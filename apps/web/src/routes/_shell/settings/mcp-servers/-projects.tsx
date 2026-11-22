@@ -74,7 +74,6 @@ export function Projects({
             key={box.target.kind === "project" ? box.target.project.id : "default"}
             client={client}
             view={view}
-            views={views}
             box={box}
           />
         ))}

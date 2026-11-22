@@ -1,9 +1,13 @@
 import type { JSX } from "react";
 import { createPortal } from "react-dom";
 import type { PluginDetail } from "@hercule/contract";
-import type { McpServerView, ThreadStartList } from "@hercule/client-core/mcp-servers";
-import { McpServerPicker, type ListUpdate } from "../mcp-server-picker";
-import { buildThreadMenuModel } from "./thread-menu-model";
+import {
+  describeThreadStartFoot,
+  type McpListChoice,
+  type McpServerView,
+  type ThreadStartDecision,
+} from "@hercule/client-core/mcp-servers";
+import { McpServerPicker } from "../mcp-server-picker";
 
 /**
  * The picker of the thread's MCP Servers, titled "MCP servers of this
@@ -20,39 +24,24 @@ export function ThreadServerPicker({
   plugins,
   mcpServerIds,
   start,
-  startFailure,
   writing,
   refusal,
-  onChange,
-  onReset,
+  onChoose,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
   readonly plugins: readonly PluginDetail[];
   /** The thread's list. */
   readonly mcpServerIds: readonly string[];
-  /** Where the list started, or `undefined` while that is not known. The checkboxes work without it. */
-  readonly start: ThreadStartList | undefined;
-  /** Why `start` could not be read, or `null`. */
-  readonly startFailure: string | null;
+  /** Where the list started. The checkboxes work whatever it says. */
+  readonly start: ThreadStartDecision;
   readonly writing: boolean;
   /** Why the last write was refused, or `null`. */
   readonly refusal: string | null;
-  readonly onChange: (update: ListUpdate) => void;
-  /** The user asked to go back to the start list. The caller resolves that list when this is called. */
-  readonly onReset: () => void;
+  readonly onChoose: (choice: McpListChoice) => void;
   readonly onClose: () => void;
 }): JSX.Element {
-  // The submenu's model gives the foot and the reset button. Its rows are not
-  // used here, so it is built with no order and offers none.
-  const { foot, reset } = buildThreadMenuModel({
-    views,
-    mcpServerIds,
-    order: [],
-    rememberedAccounts: {},
-    start,
-    startFailure,
-  });
+  const { foot, reset } = describeThreadStartFoot(start, mcpServerIds);
   return createPortal(
     <McpServerPicker
       title="MCP servers of this thread"
@@ -60,10 +49,10 @@ export function ThreadServerPicker({
       plugins={plugins}
       mcpServerIds={mcpServerIds}
       foot={foot}
-      reset={reset === null ? null : { label: reset.label, onPress: onReset }}
+      reset={reset}
       pending={writing}
       failure={refusal}
-      onChange={onChange}
+      onChoose={onChoose}
       onClose={onClose}
     />,
     document.body,

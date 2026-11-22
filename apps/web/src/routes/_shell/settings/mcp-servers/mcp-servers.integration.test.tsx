@@ -1182,38 +1182,6 @@ describe("Settings > MCP servers > a write's guard and its refusal belong to the
     expect(listWrites(api)).toHaveLength(1);
   });
 
-  it("keeps the default list's guard when its picker is closed and opened again while the write runs", async () => {
-    const user = userEvent.setup();
-    const gate = buildGate();
-    const world = buildWorld();
-    const { api } = await openList({ world, extra: holdDefaultListWrite(world, gate) });
-
-    await user.click(await screen.findByRole("button", { name: "Change…" }));
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("checkbox", { name: "linear" }),
-    );
-    await waitFor(() => {
-      expect(listWrites(api)).toHaveLength(1);
-    });
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
-
-    await user.click(screen.getByRole("button", { name: "Change…" }));
-    const reopened = await screen.findByRole("dialog");
-    const notion = within(reopened).getByRole("checkbox", { name: "notion" });
-    expect(notion.getAttribute("aria-disabled")).toBe("true");
-    await user.click(notion);
-
-    // The second choice was ignored, so it cannot overwrite the first.
-    expect(listWrites(api)).toHaveLength(1);
-    gate.release();
-    await waitFor(() => {
-      expect(world.defaultIds).toEqual([S_GITHUB.id, S_LINEAR.id]);
-    });
-    await waitFor(() => {
-      expect(notion.getAttribute("aria-disabled")).not.toBe("true");
-    });
-  });
-
   it("shows the refusal of a write that arrives after the picker was closed", async () => {
     const user = userEvent.setup();
     const gate = buildGate();

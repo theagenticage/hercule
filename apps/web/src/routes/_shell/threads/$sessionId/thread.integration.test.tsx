@@ -5712,36 +5712,6 @@ describe("Thread: the MCP servers of the + menu", () => {
     },
   });
 
-  it("keeps the write guard when the menu is closed and opened again while the write runs", async () => {
-    const user = userEvent.setup();
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const state = { session: buildSession({ status: "idle", mcpServers: [] }) };
-    const { api } = await openServersThread([S_NOTION], holdUpdate(state, gate));
-
-    const first = await openServersSubmenu(user);
-    await user.click(within(first).getByRole("switch", { name: "github in this thread" }));
-    await waitFor(() => {
-      expect(readUpdates(api)).toHaveLength(1);
-    });
-    // The first Escape closes the submenu, and the second the menu.
-    await user.keyboard("{Escape}{Escape}");
-
-    const reopened = await openServersSubmenu(user);
-    const stripe = within(reopened).getByRole("switch", { name: "stripe in this thread" });
-    expect(stripe.getAttribute("aria-disabled")).toBe("true");
-    await user.click(stripe);
-
-    // The second change was ignored, so it cannot start from the list the first one started from.
-    expect(readUpdates(api)).toHaveLength(1);
-    release();
-    await waitFor(() => {
-      expect(stripe.getAttribute("aria-disabled")).not.toBe("true");
-    });
-  });
-
   it("shows a refusal that arrives after the menu was closed when the menu opens again", async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;

@@ -352,7 +352,9 @@ describe("a server's page, Projects", () => {
     const row = findProjectRow("webshop");
 
     // A read has put the other server in the webshop's list, which the box has not drawn yet.
-    context.queryClient.setQueryData(queryKeys.projects(), [named(WEBSHOP, SENTRY_HOBBY_ID), OPS]);
+    // The refusal reads the list again, so the controller holds it too.
+    world.projects = [named(WEBSHOP, SENTRY_HOBBY_ID), OPS];
+    context.queryClient.setQueryData(queryKeys.projects(), world.projects);
     fireEvent.click(within(row).getByRole("checkbox"));
 
     await waitFor(() => {
@@ -361,7 +363,7 @@ describe("a server's page, Projects", () => {
       );
     });
     expect(findCalls(calls, "PATCH", `/api/v1/projects/${WEBSHOP.id}`)).toEqual([]);
-    expect(world.projects[0]!.mcpServerIds).toEqual([]);
+    expect(world.projects[0]!.mcpServerIds).toEqual([SENTRY_HOBBY_ID]);
   });
 
   it("unticks only this server, whatever else the list names by the time of the press", async () => {

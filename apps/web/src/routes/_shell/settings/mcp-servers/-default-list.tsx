@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import { buildMcpServerViews, decideThreadStartList } from "@hercule/client-core/mcp-servers";
 import { Button, LaneLabel } from "@hercule/ui";
 import {
@@ -9,9 +9,9 @@ import {
   pluginsQuery,
   settingsQuery,
 } from "../../../../app/queries";
+import { useMcpListEdit } from "../../../../app/mcp-list-edits";
 import { McpServerPicker } from "../../../../screens/mcp-server-picker";
 import { ProviderMark } from "../../../../screens/provider-mark";
-import { useWriteServerList } from "./-write-list";
 
 /**
  * The group "Threads without a project": the servers a thread in no project
@@ -25,7 +25,7 @@ export function DefaultList({ client }: { readonly client: HerculeClient }): JSX
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const [picking, setPicking] = useState(false);
-  const write = useWriteServerList(client, { kind: "default" });
+  const edit = useMcpListEdit(client, { kind: "default" });
 
   const views = buildMcpServerViews(servers, connections, plugins);
   // The default list is never rewritten when a server is deleted, so the
@@ -36,7 +36,7 @@ export function DefaultList({ client }: { readonly client: HerculeClient }): JSX
     settings.user["thread.mcpServerIds"] ?? [],
     views,
   );
-  const failure = write.refusal === null ? null : readErrorMessage(write.refusal);
+  const failure = edit.problem();
 
   return (
     <section>
@@ -86,9 +86,9 @@ export function DefaultList({ client }: { readonly client: HerculeClient }): JSX
           mcpServerIds={mcpServerIds}
           foot="Threads started in no project from now on. A thread can still change its own."
           reset={null}
-          pending={write.writing}
+          pending={edit.blocked}
           failure={failure}
-          onChange={write.write}
+          onChoose={edit.apply}
           onClose={() => {
             setPicking(false);
           }}

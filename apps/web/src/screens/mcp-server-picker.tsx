@@ -2,17 +2,15 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import type { PluginDetail } from "@hercule/contract";
 import {
   buildServerPicker,
-  chooseNamedServer,
   orderMenuNames,
+  type McpListChoice,
   type McpServerView,
   type RememberedAccounts,
+  type ServerPickerRow,
 } from "@hercule/client-core/mcp-servers";
 import { Button, ChoiceInput, Input, Select } from "@hercule/ui";
 import { McpServerStatusWord } from "./mcp-server-status";
 import { ProviderMark } from "./provider-mark";
-
-/** A change of a list: the new list, from the list as it is when the change is applied. */
-export type ListUpdate = (current: readonly string[]) => readonly string[];
 
 /**
  * The picker of MCP Servers: one dialog that edits any list of servers, a
@@ -22,12 +20,12 @@ export type ListUpdate = (current: readonly string[]) => readonly string[];
  * the New project dialog.
  *
  * The component is presentational. It knows nothing of where the list lives:
- * `onChange` receives, for each click, a function from the list as it is
- * when the caller applies the change to the list to write, and the caller
- * decides how to write it. The list the dialog draws can be older than the
- * list the caller holds, so a click never sends the drawn list back. While
- * `pending` is true the caller's write is running, and the controls ignore
- * clicks, so one list never has two writes in flight.
+ * `onChoose` receives what the user chose with each click, and the caller
+ * resolves it against its list as it is when the edit runs. The list the
+ * dialog draws can be older than the list the caller holds, so a click never
+ * sends the drawn list back. While `pending` is true the caller's edit is
+ * running, and the controls ignore clicks, so one list never has two edits in
+ * flight.
  *
  * The order of the names is fixed when the dialog opens (the servers on the
  * list first), so a row never jumps away under the pointer.
@@ -41,7 +39,7 @@ export function McpServerPicker({
   reset,
   pending,
   failure,
-  onChange,
+  onChoose,
   onClose,
 }: {
   readonly title: string;
@@ -53,15 +51,15 @@ export function McpServerPicker({
   readonly foot: string;
   /**
    * The button that goes back to the list this one started from, or `null`
-   * when there is none or the list equals it. `onPress` resolves that list
+   * when there is none or the list equals it. The caller resolves that list
    * when the button is pressed, not when the dialog was drawn.
    */
-  readonly reset: { readonly label: string; readonly onPress: () => void } | null;
+  readonly reset: { readonly label: string } | null;
   readonly pending: boolean;
   /** Why the last write was refused, or `null`. */
   readonly failure: string | null;
-  /** The user changed the list: `update` gives the new list from the list as it is when the caller applies it. */
-  readonly onChange: (update: ListUpdate) => void;
+  /** The user chose: a switch, a swap of account, or going back to the start list. */
+  readonly onChoose: (choice: McpListChoice) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -84,10 +82,10 @@ export function McpServerPicker({
     if (dialog !== null && !dialog.contains(document.activeElement)) dialog.focus();
   }, []);
 
-  const choose = (name: string, serverId: string | null, shownId: string): void => {
+  const choose = (row: ServerPickerRow, serverId: string | null, shownId: string): void => {
     if (pending) return;
-    setRemembered({ ...remembered, [name]: serverId ?? shownId });
-    onChange((current) => chooseNamedServer(current, views, name, serverId));
+    setRemembered({ ...remembered, [row.name]: serverId ?? shownId });
+    onChoose({ kind: "name", name: row.name, serverId, shownServerId: row.shown.server.id });
   };
 
   return (
@@ -147,7 +145,7 @@ export function McpServerPicker({
                   checked={row.chosen}
                   onChange={(event) => {
                     choose(
-                      row.name,
+                      row,
                       event.target.checked ? row.shown.server.id : null,
                       row.shown.server.id,
                     );
@@ -177,7 +175,7 @@ export function McpServerPicker({
                       value={row.shown.server.id}
                       className="py-1 text-fine"
                       onChange={(event) => {
-                        choose(row.name, event.target.value, event.target.value);
+                        choose(row, event.target.value, event.target.value);
                       }}
                     >
                       {row.accounts.map((view) => (
@@ -209,7 +207,7 @@ export function McpServerPicker({
             <Button
               aria-disabled={pending}
               onClick={() => {
-                if (!pending) reset.onPress();
+                if (!pending) onChoose({ kind: "reset" });
               }}
             >
               {reset.label}

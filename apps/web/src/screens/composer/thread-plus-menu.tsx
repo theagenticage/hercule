@@ -98,17 +98,15 @@ export function ThreadPlusMenu({
         serversOpen={showsServers}
         onServersOpenChange={setShowsServers}
         submenu={
-          servers.views !== undefined ? (
+          servers.views !== undefined && servers.start !== undefined ? (
             <ThreadServersMenu
               views={servers.views}
               plugins={plugins}
               mcpServerIds={servers.mcpServerIds}
               start={servers.start}
-              startFailure={servers.startFailure}
               writing={servers.writing}
               refusal={servers.refusal}
-              onChoose={servers.chooseServer}
-              onReset={servers.resetToStart}
+              onChoose={servers.apply}
               onOpenPicker={() => {
                 setPicking(true);
                 onOpenChange(false);
@@ -126,17 +124,15 @@ export function ThreadPlusMenu({
           )
         }
       />
-      {picking && servers.views !== undefined ? (
+      {picking && servers.views !== undefined && servers.start !== undefined ? (
         <ThreadServerPicker
           views={servers.views}
           plugins={plugins}
           mcpServerIds={servers.mcpServerIds}
           start={servers.start}
-          startFailure={servers.startFailure}
           writing={servers.writing}
           refusal={servers.refusal}
-          onChange={servers.changeList}
-          onReset={servers.resetToStart}
+          onChoose={servers.apply}
           onClose={() => {
             setPicking(false);
             forgetSeenRefusal();

@@ -487,36 +487,6 @@ describe("Settings > MCP servers, the default list and its picker", () => {
     expect(within(findPickRow("linear")).getByRole("checkbox", { checked: false })).toBeTruthy();
   });
 
-  it("keeps the guard of the list when the picker is closed and opened again while its write runs", async () => {
-    const held = holdAnswer();
-    const { calls } = await openList({
-      servers: [SENTRY_WORK, LINEAR],
-      handlers: { [`PATCH ${SETTINGS_PATH}`]: held.handler },
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
-    await screen.findByRole("dialog", { name: PICKER_TITLE });
-    await userEvent.click(within(findPickRow("linear")).getByRole("checkbox"));
-    await waitFor(() => {
-      expect(findCalls(calls, "PATCH", SETTINGS_PATH)).toHaveLength(1);
-    });
-
-    await userEvent.click(screen.getByRole("button", { name: "Done" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
-    await screen.findByRole("dialog", { name: PICKER_TITLE });
-    const sentry = within(findPickRow("sentry")).getByRole("checkbox");
-    expect(sentry.getAttribute("aria-disabled")).toBe("true");
-    await userEvent.click(sentry);
-    held.answer({ body: { controller: {}, user: { "thread.mcpServerIds": [LINEAR_ID] } } });
-
-    await waitFor(() => {
-      expect(sentry.getAttribute("aria-disabled")).toBe("false");
-    });
-    expect(findCalls(calls, "PATCH", SETTINGS_PATH)).toHaveLength(1);
-  });
-
   it("applies a change to the setting as the cache holds it when the user presses, not as the picker drew it", async () => {
     const { world, context } = await openList({
       servers: [SENTRY_WORK, LINEAR],

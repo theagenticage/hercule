@@ -2,14 +2,14 @@
  * The picker of MCP servers: one glass dialog for every list of servers, so
  * far the default list of Settings > MCP servers, and later a thread's own
  * list under the composer's `+`. It knows nothing about where the list is
- * kept: it shows the list it is given and reports each change as a new list.
+ * kept: it shows the list it is given and reports each click as a choice.
  */
 import { useRef, useState, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import {
   buildServerPicker,
-  chooseNamedServer,
   orderMenuNames,
+  type McpListChoice,
   type McpServerView,
   type RememberedAccounts,
   type ServerPickerRow,
@@ -31,14 +31,12 @@ import "./mcp-servers.css";
  *   account for a name that two accounts share. The rows keep the order the
  *   dialog opened with, so no row jumps while it is used.
  * - The foot holds `foot`, the quiet button `reset` that goes back to the
- *   list the list started from (left out with `null`; `readIds` returns that
- *   list when the button is pressed), and Done.
- * - Each change calls `onChange` with a function that returns the new list
- *   for the list as it is when the change is written. The result never holds
- *   two servers of one name, so the caller applies the choice to its current
- *   list, never to the one this dialog last drew. While `busy`, a write of the
- *   list is running and the controls ignore changes. `error` is the reason for a write the
- *   controller refused, shown under the rows.
+ *   list the list started from (left out with `null`), and Done.
+ * - Each click calls `onChoose` with what the user chose. The caller resolves
+ *   it against its list as it is when the edit runs, never against the list
+ *   this dialog last drew. While `busy`, an edit of the list is running and
+ *   the controls ignore clicks. `error` is the reason an edit was not made,
+ *   shown under the rows.
  *
  * `onClose` is called whenever the dialog closes, and the caller then
  * unmounts it.
@@ -52,7 +50,7 @@ export function ServerPickerDialog({
   reset,
   busy,
   error,
-  onChange,
+  onChoose,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
@@ -60,14 +58,10 @@ export function ServerPickerDialog({
   readonly mcpServerIds: readonly string[];
   readonly title: string;
   readonly foot: string;
-  readonly reset: {
-    readonly label: string;
-    /** Returns the list to go back to, read when the user presses the button. */
-    readonly readIds: () => readonly string[];
-  } | null;
+  readonly reset: { readonly label: string } | null;
   readonly busy: boolean;
   readonly error: string | null;
-  readonly onChange: (update: (current: readonly string[]) => readonly string[]) => void;
+  readonly onChoose: (choice: McpListChoice) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -80,7 +74,7 @@ export function ServerPickerDialog({
   const choose = (row: ServerPickerRow, serverId: string | null, shownId: string): void => {
     if (busy) return;
     setRememberedAccounts({ ...rememberedAccounts, [row.name]: shownId });
-    onChange((current) => chooseNamedServer(current, views, row.name, serverId));
+    onChoose({ kind: "name", name: row.name, serverId, shownServerId: row.shown.server.id });
   };
 
   return (
@@ -183,7 +177,7 @@ export function ServerPickerDialog({
             className="btn btn--quiet"
             aria-disabled={busy}
             onClick={() => {
-              if (!busy) onChange(reset.readIds);
+              if (!busy) onChoose({ kind: "reset" });
             }}
           >
             {reset.label}

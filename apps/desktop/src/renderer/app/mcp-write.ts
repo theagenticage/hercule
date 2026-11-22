@@ -1,10 +1,11 @@
 /**
- * The writes of MCP server lists and switches, which Settings, a thread's
- * `+` menu and a server's page all make. Each write has a target (a started
- * thread's list, a project's list, the default list, one server's switch)
- * and the target's mutation key is its guard: one write runs at a time for a
- * target, wherever the control that started it is, and the guard outlives
- * the control, so closing and reopening a menu or dialog never releases it.
+ * The writes of an MCP server's switch, which Settings makes from a server's
+ * row and its page (the lists of servers are edited through
+ * `mcp-list-edits.ts`). A switch has a target (one server, or a Connection's
+ * server that has no record yet) and the target's mutation key is its guard:
+ * one write runs at a time for a target, wherever the control that started it
+ * is, and the guard outlives the control, so closing and reopening a dialog
+ * never releases it.
  */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
@@ -20,18 +21,8 @@ import { useRouteContext } from "@tanstack/react-router";
 import { ApiError, isMutationRunning, readErrorMessage } from "@hercule/client-core";
 import { mcpServersQuery } from "./queries";
 
-/**
- * The mutation keys of the targets of an MCP write. A target has one key
- * wherever it is written from, so a project box and the default list's picker
- * guard the same default list.
- */
+/** The mutation keys of the targets of a switch. A target has one key wherever it is written from. */
 export const mcpWriteKeys = {
-  /** The list of MCP servers of the started thread `sessionId`. */
-  threadList: (sessionId: string): MutationKey => ["mcp-write", "thread-list", sessionId],
-  /** The list of MCP servers of the project `projectId`. */
-  projectList: (projectId: string): MutationKey => ["mcp-write", "project-list", projectId],
-  /** The setting `thread.mcpServerIds`, the list of threads without a project. */
-  defaultList: (): MutationKey => ["mcp-write", "default-list"],
   /** The switch of the MCP server `serverId`. */
   serverSwitch: (serverId: string): MutationKey => ["mcp-write", "server-switch", serverId],
   /** The switch of a Connection's server that has no record yet, which creates it. */

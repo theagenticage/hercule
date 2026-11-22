@@ -4,18 +4,25 @@
  * to the list is written. A Draft Thread keeps its list with its other unsent
  * picks. A started thread writes `session.update` at once.
  */
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { queryKeys, type DraftView, type ThreadChoice } from "@hercule/client-core";
+import { readErrorMessage, type DraftView, type ThreadChoice } from "@hercule/client-core";
 import {
+  decideMcpListChoice,
   decideThreadStartList,
+  decideThreadStartSource,
   describeThreadServersRow,
+  type McpListChoice,
+  type McpServerView,
+  type StartProjectRecord,
+  type StartRecord,
   type ThreadServersRow,
+  type ThreadStartDecision,
 } from "@hercule/client-core/mcp-servers";
 import type { Session } from "@hercule/contract";
-import { useMcpServerViews, readCachedStartList } from "../../app/mcp-server-views";
-import { mcpWriteKeys, useMcpWrite } from "../../app/mcp-write";
-import { sessionQuery } from "../../app/queries";
+import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
+import { useMcpServerViews } from "../../app/mcp-server-views";
+import { projectsQuery, settingsQuery } from "../../app/queries";
 import {
   useCachedMcpServers,
   useDraftListRecords,
@@ -24,9 +31,9 @@ import {
 
 /**
  * What the `+` menu needs of the thread's servers. The row's words and the
- * red dot come from `row`. A change goes through `change`, which gives the
- * caller the list as it is when the change is made, so a switch is always
- * applied to the current list and never to one drawn earlier.
+ * red dot come from `row`. A change goes through `apply`, which hands the
+ * user's choice to the rules that resolve it against the list as it is when
+ * the change is made, so a switch is never applied to a list drawn earlier.
  */
 export interface ThreadServers {
   /** The thread's list now. */
@@ -34,20 +41,45 @@ export interface ThreadServers {
   /** The project the thread is in, which decides the list it started from. `null` for no project. */
   readonly projectId: string | null;
   readonly row: ThreadServersRow;
-  /** Writes the list `update` returns for the thread's current list. Does nothing while `busy`. */
-  readonly change: (update: (current: readonly string[]) => readonly string[]) => void;
-  /**
-   * Returns the list the thread would start with, from the records the cache
-   * holds now. A reset to the start list calls it when the user presses, so
-   * it never writes a list drawn from an older read.
-   */
-  readonly readStartIds: () => readonly string[];
+  /** Applies the user's choice to the thread's list. Does nothing while `busy`. */
+  readonly apply: (choice: McpListChoice) => void;
   /** Whether a write runs or its list could not be read again, which draws the switches as off. */
   readonly busy: boolean;
-  /** Why the controller refused the last write, such as a session without `mcp.manage`. `null` when it did not. */
+  /** Why the last change was not made, such as a session without `mcp.manage`. `null` when it was. */
   readonly refusal: string | null;
   /** Forgets a settled refusal, when the user dismisses the menu or the picker that showed it. */
   readonly clearRefusal: () => void;
+}
+
+/**
+ * Returns where the thread's list started, from the records the cache holds
+ * and the project and settings reads the caller made. The submenu and the
+ * picker word their foot and offer the way back to the start list from it.
+ * A read that is pending or failed, or a project that no longer exists, only
+ * takes the way back: the thread's own switches work.
+ */
+export function useThreadStartDecision(
+  projectId: string | null,
+  views: readonly McpServerView[],
+): ThreadStartDecision {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const projects = useSuspenseQuery(projectsQuery(client)).data;
+  const settings = useQuery(settingsQuery(client));
+  const found = projects.find((each) => each.id === projectId);
+  const project: StartProjectRecord =
+    found === undefined ? { kind: "missing" } : { kind: "read", value: found };
+  const defaultIds: StartRecord<readonly string[]> =
+    settings.data !== undefined
+      ? { kind: "read", value: settings.data.user["thread.mcpServerIds"] ?? [] }
+      : settings.error === null
+        ? { kind: "pending" }
+        : { kind: "failed", message: readErrorMessage(settings.error) };
+  return decideThreadStartSource({
+    projectId,
+    project,
+    defaultIds,
+    knownServerIds: new Set(views.map((view) => view.server.id)),
+  });
 }
 
 /**
@@ -80,21 +112,32 @@ export function useDraftServers({
       ? recordedIds
       : decideThreadStartList(projectId, projects, defaultIds, views).mcpServerIds);
   const row = describeThreadServersRow(useCachedMcpServers() ?? [], ids);
-  const readStartIds = (): readonly string[] => readCachedStartList(queryClient, client, projectId);
   return {
     ids,
     projectId,
     row,
     // The picks are in a store that re-renders the draft before the next event, so `pick` is
     // current. Without one, the draft's list is the start list, which the cache holds now.
-    change: (update) => {
-      onChoose({
-        kind: "mcpServers",
+    apply: (choice) => {
+      const cache = buildMcpListCache(queryClient, client);
+      const cachedViews = cache.readViews();
+      if (cachedViews === undefined) return;
+      const source = decideThreadStartSource({
         projectId,
-        mcpServerIds: [...update(pick ?? readStartIds())],
+        ...cache.readStartRecords(projectId),
+        knownServerIds: new Set(cachedViews.map((each) => each.server.id)),
       });
+      const start = source.kind === "start" ? source.start : undefined;
+      const decided = decideMcpListChoice({
+        ids: pick ?? start?.mcpServerIds ?? ids,
+        views: cachedViews,
+        choice,
+        start,
+      });
+      if (decided.kind === "write") {
+        onChoose({ kind: "mcpServers", projectId, mcpServerIds: [...decided.mcpServerIds] });
+      }
     },
-    readStartIds,
     busy: false,
     refusal: null,
     clearRefusal: () => undefined,
@@ -102,9 +145,8 @@ export function useDraftServers({
 }
 
 /**
- * Returns the servers of the started thread `session`. A change writes
- * `session.update` with the new list, on the list the session's cached
- * record holds when the change starts. One write runs at a time for the
+ * Returns the servers of the started thread `session`. A change is an edit
+ * of the thread's list (see `useMcpListEdit`): one runs at a time for the
  * thread, wherever its menu or picker was opened from, and it counts as
  * running until the session is read again, so a second switch never starts
  * from a list the first one replaced. Closing the menu or the picker keeps
@@ -114,31 +156,20 @@ export function useDraftServers({
  * `useMcpServerViews`), and this only uses what the cache holds.
  */
 export function useStartedThreadServers(session: Session): ThreadServers {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const queryClient = useQueryClient();
-  const sessionId = session.id;
   const ids = useStartedThreadIds(session);
   const row = describeThreadServersRow(useCachedMcpServers() ?? [], ids);
-  const write = useMcpWrite<(current: readonly string[]) => readonly string[]>({
-    mutationKey: mcpWriteKeys.threadList(sessionId),
-    mutationFn: (update) => {
-      const held = queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
-      const current = (held ?? session).mcpServers.map((server) => server.mcpServerId);
-      return client.session.update({
-        params: { id: sessionId },
-        payload: { mcpServerIds: [...update(current)] },
-      });
-    },
-    refresh: [queryKeys.session(sessionId)],
+  const edit = useMcpListEdit({
+    kind: "thread",
+    sessionId: session.id,
+    projectId: session.projectId,
   });
   return {
     ids,
     projectId: session.projectId,
     row,
-    change: write.start,
-    readStartIds: () => readCachedStartList(queryClient, client, session.projectId),
-    busy: write.isBlocked,
-    refusal: write.problem(),
-    clearRefusal: write.clearRefusal,
+    apply: edit.apply,
+    busy: edit.blocked,
+    refusal: edit.problem(),
+    clearRefusal: edit.clearRefusal,
   };
 }

@@ -10,7 +10,6 @@
  * read again from the current records, so a server deleted or switched off
  * meanwhile never leaves a stale row.
  */
-import { describeStartLine, type ThreadStartList } from "./start-list";
 import { groupServersByName, type ServerNameGroup } from "./named-lists";
 import { describeReconnect, type McpServerView, type ReconnectTarget } from "./views";
 
@@ -72,19 +71,7 @@ export interface ThreadServerMenu {
   readonly rows: readonly ServerMenuRow[];
   /** How many server names the rows leave out, those that only switched-off servers have included. They are in the picker. */
   readonly moreCount: number;
-  /** The line at the foot: where the list started, and that a change is for this Thread only. */
-  readonly foot: string;
-  /** The button that goes back to the start list, or `null` while the list equals it or the start list is not `complete`. */
-  readonly reset: {
-    readonly label: string;
-    /** The list the button writes. */
-    readonly mcpServerIds: readonly string[];
-  } | null;
 }
-
-/** Checks that two lists hold the same ids, whatever their order. */
-const holdSameIds = (one: readonly string[], other: readonly string[]): boolean =>
-  one.length === other.length && one.every((id) => other.includes(id));
 
 /**
  * Returns the submenu for a Thread whose list is `mcpServerIds`.
@@ -103,13 +90,11 @@ export const buildThreadServerMenu = ({
   mcpServerIds,
   order,
   rememberedAccounts,
-  start,
 }: {
   readonly views: readonly McpServerView[];
   readonly mcpServerIds: readonly string[];
   readonly order: readonly string[];
   readonly rememberedAccounts: RememberedAccounts;
-  readonly start: ThreadStartList;
 }): ThreadServerMenu => {
   const groups = groupServersByName(views);
   const ownNames = new Set(
@@ -155,16 +140,7 @@ export const buildThreadServerMenu = ({
         reconnect: note === null ? null : describeReconnect(shown),
       };
     });
-  const { line, resetLabel } = describeStartLine(start);
-  return {
-    rows,
-    moreCount: groups.length - rows.length,
-    foot: line,
-    reset:
-      !start.complete || holdSameIds(mcpServerIds, start.mcpServerIds)
-        ? null
-        : { label: resetLabel, mcpServerIds: start.mcpServerIds },
-  };
+  return { rows, moreCount: groups.length - rows.length };
 };
 
 /** One server name in the picker. */

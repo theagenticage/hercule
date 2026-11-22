@@ -2,15 +2,18 @@ import { useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { PluginDetail } from "@hercule/contract";
 import {
+  buildThreadServerMenu,
+  describeThreadStartFoot,
   orderMenuNames,
+  type McpListChoice,
   type McpServerView,
   type RememberedAccounts,
-  type ThreadStartList,
+  type ServerMenuRow,
+  type ThreadStartDecision,
 } from "@hercule/client-core/mcp-servers";
 import { Button, buildButtonClassName, Select, Switch } from "@hercule/ui";
 import { ProviderMark } from "../provider-mark";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
-import { buildThreadMenuModel } from "./thread-menu-model";
 
 /**
  * The submenu "Servers of this thread" of the composer's `+` menu: one row for
@@ -29,54 +32,47 @@ import { buildThreadMenuModel } from "./thread-menu-model";
  * - While `writing` the switches and selects ignore clicks, so one list never
  *   has two writes in flight. A refusal shows under the rows.
  *
- * The component writes nothing itself: `onChoose` and `onReset` report what
- * the user asked, and the caller decides how the list is stored.
+ * The component writes nothing itself: `onChoose` reports what the user
+ * chose, and the caller decides how the list is stored.
  */
 export function ThreadServersMenu({
   views,
   plugins,
   mcpServerIds,
   start,
-  startFailure,
   writing,
   refusal,
   onChoose,
-  onReset,
   onOpenPicker,
 }: {
   readonly views: readonly McpServerView[];
   readonly plugins: readonly PluginDetail[];
   /** The thread's list. */
   readonly mcpServerIds: readonly string[];
-  /** Where the list started, or `undefined` while that is not known. The switches work without it. */
-  readonly start: ThreadStartList | undefined;
-  /** Why `start` could not be read, or `null`. */
-  readonly startFailure: string | null;
+  /** Where the list started. The switches work whatever it says. */
+  readonly start: ThreadStartDecision;
   readonly writing: boolean;
   /** Why the last write was refused, or `null`. */
   readonly refusal: string | null;
-  /** The user switched the server of `name`: `serverId` on, `null` off. */
-  readonly onChoose: (name: string, serverId: string | null) => void;
-  /** The user asked to go back to the list the thread started from. The caller resolves that list when this is called. */
-  readonly onReset: () => void;
+  /** The user chose: a switch, a swap of account, or going back to the start list. */
+  readonly onChoose: (choice: McpListChoice) => void;
   readonly onOpenPicker: () => void;
 }): JSX.Element {
   const [order] = useState(() => orderMenuNames(views, mcpServerIds));
   // The account each name last showed, so a name switched off offers the account the user chose.
   const [remembered, setRemembered] = useState<RememberedAccounts>({});
-  const menu = buildThreadMenuModel({
+  const menu = buildThreadServerMenu({
     views,
     mcpServerIds,
     order,
     rememberedAccounts: remembered,
-    start,
-    startFailure,
   });
+  const { foot, reset } = describeThreadStartFoot(start, mcpServerIds);
 
-  const choose = (name: string, serverId: string | null, shownId: string): void => {
+  const choose = (row: ServerMenuRow, serverId: string | null, shownId: string): void => {
     if (writing) return;
-    setRemembered({ ...remembered, [name]: serverId ?? shownId });
-    onChoose(name, serverId);
+    setRemembered({ ...remembered, [row.name]: serverId ?? shownId });
+    onChoose({ kind: "name", name: row.name, serverId, shownServerId: row.shown.server.id });
   };
 
   return (
@@ -122,7 +118,7 @@ export function ThreadServersMenu({
                   value={row.shown.server.id}
                   className="py-0.5 text-fine"
                   onChange={(event) => {
-                    choose(row.name, event.target.value, event.target.value);
+                    choose(row, event.target.value, event.target.value);
                   }}
                 >
                   {row.accounts.map((view) => (
@@ -138,7 +134,7 @@ export function ThreadServersMenu({
               aria-disabled={writing}
               checked={row.on}
               onCheckedChange={(on) => {
-                choose(row.name, on ? row.shown.server.id : null, row.shown.server.id);
+                choose(row, on ? row.shown.server.id : null, row.shown.server.id);
               }}
             />
           </li>
@@ -161,17 +157,17 @@ export function ThreadServersMenu({
         </p>
       )}
       <MenuFoot>
-        <p>{menu.foot}</p>
+        <p>{foot}</p>
         <div className="mt-1 flex items-center gap-1 text-fine">
-          {menu.reset === null ? null : (
+          {reset === null ? null : (
             <Button
               aria-disabled={writing}
               className="-ml-2 px-2 py-0.5 text-fine"
               onClick={() => {
-                if (!writing) onReset();
+                if (!writing) onChoose({ kind: "reset" });
               }}
             >
-              {menu.reset.label}
+              {reset.label}
             </Button>
           )}
           <Link

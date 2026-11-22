@@ -22,6 +22,22 @@ export {
   type WarningFix,
 } from "./fix";
 export { type McpServerDisplayStatus } from "./display-status";
+export {
+  buildMcpListQuery,
+  createMcpListEdits,
+  decideMcpListChoice,
+  describeMcpListProblem,
+  findOrCreateMcpListEdits,
+  type McpListCache,
+  type McpListChoice,
+  type McpListDecision,
+  type McpListEditState,
+  type McpListQuery,
+  type McpListEdits,
+  type McpListRefusal,
+  type McpListTarget,
+  type McpListUnread,
+} from "./list-edits";
 export { chooseNamedServer } from "./named-lists";
 export { describeOfferAddress, readMcpServerOffers } from "./offers";
 export {
@@ -39,7 +55,15 @@ export {
   type NamingProjects,
 } from "./settings-list";
 export { resolveDraftMcpServerIds } from "./draft-pick";
-export { decideThreadStartList, type ThreadStartList } from "./start-list";
+export {
+  decideThreadStartList,
+  decideThreadStartSource,
+  describeThreadStartFoot,
+  type StartProjectRecord,
+  type StartRecord,
+  type ThreadStartDecision,
+  type ThreadStartList,
+} from "./start-list";
 export {
   buildServerPicker,
   buildThreadServerMenu,

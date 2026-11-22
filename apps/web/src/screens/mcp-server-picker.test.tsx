@@ -1,11 +1,10 @@
 /**
- * Tests that the picker of MCP Servers reports each click as a change of the
- * list, not as the whole list it has drawn: the list it draws can be older
- * than the list the caller holds, and the caller decides what the change is
- * applied to.
+ * Tests that the picker of MCP Servers reports each click as a choice, not as
+ * the whole list it has drawn: the list it draws can be older than the list
+ * the caller holds, and the caller resolves the choice against its own list.
  */
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   LINEAR,
@@ -20,7 +19,7 @@ const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
 
 const renderPicker = (
   props: Partial<Parameters<typeof McpServerPicker>[0]> & {
-    readonly onChange: (update: (current: readonly string[]) => readonly string[]) => void;
+    readonly onChoose: Parameters<typeof McpServerPicker>[0]["onChoose"];
   },
 ) =>
   render(
@@ -39,39 +38,44 @@ const renderPicker = (
   );
 
 describe("McpServerPicker", () => {
-  it("reports a click as a change to apply to the caller's list, which can differ from the one drawn", async () => {
+  it("reports a click on a name as the choice of that name, with the account the row showed", async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderPicker({ onChange });
+    const onChoose = vi.fn();
+    renderPicker({ onChoose });
 
     await user.click(screen.getByRole("checkbox", { name: "linear" }));
 
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const update = onChange.mock.calls[0]![0] as (current: readonly string[]) => readonly string[];
-    // The picker drew [work]; the caller's list has since gained a server it never drew.
-    expect(update([SENTRY_WORK.id, "s-new"])).toEqual([SENTRY_WORK.id, "s-new", LINEAR.id]);
-    cleanup();
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      kind: "name",
+      name: "linear",
+      serverId: LINEAR.id,
+      shownServerId: LINEAR.id,
+    });
   });
 
-  it("swaps the account of a name in the caller's list, keeping the servers it never drew", async () => {
+  it("reports a swap of account with the account the row showed before it", async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderPicker({ onChange });
+    const onChoose = vi.fn();
+    renderPicker({ onChoose });
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Account of sentry" }), "hobby");
 
-    const update = onChange.mock.calls[0]![0] as (current: readonly string[]) => readonly string[];
-    expect(update(["s-new", SENTRY_WORK.id])).toEqual(["s-new", SENTRY_HOBBY.id]);
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      kind: "name",
+      name: "sentry",
+      serverId: SENTRY_HOBBY.id,
+      shownServerId: SENTRY_WORK.id,
+    });
   });
 
-  it("leaves the list that goes back to the start list for the caller to resolve when the button is pressed", async () => {
+  it("reports the way back to the start list as a choice, for the caller to resolve when the button is pressed", async () => {
     const user = userEvent.setup();
-    const onPress = vi.fn();
-    renderPicker({ onChange: vi.fn(), reset: { label: "Back to the default list", onPress } });
+    const onChoose = vi.fn();
+    renderPicker({ onChoose, reset: { label: "Back to the default list" } });
 
-    expect(onPress).not.toHaveBeenCalled();
+    expect(onChoose).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Back to the default list" }));
 
-    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({ kind: "reset" });
   });
 });

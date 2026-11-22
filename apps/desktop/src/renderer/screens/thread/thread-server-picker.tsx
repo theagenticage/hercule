@@ -6,12 +6,12 @@
 import { useRef, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { buildThreadServerMenu, decideThreadStartList } from "@hercule/client-core/mcp-servers";
+import { describeThreadStartFoot, type McpServerView } from "@hercule/client-core/mcp-servers";
 import { useMcpServerViews } from "../../app/mcp-server-views";
-import { pluginsQuery, projectsQuery, settingsQuery } from "../../app/queries";
+import { pluginsQuery, settingsQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
 import { ServerPickerDialog } from "../settings/mcp-servers/server-picker";
-import type { ThreadServers } from "./use-thread-servers";
+import { useThreadStartDecision, type ThreadServers } from "./use-thread-servers";
 
 /**
  * Renders the picker "MCP servers of this thread" for `servers`, once the
@@ -29,8 +29,6 @@ export default function ThreadServerPicker({
 }): JSX.Element | null {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { views, failure } = useMcpServerViews("read");
-  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const projects = useSuspenseQuery(projectsQuery(client)).data;
   const settings = useQuery(settingsQuery(client));
   const dialogRef = useRef<HTMLDialogElement>(null);
   if (failure !== null) {
@@ -57,19 +55,25 @@ export default function ThreadServerPicker({
     );
   }
   if (views === undefined || settings.isPending) return null;
-  // The menu model words the foot and the way back to the start list, which the picker shows too.
-  const { foot, reset } = buildThreadServerMenu({
-    views,
-    mcpServerIds: servers.ids,
-    order: [],
-    rememberedAccounts: {},
-    start: decideThreadStartList(
-      servers.projectId,
-      projects,
-      settings.data?.user["thread.mcpServerIds"] ?? [],
-      views,
-    ),
-  });
+  return <ThreadPickerDialog views={views} servers={servers} onClose={onClose} />;
+}
+
+/** Renders the dialog once the servers and the default list are read, so the foot can say where the list started. */
+function ThreadPickerDialog({
+  views,
+  servers,
+  onClose,
+}: {
+  readonly views: readonly McpServerView[];
+  readonly servers: ThreadServers;
+  readonly onClose: () => void;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
+  const { foot, reset } = describeThreadStartFoot(
+    useThreadStartDecision(servers.projectId, views),
+    servers.ids,
+  );
   return (
     <ServerPickerDialog
       views={views}
@@ -77,10 +81,10 @@ export default function ThreadServerPicker({
       mcpServerIds={servers.ids}
       title="MCP servers of this thread"
       foot={foot}
-      reset={reset === null ? null : { label: reset.label, readIds: servers.readStartIds }}
+      reset={reset}
       busy={servers.busy}
       error={servers.refusal}
-      onChange={servers.change}
+      onChoose={servers.apply}
       onClose={onClose}
     />
   );

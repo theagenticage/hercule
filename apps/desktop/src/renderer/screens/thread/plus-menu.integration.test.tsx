@@ -385,61 +385,6 @@ describe("the + menu on a started thread", () => {
     expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
   });
 
-  it("keeps the guard when the menu is closed and opened again while the write runs", async () => {
-    const thread = threadWith([LINEAR]);
-    const held = holdAnswer();
-    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
-      thread,
-      servers: [SENTRY_WORK, LINEAR],
-      holdWrite: held.handler,
-    });
-    const popover = await openServersSubmenu();
-    fireEvent.click(findSwitch("sentry"));
-    await waitFor(() => {
-      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
-    });
-
-    toggleMenu(popover, "closed");
-    await openServersSubmenu();
-    fireEvent.click(findSwitch("linear"));
-
-    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
-    held.answer({ body: {} });
-    await waitFor(() => {
-      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
-    });
-    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
-  });
-
-  it("reads the servers again when the controller refuses the list with validation", async () => {
-    const thread = threadWith([LINEAR]);
-    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
-      thread,
-      servers: [SENTRY_WORK, LINEAR],
-      handlers: {
-        [`PATCH /api/v1/sessions/${thread.session.id}`]: {
-          status: 400,
-          body: {
-            error: {
-              code: "validation",
-              message: "The list names a server that no longer exists.",
-              details: { issues: [] },
-            },
-          },
-        },
-      },
-    });
-    const popover = await openServersSubmenu();
-    const readsBefore = findCalls(calls, "GET", SERVER_LIST).length;
-
-    fireEvent.click(findSwitch("sentry"));
-
-    await within(popover).findByRole("alert", { hidden: true });
-    await waitFor(() => {
-      expect(findCalls(calls, "GET", SERVER_LIST).length).toBeGreaterThan(readsBefore);
-    });
-  });
-
   it("swaps the account of a name in one write", async () => {
     const thread = threadWith([SENTRY_WORK]);
     const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
@@ -736,34 +681,6 @@ describe("the + menu's writes that end badly", () => {
     await openServersSubmenu();
 
     expect(within(popover).queryByRole("alert", { hidden: true })).toBeNull();
-  });
-});
-
-describe("the + menu's write once the thread is left", () => {
-  it("keeps the record of a write that still runs, and gives it a lifetime that ends", async () => {
-    const thread = threadWith([LINEAR]);
-    const held = holdAnswer();
-    const { context, router } = await openComposerApp(`/threads/${thread.session.id}`, {
-      thread,
-      servers: [SENTRY_WORK, LINEAR],
-      handlers: { [`PATCH /api/v1/sessions/${thread.session.id}`]: held.handler },
-    });
-    await openServersSubmenu();
-    fireEvent.click(findSwitch("sentry"));
-    await waitFor(() => {
-      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
-    });
-    const mutations = context.queryClient.getMutationCache();
-    const findWrite = () =>
-      mutations.find({ mutationKey: ["mcp-write", "thread-list", thread.session.id] });
-
-    await act(() => router.navigate({ to: "/" }));
-
-    // The guard stays while the write runs, though nothing shows it any more.
-    expect(findWrite()?.state.status).toBe("pending");
-    // Nothing is left to remove the record once the write ends, so it must expire by itself.
-    expect(findWrite()?.gcTime).toBeLessThan(Infinity);
-    held.answer({ body: {} });
   });
 });
 

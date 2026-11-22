@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { decideThreadStartList } from "./start-list";
 import { buildServerPicker, buildThreadServerMenu, orderMenuNames } from "./thread-menu";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
 
-const START = decideThreadStartList(null, [], [], []);
 const menuOf = (
   views: ReturnType<typeof buildViews>,
   mcpServerIds: string[],
   order = orderMenuNames(views, mcpServerIds),
   rememberedAccounts: Record<string, string> = {},
-) => buildThreadServerMenu({ views, mcpServerIds, order, rememberedAccounts, start: START });
+) => buildThreadServerMenu({ views, mcpServerIds, order, rememberedAccounts });
 
 /** Returns `count` ready servers named `tool01`, `tool02`, ... */
 const buildManyServers = (count: number) =>
@@ -177,60 +175,6 @@ describe("buildThreadServerMenu", () => {
     const order = orderMenuNames(buildViews([LINEAR, SENTRY_WORK]), []);
 
     expect(menuOf(buildViews([LINEAR]), [], order).rows.map((row) => row.name)).toEqual(["linear"]);
-  });
-
-  it("says where the list started, and offers the way back only while the list differs", () => {
-    const start = decideThreadStartList(
-      "p-shop",
-      [{ id: "p-shop", name: "webshop", mcpServerIds: ["s-linear"], createdAt: "", updatedAt: "" }],
-      [],
-      VIEWS,
-    );
-    const build = (mcpServerIds: string[]) =>
-      buildThreadServerMenu({
-        views: VIEWS,
-        mcpServerIds,
-        order: [],
-        rememberedAccounts: {},
-        start,
-      });
-
-    expect(build(["s-linear"]).foot).toBe(
-      "Starts from webshop's list. Changes are for this thread only.",
-    );
-    expect(build(["s-linear"]).reset).toBeNull();
-    expect(build([]).reset).toEqual({
-      label: "Back to webshop's list",
-      mcpServerIds: ["s-linear"],
-    });
-  });
-});
-
-describe("buildThreadServerMenu reset", () => {
-  const VIEWS = buildViews([LINEAR, SENTRY_WORK]);
-  const startOf = (projectIds: string[]) =>
-    decideThreadStartList(
-      "p-shop",
-      [{ id: "p-shop", name: "webshop", mcpServerIds: projectIds, createdAt: "", updatedAt: "" }],
-      [],
-      VIEWS,
-    );
-  const resetOf = (projectIds: string[]) =>
-    buildThreadServerMenu({
-      views: VIEWS,
-      mcpServerIds: [],
-      order: [],
-      rememberedAccounts: {},
-      start: startOf(projectIds),
-    }).reset;
-
-  it("offers no reset while the project's list holds a server the views do not know yet", () => {
-    expect(resetOf(["s-linear", "s-new"])).toBeNull();
-  });
-
-  it("filters a deleted server out of the start list, and offers the reset for what is left", () => {
-    expect(startOf(["s-linear", "s-gone"]).mcpServerIds).toEqual(["s-linear"]);
-    expect(resetOf(["s-linear"])?.mcpServerIds).toEqual(["s-linear"]);
   });
 });
 

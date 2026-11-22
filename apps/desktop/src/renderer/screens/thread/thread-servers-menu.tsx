@@ -9,19 +9,18 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   buildThreadServerMenu,
-  chooseNamedServer,
-  decideThreadStartList,
+  describeThreadStartFoot,
   orderMenuNames,
   type McpServerView,
   type RememberedAccounts,
   type ServerMenuRow,
 } from "@hercule/client-core/mcp-servers";
 import { useMcpServerViews } from "../../app/mcp-server-views";
-import { pluginsQuery, projectsQuery, settingsQuery } from "../../app/queries";
+import { pluginsQuery, settingsQuery } from "../../app/queries";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { PluginMark } from "../../marks/plugin-mark";
 import { ServerName, ServerSwitch } from "../settings/mcp-servers/server-parts";
-import type { ThreadServers } from "./use-thread-servers";
+import { useThreadStartDecision, type ThreadServers } from "./use-thread-servers";
 import "./thread-servers.css";
 
 /**
@@ -59,7 +58,6 @@ export default function ThreadServersMenu({
   return (
     <SubmenuRows
       views={views}
-      defaultIds={settings.data?.user["thread.mcpServerIds"] ?? []}
       servers={servers}
       onOpenPicker={onOpenPicker}
       onReconnect={onReconnect}
@@ -75,14 +73,12 @@ export default function ThreadServersMenu({
  */
 function SubmenuRows({
   views,
-  defaultIds,
   servers,
   onOpenPicker,
   onReconnect,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
-  readonly defaultIds: readonly string[];
   readonly servers: ThreadServers;
   readonly onOpenPicker: () => void;
   readonly onReconnect: (connectionId: string) => void;
@@ -90,7 +86,6 @@ function SubmenuRows({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const projects = useSuspenseQuery(projectsQuery(client)).data;
   const navigate = useNavigate();
   const [order] = useState(() => orderMenuNames(views, servers.ids));
   // The account each name last showed, so switching a name back on picks it again.
@@ -100,13 +95,21 @@ function SubmenuRows({
     mcpServerIds: servers.ids,
     order,
     rememberedAccounts,
-    start: decideThreadStartList(servers.projectId, projects, defaultIds, views),
   });
+  const { foot, reset } = describeThreadStartFoot(
+    useThreadStartDecision(servers.projectId, views),
+    servers.ids,
+  );
 
   const choose = (row: ServerMenuRow, serverId: string | null, shownId: string): void => {
     if (servers.busy) return;
     setRememberedAccounts({ ...rememberedAccounts, [row.name]: shownId });
-    servers.change((current) => chooseNamedServer(current, views, row.name, serverId));
+    servers.apply({
+      kind: "name",
+      name: row.name,
+      serverId,
+      shownServerId: row.shown.server.id,
+    });
   };
 
   return (
@@ -188,8 +191,8 @@ function SubmenuRows({
       )}
       <div className="plus-foot">
         <p className="menu-note">
-          {menu.foot}
-          {menu.reset !== null && (
+          {foot}
+          {reset !== null && (
             <>
               {" "}
               <button
@@ -199,10 +202,10 @@ function SubmenuRows({
                 onClick={() => {
                   if (servers.busy) return;
                   // The start list is read when the user presses, not when the menu drew it.
-                  servers.change(() => servers.readStartIds());
+                  servers.apply({ kind: "reset" });
                 }}
               >
-                {menu.reset.label}
+                {reset.label}
               </button>
             </>
           )}
