@@ -5,10 +5,10 @@
  * `notifications/tools/list_changed` and lists again, opens a new MCP session
  * when the gateway answers 404 for the one it holds and then sends its call
  * again, which reaches the right tool, calls a hyphenated tool and a tool whose
- * name carries a hash, never shows the model a tool name of more than 64
+ * name has a dot, never shows the model a tool name of more than 64
  * characters, runs a call from a first input that arrives before pi has
- * listed the tools, and keeps a name it showed away from the other tool when a
- * tool with a twin of the same shown name comes or goes. What a user sees of approvals and items is checked beside the
+ * listed the tools, and never runs the other tool under a name it showed when
+ * a twin with `-` or `_` comes or goes. What a user sees of approvals and items is checked beside the
  * adapter, in `apps/runner/src/harnesses/pi/adapter-mcp.integration.test.ts`.
  *
  * Nothing here is billed and no login is used. pi starts through the pi
@@ -69,7 +69,9 @@ import {
 import { startFakeUpstream, type FakeTool, type FakeUpstream } from "../mcp-servers/testing";
 import {
   OLDER_ERA_REVISIONS,
+  TWIN_SCENARIOS,
   WHOAMI_TOOL,
+  buildTwinTool,
   readUpstreamCalls,
   withGatewayRig,
   type ToolChangingGatewayRig,
@@ -90,8 +92,8 @@ const STEP_MS = 30_000;
 /** The test's own limit, with room for pi to start and for several turns. */
 const TEST_MS = 120_000;
 
-/** The most a test of the twins takes: each runs several pi processes, one for each scenario. */
-const TWIN_TEST_MS = 300_000;
+/** The most a test of the twins takes: each runs one pi process for its scenario. */
+const TWIN_TEST_MS = 120_000;
 
 /** How long the gateway holds back its first list in the test of an input that arrives before it. Longer than pi needs to start and ask the model. */
 const LATE_LIST_MS = 2_000;
@@ -416,11 +418,11 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
   );
 
   it(
-    "calls a tool whose name has a hyphen and one whose name carries a hash, each reaching its own upstream tool beside a tool that reads alike",
+    "calls a tool whose name has a hyphen and one whose name has a dot, each reaching its own upstream tool beside a tool that reads alike",
     async () => {
       const owners: ReadonlyArray<readonly [string, string]> = [
         [`${SERVER_NAME}__search_pages`, "search_pages"],
-        [`${SERVER_NAME}__search-pages`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_f33805`, "search-pages"],
         [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
       ];
       await withPiOnGateway(
@@ -460,7 +462,7 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
     async () => {
       const owners: ReadonlyArray<readonly [string, string]> = [
         [`${SERVER_NAME}__search_pages`, "search_pages"],
-        [`${SERVER_NAME}__search-pages`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_f33805`, "search-pages"],
         [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
       ];
       await withPiOnGateway(
@@ -483,8 +485,8 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
             );
             const opened = running.listOpened().at(-1)!;
             const started = filterByTag(running.seen, "item.started").at(-1)!;
-            // The card is on the item of the call it asks about. It names the tool as pi does:
-            // pi gives no other name before the call has run, and tells the tools apart by a suffix of its own.
+            // The card is on the item of the call it asks about. It names the tool as pi does, which is
+            // the gateway's name, because the gateway keeps no character pi would change.
             expect(opened.request.itemId).toBe(started.itemId);
             expect(opened.request.detail).toEqual({
               toolName: `mcp__${MCP_GATEWAY_ENTRY_NAME}__${SERVER_NAME}__${(started.detail as { name: string }).name}`,
@@ -547,12 +549,6 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
 });
 
 // -- A name pi showed, and a twin that comes or goes ----------------------------
-
-/** A tool of `sentry` whose description ends with its own name in square brackets, which is how a test tells which tool pi shows under a name. */
-const buildTwinTool = (name: string): FakeTool => ({ name, description: `Searches [${name}]` });
-
-const UNDERSCORE_TOOL = buildTwinTool("search_pages");
-const HYPHEN_TOOL = buildTwinTool("search-pages");
 
 /**
  * Builds a script with two prompts:
@@ -698,35 +694,47 @@ const runTwinScenario = async (options: {
 const buildGatewayName = (tool: string): string =>
   `${SERVER_NAME}${MCP_GATEWAY_TOOL_SEPARATOR}${tool}`;
 
-/** The name pi shows for a lone tool whose name has `-` or `_` between its words. */
-const PLAIN_NAME = `${MCP_GATEWAY_HARNESS_PREFIX}${buildGatewayName("search_pages")}`;
+/** The name pi shows for a gateway tool called `gatewayName`. pi shows the gateway's name as it is, behind its own prefix. */
+const buildShownName = (gatewayName: string): string =>
+  `${MCP_GATEWAY_HARNESS_PREFIX}${gatewayName}`;
 
-/** The names pi shows when both twins are listed: its own suffix on each, the same for the same tool every time. */
-const UNDERSCORE_NAME = `${PLAIN_NAME}_66b8e92a`;
-const HYPHEN_NAME = `${PLAIN_NAME}_a7feafcf`;
+/**
+ * The name pi shows for `search_pages`, which the gateway keeps as it is, and
+ * for `search-pages`: the hyphen becomes `_`, and the first six hex characters
+ * of the SHA-256 of `search-pages` follow. The gateway keeps no hyphen, so pi
+ * has no `-` to fold into the name of `search_pages`.
+ */
+const UNDERSCORE_NAME = buildShownName(buildGatewayName("search_pages"));
+const HYPHEN_NAME = buildShownName(buildGatewayName("search_pages_f33805"));
 
-/** What the model is shown when both twins are listed, in the order pi lists them. */
-const BOTH_SHOWN = { [HYPHEN_NAME]: "search-pages", [UNDERSCORE_NAME]: "search_pages" };
-const BOTH_DECLARED = [HYPHEN_NAME, UNDERSCORE_NAME];
+/** The gateway's name, and pi's name, for each of the two tools. */
+const GATEWAY_NAMES: Readonly<Record<string, string>> = {
+  search_pages: buildGatewayName("search_pages"),
+  "search-pages": buildGatewayName("search_pages_f33805"),
+};
+const SHOWN_NAMES: Readonly<Record<string, string>> = {
+  search_pages: UNDERSCORE_NAME,
+  "search-pages": HYPHEN_NAME,
+};
 
 /** What the fake server's tool answers a call with. */
 const RAN_TEXT = '{"text":"hello"}';
 
 /** What a call that reached `tool` through the gateway looks like. */
 const ranCall = (tool: string) => ({
-  sentToGateway: [buildGatewayName(tool)],
+  sentToGateway: [GATEWAY_NAMES[tool]!],
   ranUpstream: [tool],
 });
 
 /** What a call looks like when pi refuses the name itself: nothing reaches the gateway. */
 const REFUSED_BY_PI = { sentToGateway: [], ranUpstream: [] };
 
-/** Returns what each step showed and did, with the text pi told the model for the call. */
+/** Returns what each step showed and did, with the text pi told the model for the call. The order in which pi lists tools is its own, so names are sorted. */
 const summarizeSteps = (steps: ReadonlyArray<TwinStep>) =>
   steps.map(({ listed, shown, declared, call }) => ({
     listed,
     shown,
-    declared,
+    declared: declared.toSorted(),
     sentToGateway: call.sentToGateway,
     ranUpstream: call.ranUpstream,
     modelWasTold: call.modelWasTold,
@@ -734,156 +742,54 @@ const summarizeSteps = (steps: ReadonlyArray<TwinStep>) =>
 
 /**
  * pi, 1.3.0 and 1.6.0, shows `-` as `_` and gives every tool whose shown name
- * has a twin a suffix of its own. It remembers which tool a name was given to:
- * a name that once belonged to one tool is never given to another, and a tool
- * that is no longer listed is hidden from the model, so a call of its name
- * fails with "not found". These tests record what pi does with a name the model
- * used, when a twin comes or goes with no restart (spec 21 section 3.4).
+ * has a twin a suffix of its own. The gateway keeps no `-` in a name, so no two
+ * gateway names look alike to pi and pi shows each name as it is. pi also
+ * remembers which tool a name was given to, and hides a tool that is no longer
+ * listed from the model. So a name the model used runs its own tool while that
+ * tool is listed, pi refuses it with "not found" once the tool is gone, and it
+ * never runs the sibling tool (spec 21 section 3.4).
  *
  * `shown` is what the model's search for `pages` found, which holds only tools
- * pi has not loaded yet, so it is empty when the tool in play was loaded
+ * pi has not loaded yet, so it is empty when every listed tool was loaded
  * before. `declared` is every gateway tool pi declared to the model in the
  * request that followed.
  */
 describe.skipIf(piBinary === undefined)(
-  "a name pi shows for a gateway tool, when a twin with - or _ comes or goes",
+  "a name the model already used never runs the other tool in pi, when a twin with - or _ comes or goes",
   () => {
-    it(
-      "is shown for no tool once the twin is listed, and pi refuses a call of it before the gateway sees it",
-      async () => {
-        for (const [lone, calledTool] of [
-          [UNDERSCORE_TOOL, "search_pages"],
-          [HYPHEN_TOOL, "search-pages"],
-        ] as const) {
+    for (const { title, states, calledTool } of TWIN_SCENARIOS) {
+      it(
+        `${title}: the model's name for ${calledTool} runs ${calledTool} while it is listed and is refused after`,
+        async () => {
           const run = await runTwinScenario({
-            states: [[lone], [UNDERSCORE_TOOL, HYPHEN_TOOL]],
+            states: states.map((listed) => listed.map(buildTwinTool)),
             calledTool,
           });
-          expect(run.name).toBe(PLAIN_NAME);
-          expect(summarizeSteps(run.steps), `${calledTool} was alone`).toEqual([
-            {
-              listed: [calledTool],
-              shown: { [PLAIN_NAME]: calledTool },
-              declared: [PLAIN_NAME],
-              ...ranCall(calledTool),
-              modelWasTold: RAN_TEXT,
-            },
-            {
-              listed: ["search_pages", "search-pages"],
-              shown: BOTH_SHOWN,
-              declared: BOTH_DECLARED,
-              ...REFUSED_BY_PI,
-              modelWasTold: `Tool ${PLAIN_NAME} not found`,
-            },
-          ]);
-        }
-      },
-      TWIN_TEST_MS,
-    );
-
-    it(
-      "with pi's suffix is shown for no tool once the twin is removed, whichever twin goes, and pi refuses a call of it before the gateway sees it",
-      async () => {
-        const bothThenUnderscore = [[UNDERSCORE_TOOL, HYPHEN_TOOL], [UNDERSCORE_TOOL]];
-        const bothThenHyphen = [[UNDERSCORE_TOOL, HYPHEN_TOOL], [HYPHEN_TOOL]];
-        const cases = [
-          // The tool called stays, and the other goes.
-          { states: bothThenUnderscore, calledTool: "search_pages", name: UNDERSCORE_NAME },
-          { states: bothThenHyphen, calledTool: "search-pages", name: HYPHEN_NAME },
-          // The tool called goes.
-          { states: bothThenUnderscore, calledTool: "search-pages", name: HYPHEN_NAME },
-          { states: bothThenHyphen, calledTool: "search_pages", name: UNDERSCORE_NAME },
-        ];
-        for (const { states, calledTool, name } of cases) {
-          const run = await runTwinScenario({ states, calledTool });
-          const survivor = states[1]![0]!.name;
-          expect(run.name).toBe(name);
-          expect(summarizeSteps(run.steps), `${calledTool} called, then ${survivor} stays`).toEqual(
-            [
-              {
-                listed: ["search_pages", "search-pages"],
-                shown: BOTH_SHOWN,
-                declared: BOTH_DECLARED,
-                ...ranCall(calledTool),
-                modelWasTold: RAN_TEXT,
-              },
-              {
-                listed: [survivor],
-                shown: { [PLAIN_NAME]: survivor },
-                declared: [PLAIN_NAME],
-                ...REFUSED_BY_PI,
-                modelWasTold: `Tool ${name} not found`,
-              },
-            ],
+          expect(run.name).toBe(SHOWN_NAMES[calledTool]);
+          const loaded = new Set<string>();
+          expect(summarizeSteps(run.steps)).toEqual(
+            states.map((listed) => {
+              const found = listed.filter((tool) => !loaded.has(tool));
+              for (const tool of listed) loaded.add(tool);
+              return {
+                listed,
+                shown: Object.fromEntries(found.map((tool) => [SHOWN_NAMES[tool]!, tool])),
+                declared: listed.map((tool) => SHOWN_NAMES[tool]!).toSorted(),
+                ...(listed.includes(calledTool)
+                  ? { ...ranCall(calledTool), modelWasTold: RAN_TEXT }
+                  : { ...REFUSED_BY_PI, modelWasTold: `Tool ${run.name} not found` }),
+              };
+            }),
           );
-        }
-      },
-      TWIN_TEST_MS,
-    );
-
-    it(
-      "never moves to the sibling tool when the twin comes and then goes, nor when the server swaps one tool for the other: pi refuses a call of it",
-      async () => {
-        for (const [from, to] of [
-          ["search_pages", "search-pages"],
-          ["search-pages", "search_pages"],
-        ] as const) {
-          // The sibling is listed under the suffix pi gave it when both were listed, and pi has
-          // that name loaded already, so the search finds nothing new.
-          const siblingName = to === "search_pages" ? UNDERSCORE_NAME : HYPHEN_NAME;
-          const comesAndGoes = await runTwinScenario({
-            states: [[buildTwinTool(from)], [UNDERSCORE_TOOL, HYPHEN_TOOL], [buildTwinTool(to)]],
-            calledTool: from,
-          });
-          expect(comesAndGoes.name, `${from} first`).toBe(PLAIN_NAME);
-          expect(summarizeSteps(comesAndGoes.steps)).toEqual([
-            {
-              listed: [from],
-              shown: { [PLAIN_NAME]: from },
-              declared: [PLAIN_NAME],
-              ...ranCall(from),
-              modelWasTold: RAN_TEXT,
-            },
-            {
-              listed: ["search_pages", "search-pages"],
-              shown: BOTH_SHOWN,
-              declared: BOTH_DECLARED,
-              ...REFUSED_BY_PI,
-              modelWasTold: `Tool ${PLAIN_NAME} not found`,
-            },
-            {
-              listed: [to],
-              shown: {},
-              declared: [siblingName],
-              ...REFUSED_BY_PI,
-              modelWasTold: `Tool ${PLAIN_NAME} not found`,
-            },
-          ]);
-
-          const swapped = await runTwinScenario({
-            states: [[buildTwinTool(from)], [buildTwinTool(to)]],
-            calledTool: from,
-          });
-          expect(swapped.name, `${from} swapped for ${to}`).toBe(PLAIN_NAME);
-          expect(summarizeSteps(swapped.steps)).toEqual([
-            {
-              listed: [from],
-              shown: { [PLAIN_NAME]: from },
-              declared: [PLAIN_NAME],
-              ...ranCall(from),
-              modelWasTold: RAN_TEXT,
-            },
-            {
-              listed: [to],
-              shown: { [siblingName]: to },
-              declared: [siblingName],
-              ...REFUSED_BY_PI,
-              modelWasTold: `Tool ${PLAIN_NAME} not found`,
-            },
-          ]);
-        }
-      },
-      TWIN_TEST_MS,
-    );
+          for (const step of run.steps) {
+            expect(
+              step.call.ranUpstream.every((tool) => tool === calledTool),
+              "no other tool ran",
+            ).toBe(true);
+          }
+        },
+        TWIN_TEST_MS,
+      );
+    }
   },
 );

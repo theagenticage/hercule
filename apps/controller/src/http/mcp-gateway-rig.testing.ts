@@ -32,6 +32,71 @@ export const WHOAMI_TOOL: FakeTool = {
   description: "Returns the user the server acts as",
 };
 
+/** A tool of the fake MCP server whose description ends with its own name in square brackets, which is how a test tells which tool a harness shows under a name. */
+export const buildTwinTool = (name: string): FakeTool => ({
+  name,
+  description: `Searches [${name}]`,
+});
+
+/**
+ * One way the tools of a server change under a harness that has already shown
+ * a name to the model: the tools the server lists in each state, in order, and
+ * the tool whose name the model used in the first state. `search_pages` and
+ * `search-pages` are the twins: a harness that folds `-` into `_` shows them
+ * alike.
+ */
+export interface TwinScenario {
+  readonly title: string;
+  readonly states: ReadonlyArray<ReadonlyArray<string>>;
+  readonly calledTool: string;
+}
+
+const UNDERSCORE = "search_pages";
+const HYPHEN = "search-pages";
+const BOTH = [UNDERSCORE, HYPHEN];
+
+/** The twin comes, the twin goes, the twin comes and goes, and one tool is swapped for the other. */
+export const TWIN_SCENARIOS: ReadonlyArray<TwinScenario> = [
+  {
+    title: "search-pages added to search_pages",
+    states: [[UNDERSCORE], BOTH],
+    calledTool: UNDERSCORE,
+  },
+  { title: "search_pages added to search-pages", states: [[HYPHEN], BOTH], calledTool: HYPHEN },
+  {
+    title: "search-pages removed, search_pages called and stays",
+    states: [BOTH, [UNDERSCORE]],
+    calledTool: UNDERSCORE,
+  },
+  {
+    title: "search_pages removed, search-pages called and stays",
+    states: [BOTH, [HYPHEN]],
+    calledTool: HYPHEN,
+  },
+  { title: "search-pages called and removed", states: [BOTH, [UNDERSCORE]], calledTool: HYPHEN },
+  { title: "search_pages called and removed", states: [BOTH, [HYPHEN]], calledTool: UNDERSCORE },
+  {
+    title: "search_pages, both, search-pages",
+    states: [[UNDERSCORE], BOTH, [HYPHEN]],
+    calledTool: UNDERSCORE,
+  },
+  {
+    title: "search-pages, both, search_pages",
+    states: [[HYPHEN], BOTH, [UNDERSCORE]],
+    calledTool: HYPHEN,
+  },
+  {
+    title: "search_pages swapped for search-pages",
+    states: [[UNDERSCORE], [HYPHEN]],
+    calledTool: UNDERSCORE,
+  },
+  {
+    title: "search-pages swapped for search_pages",
+    states: [[HYPHEN], [UNDERSCORE]],
+    calledTool: HYPHEN,
+  },
+];
+
 /** What a test needs to reach the gateway as a harness does. */
 export interface GatewayRig {
   readonly proxy: RecordingProxy;

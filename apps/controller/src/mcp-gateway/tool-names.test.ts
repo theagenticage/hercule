@@ -20,15 +20,15 @@ const buildGatewayToolName = (tool: string, serverName = "sentry"): string =>
   buildToolName({ serverName, tool });
 
 describe("buildToolName", () => {
-  it("keeps an original name of letters, digits, underscores and hyphens as it is", () => {
+  it("keeps an original name of letters, digits and underscores as it is", () => {
     expect(buildGatewayToolName("search_issues")).toBe("sentry__search_issues");
-    expect(buildGatewayToolName("search-pages")).toBe("sentry__search-pages");
     expect(buildGatewayToolName("GetIssue2")).toBe("sentry__GetIssue2");
   });
 
-  it("changes a name with any other character: the character becomes an underscore and a hash follows", () => {
+  it("changes a name with a hyphen or any other character: the character becomes an underscore and a hash follows", () => {
+    expect(buildGatewayToolName("search-pages")).toMatch(/^sentry__search_pages_[0-9a-f]{6}$/);
     expect(buildGatewayToolName("get-issue.details")).toMatch(
-      /^sentry__get-issue_details_[0-9a-f]{6}$/,
+      /^sentry__get_issue_details_[0-9a-f]{6}$/,
     );
     expect(buildGatewayToolName("a b")).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
     expect(buildGatewayToolName("")).toMatch(CHANGED_ENDING);
@@ -72,6 +72,13 @@ describe("buildToolName", () => {
 
   it("gives tools that differ only in a replaced character different names", () => {
     expect(buildGatewayToolName("a.b")).not.toBe(buildGatewayToolName("a b"));
+    expect(buildGatewayToolName("search-pages")).not.toBe(buildGatewayToolName("search_pages"));
+  });
+
+  it("gives no name a hyphen, so no harness that folds a hyphen can fold two names into one", () => {
+    for (const tool of ["a-b", "-", "x-y_z", "a.b-c"]) {
+      expect(buildGatewayToolName(tool)).not.toContain("-");
+    }
   });
 });
 
@@ -80,16 +87,22 @@ describe("the names the gateway gives, pinned", () => {
   // the server's name too, or a change of case would change them, and so must fail here.
   it("keeps a plain name with mixed case exactly as it is", () => {
     expect(buildGatewayToolName("SearchPages")).toBe("sentry__SearchPages");
-    expect(buildGatewayToolName("Get_Issue-2")).toBe("sentry__Get_Issue-2");
+    expect(buildGatewayToolName("Get_Issue_2")).toBe("sentry__Get_Issue_2");
   });
 
   it("gives a name with punctuation the first six hex characters of the SHA-256 of the original name, whatever the server", () => {
     // `printf 'Search.Pages' | sha256sum` starts with 873eaa.
     expect(buildGatewayToolName("Search.Pages")).toBe("sentry__Search_Pages_873eaa");
     expect(buildGatewayToolName("Search.Pages", "linear")).toBe("linear__Search_Pages_873eaa");
-    expect(buildGatewayToolName("get-issue.details")).toBe("sentry__get-issue_details_437857");
+    expect(buildGatewayToolName("get-issue.details")).toBe("sentry__get_issue_details_437857");
     // The hash is over the UTF-8 bytes, so a character outside ASCII is part of it.
     expect(buildGatewayToolName("h\u00e9llo w\u00f6rld")).toBe("sentry__h_llo_w_rld_a1003f");
+  });
+
+  it("changes a hyphenated name, and gives it the hash of the original with its hyphen", () => {
+    // `printf 'search-pages' | sha256sum` starts with f33805.
+    expect(buildGatewayToolName("search-pages")).toBe("sentry__search_pages_f33805");
+    expect(buildGatewayToolName("notion-search", "notion")).toBe("notion__notion_search_042031");
   });
 
   it("cuts a long name to 52 characters and ends it with the hash of the whole original name", () => {
@@ -112,7 +125,7 @@ describe("buildToolNames", () => {
       names.named.find((one) => one.serverName === serverName && one.tool === tool)?.name;
     expect(find(alone, "notion", "search_pages")).toBe("notion__search_pages");
     expect(find(crowded, "notion", "search_pages")).toBe("notion__search_pages");
-    expect(find(crowded, "notion", "search-pages")).toBe("notion__search-pages");
+    expect(find(crowded, "notion", "search-pages")).toMatch(/^notion__search_pages_[0-9a-f]{6}$/);
     expect(find(crowded, "notion", "search.pages")).toMatch(/^notion__search_pages_[0-9a-f]{6}$/);
     expect(crowded.leftOut).toEqual([]);
   });

@@ -2,9 +2,9 @@
  * Runs the real Codex against the real MCP Gateway, to check what the spec
  * could only assume (spec 21 section 3.11): that Codex works on the older wire
  * era, sees `notifications/tools/list_changed` and lists again, opens a new MCP
- * session when the gateway answers 404 for the one it holds, and what a name
- * Codex showed the model reaches when a tool with a twin of the same shown
- * name comes or goes (it can reach the other tool: see the last `describe`).
+ * session when the gateway answers 404 for the one it holds, and that a name
+ * Codex showed the model never reaches the other tool when a twin with `-` or
+ * `_` comes or goes (see the last `describe`).
  * Resuming and forking a thread is checked beside the adapter, in
  * `apps/runner/src/harnesses/codex/adapter-mcp.integration.test.ts`.
  *
@@ -69,7 +69,9 @@ import type { ThreadStartParams, TurnStartParams } from "../../../runner/src/har
 import { startFakeUpstream, type FakeTool, type FakeUpstream } from "../mcp-servers/testing";
 import {
   OLDER_ERA_REVISIONS,
+  TWIN_SCENARIOS,
   WHOAMI_TOOL,
+  buildTwinTool,
   readUpstreamCalls,
   withGatewayRig,
   type ToolChangingGatewayRig,
@@ -596,10 +598,10 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 
-  it("calls a tool whose name has a hyphen and one whose name carries a hash, each reaching its own upstream tool beside a tool that reads alike", async () => {
+  it("calls a tool whose name has a hyphen and one whose name has a dot, each reaching its own upstream tool beside a tool that reads alike", async () => {
     const tools = [
       { name: "search_pages", description: `Searches [${SERVER_NAME}__search_pages]` },
-      { name: "search-pages", description: `Searches [${SERVER_NAME}__search-pages]` },
+      { name: "search-pages", description: `Searches [${SERVER_NAME}__search_pages_f33805]` },
       { name: "search.pages", description: `Searches [${SERVER_NAME}__search_pages_52ac82]` },
     ];
     await withCodexOnGateway({ listed: true, tools }, async (rig, home) => {
@@ -607,7 +609,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       const threadId = await running.startThread();
       const owners: ReadonlyArray<readonly [string, string]> = [
         [`${SERVER_NAME}__search_pages`, "search_pages"],
-        [`${SERVER_NAME}__search-pages`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_f33805`, "search-pages"],
         [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
       ];
       for (const [name, tool] of owners) {
@@ -662,14 +664,8 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
 
 // -- A name Codex showed, and a twin that comes or goes -------------------------
 
-/** A tool of `sentry` whose description ends with its own name in square brackets, which is how a test tells which tool Codex shows under a name. */
-const buildTwinTool = (name: string): FakeTool => ({ name, description: `Searches [${name}]` });
-
-const UNDERSCORE_TOOL = buildTwinTool("search_pages");
-const HYPHEN_TOOL = buildTwinTool("search-pages");
-
-/** The most a test of the twins takes: each runs several Codex processes, one for each scenario. */
-const TWIN_TEST_MS = 300_000;
+/** The most a test of the twins takes: each runs one Codex process for its scenario. */
+const TWIN_TEST_MS = 120_000;
 
 /** What the model is shown of the twins: each name Codex shows, and the tool of the server it stands for. */
 type ShownTwins = Readonly<Record<string, string>>;
@@ -776,17 +772,25 @@ const runTwinScenario = async (options: {
 const buildGatewayName = (tool: string): string =>
   `${SERVER_NAME}${MCP_GATEWAY_TOOL_SEPARATOR}${tool}`;
 
-/** The name Codex shows for a lone tool whose name has `-` or `_` between its words. */
-const PLAIN_NAME = buildGatewayName("search_pages");
+/** The name of `search_pages`, which the gateway keeps as it is. */
+const UNDERSCORE_NAME = buildGatewayName("search_pages");
 
-/** The names Codex shows when both twins are listed: its own suffix on each, the same for the same tool every time. */
-const UNDERSCORE_NAME = `${PLAIN_NAME}_987a6a995dbb`;
-const HYPHEN_NAME = `${PLAIN_NAME}_281727d9ca73`;
-const BOTH_SHOWN = { [HYPHEN_NAME]: "search-pages", [UNDERSCORE_NAME]: "search_pages" };
+/**
+ * The name of `search-pages`: the hyphen becomes `_`, and the first six hex
+ * characters of the SHA-256 of `search-pages` follow. The gateway keeps no
+ * hyphen, so Codex has no `-` to fold into the name of `search_pages`.
+ */
+const HYPHEN_NAME = buildGatewayName("search_pages_f33805");
+
+/** The name Codex shows, and the gateway sends, for each of the two tools. */
+const NAMES: Readonly<Record<string, string>> = {
+  search_pages: UNDERSCORE_NAME,
+  "search-pages": HYPHEN_NAME,
+};
 
 /** What a call that reached `tool` through the gateway looks like. */
 const ranCall = (tool: string) => ({
-  sentToGateway: [buildGatewayName(tool)],
+  sentToGateway: [NAMES[tool]!],
   ranUpstream: [tool],
   status: "completed",
 });
@@ -804,134 +808,51 @@ const summarizeSteps = (steps: ReadonlyArray<TwinStep>) =>
     status: call.status,
   }));
 
+/** The tools that Codex shows for a list of tools, each under the gateway's name. */
+const buildShown = (listed: ReadonlyArray<string>): ShownTwins =>
+  Object.fromEntries(listed.map((tool) => [NAMES[tool]!, tool]));
+
 /**
- * Codex, 0.169 and 0.171, shows `-` as `_` and gives every tool whose shown
- * name has a twin a suffix of its own, so the twins' names depend on which
- * tools are listed now and on nothing the gateway sent. The name of a lone
- * tool is therefore the name of its twin when the twin takes its place. These
- * tests record what Codex does with a name the model used, when a twin comes or
- * goes with no restart (spec 21 section 3.4).
+ * Codex, 0.169 and 0.171, shows the model `_` for `-` and gives every tool
+ * whose shown name has a twin a suffix of its own, worked out from the
+ * current list alone. The gateway keeps no `-` in a name, so no two gateway
+ * names look alike to Codex, and Codex shows each name as it is. A name the
+ * model used therefore means the same tool in every state of the list: it
+ * runs its own tool while that tool is listed, and Codex refuses it once the
+ * tool is gone. It never runs the sibling tool, with no restart, as the
+ * hyphen-keeping names did (spec 21 section 3.4).
  */
 describe.skipIf(codex === undefined)(
-  "a name Codex shows for a gateway tool, when a twin with - or _ comes or goes",
+  "a name the model already used never runs the other tool in Codex, when a twin with - or _ comes or goes",
   () => {
-    it(
-      "is shown for no tool once the twin is listed, and Codex refuses a call of it before the gateway sees it",
-      async () => {
-        const added = await runTwinScenario({
-          states: [[UNDERSCORE_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL]],
-          calledTool: "search_pages",
-        });
-        expect(added.name).toBe(PLAIN_NAME);
-        expect(summarizeSteps(added.steps)).toEqual([
-          {
-            listed: ["search_pages"],
-            shown: { [PLAIN_NAME]: "search_pages" },
-            ...ranCall("search_pages"),
-          },
-          { listed: ["search_pages", "search-pages"], shown: BOTH_SHOWN, ...REFUSED_BY_CODEX },
-        ]);
-        expect(added.steps[1]!.call.modelWasTold).toContain("unsupported call");
-
-        // The same when the lone tool is the one with `-`: Codex shows it as `_` too.
-        const addedReverse = await runTwinScenario({
-          states: [[HYPHEN_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL]],
-          calledTool: "search-pages",
-        });
-        expect(addedReverse.name).toBe(PLAIN_NAME);
-        expect(summarizeSteps(addedReverse.steps)).toEqual([
-          {
-            listed: ["search-pages"],
-            shown: { [PLAIN_NAME]: "search-pages" },
-            ...ranCall("search-pages"),
-          },
-          { listed: ["search_pages", "search-pages"], shown: BOTH_SHOWN, ...REFUSED_BY_CODEX },
-        ]);
-      },
-      TWIN_TEST_MS,
-    );
-
-    it(
-      "with Codex's suffix is shown for no tool once the twin is removed, whichever twin goes, and Codex refuses a call of it before the gateway sees it",
-      async () => {
-        const bothThenUnderscore = [[UNDERSCORE_TOOL, HYPHEN_TOOL], [UNDERSCORE_TOOL]];
-        const bothThenHyphen = [[UNDERSCORE_TOOL, HYPHEN_TOOL], [HYPHEN_TOOL]];
-        const cases = [
-          // The tool called stays, and the other goes.
-          { states: bothThenUnderscore, calledTool: "search_pages", name: UNDERSCORE_NAME },
-          { states: bothThenHyphen, calledTool: "search-pages", name: HYPHEN_NAME },
-          // The tool called goes.
-          { states: bothThenUnderscore, calledTool: "search-pages", name: HYPHEN_NAME },
-          { states: bothThenHyphen, calledTool: "search_pages", name: UNDERSCORE_NAME },
-        ];
-        for (const { states, calledTool, name } of cases) {
-          const run = await runTwinScenario({ states, calledTool });
-          const survivor = states[1]![0]!.name;
-          expect(run.name).toBe(name);
-          expect(summarizeSteps(run.steps), `${calledTool} called, then ${survivor} stays`).toEqual(
-            [
-              {
-                listed: ["search_pages", "search-pages"],
-                shown: BOTH_SHOWN,
-                ...ranCall(calledTool),
-              },
-              { listed: [survivor], shown: { [PLAIN_NAME]: survivor }, ...REFUSED_BY_CODEX },
-            ],
-          );
-        }
-      },
-      TWIN_TEST_MS,
-    );
-
-    // This is the finding of the test: the name does MOVE inside Codex, with no restart. The model
-    // used `sentry__search_pages` when it was one tool's name, and the same name reaches the other
-    // tool once the twin has come and gone, or once the server has swapped one tool for the other.
-    // The gateway sends each tool under its own name every time (spec 21 section 3.4), so this is
-    // Codex's own naming at work and the gateway cannot prevent it.
-    it(
-      "MOVES to the sibling tool when the twin comes and then goes, and when the server swaps one tool for the other",
-      async () => {
-        const comesAndGoes = [
-          {
-            states: [[UNDERSCORE_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL], [HYPHEN_TOOL]],
-            calledTool: "search_pages",
-            from: "search_pages",
-            to: "search-pages",
-          },
-          {
-            states: [[HYPHEN_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL], [UNDERSCORE_TOOL]],
-            calledTool: "search-pages",
-            from: "search-pages",
-            to: "search_pages",
-          },
-        ];
-        for (const { states, calledTool, from, to } of comesAndGoes) {
-          const run = await runTwinScenario({ states, calledTool });
-          expect(run.name, `${from} first`).toBe(PLAIN_NAME);
-          expect(summarizeSteps(run.steps)).toEqual([
-            { listed: [from], shown: { [PLAIN_NAME]: from }, ...ranCall(from) },
-            { listed: ["search_pages", "search-pages"], shown: BOTH_SHOWN, ...REFUSED_BY_CODEX },
-            // The same name as in the first step, and the other tool runs.
-            { listed: [to], shown: { [PLAIN_NAME]: to }, ...ranCall(to) },
-          ]);
-        }
-
-        for (const [from, to] of [
-          ["search_pages", "search-pages"],
-          ["search-pages", "search_pages"],
-        ] as const) {
-          const swapped = await runTwinScenario({
-            states: [[buildTwinTool(from)], [buildTwinTool(to)]],
-            calledTool: from,
+    for (const { title, states, calledTool } of TWIN_SCENARIOS) {
+      it(
+        `${title}: the model's name for ${calledTool} runs ${calledTool} while it is listed and is refused after`,
+        async () => {
+          const run = await runTwinScenario({
+            states: states.map((listed) => listed.map(buildTwinTool)),
+            calledTool,
           });
-          expect(swapped.name, `${from} swapped for ${to}`).toBe(PLAIN_NAME);
-          expect(summarizeSteps(swapped.steps)).toEqual([
-            { listed: [from], shown: { [PLAIN_NAME]: from }, ...ranCall(from) },
-            { listed: [to], shown: { [PLAIN_NAME]: to }, ...ranCall(to) },
-          ]);
-        }
-      },
-      TWIN_TEST_MS,
-    );
+          expect(run.name).toBe(NAMES[calledTool]);
+          expect(summarizeSteps(run.steps)).toEqual(
+            states.map((listed) => ({
+              listed,
+              shown: buildShown(listed),
+              ...(listed.includes(calledTool) ? ranCall(calledTool) : REFUSED_BY_CODEX),
+            })),
+          );
+          for (const step of run.steps) {
+            expect(
+              step.call.ranUpstream.every((tool) => tool === calledTool),
+              "no other tool ran",
+            ).toBe(true);
+            if (step.call.ranUpstream.length === 0) {
+              expect(step.call.modelWasTold).toContain("unsupported call");
+            }
+          }
+        },
+        TWIN_TEST_MS,
+      );
+    }
   },
 );

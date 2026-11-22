@@ -572,13 +572,13 @@ describe("the stateful era", () => {
     const tools = answer.body.result.tools as ReadonlyArray<{ name: string; description: string }>;
     expect(tools.map((tool) => tool.name)).toEqual([
       "alpha__echo",
-      "alpha__get-issue_details_437857",
+      "alpha__get_issue_details_437857",
       "bravo__echo",
-      "bravo__get-issue_details_437857",
+      "bravo__get_issue_details_437857",
     ]);
     expect(tools[0]?.description).toBe("Echoes its text");
 
-    const called = await callEcho(thread.token, "bravo__get-issue_details_437857", sessionId);
+    const called = await callEcho(thread.token, "bravo__get_issue_details_437857", sessionId);
     expect(called.body.result.isError).toBeUndefined();
     // The fake server echoes the arguments it received.
     expect(textOf(called)).toBe('{"text":"hello"}');
@@ -637,7 +637,7 @@ describe("the stateless era", () => {
     expect(listed.body.result.resultType).toBe("complete");
     expect(
       (listed.body.result.tools as ReadonlyArray<{ name: string }>).map((tool) => tool.name),
-    ).toEqual(["alpha__echo", "alpha__get-issue_details_437857"]);
+    ).toEqual(["alpha__echo", "alpha__get_issue_details_437857"]);
 
     const called = await callEcho(thread.token, "alpha__echo", undefined);
     expect(called.body.result).toMatchObject({
@@ -801,7 +801,7 @@ describe("list changes", () => {
     const { sessionId } = await initialize(thread.token);
     expect(await listToolNames(thread.token, sessionId)).toEqual([
       "alpha__echo",
-      "alpha__get-issue_details_437857",
+      "alpha__get_issue_details_437857",
     ]);
 
     const stream = await openGetStream(thread.token, sessionId);
@@ -816,9 +816,9 @@ describe("list changes", () => {
       await waitForListChanges(stream, 2);
       expect(await listToolNames(thread.token, sessionId)).toEqual([
         "alpha__echo",
-        "alpha__get-issue_details_437857",
+        "alpha__get_issue_details_437857",
         "charlie__echo",
-        "charlie__get-issue_details_437857",
+        "charlie__get_issue_details_437857",
       ]);
 
       // A server that left is refused at once, and the names of the others stay.
@@ -1476,7 +1476,7 @@ const SEARCH_PAGES_WITH_DOT = { name: "search.pages", description: "Searches the
 
 /** What the gateway names those three tools of a server called `notion`. */
 const NOTION_SEARCH_PAGES = "notion__search_pages";
-const NOTION_SEARCH_PAGES_WITH_HYPHEN = "notion__search-pages";
+const NOTION_SEARCH_PAGES_WITH_HYPHEN = "notion__search_pages_f33805";
 const NOTION_SEARCH_PAGES_WITH_DOT = "notion__search_pages_52ac82";
 
 /** Counts the accounts `withNotion` made, so that each server has an account of its own. */
@@ -1612,6 +1612,47 @@ describe("tool names that no list and no restart can change", () => {
       ).toBeUndefined();
       expect(readUpstreamTools(mark)).toEqual(["search-pages"]);
     });
+  });
+});
+
+describe("a name a client holds when the server swaps a tool for its twin", () => {
+  it("is refused, and the twin runs only under its own name, whichever tool was swapped for the other", async () => {
+    const cases = [
+      {
+        from: SEARCH_PAGES,
+        fromName: NOTION_SEARCH_PAGES,
+        to: SEARCH_PAGES_WITH_HYPHEN,
+        toName: NOTION_SEARCH_PAGES_WITH_HYPHEN,
+      },
+      {
+        from: SEARCH_PAGES_WITH_HYPHEN,
+        fromName: NOTION_SEARCH_PAGES_WITH_HYPHEN,
+        to: SEARCH_PAGES,
+        toName: NOTION_SEARCH_PAGES,
+      },
+    ];
+    for (const { from, fromName, to, toName } of cases) {
+      await withNotion([from], async (notion, replaceTools) => {
+        const thread = await spawnThread(["mcp.use"], [notion]);
+        const { sessionId } = await initialize(thread.token);
+        expect(await listToolNames(thread.token, sessionId)).toEqual([fromName]);
+        await replaceTools([to]);
+
+        // The name the client holds is not the twin's: nothing runs under it.
+        const mark = countUpstreamRequests();
+        const refused = await callEcho(thread.token, fromName, sessionId);
+        expect(refused.body.result.isError, from.name).toBe(true);
+        expect(textOf(refused)).toContain("no longer offers this tool");
+        expect(readUpstreamTools(mark)).toEqual([]);
+
+        // The twin is reached under its own name.
+        expect(await listToolNames(thread.token, sessionId)).toEqual([toName]);
+        expect(
+          (await callEcho(thread.token, toName, sessionId)).body.result.isError,
+        ).toBeUndefined();
+        expect(readUpstreamTools(mark)).toEqual([to.name]);
+      });
+    }
   });
 });
 

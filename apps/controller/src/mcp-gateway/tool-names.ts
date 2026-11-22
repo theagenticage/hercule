@@ -18,7 +18,7 @@ const MAX_NAME_LENGTH = MAX_HARNESS_NAME_LENGTH - MCP_GATEWAY_HARNESS_PREFIX.len
 const SUFFIX_LENGTH = 7;
 
 /** A tool name the gateway sends as it is: only these characters. */
-const KEPT_CHARACTERS = /^[A-Za-z0-9_-]+$/;
+const KEPT_CHARACTERS = /^[A-Za-z0-9_]+$/;
 
 /** The end of every changed name: `_` plus six lowercase hex characters. No unchanged name ends so. */
 const HASH_SUFFIX = /_[0-9a-f]{6}$/;
@@ -73,7 +73,9 @@ const hashSuffix = (text: string): string =>
  *
  * The original name is kept when all of these hold:
  *
- * - it has only the characters `A-Z`, `a-z`, `0-9`, `_` and `-`;
+ * - it has only the characters `A-Z`, `a-z`, `0-9` and `_`. A hyphen is not
+ *   kept: Codex shows the model `_` for `-` and moves a name between two tools
+ *   that look alike, so a gateway name never holds a character a harness folds;
  * - it does not end in `_` plus six lowercase hex characters, because that
  *   ending belongs to changed names, so an unchanged name never equals the
  *   changed name of another tool;
@@ -93,7 +95,7 @@ export const buildToolName = ({ serverName, tool }: ToolKey): string => {
   ) {
     return `${prefix}${tool}`;
   }
-  const normalized = tool.replace(/[^A-Za-z0-9_-]/g, "_");
+  const normalized = tool.replace(/[^A-Za-z0-9_]/g, "_");
   const room = MAX_NAME_LENGTH - prefix.length - SUFFIX_LENGTH;
   return `${prefix}${normalized.slice(0, room)}_${hashSuffix(tool)}`;
 };

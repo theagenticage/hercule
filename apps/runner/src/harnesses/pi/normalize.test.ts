@@ -307,7 +307,8 @@ describe("normalizing a call to the MCP Gateway on a pi turn", () => {
   });
 
   it("shows the gateway's own name on the completed item, where pi showed the model its own spelling", () => {
-    // pi turns the `-` of `search-pages` into `_` and adds a suffix of its own, because `search_pages` reads alike.
+    // pi can show a spelling of its own, with a suffix, for names that read alike to it. The gateway's names
+    // never read alike to pi, so this is a backstop: the item still shows the name the gateway sent.
     const piName = "mcp__tools__sentry__search_pages_a7feafcf";
     const events = normalizeFromStart([
       { type: "agent_start" },
@@ -317,7 +318,7 @@ describe("normalizing a call to the MCP Gateway on a pi turn", () => {
         toolName: piName,
         result: {
           content: [{ type: "text", text: "ok" }],
-          details: { server: "tools", tool: "sentry__search-pages" },
+          details: { server: "tools", tool: "sentry__search_pages_f33805" },
         },
       },
     ]);
@@ -329,7 +330,7 @@ describe("normalizing a call to the MCP Gateway on a pi turn", () => {
       kind: "mcp",
     });
     expect(filterByTag(events, "item.completed")[0]?.detail).toEqual({
-      name: "search-pages",
+      name: "search_pages_f33805",
       server: "sentry",
       kind: "mcp",
     });

@@ -353,9 +353,9 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
   });
 
-  it("shows a tool whose name has a hyphen, and one whose name ends in a hash, as the gateway names them", async () => {
+  it("shows a tool whose name has a hash ending, as the gateway names it", async () => {
     // Codex puts the gateway's own tool name in `_meta.tool_name`, not the spelling it shows the model.
-    for (const tool of ["notion__search-pages", "notion__search_pages_52ac82"]) {
+    for (const tool of ["notion__search_pages_f33805", "notion__search_pages_52ac82"]) {
       const run = await pushServerRequest(ELICITATION, {
         ...TOOL_CALL_ELICITATION_PARAMS,
         _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: tool },
@@ -452,19 +452,19 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(request.itemId).toBe("call-search");
   });
 
-  it("files the question under the call of the tool with the hyphen, not under its sibling that reads alike", async () => {
+  it("files the question under the call of the tool with the hash ending, not under its sibling that reads alike", async () => {
     const request = await askAboutCall(
       [
         ["call-underscore", "notion__search_pages"],
-        ["call-hyphen", "notion__search-pages"],
+        ["call-hashed", "notion__search_pages_f33805"],
       ],
       {
         ...TOOL_CALL_ELICITATION_PARAMS,
-        _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "notion__search-pages" },
+        _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "notion__search_pages_f33805" },
       },
     );
 
-    expect(request.itemId).toBe("call-hyphen");
+    expect(request.itemId).toBe("call-hashed");
   });
 
   it("files a question that names no tool under its turn, because no call can be matched to it", async () => {

@@ -710,10 +710,14 @@ describe("item details", () => {
     expect(
       readItemDetail([buildToolUse("mcp__tools__sentry__search_issues")], TOOL, "item.started"),
     ).toEqual({ name: "search_issues", server: "sentry", input: { query: "x" }, kind: "mcp" });
-    // A hyphen stays, and a changed name keeps its hash ending: the item shows the gateway's name.
+    // A changed name keeps its hash ending: the item shows the gateway's name.
     expect(
-      readItemDetail([buildToolUse("mcp__tools__notion__search-pages")], TOOL, "item.started"),
-    ).toMatchObject({ name: "search-pages", server: "notion" });
+      readItemDetail(
+        [buildToolUse("mcp__tools__notion__search_pages_f33805")],
+        TOOL,
+        "item.started",
+      ),
+    ).toMatchObject({ name: "search_pages_f33805", server: "notion" });
     expect(
       readItemDetail(
         [buildToolUse("mcp__tools__notion__search_pages_52ac82")],

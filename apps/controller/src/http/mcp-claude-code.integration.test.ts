@@ -390,8 +390,8 @@ const withGateway = (
     ),
   );
 
-const ALPHA_TOOLS = ["alpha__echo", "alpha__get-issue_details_437857"];
-const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get-issue_details_437857"];
+const ALPHA_TOOLS = ["alpha__echo", "alpha__get_issue_details_437857"];
+const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get_issue_details_437857"];
 
 /** Waits until the CLI lists exactly `tools` for the gateway's entry. */
 const waitForTools = (
@@ -457,14 +457,14 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
     });
   }, 120_000);
 
-  it("lists and calls a tool whose name has a hyphen and one whose name carries a hash, each reaching its own upstream tool beside a tool that reads alike", async () => {
+  it("lists and calls a tool whose name has a hyphen and one whose name has a dot, each reaching its own upstream tool beside a tool that reads alike", async () => {
     const tools = [
       { name: "search_pages", description: "Searches the pages" },
       { name: "search-pages", description: "Searches the pages by hyphen" },
       { name: "search.pages", description: "Searches the pages by dot" },
     ];
     const owners: ReadonlyArray<readonly [string, string]> = [
-      ["alpha__search-pages", "search-pages"],
+      ["alpha__search_pages_f33805", "search-pages"],
       ["alpha__search_pages_52ac82", "search.pages"],
       ["alpha__search_pages", "search_pages"],
     ];
@@ -478,7 +478,7 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         },
         async (rig) => {
           await withClaude(rig, async (running) => {
-            // The gateway lists in order of the original names: `-`, `.`, `_`.
+            // The gateway lists in order of the original names: `-`, `.`, `_`. The hyphen and the dot are changed to `_` and a hash.
             await waitForTools(
               running,
               owners.map(([name]) => name),
