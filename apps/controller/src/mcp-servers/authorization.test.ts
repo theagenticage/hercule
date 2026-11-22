@@ -1,36 +1,102 @@
 /**
- * Tests the parts of discovery and registration that need no network: reading
- * a `WWW-Authenticate` challenge, listing where metadata may be, the outbound
- * rules on an address, and validating the three documents (protected resource
- * metadata, authorization server metadata, a client registration answer). The
- * requests themselves are tested against a fake authorization server in
+ * Tests discovery and registration (`discoverAuthorization`,
+ * `registerClient`) through the requests they send and what they return,
+ * against a stub HTTP client that records every request and answers from a
+ * table. The two documents and the registration answer are validated inside
+ * them, so their rules are tested here with documents that break one rule at a
+ * time, not through the helpers. Four things have a test of their own: the
+ * challenge grammar, the cancelling of a body nobody reads (it needs a real
+ * socket), the address of the authorization endpoint, and the requests
+ * themselves against a fake authorization server in
  * `oauth-sign-in.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as UrlParams from "effect/http/UrlParams";
 import {
-  buildAuthorizationServerMetadataUrls,
   buildAuthorizationUrl,
-  buildResourceMetadataCandidates,
-  checkOutboundUrl,
   discoverAuthorization,
   parseBearerChallenge,
-  readAuthorizationServerMetadata,
-  readProtectedResourceMetadata,
-  readRegisteredClient,
-  REGISTERED_REDIRECT_URI,
+  registerClient,
+  type AuthorizationServer,
 } from "./authorization";
 
-const SERVER = new URL("https://mcp.example.com/mcp");
+const SERVER = "https://mcp.example.com/mcp";
 const ISSUER = "https://auth.example.com";
+const PRM_URL = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp";
+const AS_URL = `${ISSUER}/.well-known/oauth-authorization-server`;
+
+/** A protected resource metadata document for `SERVER` that names `ISSUER`. */
+const PRM = { resource: SERVER, authorization_servers: [ISSUER] };
+
+/** A valid authorization server metadata document, which a test breaks one rule of. */
+const AS = {
+  issuer: ISSUER,
+  authorization_endpoint: `${ISSUER}/authorize`,
+  token_endpoint: `${ISSUER}/token`,
+  registration_endpoint: `${ISSUER}/register`,
+  code_challenge_methods_supported: ["plain", "S256"],
+  token_endpoint_auth_methods_supported: ["none", "client_secret_post", 4],
+  authorization_response_iss_parameter_supported: true,
+};
+
+/**
+ * What the stub web answers, by `"<METHOD> <address>"`: a `Response`, or a
+ * value that is answered as a JSON body with status 200. Any other request
+ * gets 404.
+ */
+type Answers = Record<string, unknown>;
+
+/** Builds a stub HTTP client over `answers`, and the list of `"<METHOD> <address>"` it received. */
+const stubWeb = (answers: Answers) => {
+  const requests: Array<string> = [];
+  const client = HttpClient.make((request) => {
+    // The client keeps the query apart from the address.
+    const query = UrlParams.toString(request.urlParams);
+    const key = `${request.method} ${request.url}${query === "" ? "" : `?${query}`}`;
+    requests.push(key);
+    const answer = answers[key];
+    const response =
+      answer instanceof Response
+        ? answer
+        : answer === undefined
+          ? new Response("not found", { status: 404 })
+          : Response.json(answer);
+    return Effect.succeed(HttpClientResponse.fromWeb(request, response));
+  });
+  return {
+    requests,
+    /** The metadata requests only, which are the GETs. */
+    get metadataRequests() {
+      return requests.filter((key) => key.startsWith("GET ")).map((key) => key.slice(4));
+    },
+    run: <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
+      Effect.runPromise(
+        Effect.result(effect.pipe(Effect.provideService(HttpClient.HttpClient, client))),
+      ),
+  };
+};
+
+/** Discovers `server` against `answers`, and returns the outcome (`success` or `failure`) with the requests. */
+const discover = async (answers: Answers, server = SERVER) => {
+  const web = stubWeb(answers);
+  const outcome = await web.run(discoverAuthorization(server));
+  return { outcome, web };
+};
+
+/** Discovers against a web that serves `prm` and `as`, and returns the failure's tag, which the test expects. */
+const discoveryFailure = async (prm: unknown, as: unknown, server = SERVER): Promise<string> => {
+  const { outcome } = await discover({ [`GET ${PRM_URL}`]: prm, [`GET ${AS_URL}`]: as }, server);
+  if (outcome._tag !== "Failure") throw new Error("discovery did not fail");
+  return (outcome.failure as { _tag: string })._tag;
+};
 
 /** Returns a copy of the object without the key, as a server that never sends the field. */
 const leaveOut = (object: Record<string, unknown>, key: string): Record<string, unknown> =>
   Object.fromEntries(Object.entries(object).filter(([name]) => name !== key));
-
-/** Runs an effect that must fail and returns its error. */
-const fails = <E>(effect: Effect.Effect<unknown, E>) => Effect.runPromise(Effect.flip(effect));
 
 describe("parseBearerChallenge", () => {
   it.each([
@@ -96,358 +162,376 @@ describe("parseBearerChallenge", () => {
   });
 });
 
-describe("the addresses where metadata may be", () => {
-  it("lists the protected resource metadata of a server with a path, path first, each with the identifier it was built from", () => {
-    expect(
-      buildResourceMetadataCandidates(new URL("https://mcp.example.com/a/mcp?k=1#top")),
-    ).toEqual([
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp?k=1",
-        resource: "https://mcp.example.com/a/mcp?k=1",
+describe("discoverAuthorization", () => {
+  it("returns the endpoints, the resource, the scope the resource lists and the auth methods", async () => {
+    const { outcome } = await discover({
+      [`GET ${PRM_URL}`]: { ...PRM, scopes_supported: ["read", 3, "write"] },
+      [`GET ${AS_URL}`]: AS,
+    });
+
+    expect(outcome).toMatchObject({
+      _tag: "Success",
+      success: {
+        issuer: ISSUER,
+        authorizationEndpoint: `${ISSUER}/authorize`,
+        tokenEndpoint: `${ISSUER}/token`,
+        registrationEndpoint: `${ISSUER}/register`,
+        resource: SERVER,
+        scope: "read write",
+        sendsIssuer: true,
+        tokenEndpointAuthMethods: ["none", "client_secret_post"],
       },
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
-        resource: "https://mcp.example.com/",
-      },
-    ]);
+    });
   });
 
-  it("keeps the query of the server in the first address, and has the origin address as the fallback", () => {
-    expect(
-      buildResourceMetadataCandidates(new URL("https://mcp.example.com/a/mcp?tenant=1")),
-    ).toEqual([
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp?tenant=1",
-        resource: "https://mcp.example.com/a/mcp?tenant=1",
-      },
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
-        resource: "https://mcp.example.com/",
-      },
-    ]);
-  });
-
-  it("tries the address with the query and then the one without, for a server with a query and no path", () => {
-    expect(buildResourceMetadataCandidates(new URL("https://mcp.example.com/?tenant=1"))).toEqual([
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource?tenant=1",
-        resource: "https://mcp.example.com/?tenant=1",
-      },
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
-        resource: "https://mcp.example.com/",
-      },
-    ]);
-  });
-
-  it("lists the protected resource metadata of a server with no path once", () => {
-    expect(buildResourceMetadataCandidates(new URL("https://mcp.example.com"))).toEqual([
-      {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
-        resource: "https://mcp.example.com/",
-      },
-    ]);
-  });
-
-  it("lists the authorization server metadata of an issuer with no path", () => {
-    expect(buildAuthorizationServerMetadataUrls(new URL("https://auth.example.com/"))).toEqual([
-      "https://auth.example.com/.well-known/oauth-authorization-server",
-      "https://auth.example.com/.well-known/openid-configuration",
-    ]);
-  });
-
-  it("lists the authorization server metadata of an issuer with a path in the three forms", () => {
-    expect(
-      buildAuthorizationServerMetadataUrls(new URL("https://auth.example.com/tenant/1")),
-    ).toEqual([
-      "https://auth.example.com/.well-known/oauth-authorization-server/tenant/1",
-      "https://auth.example.com/.well-known/openid-configuration/tenant/1",
-      "https://auth.example.com/tenant/1/.well-known/openid-configuration",
-    ]);
-  });
-});
-
-describe("checkOutboundUrl", () => {
-  const HTTP_SERVER = new URL("http://127.0.0.1:9/mcp");
-
-  it("accepts an https address for an https server and for an http server", async () => {
-    for (const server of [SERVER, HTTP_SERVER]) {
-      expect(
-        (await Effect.runPromise(checkOutboundUrl("https://a.example/x", server, "t"))).href,
-      ).toBe("https://a.example/x");
+  it("says the authorization server sends no iss unless its metadata says true, and has no registration endpoint when it names none", async () => {
+    for (const flag of [undefined, "true"]) {
+      const { outcome } = await discover({
+        [`GET ${PRM_URL}`]: PRM,
+        [`GET ${AS_URL}`]: {
+          ...leaveOut(AS, "registration_endpoint"),
+          authorization_response_iss_parameter_supported: flag,
+        },
+      });
+      expect(outcome).toMatchObject({
+        success: { sendsIssuer: false, registrationEndpoint: undefined },
+      });
     }
   });
 
-  it("accepts an http address on the origin of an http server", async () => {
-    expect(
-      (await Effect.runPromise(checkOutboundUrl("http://127.0.0.1:9/token", HTTP_SERVER, "t")))
-        .href,
-    ).toBe("http://127.0.0.1:9/token");
-  });
-
-  it.each([
-    ["not an address", "not a url", SERVER, "the token endpoint is not an http or https address"],
-    [
-      "a file address",
-      "file:///etc/passwd",
-      SERVER,
-      "the token endpoint is not an http or https address",
-    ],
-    [
-      "a user name",
-      "https://u@a.example/x",
-      SERVER,
-      "the token endpoint holds a user name or a password",
-    ],
-    [
-      "a password",
-      "https://u:p@a.example/x",
-      SERVER,
-      "the token endpoint holds a user name or a password",
-    ],
-    [
-      "an http address for an https server",
-      "http://a.example/x",
-      SERVER,
-      "the token endpoint is http, and only the MCP server's own origin may be",
-    ],
-    [
-      "an http address on the host of an https server",
-      "http://mcp.example.com/x",
-      SERVER,
-      "the token endpoint is http, and only the MCP server's own origin may be",
-    ],
-    [
-      "an http address on another port of an http server's host",
-      "http://127.0.0.1:77/token",
-      HTTP_SERVER,
-      "the token endpoint is http, and only the MCP server's own origin may be",
-    ],
-    [
-      "an http address on another host than an http server",
-      "http://127.0.0.2:9/x",
-      HTTP_SERVER,
-      "the token endpoint is http, and only the MCP server's own origin may be",
-    ],
-  ])("refuses %s, and never quotes the address", async (_name, raw, server, message) => {
-    const error = await fails(checkOutboundUrl(raw, server, "token endpoint"));
-    expect(error).toMatchObject({ _tag: "AuthorizationUnreadable", message });
-  });
-});
-
-describe("readProtectedResourceMetadata", () => {
-  const SERVER_RESOURCE = "https://mcp.example.com/mcp";
-  const read = (body: unknown, expected = SERVER_RESOURCE) =>
-    Effect.runPromise(readProtectedResourceMetadata(body, expected));
-
-  it("returns the resource, the first authorization server and the listed scopes", async () => {
-    expect(
-      await read({
-        resource: "https://mcp.example.com/mcp",
-        authorization_servers: [ISSUER, "https://other.example"],
-        scopes_supported: ["read", 3, "write"],
+  it("goes to the address a Bearer challenge names, and asks for the scope the challenge asks for", async () => {
+    const { outcome, web } = await discover({
+      [`POST ${SERVER}`]: new Response(null, {
+        status: 401,
+        headers: {
+          "www-authenticate": `Bearer resource_metadata="https://mcp.example.com/meta", scope="admin"`,
+        },
       }),
-    ).toEqual({
-      resource: "https://mcp.example.com/mcp",
-      issuer: ISSUER,
-      scopesSupported: ["read", "write"],
+      "GET https://mcp.example.com/meta": { ...PRM, scopes_supported: ["read"] },
+      [`GET ${AS_URL}`]: AS,
     });
+
+    expect(outcome).toMatchObject({ success: { scope: "admin" } });
+    expect(web.metadataRequests[0]).toBe("https://mcp.example.com/meta");
   });
 
   it.each([
-    ["the address with no path slash", "https://mcp.example.com", "https://mcp.example.com/"],
     [
-      "the address with its query",
-      "https://mcp.example.com/mcp?k=1",
-      "https://mcp.example.com/mcp?k=1",
+      "a server with a path and a query, path first",
+      "https://mcp.example.com/a/mcp?k=1#top",
+      [
+        "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp?k=1",
+        "https://mcp.example.com/.well-known/oauth-protected-resource",
+      ],
     ],
-  ])("accepts %s as the resource", async (_name, resource, expected) => {
-    const found = await read({ resource, authorization_servers: [ISSUER] }, expected);
-    expect(found.resource).toBe(resource);
+    [
+      "a server with a query and no path, the query first",
+      "https://mcp.example.com/?tenant=1",
+      [
+        "https://mcp.example.com/.well-known/oauth-protected-resource?tenant=1",
+        "https://mcp.example.com/.well-known/oauth-protected-resource",
+      ],
+    ],
+    [
+      "a server with no path, once",
+      "https://mcp.example.com",
+      ["https://mcp.example.com/.well-known/oauth-protected-resource"],
+    ],
+  ])("asks for the protected resource metadata of %s", async (_name, server, expected) => {
+    const { outcome, web } = await discover({}, server);
+
+    expect(outcome).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "AuthorizationUnsupported", message: "it publishes no OAuth metadata" },
+    });
+    expect(web.metadataRequests).toEqual(expected);
+  });
+
+  it("accepts the metadata at the origin of the server, which is about the origin", async () => {
+    const { outcome } = await discover(
+      {
+        "GET https://mcp.example.com/.well-known/oauth-protected-resource": {
+          resource: "https://mcp.example.com/",
+          authorization_servers: [ISSUER],
+        },
+        [`GET ${AS_URL}`]: AS,
+      },
+      "https://mcp.example.com/a/mcp",
+    );
+
+    expect(outcome).toMatchObject({ success: { resource: "https://mcp.example.com/" } });
   });
 
   it.each([
-    ["another address", { resource: "https://evil.example/mcp", authorization_servers: [ISSUER] }],
-    ["a fragment", { resource: "https://mcp.example.com/mcp#x", authorization_servers: [ISSUER] }],
     [
-      "a query that the expected address lacks",
-      { resource: "https://mcp.example.com/mcp?k=1", authorization_servers: [ISSUER] },
-    ],
-    ["no resource", { authorization_servers: [ISSUER] }],
-    ["an address that is not one", { resource: "nope", authorization_servers: [ISSUER] }],
-    [
-      "no authorization server",
-      { resource: "https://mcp.example.com/mcp", authorization_servers: [] },
+      "an issuer with no path, in the two forms",
+      ISSUER,
+      [
+        `${ISSUER}/.well-known/oauth-authorization-server`,
+        `${ISSUER}/.well-known/openid-configuration`,
+      ],
     ],
     [
-      "a first authorization server that is not text",
-      { resource: "https://mcp.example.com/mcp", authorization_servers: [7] },
+      "an issuer with a path, in the three forms",
+      `${ISSUER}/tenant/`,
+      [
+        `${ISSUER}/.well-known/oauth-authorization-server/tenant`,
+        `${ISSUER}/.well-known/openid-configuration/tenant`,
+        `${ISSUER}/tenant/.well-known/openid-configuration`,
+      ],
     ],
+  ])("asks for the authorization server metadata of %s", async (_name, issuer, expected) => {
+    const { outcome, web } = await discover({
+      [`GET ${PRM_URL}`]: { resource: SERVER, authorization_servers: [issuer] },
+    });
+
+    expect(outcome).toMatchObject({
+      failure: {
+        _tag: "AuthorizationUnreadable",
+        message: expect.stringContaining("is not there"),
+      },
+    });
+    expect(web.metadataRequests.slice(1)).toEqual(expected);
+  });
+
+  it("accepts a resource identifier that differs only as the URL standard writes it", async () => {
+    const { outcome } = await discover(
+      {
+        "GET https://mcp.example.com/.well-known/oauth-protected-resource": {
+          resource: "https://mcp.example.com",
+          authorization_servers: [ISSUER],
+        },
+        [`GET ${AS_URL}`]: AS,
+      },
+      "https://mcp.example.com",
+    );
+
+    expect(outcome).toMatchObject({ _tag: "Success" });
+  });
+
+  it.each([
+    ["another address", { ...PRM, resource: "https://evil.example/mcp" }],
+    ["a fragment", { ...PRM, resource: `${SERVER}#x` }],
+    ["a query that the server's address lacks", { ...PRM, resource: `${SERVER}?k=1` }],
+    ["no resource", leaveOut(PRM, "resource")],
+    ["an address that is not one", { ...PRM, resource: "nope" }],
+    ["no authorization server", { ...PRM, authorization_servers: [] }],
+    ["a first authorization server that is not text", { ...PRM, authorization_servers: [7] }],
     ["a body that is not an object", "text"],
-  ])("refuses %s", async (_name, body) => {
-    expect(await fails(readProtectedResourceMetadata(body, SERVER_RESOURCE))).toMatchObject({
-      _tag: "AuthorizationUnreadable",
-    });
+  ])("refuses protected resource metadata with %s", async (_name, prm) => {
+    expect(await discoveryFailure(prm, AS)).toBe("AuthorizationUnreadable");
   });
 
-  it("refuses a resource that drops the query of the address it must equal", async () => {
-    const body = { resource: "https://mcp.example.com/mcp", authorization_servers: [ISSUER] };
-    expect(
-      await fails(readProtectedResourceMetadata(body, "https://mcp.example.com/mcp?k=1")),
-    ).toMatchObject({ _tag: "AuthorizationUnreadable" });
-  });
-});
-
-describe("readAuthorizationServerMetadata", () => {
-  const valid = {
-    issuer: ISSUER,
-    authorization_endpoint: `${ISSUER}/authorize`,
-    token_endpoint: `${ISSUER}/token`,
-    registration_endpoint: `${ISSUER}/register`,
-    code_challenge_methods_supported: ["plain", "S256"],
-    token_endpoint_auth_methods_supported: ["none", "client_secret_post", 4],
-    authorization_response_iss_parameter_supported: true,
-  };
-  const read = (body: unknown, server = SERVER) =>
-    Effect.runPromise(readAuthorizationServerMetadata(body, ISSUER, server));
-
-  it("returns the endpoints, whether it sends iss, and the auth methods", async () => {
-    expect(await read(valid)).toEqual({
-      issuer: ISSUER,
-      authorizationEndpoint: `${ISSUER}/authorize`,
-      tokenEndpoint: `${ISSUER}/token`,
-      registrationEndpoint: `${ISSUER}/register`,
-      sendsIssuer: true,
-      tokenEndpointAuthMethods: ["none", "client_secret_post"],
-    });
-  });
-
-  it("says it sends no iss unless the metadata says true", async () => {
-    const without = leaveOut(valid, "authorization_response_iss_parameter_supported");
-    expect((await read(without)).sendsIssuer).toBe(false);
-    expect(
-      (await read({ ...valid, authorization_response_iss_parameter_supported: "true" }))
-        .sendsIssuer,
-    ).toBe(false);
-  });
-
-  it("accepts metadata with no registration endpoint", async () => {
-    const without = leaveOut(valid, "registration_endpoint");
-    expect((await read(without)).registrationEndpoint).toBeUndefined();
+  it("refuses protected resource metadata that drops the query of the server's address", async () => {
+    const server = `${SERVER}?k=1`;
+    const { outcome } = await discover(
+      { [`GET ${PRM_URL}?k=1`]: PRM, [`GET ${AS_URL}`]: AS },
+      server,
+    );
+    expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
   });
 
   it.each([
-    ["another issuer", { ...valid, issuer: "https://evil.example" }],
-    ["an issuer with a query", { ...valid, issuer: `${ISSUER}?a=1` }],
-    ["no token endpoint", { ...valid, token_endpoint: undefined }],
-    ["a token endpoint on http", { ...valid, token_endpoint: "http://auth.example.com/token" }],
+    ["another issuer", { ...AS, issuer: "https://evil.example" }],
+    ["no token endpoint", leaveOut(AS, "token_endpoint")],
+    ["a token endpoint on http", { ...AS, token_endpoint: "http://auth.example.com/token" }],
+    ["a file address as an endpoint", { ...AS, token_endpoint: "file:///etc/passwd" }],
     [
       "an authorization endpoint with a user name",
-      { ...valid, authorization_endpoint: "https://u@auth.example.com/a" },
+      { ...AS, authorization_endpoint: "https://u@auth.example.com/a" },
     ],
     [
       "a registration endpoint on http",
-      { ...valid, registration_endpoint: "http://auth.example.com/register" },
+      { ...AS, registration_endpoint: "http://auth.example.com/register" },
     ],
     ["a body that is not an object", 3],
-  ])("refuses %s", async (_name, body) => {
-    expect(await fails(readAuthorizationServerMetadata(body, ISSUER, SERVER))).toMatchObject({
-      _tag: "AuthorizationUnreadable",
+  ])("refuses authorization server metadata with %s", async (_name, as) => {
+    expect(await discoveryFailure(PRM, as)).toBe("AuthorizationUnreadable");
+  });
+
+  it("refuses an issuer with a query", async () => {
+    const issuer = `${ISSUER}?a=1`;
+    const { outcome } = await discover({
+      [`GET ${PRM_URL}`]: { ...PRM, authorization_servers: [issuer] },
+      [`GET ${ISSUER}/.well-known/oauth-authorization-server`]: { ...AS, issuer },
     });
+    expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
   });
 
   it.each([
-    ["authorization", "authorization_endpoint"],
-    ["token", "token_endpoint"],
-    ["registration", "registration_endpoint"],
-  ])("refuses an http %s endpoint on another host, also for an http server", async (_name, key) => {
-    const httpServer = new URL("http://127.0.0.1:9/mcp");
-    const body = { ...valid, [key]: "http://auth.example.com/endpoint" };
-    expect(await fails(readAuthorizationServerMetadata(body, ISSUER, httpServer))).toMatchObject({
-      _tag: "AuthorizationUnreadable",
+    ["no PKCE methods", leaveOut(AS, "code_challenge_methods_supported")],
+    ["only the plain PKCE method", { ...AS, code_challenge_methods_supported: ["plain"] }],
+  ])("is unsupported when the authorization server has %s", async (_name, as) => {
+    expect(await discoveryFailure(PRM, as)).toBe("AuthorizationUnsupported");
+  });
+
+  it("refuses a metadata answer that is a 200 but not JSON, and one over the size limit", async () => {
+    const notJson = await discover({ [`GET ${PRM_URL}`]: new Response("<html>no</html>") });
+    const tooLarge = await discover({
+      [`GET ${PRM_URL}`]: new Response("x".repeat(1024 * 1024 + 1)),
+    });
+
+    expect(notJson.outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
+    expect(tooLarge.outcome).toMatchObject({
+      failure: { message: expect.stringContaining("more than 1048576 bytes") },
     });
   });
 
-  describe("an http endpoint", () => {
-    const HTTP_ISSUER = "http://127.0.0.1:9";
-    const httpServer = new URL("http://127.0.0.1:9/mcp");
-    const httpValid = {
-      ...valid,
-      issuer: HTTP_ISSUER,
-      authorization_endpoint: `${HTTP_ISSUER}/authorize`,
-      token_endpoint: `${HTTP_ISSUER}/token`,
-      registration_endpoint: `${HTTP_ISSUER}/register`,
-    };
+  it("refuses a redirect, which it never follows, and a server error", async () => {
+    const redirect = await discover({
+      [`GET ${PRM_URL}`]: new Response(null, {
+        status: 302,
+        headers: { location: "https://elsewhere.example/" },
+      }),
+    });
+    const failing = await discover({ [`GET ${PRM_URL}`]: new Response(null, { status: 503 }) });
 
-    it("is accepted from an http issuer on the host of an http server", async () => {
-      const read = await Effect.runPromise(
-        readAuthorizationServerMetadata(httpValid, HTTP_ISSUER, httpServer),
+    expect(redirect.outcome).toMatchObject({
+      failure: { message: expect.stringContaining("redirect") },
+    });
+    expect(failing.outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
+    expect(redirect.web.metadataRequests).toEqual([PRM_URL]);
+  });
+
+  describe("on an http server", () => {
+    const HTTP_SERVER = "http://127.0.0.1:9/mcp";
+    const HTTP_ISSUER = "http://127.0.0.1:9";
+    const http = (key: string, value: string) =>
+      ({
+        ...AS,
+        issuer: HTTP_ISSUER,
+        authorization_endpoint: `${HTTP_ISSUER}/authorize`,
+        token_endpoint: `${HTTP_ISSUER}/token`,
+        registration_endpoint: `${HTTP_ISSUER}/register`,
+        [key]: value,
+      }) as Record<string, unknown>;
+    const answers = (as: unknown, issuer = HTTP_ISSUER) => ({
+      "GET http://127.0.0.1:9/.well-known/oauth-protected-resource/mcp": {
+        resource: HTTP_SERVER,
+        authorization_servers: [issuer],
+      },
+      [`GET ${issuer}/.well-known/oauth-authorization-server`]: as,
+    });
+
+    it("accepts an http authorization server on the origin of the server", async () => {
+      const { outcome } = await discover(
+        answers(http("token_endpoint", `${HTTP_ISSUER}/token`)),
+        HTTP_SERVER,
       );
-      expect(read.tokenEndpoint).toBe(`${HTTP_ISSUER}/token`);
+      expect(outcome).toMatchObject({ success: { tokenEndpoint: `${HTTP_ISSUER}/token` } });
+    });
+
+    it.each([
+      ["another port", "http://127.0.0.1:77"],
+      ["another host", "http://127.0.0.2:9"],
+    ])("refuses an http authorization server on %s", async (_name, issuer) => {
+      const as = {
+        ...AS,
+        issuer,
+        authorization_endpoint: `${issuer}/a`,
+        token_endpoint: `${issuer}/t`,
+        registration_endpoint: `${issuer}/r`,
+      };
+      const { outcome } = await discover(answers(as, issuer), HTTP_SERVER);
+      expect(outcome).toMatchObject({
+        failure: {
+          message: "the authorization server is http, and only the MCP server's own origin may be",
+        },
+      });
     });
 
     it.each(["authorization_endpoint", "token_endpoint", "registration_endpoint"])(
-      "is refused as the %s of an https issuer, even on the host of an http server",
+      "refuses an http %s of an https issuer, even on the origin of the server",
       async (key) => {
-        const body = { ...valid, [key]: "http://127.0.0.1:9/endpoint" };
-        const error = await fails(readAuthorizationServerMetadata(body, ISSUER, httpServer));
-        expect(error).toMatchObject({ _tag: "AuthorizationUnreadable" });
-        expect(error.message).toContain("but its authorization server is https");
+        const { outcome } = await discover(
+          {
+            "GET http://127.0.0.1:9/.well-known/oauth-protected-resource/mcp": {
+              resource: HTTP_SERVER,
+              authorization_servers: [ISSUER],
+            },
+            [`GET ${AS_URL}`]: { ...AS, [key]: "http://127.0.0.1:9/endpoint" },
+          },
+          HTTP_SERVER,
+        );
+        expect(outcome).toMatchObject({
+          failure: { message: expect.stringContaining("but its authorization server is https") },
+        });
       },
     );
   });
-
-  it.each([
-    ["no PKCE methods", { ...valid, code_challenge_methods_supported: undefined }],
-    ["only the plain PKCE method", { ...valid, code_challenge_methods_supported: ["plain"] }],
-  ])("is unsupported with %s", async (_name, body) => {
-    expect(await fails(readAuthorizationServerMetadata(body, ISSUER, SERVER))).toMatchObject({
-      _tag: "AuthorizationUnsupported",
-    });
-  });
 });
 
-describe("readRegisteredClient", () => {
-  const read = (body: unknown, methods: ReadonlyArray<string> = []) =>
-    Effect.runPromise(readRegisteredClient(body, methods));
+describe("registerClient", () => {
+  const AUTHORIZATION: AuthorizationServer = {
+    issuer: ISSUER,
+    authorizationEndpoint: `${ISSUER}/authorize`,
+    tokenEndpoint: `${ISSUER}/token`,
+    registrationEndpoint: `${ISSUER}/register`,
+    sendsIssuer: false,
+    tokenEndpointAuthMethods: [],
+  };
+  const register = (answer: unknown, authorization = AUTHORIZATION) =>
+    stubWeb({ [`POST ${ISSUER}/register`]: answer }).run(registerClient(authorization));
 
   it("returns a public client when no secret and no method come back", async () => {
-    expect(await read({ client_id: "c1" })).toEqual({ clientId: "c1", authMethod: "none" });
+    expect(await register({ client_id: "c1" })).toMatchObject({
+      success: { clientId: "c1", authMethod: "none" },
+    });
   });
 
   it("returns a public client for the method none, and drops a secret that comes with it", async () => {
-    expect(
-      await read({ client_id: "c1", client_secret: "s", token_endpoint_auth_method: "none" }),
-    ).toEqual({ clientId: "c1", authMethod: "none" });
+    const outcome = await register({
+      client_id: "c1",
+      client_secret: "s",
+      token_endpoint_auth_method: "none",
+    });
+    expect(outcome).toMatchObject({ success: { clientId: "c1", authMethod: "none" } });
+    expect((outcome as { success: object }).success).not.toHaveProperty("clientSecret");
   });
 
   it.each(["client_secret_post", "client_secret_basic"] as const)(
     "keeps the secret and the method %s",
     async (method) => {
       expect(
-        await read({ client_id: "c1", client_secret: "s", token_endpoint_auth_method: method }),
-      ).toEqual({ clientId: "c1", clientSecret: "s", authMethod: method });
+        await register({ client_id: "c1", client_secret: "s", token_endpoint_auth_method: method }),
+      ).toMatchObject({ success: { clientSecret: "s", authMethod: method } });
     },
   );
 
   it("picks client_secret_post for a secret with no method when the token endpoint lists it, else basic", async () => {
+    const answer = { client_id: "c1", client_secret: "s" };
     expect(
-      await read({ client_id: "c1", client_secret: "s" }, ["client_secret_post"]),
-    ).toMatchObject({
-      authMethod: "client_secret_post",
+      await register(answer, {
+        ...AUTHORIZATION,
+        tokenEndpointAuthMethods: ["client_secret_post"],
+      }),
+    ).toMatchObject({ success: { authMethod: "client_secret_post" } });
+    expect(
+      await register(answer, { ...AUTHORIZATION, tokenEndpointAuthMethods: ["private_key_jwt"] }),
+    ).toMatchObject({ success: { authMethod: "client_secret_basic" } });
+  });
+
+  it("keeps when the secret expires, in milliseconds, and treats 0 as never", async () => {
+    const answer = {
+      client_id: "c1",
+      client_secret: "s",
+      token_endpoint_auth_method: "client_secret_post",
+    };
+    expect(await register({ ...answer, client_secret_expires_at: 1_900_000_000 })).toMatchObject({
+      success: { secretExpiresAtMillis: 1_900_000_000_000 },
     });
-    expect(await read({ client_id: "c1", client_secret: "s" }, ["private_key_jwt"])).toMatchObject({
-      authMethod: "client_secret_basic",
-    });
+    expect(
+      ((await register({ ...answer, client_secret_expires_at: 0 })) as { success: object }).success,
+    ).not.toHaveProperty("secretExpiresAtMillis");
   });
 
   it("accepts redirect addresses that include the registered one", async () => {
     expect(
-      await read({
+      await register({
         client_id: "c1",
-        redirect_uris: ["http://x.example/cb", REGISTERED_REDIRECT_URI],
+        redirect_uris: ["http://x.example/cb", "http://127.0.0.1/callback"],
       }),
-    ).toMatchObject({ clientId: "c1" });
+    ).toMatchObject({ _tag: "Success" });
   });
 
   it.each([
@@ -466,9 +550,21 @@ describe("readRegisteredClient", () => {
       { client_id: "c1", token_endpoint_auth_method: "client_secret_post" },
     ],
     ["a body that is not an object", undefined],
-  ])("refuses %s", async (_name, body) => {
-    expect(await fails(readRegisteredClient(body, []))).toMatchObject({
-      _tag: "AuthorizationUnreadable",
+  ])("refuses an answer with %s", async (_name, answer) => {
+    expect(await register(answer === undefined ? new Response("[]") : answer)).toMatchObject({
+      failure: { _tag: "AuthorizationUnreadable" },
+    });
+  });
+
+  it("is unsupported when the authorization server has no registration endpoint or refuses Hercule, and unreadable for a server error", async () => {
+    expect(
+      await stubWeb({}).run(registerClient({ ...AUTHORIZATION, registrationEndpoint: undefined })),
+    ).toMatchObject({ failure: { _tag: "AuthorizationUnsupported" } });
+    expect(await register(new Response("no", { status: 400 }))).toMatchObject({
+      failure: { _tag: "AuthorizationUnsupported" },
+    });
+    expect(await register(new Response("no", { status: 503 }))).toMatchObject({
+      failure: { _tag: "AuthorizationUnreadable" },
     });
   });
 });
@@ -626,62 +722,6 @@ describe("the body of an answer that discovery does not read", () => {
       expect(await waitForCancel(() => server.cancelled.get)).toBe(true);
     } finally {
       await server.stop();
-    }
-  });
-});
-
-describe("the metadata requests of discovery", () => {
-  /** Starts a server that answers every request 404, and records the path and query of each GET. */
-  const startRecordingServer = () => {
-    const requested: Array<string> = [];
-    const server = Bun.serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      fetch: (request) => {
-        if (request.method === "GET") {
-          const url = new URL(request.url);
-          requested.push(`${url.pathname}${url.search}`);
-        }
-        return new Response(null, { status: request.method === "POST" ? 401 : 404 });
-      },
-    });
-    return { requested, port: server.port, stop: () => server.stop(true) };
-  };
-
-  const discoverAt = (address: string) =>
-    Effect.runPromise(
-      Effect.flip(discoverAuthorization(address)).pipe(Effect.provide(FetchHttpClient.layer)),
-    );
-
-  it("asks for the metadata at the address with the query of the server, then the one without", async () => {
-    const server = startRecordingServer();
-    try {
-      await discoverAt(`http://127.0.0.1:${String(server.port)}/mcp?tenant=1`);
-
-      expect(server.requested).toEqual([
-        "/.well-known/oauth-protected-resource/mcp?tenant=1",
-        "/.well-known/oauth-protected-resource",
-      ]);
-    } finally {
-      await server.stop();
-    }
-  });
-
-  it("asks twice for a server with a query and no path, and once for one with neither", async () => {
-    const withQuery = startRecordingServer();
-    const bare = startRecordingServer();
-    try {
-      await discoverAt(`http://127.0.0.1:${String(withQuery.port)}/?tenant=1`);
-      await discoverAt(`http://127.0.0.1:${String(bare.port)}/`);
-
-      expect(withQuery.requested).toEqual([
-        "/.well-known/oauth-protected-resource?tenant=1",
-        "/.well-known/oauth-protected-resource",
-      ]);
-      expect(bare.requested).toEqual(["/.well-known/oauth-protected-resource"]);
-    } finally {
-      await withQuery.stop();
-      await bare.stop();
     }
   });
 });

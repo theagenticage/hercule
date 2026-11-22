@@ -52,7 +52,7 @@ const PROBE_PROTOCOL_VERSION = "2025-11-25";
  * loopback redirect, so one registration covers every port a sign-in listens
  * on. Notion and Linear were proven to do so.
  */
-export const REGISTERED_REDIRECT_URI = "http://127.0.0.1/callback";
+const REGISTERED_REDIRECT_URI = "http://127.0.0.1/callback";
 
 /** What the longest scope Hercule sends may be. A longer one is not a scope. */
 const MAX_SCOPE_LENGTH = 1024;
@@ -221,7 +221,7 @@ const withoutFragment = (address: URL): string => {
  * An address where protected resource metadata may be, with the resource
  * identifier its `resource` field must equal (RFC 9728 section 3.3).
  */
-export interface ResourceMetadataCandidate {
+interface ResourceMetadataCandidate {
   readonly url: string;
   readonly resource: string;
 }
@@ -236,9 +236,7 @@ export interface ResourceMetadataCandidate {
  * address with no path, and when it has a query, the second is tried too,
  * because the metadata of such a server may be published for its origin.
  */
-export const buildResourceMetadataCandidates = (
-  server: URL,
-): ReadonlyArray<ResourceMetadataCandidate> => {
+const buildResourceMetadataCandidates = (server: URL): ReadonlyArray<ResourceMetadataCandidate> => {
   const wellKnown = `${server.origin}/.well-known/oauth-protected-resource`;
   const path = server.pathname === "/" ? "" : server.pathname;
   const first = { url: `${wellKnown}${path}${server.search}`, resource: withoutFragment(server) };
@@ -252,7 +250,7 @@ export const buildResourceMetadataCandidates = (
  * name, then OpenID Connect discovery in its two spellings (the same
  * insertion, and the path before the well-known name).
  */
-export const buildAuthorizationServerMetadataUrls = (issuer: URL): ReadonlyArray<string> => {
+const buildAuthorizationServerMetadataUrls = (issuer: URL): ReadonlyArray<string> => {
   const path = issuer.pathname.replace(/\/$/, "");
   if (path === "") {
     return [
@@ -274,7 +272,7 @@ export const buildAuthorizationServerMetadataUrls = (issuer: URL): ReadonlyArray
  * the same host and port as an http MCP server. `what` names the address in the
  * message, which never quotes the address.
  */
-export const checkOutboundUrl = (
+const checkOutboundUrl = (
   raw: string,
   server: URL,
   what: string,
@@ -331,7 +329,7 @@ const checkScope = (scope: string): Effect.Effect<string, AuthorizationUnreadabl
  * resource, and then it must not be used), or when it names no authorization
  * server. A later authorization server is never used.
  */
-export const readProtectedResourceMetadata = (
+const readProtectedResourceMetadata = (
   body: unknown,
   expectedResource: string,
 ): Effect.Effect<
@@ -391,7 +389,7 @@ const decodeAuthorizationServerMetadata = Schema.decodeUnknownOption(Authorizati
  * - `AuthorizationUnsupported` when it does not list `S256` among its PKCE
  *   methods, because Hercule never signs in without PKCE.
  */
-export const readAuthorizationServerMetadata = (
+const readAuthorizationServerMetadata = (
   body: unknown,
   expectedIssuer: string,
   server: URL,
@@ -469,7 +467,7 @@ const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
  * otherwise (RFC 7591 section 2 makes basic the default). A client with no
  * secret, or with the method `none`, is public.
  */
-export const readRegisteredClient = (
+const readRegisteredClient = (
   body: unknown,
   tokenEndpointAuthMethods: ReadonlyArray<string>,
 ): Effect.Effect<RegisteredClient, AuthorizationUnreadable> =>

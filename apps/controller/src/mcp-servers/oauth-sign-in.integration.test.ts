@@ -1070,24 +1070,6 @@ describe("starting a sign-in", () => {
     }
   });
 
-  it("is unreadable when the metadata is larger than the limit", async () => {
-    await withOAuthRig(async (rig) => {
-      const serverId = await addServerThatNeedsSignIn(rig);
-      const publish = rig.fake.answerFirst;
-      rig.fake.answerFirst = (request) =>
-        new URL(request.url).pathname.startsWith("/.well-known/")
-          ? new Response("x".repeat(1024 * 1024 + 1), {
-              headers: { "content-type": "application/json" },
-            })
-          : publish(request);
-
-      const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
-
-      expect(error.details).toEqual({ reason: "source-unreadable" });
-      expect(error.message).toContain("more than 1048576 bytes");
-    });
-  });
-
   it("does not replace the attempt of a start that began later, when it is the slower one", async () => {
     await withOAuthRig(async (rig) => {
       const serverId = await addServerThatNeedsSignIn(rig);
@@ -1128,40 +1110,6 @@ describe("starting a sign-in", () => {
 
       expect((await readRefusal(await slow, 409)).details).toEqual({ reason: "sign-in-expired" });
       expect(await readSignInColumns(rig.controller, serverId)).toMatchObject({ sign_in: "token" });
-    });
-  });
-
-  it("is unreadable, not unsupported, when the metadata is a 200 answer that is not JSON", async () => {
-    await withOAuthRig(async (rig) => {
-      const serverId = await addServerThatNeedsSignIn(rig);
-      const publish = rig.fake.answerFirst;
-      rig.fake.answerFirst = (request) =>
-        new URL(request.url).pathname.startsWith("/.well-known/")
-          ? new Response("<html>not metadata</html>", { status: 200 })
-          : publish(request);
-
-      const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
-
-      expect(error.details).toEqual({ reason: "source-unreadable" });
-    });
-  });
-
-  it("is unreadable when the metadata is about another address than the one the server's challenge was for", async () => {
-    await withOAuthRig(async (rig) => {
-      const serverId = await addServerThatNeedsSignIn(rig);
-      const publish = rig.fake.answerFirst;
-      rig.fake.answerFirst = (request) =>
-        new URL(request.url).pathname.startsWith("/.well-known/")
-          ? Response.json({
-              resource: `${rig.fake.url}?other=1`,
-              authorization_servers: [rig.authorizationServer.issuer],
-            })
-          : publish(request);
-
-      const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
-
-      expect(error.details).toEqual({ reason: "source-unreadable" });
-      expect(error.message).toContain("for another address");
     });
   });
 
