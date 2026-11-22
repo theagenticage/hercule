@@ -24,20 +24,29 @@ import { ApiError, createClient, type HerculeClient } from "@hercule/client-core
 import type { McpServer } from "@hercule/contract";
 import { coerceFieldValue, parseArguments } from "./commands/args";
 import { resolveTails } from "./commands/execute";
-import type { FlagRow } from "./commands/help";
+import type { HandWrittenHelp } from "./commands/help";
 import type { Command } from "./commands/tree";
 import { resolveCredential } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import type { Io } from "./io";
 
-/** The flag this command takes beyond its operation's fields, for the help. */
-export const SIGN_IN_FLAGS: ReadonlyArray<FlagRow> = [
-  {
-    label: "--paste",
-    notes: "optional; for a browser on another computer",
-    help: "Listen for nothing. After you approve, your browser fails to load a page on 127.0.0.1: copy that page's whole address and give it on stdin, because the CLI never prompts. At a terminal, `cat | hercule mcp-server sign-in <id> --paste` waits for it: paste the address, press Enter, then Ctrl-D.",
-  },
-];
+/**
+ * What this command adds to the help of its table row: the flag it takes
+ * beyond its operation's fields, and what it prints. The table row's own
+ * `returns` is the answer of `mcpServer.startSignIn`, which this command
+ * prints only as the address to open, and it ends by printing the server.
+ */
+export const SIGN_IN_HELP: HandWrittenHelp = {
+  flags: [
+    {
+      label: "--paste",
+      notes: "optional; for a browser on another computer",
+      help: "Listen for nothing. After you approve, your browser fails to load a page on 127.0.0.1: copy that page's whole address and give it on stdin, because the CLI never prompts. At a terminal, `cat | hercule mcp-server sign-in <id> --paste` waits for it: paste the address, press Enter, then Ctrl-D.",
+    },
+  ],
+  prints:
+    'The address to open in your browser, and once the sign-in is finished the line "Signed in. <name> is <status>.". With --json, the address and the waiting text go to stderr, and stdout holds the server, as `hercule mcp-server read` prints it.',
+};
 
 /** What the browser is shown after it returns to the listener. */
 const RETURN_PAGE = `<!doctype html>

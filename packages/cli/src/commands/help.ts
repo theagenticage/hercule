@@ -250,15 +250,26 @@ const buildFlagRow = (
 };
 
 /**
- * Builds the help of one command: `hercule <noun>... <verb> --help`.
- *
- * `extraFlags` lists the flags a hand-written command takes beyond the ones
- * its operation's fields give, so its help shows them with the others.
+ * What a hand-written command adds to the help of its table row: the flags it
+ * takes beyond the ones its operation's fields give, and what it prints. A
+ * hand-written command may print something else than its operation returns.
+ */
+export interface HandWrittenHelp {
+  readonly flags: ReadonlyArray<FlagRow>;
+  /** Replaces the `returns:` section, which otherwise lists the operation's answer. */
+  readonly prints: string;
+}
+
+/**
+ * Builds the help of one command: `hercule <noun>... <verb> --help`. A
+ * hand-written command passes its `HandWrittenHelp`, so its help shows its
+ * flags with the others and says what it prints.
  */
 export const buildCommandHelp = (
   command: Command,
-  extraFlags: ReadonlyArray<FlagRow> = [],
+  handWritten?: HandWrittenHelp,
 ): ReadonlyArray<string> => {
+  const extraFlags = handWritten?.flags ?? [];
   // The keys of a `oneOf` field are listed in a group for each entry, not
   // among the other flags.
   const flags = [
@@ -414,7 +425,9 @@ export const buildCommandHelp = (
 
   lines.push("", "returns:");
   const { fields, items } = command.returns;
-  if (items === undefined) {
+  if (handWritten !== undefined) {
+    lines.push(...wrapParagraph(handWritten.prints, "  "));
+  } else if (items === undefined) {
     lines.push(...wrapParagraph(fields.join(", ") || "only the status", "  "));
   } else {
     // A page has an `items` field; a small fixed list is returned as a bare array.

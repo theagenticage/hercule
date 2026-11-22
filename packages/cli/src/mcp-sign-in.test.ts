@@ -281,6 +281,10 @@ describe("hercule mcp-server sign-in --help", () => {
     expect(help).toContain("--paste");
     expect(help).toContain("cat | hercule mcp-server sign-in <id> --paste");
     expect(help).toContain("operation mcpServer.startSignIn");
+    // It says what the command prints, not what `startSignIn` answers.
+    expect(help.replace(/\s+/g, " ")).toContain("Signed in. <name> is <status>.");
+    expect(help).not.toContain("authorizationUrl");
+    expect(help).not.toContain("expiresAt");
     expect(help).not.toContain("redirectUri");
   });
 

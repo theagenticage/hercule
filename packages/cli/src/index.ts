@@ -33,7 +33,7 @@ import { findCommandByWords, listWordsAfter, type Command } from "./commands/tre
 import { CredentialError, resolveCredential, resolveUrl } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, getLoginHelp } from "./login";
-import { SIGN_IN_FLAGS, signInMcpServer } from "./mcp-sign-in";
+import { SIGN_IN_HELP, signInMcpServer } from "./mcp-sign-in";
 import { processIo, type Io } from "./io";
 
 /** Returns what `hercule setup-url` prints, or fails with the reason there is nothing to print. */
@@ -339,7 +339,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     // browser. The table still gives it its spelling and help.
     const runsByHand = found.command.id === "mcpServer.startSignIn";
     if (wantsHelp(tokens)) {
-      for (const line of buildCommandHelp(found.command, runsByHand ? SIGN_IN_FLAGS : [])) {
+      for (const line of buildCommandHelp(found.command, runsByHand ? SIGN_IN_HELP : undefined)) {
         io.out(line);
       }
       return EXIT.ok;
