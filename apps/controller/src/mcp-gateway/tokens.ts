@@ -1,7 +1,7 @@
 /**
  * What the gateway keeps for each Session Token, and keeps in step with the
  * database: its MCP sessions, its open streams, the calls running for it, and
- * the names it was sent. State lives in memory only. A controller restart
+ * the tool names it was offered. State lives in memory only. A controller restart
  * drops it, and a harness that names an unknown MCP session gets 404 and opens
  * a new one.
  *
@@ -36,7 +36,6 @@ import { makeFreshReads } from "./reads";
 import type { SeenWarning } from "./refusals";
 import { fingerprintServed } from "./served";
 import type { OpenStream } from "./streams";
-import { makeNameLedger, type NameLedger } from "./tool-names";
 
 /** How often the sweep forgets the Session Tokens that ended. */
 const SWEEP_INTERVAL = Duration.minutes(1);
@@ -113,8 +112,13 @@ export interface TokenState {
   readonly streams: Set<OpenStream>;
   /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
   readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
-  /** The names `tools/list` sent to this token. A call is accepted only under one of them. */
-  readonly names: NameLedger;
+  /**
+   * The tool names a `tools/list` answer offered to this token since the
+   * controller started. A call is accepted only under one of them, which
+   * proves the name was offered. It does not say what a name means: a name
+   * is a pure function of its tool (`buildToolName`).
+   */
+  readonly offeredToolNames: Set<string>;
   /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
   readonly admission: Semaphore.Semaphore;
   readonly warnings: WarningState;
@@ -169,7 +173,7 @@ export const makeTokenStates = Effect.gen(function* () {
       sawUnknownMcpSession: false,
       streams: new Set(),
       runningCalls: new Set(),
-      names: makeNameLedger(),
+      offeredToolNames: new Set(),
       admission: Semaphore.makeUnsafe(1),
       warnings: { seen: new Map(), writing: Semaphore.makeUnsafe(1) },
     };
@@ -277,11 +281,7 @@ export const makeTokenStates = Effect.gen(function* () {
           if (!(yield* isServing)) return false;
           const actor = yield* reads.resolveActor(state.tokenHash);
           if (Option.isNone(actor)) return false;
-          stream.told = fingerprintServed(
-            yield* reads.readServed(actor.value),
-            actor.value,
-            state.names,
-          );
+          stream.told = fingerprintServed(yield* reads.readServed(actor.value), actor.value);
           // Nothing waits between this check and the add, so a token that is
           // forgotten or a shutdown that starts cannot slip between them.
           const replaced = yield* Effect.sync(() => {
@@ -371,7 +371,7 @@ export const makeTokenStates = Effect.gen(function* () {
       if (state.streams.size > 0) {
         const served = yield* reads.readServed(actor.value);
         servedServerIds = served.map(({ server }) => server.id);
-        const fingerprint = fingerprintServed(served, actor.value, state.names);
+        const fingerprint = fingerprintServed(served, actor.value);
         yield* Effect.forEach(
           [...state.streams].filter((stream) => stream.told !== fingerprint),
           (stream) => {

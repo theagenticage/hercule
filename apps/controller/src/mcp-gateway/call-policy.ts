@@ -22,11 +22,13 @@ import {
   buildMissingGrantRefusal,
   buildNotInListRefusal,
   buildRefusalWarning,
+  buildToolNotListedRefusal,
   buildUnknownToolRefusal,
   claimWarning,
   type Refusal,
 } from "./refusals";
 import { holdsMcpUse } from "./served";
+import { findOriginalToolName, readServerName } from "./tool-names";
 import { notifyListChanged, type McpSession, type TokenState } from "./tokens";
 
 /** What a call turned out to be, before anything is sent. */
@@ -70,45 +72,51 @@ export const makeCallPolicy = Effect.gen(function* () {
   ): Effect.Effect<CallDecision> =>
     Effect.gen(function* () {
       if (!holdsMcpUse(actor)) return { _tag: "refused", refusal: buildMissingGrantRefusal() };
-      // A call is accepted only under a name `tools/list` sent to this token
-      // since the controller started, and the name keeps its meaning. A name
-      // a harness remembers from before a restart is refused, because the list
-      // may have changed and a recomputed name could reach another tool than
-      // the one the harness showed. The streams are told to list again.
+      // A call is accepted only under a name `tools/list` offered to this
+      // token since the controller started. That proves the name was offered.
+      // It does not say what the name means: the name does, because it is a
+      // pure function of its tool. A name a harness remembers from before a
+      // restart is refused once, and the streams are told to list again.
       //
       // The same holds for every call of an MCP session that may hold names
       // from before, until its client lists the tools again after a refusal.
       // A harness that lost its session lists the tools before it resends the
-      // call (pi does), so the name is in the ledger by then, but it may now
-      // stand for another tool than the one the harness chose. pi also runs the
+      // call (pi does), so the name is offered by then, but it may now stand
+      // for another tool than the one the harness chose. pi also runs the
       // calls of one message at once, so all of them are refused, not only the
       // first. A refusal for an unknown name counts as that refusal, so a
       // harness that calls before it lists is refused once.
-      const meaning = state.names.find(toolName);
+      const serverName = state.offeredToolNames.has(toolName)
+        ? readServerName(toolName)
+        : undefined;
       const namesMayBeStale = session !== undefined && session.namesFromBefore !== "not-suspected";
-      if (meaning === undefined || namesMayBeStale) {
+      if (serverName === undefined || namesMayBeStale) {
         if (namesMayBeStale) session.namesFromBefore = "suspected-and-refused";
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }
       // The server the name reaches is the one of that name in the session's
-      // list now, which may be another account than the one the name was sent
-      // for. Whether it is ready and still lists the tool is the catalogue's
-      // decision, made when the call is sent.
+      // list now, which may be another account than the one the name was
+      // offered for. Whether it is ready is the catalogue's decision, made
+      // when the call is sent.
       const views = yield* reads.readListedAvailability(actor.sessionId);
-      const listed = views.find(({ server }) => server.name === meaning.serverName);
+      const listed = views.find(({ server }) => server.name === serverName);
       if (listed === undefined) {
-        return {
-          _tag: "refused",
-          refusal: buildNotInListRefusal(
-            { id: meaning.serverId, name: meaning.serverName },
-            meaning.serverName,
-            meaning.tool,
-          ),
-        };
+        return { _tag: "refused", refusal: buildNotInListRefusal(serverName) };
       }
       const { server } = listed;
-      return { _tag: "call", serverId: server.id, serverName: server.name, tool: meaning.tool };
+      const tool = findOriginalToolName(
+        server.name,
+        yield* reads.readStoredToolNames(server.id),
+        toolName,
+      );
+      if (tool === undefined) {
+        return {
+          _tag: "refused",
+          refusal: buildToolNotListedRefusal({ id: server.id, name: server.name }),
+        };
+      }
+      return { _tag: "call", serverId: server.id, serverName: server.name, tool };
     });
 
   /**

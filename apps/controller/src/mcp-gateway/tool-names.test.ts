@@ -1,34 +1,98 @@
 /**
- * Tests how the gateway names a session's tools (spec 21 section 3.4): the
- * normalization, the cut at 64 characters, clashes, and that a name a token
- * was sent keeps its meaning when the list changes.
+ * Tests how the gateway names a session's tools (spec 21 section 3.4): a name
+ * is a pure function of the tool, a valid original name stays as it is, every
+ * changed name ends in a hash, and the whole name fits behind `mcp__tools__`.
  */
 import { describe, expect, it } from "vitest";
-import { allocateToolNames } from "./tool-names";
+import { buildToolName, buildToolNames, findOriginalToolName, readServerName } from "./tool-names";
 
 /** What is left of 64 characters after the harness's `mcp__tools__`. */
 const MAX_NAME_LENGTH = 52;
 
-describe("allocateToolNames", () => {
-  it("names a tool <server>__<tool> with every other character turned into an underscore", () => {
-    const { named } = allocateToolNames(
-      [{ serverName: "sentry", tools: ["search_issues", "get-issue.details"] }],
-      new Map(),
-    );
-    expect(named.map((one) => one.name)).toEqual([
-      "sentry__get_issue_details",
-      "sentry__search_issues",
+/** A changed name ends in `_` and six hex characters. */
+const CHANGED_ENDING = /_[0-9a-f]{6}$/;
+
+const nameOf = (tool: string, serverName = "sentry"): string => buildToolName({ serverName, tool });
+
+describe("buildToolName", () => {
+  it("keeps an original name of letters, digits, underscores and hyphens as it is", () => {
+    expect(nameOf("search_issues")).toBe("sentry__search_issues");
+    expect(nameOf("search-pages")).toBe("sentry__search-pages");
+    expect(nameOf("GetIssue2")).toBe("sentry__GetIssue2");
+  });
+
+  it("changes a name with any other character: the character becomes an underscore and a hash follows", () => {
+    expect(nameOf("get-issue.details")).toMatch(/^sentry__get-issue_details_[0-9a-f]{6}$/);
+    expect(nameOf("a b")).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
+    expect(nameOf("")).toMatch(CHANGED_ENDING);
+  });
+
+  it("gives a changed name its hash even when no other tool would clash with it", () => {
+    expect(nameOf("a.b")).toMatch(CHANGED_ENDING);
+  });
+
+  it("changes an original that ends in an underscore and six hex characters, so it never equals a changed name", () => {
+    const original = "list_abc123";
+    expect(nameOf(original)).toMatch(/^sentry__list_abc123_[0-9a-f]{6}$/);
+    // The changed name of another tool is exactly such a name, and is not this one's.
+    expect(nameOf("list.")).not.toBe(nameOf(original));
+    // Capital letters are not the hash's alphabet, so they are not reserved.
+    expect(nameOf("list_ABCDEF")).toBe("sentry__list_ABCDEF");
+  });
+
+  it("cuts a name that passes the limit behind mcp__tools__, keeps the hash and keeps long names apart", () => {
+    const long = "a".repeat(80);
+    const names = [nameOf(`${long}_one`), nameOf(`${long}_two`)];
+    expect(new Set(names).size).toBe(2);
+    for (const name of names) {
+      expect(name.length).toBe(MAX_NAME_LENGTH);
+      expect(name).toMatch(/^sentry__a+_[0-9a-f]{6}$/);
+    }
+  });
+
+  it("keeps a name of exactly the limit and changes one a character longer", () => {
+    const room = MAX_NAME_LENGTH - "sentry__".length;
+    expect(nameOf("a".repeat(room))).toBe(`sentry__${"a".repeat(room)}`);
+    expect(nameOf("a".repeat(room + 1))).toMatch(CHANGED_ENDING);
+    expect(nameOf("a".repeat(room + 1)).length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
+  });
+
+  it("fits the limit for the longest server name and the longest tool name", () => {
+    const name = nameOf("x".repeat(500), "a".repeat(16));
+    expect(name.length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
+    expect(name).toMatch(CHANGED_ENDING);
+  });
+
+  it("gives the same name for the same tool every time", () => {
+    expect(nameOf("get-issue.details")).toBe(nameOf("get-issue.details"));
+  });
+
+  it("gives tools that differ only in a replaced character different names", () => {
+    expect(nameOf("a.b")).not.toBe(nameOf("a b"));
+  });
+});
+
+describe("buildToolNames", () => {
+  it("gives a tool the same name whatever else is in the list", () => {
+    const alone = buildToolNames([{ serverName: "notion", tools: ["search_pages"] }]);
+    const crowded = buildToolNames([
+      { serverName: "notion", tools: ["search-pages", "search.pages", "search_pages"] },
+      { serverName: "linear", tools: ["search_pages"] },
     ]);
+    const find = (names: typeof alone, serverName: string, tool: string) =>
+      names.named.find((one) => one.serverName === serverName && one.tool === tool)?.name;
+    expect(find(alone, "notion", "search_pages")).toBe("notion__search_pages");
+    expect(find(crowded, "notion", "search_pages")).toBe("notion__search_pages");
+    expect(find(crowded, "notion", "search-pages")).toBe("notion__search-pages");
+    expect(find(crowded, "notion", "search.pages")).toMatch(/^notion__search_pages_[0-9a-f]{6}$/);
+    expect(crowded.leftOut).toEqual([]);
   });
 
   it("orders the names by server name and then by the tool's original name", () => {
-    const { named } = allocateToolNames(
-      [
-        { serverName: "sentry", tools: ["b", "a"] },
-        { serverName: "linear", tools: ["z"] },
-      ],
-      new Map(),
-    );
+    const { named } = buildToolNames([
+      { serverName: "sentry", tools: ["b", "a"] },
+      { serverName: "linear", tools: ["z"] },
+    ]);
     expect(named.map((one) => `${one.serverName}/${one.tool}`)).toEqual([
       "linear/z",
       "sentry/a",
@@ -36,68 +100,48 @@ describe("allocateToolNames", () => {
     ]);
   });
 
-  it("cuts a name that would pass 64 characters behind mcp__tools__ and keeps long names apart by a hash", () => {
-    const long = "a".repeat(80);
-    const { named } = allocateToolNames(
-      [{ serverName: "sentry", tools: [`${long}_one`, `${long}_two`] }],
-      new Map(),
-    );
-    const names = named.map((one) => one.name);
-    expect(new Set(names).size).toBe(2);
-    for (const name of names) {
-      expect(name.length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
-      expect(name).toMatch(/^sentry__a+_[0-9a-f]{6}$/);
+  it("leaves out both tools of one server whose names coincide, and names the others", () => {
+    // A real clash needs two 24-bit hashes that agree, which a test cannot find, so the list names one tool twice.
+    const { named, leftOut } = buildToolNames([
+      { serverName: "sentry", tools: ["echo", "twin", "twin"] },
+    ]);
+    expect(named.map((one) => one.tool)).toEqual(["echo"]);
+    expect(leftOut).toEqual([
+      { serverName: "sentry", tool: "twin" },
+      { serverName: "sentry", tool: "twin" },
+    ]);
+  });
+});
+
+describe("readServerName", () => {
+  it("returns the text before the first double underscore", () => {
+    expect(readServerName("sentry__search_issues")).toBe("sentry");
+    expect(readServerName("sentry___private")).toBe("sentry");
+    expect(readServerName("my_server__a__b")).toBe("my_server");
+  });
+
+  it("returns undefined for a name with no server part", () => {
+    expect(readServerName("search_issues")).toBeUndefined();
+    expect(readServerName("__search")).toBeUndefined();
+  });
+});
+
+describe("findOriginalToolName", () => {
+  const listed = ["search_pages", "search-pages", "search.pages"];
+
+  it("returns the original name of the listed tool the gateway name stands for", () => {
+    for (const tool of listed) {
+      expect(findOriginalToolName("notion", listed, nameOf(tool, "notion"))).toBe(tool);
     }
   });
 
-  it("gives the second of two tools that normalize alike a clash suffix", () => {
-    const { named, leftOut } = allocateToolNames(
-      [{ serverName: "sentry", tools: ["a.b", "a-b"] }],
-      new Map(),
-    );
-    // In order by original name "a-b" comes first and takes the plain name.
-    expect(named.map((one) => one.tool)).toEqual(["a-b", "a.b"]);
-    expect(named[0]?.name).toBe("sentry__a_b");
-    expect(named[1]?.name).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
-    expect(leftOut).toEqual([]);
+  it("returns undefined for a name no listed tool has, after the tool left the list", () => {
+    expect(
+      findOriginalToolName("notion", ["search-pages"], nameOf("search_pages", "notion")),
+    ).toBeUndefined();
   });
 
-  it("leaves a tool out when its plain name and its clash name are both held by other tools", () => {
-    const tool = { serverName: "sentry", tool: "a.b" };
-    const other = { serverName: "sentry", tool: "other" };
-    const servers = [{ serverName: "sentry", tools: ["a.b"] }];
-    // With the plain name held, the tool gets its clash name. Hold that too.
-    const clashName = allocateToolNames(servers, new Map([["sentry__a_b", other]])).named[0]!.name;
-    const { named, leftOut } = allocateToolNames(
-      servers,
-      new Map([
-        ["sentry__a_b", other],
-        [clashName, other],
-      ]),
-    );
-    expect(named).toEqual([]);
-    expect(leftOut).toEqual([tool]);
-  });
-
-  it("keeps the name a token was sent for a tool when another tool would now take it by order", () => {
-    const reservations = new Map([["sentry__a_b", { serverName: "sentry", tool: "a.b" }]]);
-    const { named } = allocateToolNames(
-      [{ serverName: "sentry", tools: ["a.b", "a-b"] }],
-      reservations,
-    );
-    const nameOf = (tool: string) => named.find((one) => one.tool === tool)?.name;
-    expect(nameOf("a.b")).toBe("sentry__a_b");
-    expect(nameOf("a-b")).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
-  });
-
-  it("never gives a name that was sent for one tool to another, even after that tool left the list", () => {
-    const reservations = new Map([["sentry__a_b", { serverName: "sentry", tool: "a_b" }]]);
-    const { named } = allocateToolNames([{ serverName: "sentry", tools: ["a.b"] }], reservations);
-    expect(named[0]?.name).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
-  });
-
-  it("gives the same names for the same list every time", () => {
-    const servers = [{ serverName: "sentry", tools: ["a.b", "a_b", "x".repeat(70)] }];
-    expect(allocateToolNames(servers, new Map())).toEqual(allocateToolNames(servers, new Map()));
+  it("returns undefined when two listed tools have the name, because neither is offered", () => {
+    expect(findOriginalToolName("notion", ["twin", "twin"], "notion__twin")).toBeUndefined();
   });
 });

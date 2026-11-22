@@ -105,36 +105,55 @@ const readPrompt = (item: Record<string, unknown> | undefined): string =>
 /** The shape of an entry of a model request's `tools`, and of a tool search's result: Codex's namespace of the gateway. */
 type ToolEntry = Record<string, unknown>;
 
-/** Returns the names of the gateway's tools in the namespace entries among `entries`. */
-const readGatewayTools = (entries: ReadonlyArray<ToolEntry>): ReadonlyArray<string> =>
+/** A tool of the gateway as the model is shown it. */
+interface ShownTool {
+  readonly name: string;
+  readonly description?: string;
+}
+
+/** Returns the gateway's tools in the namespace entries among `entries`. */
+const readGatewayToolEntries = (entries: ReadonlyArray<ToolEntry>): ReadonlyArray<ShownTool> =>
   entries
     .filter((entry) => entry["name"] === `mcp__${GATEWAY_NAME}`)
-    .flatMap((entry) =>
-      (entry["tools"] as ReadonlyArray<{ readonly name: string }>).map((one) => one.name),
-    );
+    .flatMap((entry) => entry["tools"] as ReadonlyArray<ShownTool>);
 
 /**
- * Returns the names of the gateway's tools the model has been shown in
- * `requests`, once each. A Codex shows them in one of two shapes, and the
- * request itself says which:
+ * Returns the gateway's tools the model has been shown in `requests`. A Codex
+ * shows them in one of two shapes, and the request itself says which:
  *
  * - inline, as a `mcp__tools` namespace in the request's `tools`;
  * - deferred, as the result of a `tool_search_call`, which comes back as a
  *   `tool_search_output` item in the request's input. Such a request has a
  *   `tool_search` tool and no inline namespace.
  */
+const readShownTools = (requests: ReadonlyArray<ScriptedModelRequest>): ReadonlyArray<ShownTool> =>
+  requests.flatMap((request) => [
+    ...readGatewayToolEntries(request.body.tools),
+    ...readGatewayToolEntries(
+      request.body.input
+        .filter((item) => item["type"] === "tool_search_output")
+        .flatMap((item) => item["tools"] as ReadonlyArray<ToolEntry>),
+    ),
+  ]);
+
+/** Returns the names of the gateway's tools the model has been shown in `requests`, once each. */
 const readOfferedTools = (requests: ReadonlyArray<ScriptedModelRequest>): ReadonlyArray<string> => [
-  ...new Set(
-    requests.flatMap((request) => [
-      ...readGatewayTools(request.body.tools),
-      ...readGatewayTools(
-        request.body.input
-          .filter((item) => item["type"] === "tool_search_output")
-          .flatMap((item) => item["tools"] as ReadonlyArray<ToolEntry>),
-      ),
-    ]),
-  ),
+  ...new Set(readShownTools(requests).map((tool) => tool.name)),
 ];
+
+/**
+ * Returns the name the model is shown for the gateway's tool `wanted`. Codex
+ * shows a gateway name as it is, except that it turns `-` into `_` and then
+ * adds a suffix of its own to names that are alike after that. A test that
+ * needs such a tool ends the tool's description with its gateway name in
+ * square brackets, which is how the stand-in model finds it. Returns
+ * `undefined` when no tool shown matches.
+ */
+const findShownName = (shown: ReadonlyArray<ShownTool>, wanted: string): string | undefined =>
+  (
+    shown.find((tool) => tool.name === wanted) ??
+    shown.find((tool) => tool.description?.endsWith(`[${wanted}]`))
+  )?.name;
 
 /**
  * Builds the model's script. A prompt `call <tool>` makes the model call that
@@ -147,19 +166,20 @@ const buildCallScript = () => {
   let calls = 0;
   let searches = 0;
   let searchedFor: string | undefined;
-  const buildCall = (tool: string) => ({
+  const buildCall = (shownName: string) => ({
     type: "function_call",
     namespace: `mcp__${GATEWAY_NAME}`,
-    name: tool,
+    name: shownName,
     call_id: `call-${String(++calls)}`,
     arguments: JSON.stringify({ text: "hello" }),
   });
   return (request: ScriptedModelRequest) => {
     const last = request.body.input.at(-1);
-    const wanted = /call (\w+)/.exec(readPrompt(last))?.[1];
+    const wanted = /call ([\w-]+)/.exec(readPrompt(last))?.[1];
     if (wanted !== undefined) {
+      const shownName = findShownName(readShownTools([request]), wanted);
       const canSearch = request.body.tools.some((tool) => tool["type"] === "tool_search");
-      if (canSearch && !readOfferedTools([request]).includes(wanted)) {
+      if (canSearch && shownName === undefined) {
         searchedFor = wanted;
         return [
           {
@@ -170,11 +190,14 @@ const buildCallScript = () => {
           },
         ];
       }
-      return [buildCall(wanted)];
+      return [buildCall(shownName ?? wanted)];
     }
     if (last?.["type"] === "tool_search_output" && searchedFor !== undefined) {
-      const found = readGatewayTools(last["tools"] as ReadonlyArray<ToolEntry>);
-      return found.includes(searchedFor) ? [buildCall(searchedFor)] : undefined;
+      const shownName = findShownName(
+        readGatewayToolEntries(last["tools"] as ReadonlyArray<ToolEntry>),
+        searchedFor,
+      );
+      return shownName === undefined ? undefined : [buildCall(shownName)];
     }
     return undefined;
   };
@@ -561,6 +584,44 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 
+  it("calls a tool whose name has a hyphen and one whose name carries a hash, each reaching its own upstream tool beside a tool that reads alike", async () => {
+    const tools = [
+      { name: "search_pages", description: `Searches [${SERVER_NAME}__search_pages]` },
+      { name: "search-pages", description: `Searches [${SERVER_NAME}__search-pages]` },
+      { name: "search.pages", description: `Searches [${SERVER_NAME}__search_pages_52ac82]` },
+    ];
+    await withCodexOnGateway({ listed: true, tools }, async (rig, home) => {
+      const running = await home.start();
+      const threadId = await running.startThread();
+      const owners: ReadonlyArray<readonly [string, string]> = [
+        [`${SERVER_NAME}__search_pages`, "search_pages"],
+        [`${SERVER_NAME}__search-pages`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
+      ];
+      for (const [name, tool] of owners) {
+        const before = readUpstreamCalls(rig.upstream).length;
+        await running.runTurn(threadId, `call ${name}`);
+        expect(
+          requestsOf(rig.proxy.seen, "tools/call")
+            .map((one) => one.tool)
+            .at(-1),
+          `the gateway was called as ${name}`,
+        ).toBe(name);
+        expect(
+          readUpstreamCalls(rig.upstream)
+            .slice(before)
+            .map((one) => one.tool),
+          name,
+        ).toEqual([tool]);
+      }
+      expect(running.readFinishedCalls().map((one) => one.status)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+      ]);
+    });
+  }, 120_000);
+
   // Records which shape a Codex gives a few hundred tools: Codex 0.171.0 offers all 300 inline for the model
   // used here. It defers every MCP tool behind tool search when its search tool is enabled, which depends on
   // the model and the feature flags. Either way the model calls one tool once.
@@ -575,7 +636,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       await running.runTurn(threadId, `call ${SERVER_NAME}__tool007`);
 
       const first = rig.model.requests[0]!;
-      const inline = readGatewayTools(first.body.tools).length;
+      const inline = readGatewayToolEntries(first.body.tools).length;
       const hasToolSearch = first.body.tools.some((tool) => tool["type"] === "tool_search");
       expect(inline === 300 || (inline === 0 && hasToolSearch), "all inline, or none inline").toBe(
         true,

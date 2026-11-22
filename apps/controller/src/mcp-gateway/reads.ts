@@ -47,6 +47,15 @@ export const makeFreshReads = Effect.gen(function* () {
       Effect.map(Effect.orDie(catalogue.readViews(ids)), (views) => [...views.values()]),
     );
 
+  /**
+   * Reads the original names of the tools the server stores now. Returns an
+   * empty list for a server that no longer exists.
+   */
+  const readStoredToolNames = (serverId: string): Effect.Effect<ReadonlyArray<string>> =>
+    Effect.map(Effect.orDie(catalogue.readViews([serverId])), (views) =>
+      (views.get(serverId)?.server.tools ?? []).map((tool) => tool.name),
+    );
+
   /** Keeps the servers `tools/list` shows, and none for a session without `mcp.use`. */
   const keepServed = <View extends McpServerAvailabilityView>(
     actor: SessionActor,
@@ -63,6 +72,7 @@ export const makeFreshReads = Effect.gen(function* () {
 
     readListedServerIds,
     readListedAvailability,
+    readStoredToolNames,
 
     /** Reads the servers the session is served now, with their tools: none without `mcp.use`. */
     readServed: (actor: SessionActor): Effect.Effect<ReadonlyArray<McpServerView>> =>

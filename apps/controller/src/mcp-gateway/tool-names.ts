@@ -1,8 +1,9 @@
 /**
  * The names the MCP Gateway gives the tools of a session's servers (spec 21
- * section 3.4). A tool is named `<server name>__<tool name>`. Allocation is
- * pure. The `NameLedger` is the one place that remembers, per Session Token,
- * which names were sent and what each stands for.
+ * section 3.4). A tool is named `<server name>__<tool name>`. The name is a
+ * pure function of the server's name and the tool's original name: no list,
+ * no order and no memory decides what a name stands for, so a controller
+ * restart cannot change it.
  */
 import { createHash } from "node:crypto";
 import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
@@ -19,20 +20,19 @@ const MAX_NAME_LENGTH = MAX_HARNESS_NAME_LENGTH - HARNESS_PREFIX_LENGTH;
 /** Length of the hash suffix: `_` plus six hex characters. */
 const SUFFIX_LENGTH = 7;
 
+/** The separator between the server's name and the tool's name. A server's name holds no double underscore. */
+const SEPARATOR = "__";
+
+/** A tool name the gateway sends as it is: only these characters. */
+const KEPT_CHARACTERS = /^[A-Za-z0-9_-]+$/;
+
+/** The end of every changed name: `_` plus six lowercase hex characters. No unchanged name ends so. */
+const HASH_SUFFIX = /_[0-9a-f]{6}$/;
+
 /** One tool as a session's server lists it: the server's name and the tool's original name. */
 export interface ToolKey {
   readonly serverName: string;
   readonly tool: string;
-}
-
-/**
- * What a name the gateway sent stands for: the tool, and the id of the server
- * the list held then. A call is dispatched to the server the list holds by
- * name when the call arrives. The id only lets a refusal name the server a
- * call meant after the list dropped it.
- */
-export interface ReservedTool extends ToolKey {
-  readonly serverId: string;
 }
 
 /** A server's tools, to be named. */
@@ -41,11 +41,11 @@ export interface ServerTools {
   readonly tools: ReadonlyArray<string>;
 }
 
-/** The names allocated for one list: each tool with its name, and the tools left out. */
-export interface AllocatedNames {
-  /** In the order they were named: by server name, then by original tool name. */
+/** The names built for one list: each tool with its name, and the tools left out. */
+export interface NamedTools {
+  /** In order by server name, then by original tool name. */
   readonly named: ReadonlyArray<ToolKey & { readonly name: string }>;
-  /** Tools that could get no unique name. The caller logs them. */
+  /** Tools whose name another tool of the same server has too. The caller logs them. */
   readonly leftOut: ReadonlyArray<ToolKey>;
 }
 
@@ -53,113 +53,87 @@ export interface AllocatedNames {
 const hashSuffix = (text: string): string =>
   createHash("sha256").update(text).digest("hex").slice(0, 6);
 
-/** Returns `tool` with every character outside `[A-Za-z0-9_]` replaced by `_`. */
-const normalizeToolName = (tool: string): string => tool.replace(/[^A-Za-z0-9_]/g, "_");
-
 /**
- * Returns the name a tool gets when nothing clashes: `<server>__<tool>`, with
- * the tool normalized. When the harness would see more than 64 characters,
- * the tool part is cut and ends in `_` plus six hex characters of a hash of
- * the original name, so two long names that start alike stay apart.
+ * Returns the name the gateway gives a tool, from the tool alone.
+ *
+ * The original name is kept when all of these hold:
+ *
+ * - it has only the characters `A-Z`, `a-z`, `0-9`, `_` and `-`;
+ * - it does not end in `_` plus six lowercase hex characters, because that
+ *   ending belongs to changed names, so an unchanged name never equals the
+ *   changed name of another tool;
+ * - the whole name fits in 52 characters, which is 64 behind `mcp__tools__`.
+ *
+ * Otherwise the name is changed: the original with every other character
+ * turned into `_`, cut so the whole fits, then `_` and six hex characters of
+ * the SHA-256 of the original name. A changed name always has that ending,
+ * whether or not another tool would clash with the plain one.
  */
-const buildPrimaryName = ({ serverName, tool }: ToolKey): string => {
-  const normalized = normalizeToolName(tool);
-  const full = `${serverName}__${normalized}`;
-  if (full.length <= MAX_NAME_LENGTH) return full;
-  const room = MAX_NAME_LENGTH - serverName.length - 2;
-  return `${serverName}__${normalized.slice(0, room - SUFFIX_LENGTH)}_${hashSuffix(tool)}`;
+export const buildToolName = ({ serverName, tool }: ToolKey): string => {
+  const prefix = `${serverName}${SEPARATOR}`;
+  if (
+    KEPT_CHARACTERS.test(tool) &&
+    !HASH_SUFFIX.test(tool) &&
+    prefix.length + tool.length <= MAX_NAME_LENGTH
+  ) {
+    return `${prefix}${tool}`;
+  }
+  const normalized = tool.replace(/[^A-Za-z0-9_-]/g, "_");
+  const room = MAX_NAME_LENGTH - prefix.length - SUFFIX_LENGTH;
+  return `${prefix}${normalized.slice(0, room)}_${hashSuffix(tool)}`;
 };
-
-/**
- * Returns the name a tool gets when its primary name is taken: the primary
- * name with `_` and six hex characters of a hash of the server's name and the
- * tool's original name, cut at the front when that passes 64 characters.
- */
-const buildClashName = (key: ToolKey): string => {
-  const primary = buildPrimaryName(key);
-  const suffix = `_${hashSuffix(`${key.serverName}\0${key.tool}`)}`;
-  return `${primary.slice(0, MAX_NAME_LENGTH - SUFFIX_LENGTH)}${suffix}`;
-};
-
-const isSame = (one: ToolKey, other: ToolKey): boolean =>
-  one.serverName === other.serverName && one.tool === other.tool;
 
 const compareText = (one: string, other: string): number =>
   one < other ? -1 : one > other ? 1 : 0;
 
 /**
- * Gives every tool of the list a name that is unique within it and that keeps
- * its meaning for the Session Token holding `reservations`.
- *
- * Tools are named in a fixed order, by server name and then by original tool
- * name, so the same list always gets the same names. For each tool the first
- * of these applies:
- *
- * 1. A name the token already holds for this very tool is used again, so a
- *    later change to the list never moves a name.
- * 2. Its primary name, when no other tool holds it.
- * 3. Its clash name, when no other tool holds that.
- * 4. Otherwise the tool is left out and returned in `leftOut`.
- *
- * "Holds" means reserved for another tool in `reservations`, or given to an
- * earlier tool of this list.
+ * Returns the name of every tool of `servers`, in order by server name and
+ * then by original tool name. Each name depends on its own tool only. A tool
+ * whose name another tool of the same server also gets is left out together
+ * with that tool, because no name may stand for two tools. This needs two
+ * different original names that share a normalized prefix and the first 24
+ * bits of their hashes.
  */
-export const allocateToolNames = (
-  servers: ReadonlyArray<ServerTools>,
-  reservations: ReadonlyMap<string, ToolKey>,
-): AllocatedNames => {
-  const ordered = servers
+export const buildToolNames = (servers: ReadonlyArray<ServerTools>): NamedTools => {
+  const all = servers
     .toSorted((one, other) => compareText(one.serverName, other.serverName))
     .flatMap((server) =>
-      server.tools
-        .toSorted(compareText)
-        .map((tool): ToolKey => ({ serverName: server.serverName, tool })),
+      server.tools.toSorted(compareText).map((tool) => ({
+        serverName: server.serverName,
+        tool,
+        name: buildToolName({ serverName: server.serverName, tool }),
+      })),
     );
-  const taken = new Set<string>();
-  const named: Array<ToolKey & { readonly name: string }> = [];
-  const leftOut: Array<ToolKey> = [];
-  for (const key of ordered) {
-    const candidates = [buildPrimaryName(key), buildClashName(key)];
-    const reservedForThis = candidates.find((name) => {
-      const holder = reservations.get(name);
-      return holder !== undefined && isSame(holder, key) && !taken.has(name);
-    });
-    const name =
-      reservedForThis ?? candidates.find((one) => !reservations.has(one) && !taken.has(one));
-    if (name === undefined) {
-      leftOut.push(key);
-      continue;
-    }
-    taken.add(name);
-    named.push({ ...key, name });
-  }
+  const counts = new Map<string, number>();
+  for (const { name } of all) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const named = all.filter(({ name }) => counts.get(name) === 1);
+  const leftOut = all
+    .filter(({ name }) => counts.get(name) !== 1)
+    .map(({ serverName, tool }): ToolKey => ({ serverName, tool }));
   return { named, leftOut };
 };
 
 /**
- * The meaning of every name the gateway has sent to one Session Token since
- * the controller started. A call is accepted only under one of these names,
- * and a name keeps its meaning after its tool leaves the list.
+ * Returns the server's name in a gateway name: the text before the first `__`.
+ * Returns `undefined` when the name has no `__` or no text before it. A
+ * server's name holds no `__`, so this split is unambiguous.
  */
-export interface NameLedger {
-  /** Returns what `name` stands for, or `undefined` when no list sent this token that name. */
-  readonly find: (name: string) => ReservedTool | undefined;
-  /** Names the tools of `servers` so that every name this token holds keeps its meaning. Records nothing. */
-  readonly allocate: (servers: ReadonlyArray<ServerTools>) => AllocatedNames;
-  /** Records `sent` as the names of a `tools/list` response, once the response is being answered. */
-  readonly record: (sent: ReadonlyArray<ReservedTool & { readonly name: string }>) => void;
-}
+export const readServerName = (name: string): string | undefined => {
+  const end = name.indexOf(SEPARATOR);
+  return end > 0 ? name.slice(0, end) : undefined;
+};
 
-/** Builds the ledger of a new Session Token: nothing was sent yet. */
-export const makeNameLedger = (): NameLedger => {
-  const reservations = new Map<string, ReservedTool>();
-  return {
-    find: (name) => reservations.get(name),
-    allocate: (servers) => allocateToolNames(servers, reservations),
-    record: (sent) => {
-      for (const { name, serverName, tool, serverId } of sent) {
-        reservations.set(name, { serverName, tool, serverId });
-      }
-    },
-  };
+/**
+ * Returns the original name of the tool of `serverName` that `name` stands
+ * for, out of the tool names the server lists now. Returns `undefined` when
+ * no listed tool has that name, or when more than one has it: such tools are
+ * left out of every list (`buildToolNames`), so none of them may be called.
+ */
+export const findOriginalToolName = (
+  serverName: string,
+  listedTools: ReadonlyArray<string>,
+  name: string,
+): string | undefined => {
+  const matching = listedTools.filter((tool) => buildToolName({ serverName, tool }) === name);
+  return matching.length === 1 ? matching[0] : undefined;
 };

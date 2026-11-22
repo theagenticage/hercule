@@ -57,15 +57,13 @@ export const buildUnknownToolRefusal = (toolName: string): Refusal => ({
     "ask the user to check which MCP servers are in this Thread's list.",
 });
 
-/** The server the name belongs to is not in the session's list any more. */
-export const buildNotInListRefusal = (
-  server: { readonly id: string; readonly name: string } | undefined,
-  serverName: string,
-  tool: string,
-): Refusal => ({
+/**
+ * The server the name belongs to is not in the session's list any more. The
+ * refusal names the server by the name in the tool's name only: a server that
+ * left the list cannot be told from its name alone, so it has no id here.
+ */
+export const buildNotInListRefusal = (serverName: string): Refusal => ({
   reason: "not-in-list",
-  ...(server === undefined ? {} : { server }),
-  tool,
   message:
     `The MCP server "${serverName}" is not in this Thread's list any more. ` +
     "The user may have removed it from the Thread or deleted it. " +
@@ -120,3 +118,17 @@ export const claimWarning = (
   seen.set(key, { turnId, atMs: nowMs });
   return true;
 };
+
+/**
+ * The server is in the session's list, but none of the tools it lists now has
+ * the called name: the tool is gone, or two tools of the server share the name
+ * and are left out of every list.
+ */
+export const buildToolNotListedRefusal = (server: {
+  readonly id: string;
+  readonly name: string;
+}): Refusal => ({
+  reason: "error",
+  server,
+  message: `The MCP server "${server.name}" no longer offers this tool.`,
+});

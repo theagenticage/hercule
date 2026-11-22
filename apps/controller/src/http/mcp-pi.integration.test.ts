@@ -55,7 +55,10 @@ import {
   EXTENSION_SOURCE,
 } from "../../../runner/src/harnesses/pi/extension";
 import { decideMcpLaunch } from "../../../runner/src/harnesses/pi/mcp";
-import { buildMcpCallScript } from "../../../runner/src/harnesses/pi/mcp-model.testing";
+import {
+  buildMcpCallScript,
+  TOOL_SEARCH_TOOL,
+} from "../../../runner/src/harnesses/pi/mcp-model.testing";
 import {
   buildPiTestPath,
   findPiTestBinary,
@@ -66,7 +69,9 @@ import {
   pointAtFakeModel,
   readRequestMessageText,
   startScriptedModelServer,
+  type FakeModelReply,
   type FakeModelRequest,
+  type FakeModelScript,
   type FakeModelServer,
 } from "../../../runner/src/harnesses/pi/upstream";
 import { spawnPi, stopChild } from "../../../runner/src/harnesses/process";
@@ -239,6 +244,51 @@ const readToolResults = (model: FakeModelServer): ReadonlyArray<string> =>
     .filter((message) => message.role === "tool")
     .map(readRequestMessageText);
 
+/**
+ * Builds a script that calls one gateway tool by the gateway's own name. pi
+ * shows the model a tool under its own spelling, which is not the gateway's
+ * name: it turns `-` into `_` and adds a suffix of its own to names that are
+ * alike after that. So the tools of such a test carry their gateway name at
+ * the end of their description, in square brackets, and the script finds a
+ * tool by that.
+ *
+ * The prompt `call <name>` makes the model call the tool whose description
+ * ends with `[<name>]`: directly when pi has declared it already, and else
+ * after a `tool_search` for `pages`, which loads every tool of the server.
+ */
+const buildCallByDescriptionScript =
+  (): FakeModelScript =>
+  (request): FakeModelReply => {
+    const last = request.messages.at(-1);
+    const readWantedName = () =>
+      /^call (\S+)$/.exec(
+        readRequestMessageText(request.messages.findLast((message) => message.role === "user")!),
+      )?.[1];
+    if (last?.role === "user") {
+      const wanted = /^call (\S+)$/.exec(readRequestMessageText(last))?.[1];
+      if (wanted === undefined) return { text: "There is nothing to do." };
+      const declared = (
+        (request.tools ?? []) as ReadonlyArray<{
+          readonly function: { readonly name: string; readonly description?: string };
+        }>
+      ).find((tool) => tool.function.description?.endsWith(`[${wanted}]`))?.function.name;
+      return declared === undefined
+        ? { toolCalls: [{ name: TOOL_SEARCH_TOOL, args: { query: "pages" } }] }
+        : { toolCalls: [{ name: declared, args: { text: "hello" } }] };
+    }
+    const calledSearch =
+      request.messages.findLast((message) => message.role === "assistant")?.tool_calls?.[0]
+        ?.function.name === TOOL_SEARCH_TOOL;
+    if (last?.role === "tool" && calledSearch) {
+      const found = [...readRequestMessageText(last).matchAll(/^- (mcp__\S+?): (.*)$/gm)];
+      const chosen = found.find((one) => one[2]!.endsWith(`[${readWantedName()}]`))?.[1];
+      return chosen === undefined
+        ? { text: "The search found no tool." }
+        : { toolCalls: [{ name: chosen, args: { text: "hello" } }] };
+    }
+    return { text: "Done." };
+  };
+
 // -- The gateway -------------------------------------------------------------
 
 /** What `withGateway` gives a test. */
@@ -254,11 +304,15 @@ interface Gateway extends GatewayRig {
  * Each call gets its own fake server, so a test counts calls from zero.
  */
 const withGateway = async (
-  options: { readonly listed: boolean; readonly tools?: ReadonlyArray<FakeTool> },
+  options: {
+    readonly listed: boolean;
+    readonly tools?: ReadonlyArray<FakeTool>;
+    readonly script?: FakeModelScript;
+  },
   body: (gateway: Gateway) => Promise<void>,
 ): Promise<void> => {
   const upstream = await startFakeUpstream({ tools: options.tools ?? [WHOAMI_TOOL] });
-  const model = startScriptedModelServer(buildMcpCallScript());
+  const model = startScriptedModelServer(options.script ?? buildMcpCallScript());
   try {
     await withGatewayRig(
       {
@@ -283,7 +337,11 @@ const withGateway = async (
  * and `tool_search` finds nothing before the list has arrived.
  */
 const withPiOnGateway = (
-  options: { readonly listed: boolean; readonly tools?: ReadonlyArray<FakeTool> },
+  options: {
+    readonly listed: boolean;
+    readonly tools?: ReadonlyArray<FakeTool>;
+    readonly script?: FakeModelScript;
+  },
   body: (gateway: Gateway, running: RunningPi) => Promise<void>,
 ): Promise<void> =>
   withGateway(options, (gateway) =>
@@ -447,6 +505,46 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
           readToolResults(rig.model).filter((text) => text.includes("List the tools again")),
         ).toHaveLength(1);
       });
+    },
+    TEST_MS,
+  );
+
+  it(
+    "calls a tool whose name has a hyphen and one whose name carries a hash, each reaching its own upstream tool beside a tool that reads alike",
+    async () => {
+      const owners: ReadonlyArray<readonly [string, string]> = [
+        [`${SERVER_NAME}__search_pages`, "search_pages"],
+        [`${SERVER_NAME}__search-pages`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
+      ];
+      await withPiOnGateway(
+        {
+          listed: true,
+          script: buildCallByDescriptionScript(),
+          tools: owners.map(([name, tool]) => ({
+            name: tool,
+            description: `Searches the pages [${name}]`,
+          })),
+        },
+        async (rig, running) => {
+          for (const [name, tool] of owners) {
+            const before = readUpstreamCalls(rig.upstream).length;
+            await running.runTurn(`call ${name}`);
+            expect(
+              requestsOf(rig.proxy.seen, "tools/call")
+                .map((one) => one.tool)
+                .at(-1),
+              `the gateway was called as ${name}`,
+            ).toBe(name);
+            expect(
+              readUpstreamCalls(rig.upstream)
+                .slice(before)
+                .map((one) => one.tool),
+              name,
+            ).toEqual([tool]);
+          }
+        },
+      );
     },
     TEST_MS,
   );

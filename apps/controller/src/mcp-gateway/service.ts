@@ -234,7 +234,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Answers `tools/list` and records the names it sends: only these names may
+   * Answers `tools/list` and records the names it offers: only these names may
    * be called. On an MCP session whose calls were refused because its client
    * may hold names from before, a list that was asked after that refusal ends
    * the refusals. A list asked before it does not: it is the client listing
@@ -251,16 +251,14 @@ const make = Effect.gen(function* () {
       // Read before the list is built, because a refusal can come in while the list is read, and the
       // client cannot have acted on that refusal when it asked.
       const askedAfterRefusal = session?.namesFromBefore === "suspected-and-refused";
-      const { tools, leftOut } = projectTools(yield* reads.readServed(actor), state.names);
-      // Nothing waits between naming the tools and recording the names, so two
-      // lists at once cannot give one name to two tools.
-      state.names.record(tools);
+      const { tools, leftOut } = projectTools(yield* reads.readServed(actor));
+      for (const { name } of tools) state.offeredToolNames.add(name);
       if (session !== undefined && askedAfterRefusal) session.namesFromBefore = "not-suspected";
       // One line per list, with a count and no tool name: the names come from
       // outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
         yield* Effect.logWarning(
-          `MCP gateway: ${leftOut.length} tool(s) got no unique name and are not offered to session ${actor.sessionId}`,
+          `MCP gateway: ${leftOut.length} tool(s) share their name with another tool of their server and are not offered to session ${actor.sessionId}`,
         );
       }
       return respondJson(

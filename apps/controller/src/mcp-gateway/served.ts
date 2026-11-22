@@ -8,11 +8,11 @@ import { createHash } from "node:crypto";
 import type { SessionActor } from "../actor";
 import type { McpServerAvailabilityView, McpServerView, StoredMcpTool } from "../mcp-servers";
 import { buildInstructions } from "./instructions";
-import type { NameLedger, ToolKey } from "./tool-names";
+import { buildToolNames, type ToolKey } from "./tool-names";
 
 /** One tool the session is served, under the name the gateway gives it. */
 export interface ServedTool {
-  /** The name the gateway sends: `<server name>__<tool>`, shortened if needed. */
+  /** The name the gateway sends: `<server name>__<tool>`, with the tool part changed when needed (`buildToolName`). */
   readonly name: string;
   readonly serverId: string;
   readonly serverName: string;
@@ -39,15 +39,14 @@ export const buildServedInstructions = (
   );
 
 /**
- * Names the tools of the served servers with `ledger`, and returns them in
- * the order the names were given, with the tools that got no unique name.
- * Pure: the caller records the names in the ledger once it has sent them.
+ * Names the tools of the served servers, and returns them in order by server
+ * name and then by original tool name, with the tools that were left out
+ * because their name is another tool's too.
  */
 export const projectTools = (
   served: ReadonlyArray<McpServerView>,
-  ledger: NameLedger,
 ): { readonly tools: ReadonlyArray<ServedTool>; readonly leftOut: ReadonlyArray<ToolKey> } => {
-  const { named, leftOut } = ledger.allocate(
+  const { named, leftOut } = buildToolNames(
     served.map(({ server }) => ({
       serverName: server.name,
       tools: server.tools.map((tool) => tool.name),
@@ -69,19 +68,20 @@ export const projectTools = (
 
 /**
  * Returns a fingerprint that changes whenever a served tool, a tool's
- * definition, a tool's name or the instructions change. A stream is told
- * `list_changed` when its last fingerprint differs from the current one.
+ * definition, a tool's name or the instructions change. It holds each tool's
+ * original name as well as its gateway name, so a different tool behind the
+ * same gateway name changes it too. A stream is told `list_changed` when its
+ * last fingerprint differs from the current one.
  */
 export const fingerprintServed = (
   served: ReadonlyArray<McpServerView>,
   actor: SessionActor,
-  ledger: NameLedger,
 ): string =>
   createHash("sha256")
     .update(
       JSON.stringify({
         instructions: buildServedInstructions(served, actor),
-        tools: projectTools(served, ledger).tools.map((one) => [one.name, one.definition]),
+        tools: projectTools(served).tools.map((one) => [one.name, one.tool, one.definition]),
       }),
     )
     .digest("hex");

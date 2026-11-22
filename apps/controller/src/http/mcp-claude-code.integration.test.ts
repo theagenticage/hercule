@@ -369,12 +369,17 @@ const withStandInModel = async (
  * front of the controller, and a stand-in model.
  */
 const withGateway = (
-  options: { readonly upstream: FakeUpstream; readonly answerDiscoverLikeOlderServer: boolean },
+  options: {
+    readonly upstream: FakeUpstream;
+    readonly answerDiscoverLikeOlderServer: boolean;
+    /** The tools the stand-in model calls, in order. By default `alpha`'s `echo`, twice. */
+    readonly calls?: ReadonlyArray<string>;
+  },
   body: (rig: GatewayRig & { readonly modelUrl: string }) => Promise<void>,
 ): Promise<void> =>
   withStandInModel(
     // Twice, because the test that loses its MCP session sees its first call refused and calls again.
-    ["mcp__tools__alpha__echo", "mcp__tools__alpha__echo"],
+    options.calls ?? ["mcp__tools__alpha__echo", "mcp__tools__alpha__echo"],
     (modelUrl) =>
       withGatewayRig(
         {
@@ -388,8 +393,8 @@ const withGateway = (
       ),
   );
 
-const ALPHA_TOOLS = ["alpha__echo", "alpha__get_issue_details"];
-const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get_issue_details"];
+const ALPHA_TOOLS = ["alpha__echo", "alpha__get-issue_details_437857"];
+const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get-issue_details_437857"];
 
 /** Waits until the CLI lists exactly `tools` for the gateway's entry. */
 const waitForTools = (
@@ -453,6 +458,50 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         ]);
       });
     });
+  }, 120_000);
+
+  it("lists and calls a tool whose name has a hyphen and one whose name carries a hash, each reaching its own upstream tool beside a tool that reads alike", async () => {
+    const tools = [
+      { name: "search_pages", description: "Searches the pages" },
+      { name: "search-pages", description: "Searches the pages by hyphen" },
+      { name: "search.pages", description: "Searches the pages by dot" },
+    ];
+    const owners: ReadonlyArray<readonly [string, string]> = [
+      ["alpha__search-pages", "search-pages"],
+      ["alpha__search_pages_52ac82", "search.pages"],
+      ["alpha__search_pages", "search_pages"],
+    ];
+    const searching = await startFakeUpstream({ tools });
+    try {
+      await withGateway(
+        {
+          upstream: searching,
+          answerDiscoverLikeOlderServer: false,
+          calls: owners.map(([name]) => `mcp__tools__${name}`),
+        },
+        async (rig) => {
+          await withClaude(rig, async (running) => {
+            // The gateway lists in order of the original names: `-`, `.`, `_`.
+            await waitForTools(
+              running,
+              owners.map(([name]) => name),
+            );
+            const results = await running.runToolCalls(owners.length);
+            expect(results.map((result) => result.isError)).toEqual([false, false, false]);
+            expect(requestsOf(rig.proxy.seen, "tools/call").map((one) => one.tool)).toEqual(
+              owners.map(([name]) => name),
+            );
+            expect(
+              searching.requests
+                .filter((one) => one.method === "tools/call")
+                .map((one) => one.tool),
+            ).toEqual(owners.map(([, tool]) => tool));
+          });
+        },
+      );
+    } finally {
+      await searching.stop();
+    }
   }, 120_000);
 
   it("works on the older path when server/discover is refused, lists again on list_changed from the GET stream, and opens a new MCP session after a 404", async () => {
