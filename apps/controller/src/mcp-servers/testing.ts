@@ -1226,6 +1226,58 @@ export const withOAuthRig = async (
   }, options);
 };
 
+/**
+ * Rotates the tokens a signed-in server holds, as a refresh made by another
+ * caller would: it exchanges the stored refresh token at the fake
+ * authorization server and stores the new tokens, which the fake MCP server
+ * accepts. The old access token stays valid. The server's sign-in generation
+ * stays the same.
+ */
+export const rotateSignInTokens = async (rig: OAuthRig, serverId: string): Promise<void> => {
+  const owner = { kind: "mcp-server", id: serverId } as const;
+  const stored = await runSql(rig.controller, rig.controller.harness.secrets.get(owner, "oauth"));
+  if (Option.isNone(stored)) throw new Error("the server holds no OAuth sign-in");
+  const signIn = JSON.parse(Redacted.value(stored.value)) as {
+    readonly tokenEndpoint: string;
+    readonly resource: string;
+    readonly client: { readonly clientId: string };
+    readonly tokens: { readonly refreshToken: string };
+  };
+  const answer = await fetch(signIn.tokenEndpoint, {
+    method: "POST",
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: signIn.tokens.refreshToken,
+      client_id: signIn.client.clientId,
+      resource: signIn.resource,
+    }),
+  });
+  const body = (await answer.json()) as {
+    readonly access_token: string;
+    readonly refresh_token: string;
+    readonly expires_in: number;
+  };
+  const obtainedAt = new Date();
+  await runSql(
+    rig.controller,
+    rig.controller.harness.secrets.set(
+      owner,
+      "oauth",
+      Redacted.make(
+        JSON.stringify({
+          ...signIn,
+          tokens: {
+            accessToken: body.access_token,
+            refreshToken: body.refresh_token,
+            expiresAt: new Date(obtainedAt.getTime() + body.expires_in * 1000).toISOString(),
+            obtainedAt: obtainedAt.toISOString(),
+          },
+        }),
+      ),
+    ),
+  );
+};
+
 /** The redirect address a test's sign-in returns to: a port nothing listens on. */
 export const TEST_REDIRECT_URI = "http://127.0.0.1:50123/callback";
 

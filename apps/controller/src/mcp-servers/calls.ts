@@ -30,6 +30,7 @@
  * went out is not stopped, and carries the credentials stored then.
  */
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -83,6 +84,7 @@ import {
   UpstreamError,
   type ExchangeBroken,
   type OpenedUpstream,
+  type SessionExpired,
   type PrepareSend,
   type ToolCallProgress,
 } from "./upstream";
@@ -100,6 +102,24 @@ export class McpCallRefused extends Schema.TaggedError<McpCallRefused>()("McpCal
   message: Schema.String,
   controllerNotServing: Schema.optionalKey(Schema.Boolean),
 }) {}
+
+/**
+ * The credentials a call was about to send with its tool request are not the
+ * ones its upstream session opened with, because they were renewed meanwhile.
+ * The request is not sent. Only the call's own code sees this failure: it
+ * retires the session and sends on a new one opened with `credentials`.
+ */
+class SessionCredentialsChanged extends Data.TaggedError("SessionCredentialsChanged")<{
+  readonly credentials: UpstreamCredentials;
+}> {}
+
+/**
+ * How many times a call moves to a new upstream session because the
+ * credentials were renewed between taking a session and sending the tool.
+ * Past it, the credentials keep changing faster than the call can open
+ * sessions, and the call is refused.
+ */
+const MAX_SESSION_CHANGES_FOR_RENEWAL = 2;
 
 /** What `callTool` takes. */
 export interface McpToolCall {
@@ -603,17 +623,30 @@ const make = Effect.gen(function* () {
        * request that starts an exchange prepares itself with `prepareSend`,
        * which reads the credentials and checks again at that moment.
        * `credentials` only build the address of an opening.
+       *
+       * Fails with `SessionCredentialsChanged`, before the tool request is
+       * sent, when the credentials read at that moment are not the ones the
+       * session opened with and the server's sessions do not survive a renewal
+       * (the same rule `holdSlot` applies when it takes the session): the
+       * follow-up requests of the exchange can only carry the opening's
+       * credentials, so the tool must not run on this session. The session is
+       * retired.
        */
-      const attempt = (credentials: UpstreamCredentials) =>
+      const attemptOnce = (credentials: UpstreamCredentials) =>
         Effect.acquireUseRelease(
           holdSlot(input.upstreamScope, first, credentials, prepareOpeningSend),
-          (slot) =>
-            Effect.flatMap(Deferred.await(slot.opening), (opened) =>
+          (slot) => {
+            const prepareToolSend = Effect.flatMap(prepareSend, (sent) =>
+              serverCredentials.sessionSurvivesRenewal || sent.identity === slot.credentialsIdentity
+                ? Effect.succeed(sent)
+                : Effect.fail(new SessionCredentialsChanged({ credentials: sent })),
+            );
+            return Effect.flatMap(Deferred.await(slot.opening), (opened) =>
               opened
                 .callTool({
                   tool: first.tool,
                   arguments: input.arguments,
-                  prepareSend,
+                  prepareSend: prepareToolSend,
                   progress,
                   sentValues,
                 })
@@ -622,12 +655,14 @@ const make = Effect.gen(function* () {
                   // can be sent again; the next call opens a new one.
                   Effect.tapError((error) =>
                     error._tag === "SessionExpired" ||
+                    error._tag === "SessionCredentialsChanged" ||
                     (error._tag === "ExchangeBroken" && error.sessionExpired)
                       ? Effect.sync(() => forgetSlot(slot))
                       : Effect.void,
                   ),
                 ),
-            ),
+            );
+          },
           // The values this session sent go on with the call, so an answer of a
           // session that replaces it is cleaned of them too.
           (slot) =>
@@ -637,6 +672,28 @@ const make = Effect.gen(function* () {
               }),
               releaseSlot(slot),
             ),
+        );
+
+      let sessionChangesForRenewal = 0;
+
+      /** Sends the call once, and again on a new session when a renewal made the session's credentials outdated before the tool went out. */
+      const attempt = (
+        credentials: UpstreamCredentials,
+      ): Effect.Effect<
+        McpSchema.CallToolResult,
+        UpstreamError | McpCallRefused | ExchangeBroken | SessionExpired
+      > =>
+        attemptOnce(credentials).pipe(
+          Effect.catchTag("SessionCredentialsChanged", (changed) => {
+            if (sessionChangesForRenewal >= MAX_SESSION_CHANGES_FOR_RENEWAL) {
+              return refuse(
+                "error",
+                `The sign-in of ${name} kept changing while the call was being sent. Try the call again.`,
+              );
+            }
+            sessionChangesForRenewal += 1;
+            return attempt(changed.credentials);
+          }),
         );
 
       // A call replaces an upstream session the server expired once, however

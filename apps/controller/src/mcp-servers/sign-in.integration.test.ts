@@ -36,6 +36,7 @@ import {
   readRow,
   callAs,
   readServer,
+  rotateSignInTokens,
   runSql,
   requestCheck,
   requestFinishSignIn,
@@ -443,6 +444,65 @@ describe("an upstream session of a signed-in server", () => {
             .filter((request) => request.method === "initialize")
             .map((request) => request.authorization),
         ).toEqual([`Bearer ${authorizationServer.currentAccessToken()}`]);
+      },
+      { fake: { protocols: [McpProtocol.v2025_11_25] } },
+    );
+  });
+});
+
+describe("a call on an open upstream session of a signed-in server", () => {
+  it("is moved to a new session when the token rotated between taking the session and sending the tool", async () => {
+    await withOAuthRig(
+      async (rig) => {
+        const { controller, authorizationServer, fake } = rig;
+        const serverId = await addServerThatNeedsSignIn(rig);
+        await signInWithBrowser(rig, serverId);
+        await waitForStatus(controller, "ready");
+        // The first call opens the session, with the token the sign-in issued.
+        expect((await callAs(controller, serverId))._tag).toBe("Success");
+        const requestsBefore = fake.requests.length;
+        fake.intercept = ({ method }) =>
+          method === "tools/call"
+            ? new Response(
+                `data: ${JSON.stringify({ jsonrpc: "2.0", id: "from-server", method: "ping" })}\n\n`,
+                { status: 200, headers: { "content-type": "text/event-stream" } },
+              )
+            : method === "?"
+              ? new Response(null, { status: 202 })
+              : undefined;
+
+        // The second call takes that session. The second check it runs is the
+        // one right before its tool request, and a rotation lands there.
+        let checks = 0;
+        const authorize = Effect.suspend(() => {
+          checks += 1;
+          return checks === 2
+            ? Effect.promise(() => rotateSignInTokens(rig, serverId))
+            : Effect.void;
+        });
+        // The fake never sends a result after its ping, so the call ends in a
+        // failure. What the test looks at is what went out.
+        await callAs(controller, serverId, { authorize });
+
+        const rotated = `Bearer ${authorizationServer.currentAccessToken()}`;
+        const during = fake.requests.slice(requestsBefore);
+        // A new session was opened with the rotated token, and the tool and the
+        // reply to the server's request both went through it.
+        expect(
+          during
+            .filter((request) => request.method === "initialize")
+            .map((request) => request.authorization),
+        ).toEqual([rotated]);
+        expect(
+          during
+            .filter((request) => request.method === "tools/call")
+            .map((request) => request.authorization),
+        ).toEqual([rotated]);
+        expect(
+          during
+            .filter((request) => request.method === "?")
+            .map((request) => [request.authorization, request.status]),
+        ).toEqual([[rotated, 202]]);
       },
       { fake: { protocols: [McpProtocol.v2025_11_25] } },
     );
