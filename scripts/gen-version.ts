@@ -25,11 +25,12 @@ import { $ } from "bun";
 const CODEX_RELEASE = "0.171.0";
 
 /**
- * The pi release this build's adapter was verified against. pi is pre-1.0 and
- * has broken its RPC mode between releases, so this is both the oldest version
- * a machine may run and the newest anyone has tested.
+ * The pi release this build's adapter was verified against, and the oldest
+ * version a machine may run. pi's MCP needs 0.99 or newer: `-e builtin:mcp`
+ * makes pi 0.85 to 0.87 exit at start. 1.3.0 and 1.6.0 were both run against
+ * the MCP Gateway, and behaved the same.
  */
-const PI_RELEASE = "0.85.1";
+const PI_RELEASE = "1.3.0";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { version } = (await Bun.file(`${root}package.json`).json()) as { version: string };

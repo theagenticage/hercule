@@ -53,6 +53,7 @@ import type {
   LocalAttachment,
   HarnessAdapter,
   HarnessRunnerContext,
+  SessionStartContext,
   TextGenerationContext,
   UserMaterial,
 } from "../index";
@@ -92,10 +93,12 @@ import { truncateFact, truncateMessage } from "../text";
 import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
+import { decideMcpLaunch } from "./mcp";
 import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -415,7 +418,7 @@ const confirmStartedModel = (
 interface Held {
   readonly binding: SessionBinding;
   readonly spec: SessionSpec;
-  readonly ctx: HarnessRunnerContext;
+  readonly ctx: SessionStartContext;
   /** The pi binary the session's own agent runs, which its subagents run too. */
   readonly binary: string;
   /** The session's own agent, whose pi process is the session's. */
@@ -778,13 +781,13 @@ const listSkillFolders = (ctx: HarnessRunnerContext): ReadonlyArray<string> => [
  *   passes the transcript with `--session` instead: pi rejects the two
  *   together, because the transcript already has its own session id.
  * - A subagent keeps no transcript (`--no-session`), because it lives only
- *   as long as its one task. It gets the same tools, access, skills and user
- *   material as the session, but not the Agent's instructions: its parent's
+ *   as long as its one task. It gets the same tools (the MCP Gateway's too),
+ *   access, skills and user material as the session, but not the Agent's instructions: its parent's
  *   prompt is its whole brief.
  */
 const buildArgv = (
   spec: SessionSpec,
-  ctx: HarnessRunnerContext,
+  ctx: SessionStartContext,
   selection: ModelSelection,
   launch: AgentLaunch,
   extensionFile: string,
@@ -819,6 +822,10 @@ const buildArgv = (
     "--offline",
     "-e",
     extensionFile,
+    // `--no-extensions` also drops pi's bundled MCP client and tool search, so
+    // the session's MCP Gateway needs them named. A subagent gets them too,
+    // because it has the session's tools (see `decideMcpLaunch`).
+    ...decideMcpLaunch(ctx.mcpServers).argv,
     ...(session === undefined
       ? ["--no-session"]
       : [
@@ -1663,10 +1670,12 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * not compact would have no way to free its context. `extensionFile` is the
    * agent's own copy of the extension. When the session has an edit watch,
    * every agent gets the marks directory. `agentFolder` is the agent's own
-   * private agent folder, which becomes pi's agent directory.
+   * private agent folder, which becomes pi's agent directory. Every agent
+   * gets the MCP Gateway's address when the session has the gateway
+   * (`decideMcpLaunch`), and a subagent gets the session's tools.
    */
   const buildAgentEnv = (
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
     spec: SessionSpec,
     depth: number,
     extensionFile: string,
@@ -1689,6 +1698,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           ? undefined
           : JSON.stringify(spec.outputSchema),
       [NO_AUTO_COMPACTION_VARIABLE]: cancelsAutomaticCompaction(spec, depth) ? "1" : undefined,
+      ...decideMcpLaunch(ctx.mcpServers).env,
     });
 
   const probe = makeProbe(seam.spawn, seam.run);
@@ -1803,6 +1813,9 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
                   [SUBAGENTS_VARIABLE]: undefined,
                   [NO_AUTO_COMPACTION_VARIABLE]: undefined,
                   [SESSION_MARKS_DIR_VARIABLE]: undefined,
+                  // A text generation has no MCP: it loads none of pi's
+                  // bundled extensions, so a registration would only fail.
+                  [MCP_GATEWAY_URL_VARIABLE]: undefined,
                 }),
                 // pi's working directory. It is the scratch directory, never a
                 // workspace, so a call can neither see nor change the user's files.
@@ -1914,6 +1927,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     harnessId: PI,
     harnessName: PI_NAME,
     binaryName: PI_BINARY,
+    // pi's own MCP client connects the gateway: `startSession` loads it with
+    // the flags `decideMcpLaunch` returns, and Hercule's extension registers
+    // the gateway with it. Without this, the controller would give a pi
+    // session no gateway entry.
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.empty,

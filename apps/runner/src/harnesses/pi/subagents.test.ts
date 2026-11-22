@@ -17,12 +17,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { OutputSchema, HarnessEvent, SessionSpec, SubagentId } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import type { EditMarks } from "../index";
 import {
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -255,6 +257,27 @@ describe("how a subagent's pi is started", () => {
     expect(child.env[OUTPUT_SCHEMA_VARIABLE]).toBeUndefined();
     expect(run.child.env[SUBAGENTS_VARIABLE]).toBe("1");
     expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBeDefined();
+  });
+
+  it("gets the session's MCP Gateway, as the session's own pi does", async () => {
+    const gateway = { name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:7421/mcp" };
+    const run = await startBusySession({}, SPEC, {}, { mcpServers: [gateway] });
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(child.command).toEqual(expect.arrayContaining(["builtin:mcp", "builtin:tool-search"]));
+    expect(child.env[MCP_GATEWAY_URL_VARIABLE]).toBe(gateway.url);
+  });
+
+  it("gets no MCP when the session has none, and no address from the runner's own environment", async () => {
+    const run = await startBusySession({}, SPEC, {
+      [MCP_GATEWAY_URL_VARIABLE]: "http://elsewhere/mcp",
+    });
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(child.command).not.toContain("builtin:mcp");
+    expect(child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
   });
 
   it("loads the session skills folder, as the session's own pi does", async () => {

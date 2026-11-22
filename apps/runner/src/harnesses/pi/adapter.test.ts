@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { AnswerNotDelivered } from "@hercule/protocol";
+import { AnswerNotDelivered, MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
@@ -17,6 +17,7 @@ import { makePiAdapter, REPROMPT } from "./adapter";
 import { RPC_DEADLINE } from "./rpc";
 import {
   AGENT_FILE_VARIABLE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBMIT_RESULT_TOOL,
@@ -78,6 +79,56 @@ const writePriorSessionFile = (home: string, id: string): string => {
 
 const readFlagValue = (argv: ReadonlyArray<string>, flag: string): string | undefined =>
   argv[argv.indexOf(flag) + 1];
+
+/** The MCP Gateway as the runner resolves it for a session start. */
+const GATEWAY = { name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:7421/mcp" };
+
+describe("launching pi with the MCP Gateway", () => {
+  it("loads pi's MCP client and tool search beside the extension, and gives the extension the gateway's address", async () => {
+    const run = await startTestSession({}, SPEC, {}, { mcpServers: [GATEWAY] });
+
+    // `--no-extensions` stays: only what Hercule names loads. The two flags
+    // come right after the extension's own.
+    const flags = buildFlags(run.ctx.home, agentFolderOf(run.child));
+    const after = flags.indexOf("--session-dir");
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...flags.slice(0, after),
+      "-e",
+      "builtin:mcp",
+      "-e",
+      "builtin:tool-search",
+      ...flags.slice(after),
+    ]);
+    expect(run.child.env[MCP_GATEWAY_URL_VARIABLE]).toBe(GATEWAY.url);
+  });
+
+  it("keeps the session's token out of the command line and out of the address variable", async () => {
+    const token = "session-token-1212";
+    const run = await startTestSession(
+      {},
+      SPEC,
+      { HERCULE_TOKEN: token },
+      { mcpServers: [GATEWAY] },
+    );
+
+    expect(run.child.command.join(" ")).not.toContain(token);
+    expect(run.child.env[MCP_GATEWAY_URL_VARIABLE]).not.toContain(token);
+  });
+
+  it("loads nothing for a session without the gateway, and removes an address the runner inherited", async () => {
+    // A runner started from inside a pi session inherits that session's value.
+    const run = await startTestSession({}, SPEC, { [MCP_GATEWAY_URL_VARIABLE]: GATEWAY.url });
+
+    expect(run.child.command).not.toContain("builtin:mcp");
+    expect(run.child.command).not.toContain("builtin:tool-search");
+    expect(run.child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
+  });
+
+  it("is declared as an adapter that maps MCP servers, so the controller sends the gateway", () => {
+    expect(createDriving().adapter.mapsMcpServers).toBe(true);
+  });
+});
 
 describe("launching pi for a session", () => {
   it("turns off context files, the user's own extensions and pi's own approvals for a workspace-less session", async () => {

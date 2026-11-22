@@ -50,14 +50,15 @@ describe("findVersionFloor", () => {
     expect(findVersionFloor("nobody-pinned-this")).toBeNull();
   });
 
-  // pi is pre-1.0 with recorded breaking changes in its RPC mode, so its floor
-  // and the newest anyone tested are the same release.
+  // pi has changed its RPC mode between releases, so its floor and the newest
+  // release anyone tested are the same one.
   it("returns the pi release this build was verified against", () => {
     expect(findVersionFloor("pi/pi")).toBe(PI_VERSION);
-    expect(PI_VERSION).toBe("0.85.1");
-    expect(computeVersionVerdict("0.85.1", findVersionFloor("pi/pi"))).toBe("ok");
-    expect(computeVersionVerdict("0.84.3", findVersionFloor("pi/pi"))).toBe("below-floor");
-    expect(computeVersionVerdict("0.86.0", findVersionFloor("pi/pi"))).toBe("above-tested-max");
+    expect(PI_VERSION).toBe("1.3.0");
+    expect(computeVersionVerdict("1.3.0", findVersionFloor("pi/pi"))).toBe("ok");
+    // pi 0.87 and older exit at start on the flags that load pi's MCP.
+    expect(computeVersionVerdict("0.87.1", findVersionFloor("pi/pi"))).toBe("below-floor");
+    expect(computeVersionVerdict("1.6.0", findVersionFloor("pi/pi"))).toBe("above-tested-max");
   });
 
   it("returns the Codex release this build's types were generated from", () => {
