@@ -1,15 +1,15 @@
 /**
  * The two kinds of `+` menu, one for a started thread and one for a Draft
- * Thread. Each reads and writes its own list of servers (see
- * `use-thread-servers.ts`) and draws a `PlusMenu`. Loaded when the composer
- * first draws, never with the first screen (see `lazy-thread-servers.ts`).
+ * Thread. Each makes the edits of its own list (see `use-thread-edits.ts`)
+ * and draws a `PlusMenu`. Loaded when the composer first draws, never with
+ * the first screen (see `lazy-thread-servers.ts`).
  */
 import type { JSX } from "react";
 import type { DraftView, ThreadChoice } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import type { PlusAttach } from "../session/composer-frame";
 import { PlusMenu } from "./plus-menu";
-import { useDraftServers, useStartedThreadServers } from "./use-thread-servers";
+import { useDraftEdits, useStartedThreadEdits } from "./use-thread-edits";
 
 /** Renders the `+` menu of the started thread `session`, see `PlusMenu`. */
 export function StartedThreadPlus({
@@ -21,8 +21,8 @@ export function StartedThreadPlus({
   readonly attach: PlusAttach;
   readonly serversOff: string | null;
 }): JSX.Element {
-  const servers = useStartedThreadServers(session);
-  return <PlusMenu attach={attach} servers={servers} serversOff={serversOff} />;
+  const edits = useStartedThreadEdits(session);
+  return <PlusMenu attach={attach} edits={edits} serversOff={serversOff} />;
 }
 
 /** Renders the `+` menu of the Draft Thread `view`; a change goes to `onChoose`, see `PlusMenu`. */
@@ -35,6 +35,6 @@ export function DraftPlus({
   readonly onChoose: (choice: ThreadChoice) => void;
   readonly attach: PlusAttach;
 }): JSX.Element {
-  const servers = useDraftServers({ view, onChoose });
-  return <PlusMenu attach={attach} servers={servers} serversOff={null} />;
+  const edits = useDraftEdits({ view, onChoose });
+  return <PlusMenu attach={attach} edits={edits} serversOff={null} />;
 }

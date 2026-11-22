@@ -457,15 +457,6 @@ describe("the + menu on a started thread", () => {
     });
   });
 
-  it("reads nothing for a thread with no server, and once for a thread that has some", async () => {
-    const empty = await openComposerApp(`/threads/${THREAD_FIXTURES.finished.session.id}`, {
-      servers: [LINEAR],
-    });
-    await findPlusPopover();
-    expect(findCalls(empty.calls, "GET", SERVER_LIST)).toHaveLength(0);
-    expect(empty.live.readTopics()).not.toContain("mcpServer");
-  });
-
   it("reads the servers once for a thread that has some, holds the topic, and drops it on leaving", async () => {
     const thread = threadWith([LINEAR]);
     const app = await openComposerApp(`/threads/${thread.session.id}`, {

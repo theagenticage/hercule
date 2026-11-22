@@ -7,7 +7,7 @@
 import { useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { buildMcpWarningLine, type McpServerWarningEntry } from "@hercule/client-core/mcp-servers";
-import { useMcpServerViews } from "../../app/mcp-server-views";
+import { useThreadViews } from "./thread-servers";
 import { RuntimeNote } from "./blocks";
 import { ReconnectDialog } from "./reconnect-dialog";
 
@@ -20,12 +20,13 @@ import { ReconnectDialog } from "./reconnect-dialog";
  *
  * `buildMcpWarningLine` decides the buttons and the tone. A line with at
  * least one button is drawn in the failure colours, because the user must
- * act. Every other warning stays quiet. The line keeps its severity, so the
- * marker keeps the name "Warning" for a screen reader (spec 17, the runtime
- * lines for MCP servers).
+ * act (decided by Rogier, 2026-11-22). Every other warning stays quiet. The
+ * line keeps its severity, so the marker keeps the name "Warning" for a
+ * screen reader (spec 17, the runtime lines for MCP servers).
  *
- * The servers come from the cache: the thread's page reads them while it
- * holds a line like this. Until they are read, the line has no button.
+ * The servers come from the open thread's servers: its provider reads and
+ * joins them once for every line (see `ThreadServersProvider`). Until they
+ * are read, the line has no button.
  */
 export default function McpWarningLine({
   entries,
@@ -40,7 +41,7 @@ export default function McpWarningLine({
   readonly timezone: string;
   readonly today: number;
 }): JSX.Element {
-  const { views } = useMcpServerViews("cache");
+  const views = useThreadViews();
   const navigate = useNavigate();
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
   const { tone, fixes } = buildMcpWarningLine(entries, views ?? []);

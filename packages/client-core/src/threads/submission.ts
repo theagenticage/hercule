@@ -32,11 +32,32 @@ export type Submission = SpawnSubmission | InputSubmission;
  *
  * A caller that knows which kind of thread it holds gets that kind of request
  * back, so it need not check the request's kind.
+ *
+ * A Draft Thread's picked list of MCP Servers may name a server deleted since
+ * the pick. `knownMcpServerIds`, the ids of the servers the app has cached,
+ * drops those, as the controller drops them from every list it stores. It is
+ * `undefined` while the servers have not been read, and nothing is dropped.
  */
-export function buildSubmission(resolved: ResolvedActive, message: MessageDraft): InputSubmission;
-export function buildSubmission(resolved: ResolvedDraft, message: MessageDraft): SpawnSubmission;
-export function buildSubmission(resolved: ResolvedThread, message: MessageDraft): Submission;
-export function buildSubmission(resolved: ResolvedThread, message: MessageDraft): Submission {
+export function buildSubmission(
+  resolved: ResolvedActive,
+  message: MessageDraft,
+  knownMcpServerIds?: ReadonlySet<string>,
+): InputSubmission;
+export function buildSubmission(
+  resolved: ResolvedDraft,
+  message: MessageDraft,
+  knownMcpServerIds?: ReadonlySet<string>,
+): SpawnSubmission;
+export function buildSubmission(
+  resolved: ResolvedThread,
+  message: MessageDraft,
+  knownMcpServerIds?: ReadonlySet<string>,
+): Submission;
+export function buildSubmission(
+  resolved: ResolvedThread,
+  message: MessageDraft,
+  knownMcpServerIds?: ReadonlySet<string>,
+): Submission {
   const attachmentIds = listUploadedAttachmentIds(message.attachments);
   const attachments = attachmentIds.length === 0 ? {} : { attachments: attachmentIds };
   if (resolved.kind === "active") {
@@ -70,7 +91,14 @@ export function buildSubmission(resolved: ResolvedThread, message: MessageDraft)
         : { projectId: config.projectId }),
       // An untouched list is left out, so the controller picks the project's
       // list or the default. A list the user emptied is sent as empty.
-      ...(resolved.mcpServerIds === undefined ? {} : { mcpServerIds: resolved.mcpServerIds }),
+      ...(resolved.mcpServerIds === undefined
+        ? {}
+        : {
+            mcpServerIds:
+              knownMcpServerIds === undefined
+                ? resolved.mcpServerIds
+                : resolved.mcpServerIds.filter((id) => knownMcpServerIds.has(id)),
+          }),
       // A thread that works without a checkout leaves `workspace` out: the
       // contract does not accept `{ kind: "none" }` for the field. A main
       // workspace is sent by its repo alone, because it is the one shared

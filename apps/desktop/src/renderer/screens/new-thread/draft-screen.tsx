@@ -29,7 +29,7 @@ import {
 } from "@hercule/client-core";
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../app/account-scope";
-import { useDraftThread } from "../../app/draft-thread";
+import { readCachedMcpServerIds, useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
 import { threadAndAgentSessionsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
@@ -211,7 +211,11 @@ export function DraftScreen({
   };
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, startKey)) return;
-    const submission = buildSubmission(view.resolved, pending.message);
+    const submission = buildSubmission(
+      view.resolved,
+      pending.message,
+      readCachedMcpServerIds(queryClient, client),
+    );
     pendingSubmissions.clearFailure(key);
     images.clearRefusal();
     spawn.mutate(

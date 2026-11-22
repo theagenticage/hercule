@@ -1,14 +1,16 @@
-import { Suspense, useState, type JSX, type KeyboardEvent } from "react";
+import { Suspense, useEffect, useState, type JSX, type KeyboardEvent } from "react";
 import { ToolsIcon } from "../../icons/tools";
 import { FileIcon } from "../../icons/file";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import type { PlusAttach } from "../session/composer-frame";
 import { isMenuFocusKey, moveMenuFocus } from "../move-menu-focus";
+import type { ThreadServersRow } from "@hercule/client-core/mcp-servers";
 import { ComposerMenu } from "./composer-menu";
 import { PlusFace, describePlusLabel } from "./plus-face";
 import { LazyThreadServerPicker, LazyThreadServersMenu } from "./lazy-thread-servers";
 import { ReconnectDialog } from "./reconnect-dialog";
-import type { ThreadServers } from "./use-thread-servers";
+import { useThreadServers } from "./thread-servers";
+import type { ThreadServerEdits } from "./use-thread-edits";
 
 /**
  * Renders the composer's `+`: a button that opens a menu above itself with two
@@ -23,7 +25,11 @@ import type { ThreadServers } from "./use-thread-servers";
  *   opens the picker. A server that needs sign-in also puts a red dot on the
  *   `+`.
  *
- * `servers` is the thread's list and how it is written. The dialogs the menu
+ * The thread's list and its row come from the open thread's servers (see
+ * `ThreadServersProvider`), and `edits` is how a change is made. Opening the
+ * MCP row or the picker tells the provider the editor is open, which is when
+ * it reads the servers, and it stays open from the submenu to the picker.
+ * Opening the menu for Attach alone reads nothing. The dialogs the menu
  * opens, the picker and Reconnect, are drawn outside the menu, because the
  * menu closes first. `serversOff` is the reason the MCP row is off, or
  * `null` when it works. The menu opens on a thread that takes no message too:
@@ -36,16 +42,27 @@ import type { ThreadServers } from "./use-thread-servers";
  */
 export function PlusMenu({
   attach,
-  servers,
+  edits,
   serversOff,
 }: {
   readonly attach: PlusAttach;
-  readonly servers: ThreadServers;
+  readonly edits: ThreadServerEdits;
   readonly serversOff: string | null;
 }): JSX.Element {
+  const { described, setEditing } = useThreadServers();
+  const { row } = described;
   const [picking, setPicking] = useState(false);
+  // Whether the submenu is open. It closes with the menu, in `onClosed`.
+  const [showsServers, setShowsServers] = useState(false);
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
-  const { row } = servers;
+  // One state for the submenu and the picker, so the handoff from one to the other never drops it.
+  const editing = showsServers || picking;
+  useEffect(() => {
+    setEditing(editing);
+    return () => {
+      setEditing(false);
+    };
+  }, [editing, setEditing]);
   return (
     <>
       <ComposerMenu
@@ -56,12 +73,20 @@ export function PlusMenu({
         triggerClassName="icon-btn plus-button"
         triggerLabel={describePlusLabel(row)}
         trigger={<PlusFace row={row} />}
-        onClosed={servers.clearRefusal}
+        onClosed={() => {
+          edits.clearRefusal();
+          setShowsServers(false);
+        }}
       >
         {(close) => (
           <PlusMenuPanels
             attach={attach}
-            servers={servers}
+            row={row}
+            showsServers={showsServers}
+            onShowServers={() => {
+              setShowsServers(true);
+            }}
+            edits={edits}
             serversOff={serversOff}
             onAttach={() => {
               close();
@@ -83,9 +108,9 @@ export function PlusMenu({
         // Without their own boundary, the dialogs' load would suspend the composer behind them.
         <Suspense fallback={null}>
           <LazyThreadServerPicker
-            servers={servers}
+            edits={edits}
             onClose={() => {
-              servers.clearRefusal();
+              edits.clearRefusal();
               setPicking(false);
             }}
           />
@@ -111,7 +136,10 @@ export function PlusMenu({
  */
 function PlusMenuPanels({
   attach,
-  servers,
+  row,
+  showsServers,
+  onShowServers,
+  edits,
   serversOff,
   onAttach,
   onClose,
@@ -119,18 +147,19 @@ function PlusMenuPanels({
   onReconnect,
 }: {
   readonly attach: PlusAttach;
-  readonly servers: ThreadServers;
+  readonly row: ThreadServersRow;
+  readonly showsServers: boolean;
+  readonly onShowServers: () => void;
+  readonly edits: ThreadServerEdits;
   readonly serversOff: string | null;
   readonly onAttach: () => void;
   readonly onClose: () => void;
   readonly onOpenPicker: () => void;
   readonly onReconnect: (connectionId: string) => void;
 }): JSX.Element {
-  const [showsServers, setShowsServers] = useState(false);
   const openServers = (): void => {
-    if (serversOff === null) setShowsServers(true);
+    if (serversOff === null) onShowServers();
   };
-  const { row } = servers;
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "ArrowRight" && event.target instanceof HTMLElement) {
       if (event.target.dataset.item === "servers") openServers();
@@ -188,7 +217,7 @@ function PlusMenuPanels({
       {showsServers && (
         <Suspense fallback={<div className="pop plus-sub" aria-busy="true" />}>
           <LazyThreadServersMenu
-            servers={servers}
+            edits={edits}
             onOpenPicker={onOpenPicker}
             onReconnect={onReconnect}
             onClose={onClose}

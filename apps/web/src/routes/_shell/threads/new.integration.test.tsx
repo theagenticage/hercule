@@ -3316,6 +3316,33 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_GITHUB.id] });
   });
 
+  it("keeps the topic of a draft whose list names only a server that was deleted, which then counts none", async () => {
+    const user = userEvent.setup();
+    let held = MCP_SERVERS;
+    const { live } = await openServersDraft(
+      "/threads/new",
+      { "thread.mcpServerIds": [S_NOTION.id] },
+      buildMcpServerRoutes(() => held),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+
+    held = MCP_SERVERS.filter((server) => server.id !== S_NOTION.id);
+    act(() => {
+      live.push("mcpServer", { _tag: "invalidate", ids: [S_NOTION.id], kind: "deleted" });
+    });
+
+    const menu = await openPlusMenu(user);
+    await waitFor(() => {
+      expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain(
+        "none",
+      );
+    });
+    // The stored list still names the server, so the draft keeps asking for the servers.
+    expect(live.topics()).toContain("mcpServer");
+  });
+
   it("sends an empty list when the user switched every server off", async () => {
     const user = userEvent.setup();
     const { api } = await openServersDraft("/threads/new", {

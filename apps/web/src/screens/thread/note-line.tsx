@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Link, useRouteContext } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import type { RuntimeNote } from "@hercule/client-core";
 import {
   buildMcpWarningLine,
@@ -7,7 +7,7 @@ import {
   type WarningFix,
 } from "@hercule/client-core/mcp-servers";
 import { buildButtonClassName } from "@hercule/ui";
-import { useMcpServerViews } from "../use-mcp-server-views";
+import { useThreadViews } from "../thread-servers";
 import { RuntimeNoteLine } from "./runtime-note-line";
 
 /**
@@ -30,11 +30,11 @@ export function NoteLine({ note }: { readonly note: RuntimeNote }): JSX.Element 
  * give two buttons.
  *
  * A warning with at least one button is one the user must act on, and is
- * drawn in the failure colours. Any other is as quiet as every warning. The
+ * drawn in the failure colours (decided by Rogier, 2026-11-22). Any other is as quiet as every warning. The
  * line keeps its severity either way, so a screen reader still hears
  * "Warning". Until the servers are read the line is quiet and has no button.
- * The screen holding the line reads the servers once and keeps the live topic
- * (see `AgentPage`).
+ * The page's servers are read once for every line, and the live topic is
+ * kept (see `ThreadServersProvider`).
  */
 function McpNoteLine({
   note,
@@ -43,8 +43,7 @@ function McpNoteLine({
   readonly note: RuntimeNote;
   readonly entries: readonly McpServerWarningEntry[];
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_shell" });
-  const { views } = useMcpServerViews(client, true);
+  const views = useThreadViews();
   if (views === undefined) return <RuntimeNoteLine note={note} />;
   const { tone, fixes } = buildMcpWarningLine(entries, views);
   return (

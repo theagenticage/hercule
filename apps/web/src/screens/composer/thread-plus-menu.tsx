@@ -1,10 +1,13 @@
-import { useState, type JSX } from "react";
-import type { HerculeClient, Live, Thread, ThreadChoice, ThreadPicks } from "@hercule/client-core";
-import type { PluginDetail, Project } from "@hercule/contract";
+import { useEffect, useState, type JSX } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { HerculeClient, Thread, ThreadChoice } from "@hercule/client-core";
+import { decideDraftServersPick, type McpListChoice } from "@hercule/client-core/mcp-servers";
+import type { PluginDetail } from "@hercule/contract";
+import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
+import { useThreadServers } from "../thread-servers";
 import { PlusMenu } from "./plus-menu";
 import { ThreadServerPicker } from "./thread-server-picker";
 import { ThreadServersMenu } from "./thread-servers-menu";
-import { useThreadServers } from "./use-thread-servers";
 
 /**
  * The composer's `+` menu wired to the thread's MCP servers: the `PlusMenu`
@@ -12,9 +15,21 @@ import { useThreadServers } from "./use-thread-servers";
  * This is the one place the composer touches MCP servers. The composer owns
  * whether the menu is open, so opening one of its selectors closes this menu.
  *
- * The servers are read when the MCP row opens its submenu or the picker
- * opens, not when the `+` menu does: the menu is also how an image is
- * attached.
+ * What the thread knows of its servers comes from the open thread's provider
+ * (see `ThreadServersProvider`). This component tells it when the MCP row or
+ * the picker is open, which is when the servers are read, not when the `+`
+ * menu opens: the menu is also how an image is attached. It stays open from
+ * the submenu to the picker.
+ *
+ * How a change is made depends on the thread. A Draft Thread keeps its list
+ * as a pick, recorded with `recordThreadChoice` after the rules decided it. A
+ * started thread edits its list at once (see `useMcpListEdit`). Each change is
+ * a choice, resolved against the session in the cache when the edit runs, so
+ * two quick changes never overwrite each other. One edit runs at a time for
+ * the session, whichever menu or picker started it, and the guard survives
+ * closing and opening them: `writing` stays true until the session has been
+ * read again, and, when that read fails, until a read succeeds. A refusal is
+ * `refusal`, and the list stays as the controller holds it.
  *
  * Opening "N more servers…" closes the menu and opens the picker, which is
  * drawn until the user is done. A refusal of a write belongs to the thread's
@@ -25,12 +40,8 @@ import { useThreadServers } from "./use-thread-servers";
  */
 export function ThreadPlusMenu({
   client,
-  live,
   thread,
   projectId,
-  projects,
-  defaultIds,
-  picks,
   recordThreadChoice,
   plugins,
   open,
@@ -40,14 +51,9 @@ export function ThreadPlusMenu({
   onFiles,
 }: {
   readonly client: HerculeClient;
-  readonly live: Live;
   readonly thread: Thread;
   /** The project the thread is in (`null` for none), as the composer resolved it. */
   readonly projectId: string | null;
-  readonly projects: readonly Project[];
-  /** The ids of the setting `thread.mcpServerIds`. */
-  readonly defaultIds: readonly string[];
-  readonly picks: ThreadPicks;
   readonly recordThreadChoice: (choice: ThreadChoice) => void;
   readonly plugins: readonly PluginDetail[];
   readonly open: boolean;
@@ -58,28 +64,51 @@ export function ThreadPlusMenu({
   readonly serversOffReason: string | null;
   readonly onFiles: (files: readonly File[]) => void;
 }): JSX.Element {
+  const queryClient = useQueryClient();
+  const { described, views, readFailure, setEditing } = useThreadServers();
   // Whether the picker is open. It opens from the `+` menu, which closes.
   const [picking, setPicking] = useState(false);
   // Whether the MCP row has opened its submenu. It closes with the menu,
   // however the menu closes: the composer closes it when one of its selectors opens.
   const [showsServers, setShowsServers] = useState(false);
   if (!open && showsServers) setShowsServers(false);
-  const servers = useThreadServers({
-    client,
-    live,
-    thread,
+  // One state for the submenu and the picker, so the handoff from one to the other never drops it.
+  const editing = showsServers || picking;
+  useEffect(() => {
+    setEditing(editing);
+    return () => {
+      setEditing(false);
+    };
+  }, [editing, setEditing]);
+
+  const session = thread.kind === "active" ? thread.session : null;
+  const edit = useMcpListEdit(client, {
+    kind: "thread",
+    sessionId: session?.id ?? "",
     projectId,
-    projects,
-    defaultIds,
-    picks,
-    recordThreadChoice,
-    wanted: showsServers || picking,
   });
+  // A Draft Thread writes nothing: its choice is decided by the same rules and recorded with the
+  // draft's other picks.
+  const applyToDraft = (choice: McpListChoice): void => {
+    const cache = buildMcpListCache(queryClient, client);
+    const cachedViews = cache.readViews();
+    if (cachedViews === undefined) return;
+    const picked = decideDraftServersPick({
+      projectId,
+      ids: described.mcpServerIds,
+      views: cachedViews,
+      ...cache.readStartRecords(projectId),
+      choice,
+    });
+    if (picked !== undefined) recordThreadChoice(picked);
+  };
+  const apply = session === null ? applyToDraft : edit.apply;
+  const refusal = edit.problem();
 
   // A refusal is forgotten once the user has seen it and closes the control.
   // While a write runs, its refusal has not arrived yet, so it is kept.
   const forgetSeenRefusal = (): void => {
-    if (!servers.writing) servers.clearRefusal();
+    if (!edit.blocked) edit.clearRefusal();
   };
   const handleOpenChange = (next: boolean): void => {
     if (!next) forgetSeenRefusal();
@@ -94,19 +123,19 @@ export function ThreadPlusMenu({
         attachDisabledReason={attachDisabledReason}
         serversOffReason={serversOffReason}
         onFiles={onFiles}
-        serversRow={servers.row}
+        serversRow={described.row}
         serversOpen={showsServers}
         onServersOpenChange={setShowsServers}
         submenu={
-          servers.views !== undefined && servers.start !== undefined ? (
+          views !== undefined && described.start !== undefined ? (
             <ThreadServersMenu
-              views={servers.views}
+              views={views}
               plugins={plugins}
-              mcpServerIds={servers.mcpServerIds}
-              start={servers.start}
-              writing={servers.writing}
-              refusal={servers.refusal}
-              onChoose={servers.apply}
+              mcpServerIds={described.mcpServerIds}
+              start={described.start}
+              writing={edit.blocked}
+              refusal={refusal}
+              onChoose={apply}
               onOpenPicker={() => {
                 setPicking(true);
                 onOpenChange(false);
@@ -114,25 +143,23 @@ export function ThreadPlusMenu({
             />
           ) : (
             <p
-              className={
-                servers.readFailure === null ? "px-2 py-1.5 text-faint" : "px-2 py-1.5 text-fail"
-              }
-              role={servers.readFailure === null ? "status" : "alert"}
+              className={readFailure === null ? "px-2 py-1.5 text-faint" : "px-2 py-1.5 text-fail"}
+              role={readFailure === null ? "status" : "alert"}
             >
-              {servers.readFailure ?? "Reading servers…"}
+              {readFailure ?? "Reading servers…"}
             </p>
           )
         }
       />
-      {picking && servers.views !== undefined && servers.start !== undefined ? (
+      {picking && views !== undefined && described.start !== undefined ? (
         <ThreadServerPicker
-          views={servers.views}
+          views={views}
           plugins={plugins}
-          mcpServerIds={servers.mcpServerIds}
-          start={servers.start}
-          writing={servers.writing}
-          refusal={servers.refusal}
-          onChoose={servers.apply}
+          mcpServerIds={described.mcpServerIds}
+          start={described.start}
+          writing={edit.blocked}
+          refusal={refusal}
+          onChoose={apply}
           onClose={() => {
             setPicking(false);
             forgetSeenRefusal();

@@ -2,8 +2,8 @@
  * Tests the thread's lines about MCP servers against the stubbed controller:
  * the button each server with a fix gets (Reconnect, Open server), no button
  * for a reason with no fix or a server deleted since, no dedup, the failure
- * colours of a line the user can act on and the quiet look of any other, and
- * that a thread with such a line reads the servers and holds their topic.
+ * colours of a line the user can act on and the quiet look of any other. What
+ * a thread with such a line reads is tested in `thread-servers.integration.test.tsx`.
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -16,7 +16,7 @@ import {
   SENTRY_WORK,
   SENTRY_WORK_ID,
 } from "../settings/mcp-servers/mcp-servers.testing";
-import { findCalls, openComposerApp, waitForTopicReads } from "./thread-servers.testing";
+import { findCalls, openComposerApp } from "./thread-servers.testing";
 
 type Reason = NonNullable<
   Extract<ThreadRecords["transcript"][number]["event"], { _tag: "runtime.warning" }>["mcpServers"]
@@ -155,19 +155,5 @@ describe("a thread's line about MCP servers", () => {
         .getAllByRole("button")
         .map((button) => button.textContent),
     ).toEqual(["Reconnect Sentry · work", "Open server"]);
-  });
-
-  it("makes the thread read the servers once and hold their topic, though its own list is empty", async () => {
-    const thread = threadWithLine([{ mcpServerId: LINEAR_ID, reason: "unreachable" }]);
-    const app = await openComposerApp(`/threads/${thread.session.id}`, {
-      thread,
-      servers: [LINEAR],
-    });
-
-    await waitForTopicReads(app);
-
-    expect(app.live.readTopics()).toContain("mcpServer");
-    // The read when the thread opened, and the one on the topic's first push.
-    expect(findCalls(app.calls, "GET", "/api/v1/mcp-servers")).toHaveLength(2);
   });
 });

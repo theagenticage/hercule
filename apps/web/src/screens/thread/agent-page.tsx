@@ -28,9 +28,9 @@ import {
   type RuntimeNote,
 } from "@hercule/client-core";
 import { hasMcpServerLine } from "@hercule/client-core/mcp-servers";
-import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
+import { ThreadServersProvider } from "../thread-servers";
 import { ContentColumn } from "../content-column";
 import { BriefCard } from "../subagents/brief-card";
 import { SpawnLines } from "../subagents/spawn-lines";
@@ -95,10 +95,9 @@ export function AgentPage({
       : buildSubagentAgentState(subagent, session);
   const { turns, outsideRuntimeNotes } = buildTurns(rows, agent);
   // A line about MCP servers draws its buttons from the servers as they are
-  // now. So a page that holds one reads the servers (each line does) and keeps
-  // the live topic, and a page without one does neither.
+  // now. The page's servers (see `ThreadServersProvider`) read them once for
+  // every line and keep the live topic, and a page without a line does neither.
   const hasMcpNote = hasMcpServerLine({ turns, outsideRuntimeNotes });
-  useLiveInvalidation(live, queryClient, "mcpServer", hasMcpNote);
   // A subagent's page shows its brief in the brief card, so the turn that
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
@@ -152,98 +151,101 @@ export function AgentPage({
   }, [rows.length, queuedCount, openRequestIds, isStreamUnreadable, followIfAtBottom]);
 
   return (
-    <div className="flex flex-1 flex-col">
-      <AgentChrome client={client} session={session} subagents={subagents} subagent={subagent} />
-      <ContentColumn className="gap-6">
-        {/* The turns take the height the composer leaves, so the composer
+    <ThreadServersProvider thread={{ kind: "started", session, hasMcpLine: hasMcpNote }}>
+      <div className="flex flex-1 flex-col">
+        <AgentChrome client={client} session={session} subagents={subagents} subagent={subagent} />
+        <ContentColumn className="gap-6">
+          {/* The turns take the height the composer leaves, so the composer
             stays at the foot of a short thread. Their bottom padding and the
             column gap leave 40px above the composer, as on an assistant's
             conversation. */}
-        <div className="flex flex-1 flex-col gap-6 pb-4">
-          {subagent === undefined ? null : (
-            <BriefCard subagents={subagents} subagent={subagent} brief={brief} />
-          )}
-          {turns.map((turn, index) => {
-            // Only the last turn can still be running.
-            //
-            // - An earlier turn with no `turn.completed` was abandoned by an
-            //   interrupt.
-            // - An unfinished last turn of an agent that cannot be running a
-            //   turn was abandoned: its session runs no harness, or the
-            //   subagent has ended. A session that reads `idle` has only not
-            //   been read again since the turn started.
-            //
-            // Neither abandoned turn is running, so both show as finished
-            // with no duration, rather than as working since they were last
-            // updated.
-            const isLive = agent.mayBeRunningTurn && index === lastIndex && turn.duration === null;
-            return (
-              <Fragment key={turn.turnId}>
-                {drawRuntimeNotesAfter(index)}
-                <Turn
-                  turn={turn}
-                  spawnLines={
-                    <SpawnLines
-                      session={session}
-                      subagents={subagents}
-                      agentSubagentId={subagentId}
-                      turn={turn}
-                    />
-                  }
-                  live={isLive}
-                  // The tap buffer holds one item's text at a time, so only the
-                  // live last turn gets the live tail element.
-                  tailRef={isLive ? tailRef : undefined}
-                  stamp={stamps[index]}
-                  hidesOpeningMessage={turn.turnId === brief?.turnId}
-                />
-              </Fragment>
-            );
-          })}
-          {drawRuntimeNotesAfter(turns.length)}
-          {isStreamUnreadable ? (
-            <RuntimeNoteLine note={buildUnreadableStreamNote(streamUnreadableAt)} />
-          ) : null}
-          {subagent === undefined ? (
-            <SendingMessages client={client} sessionId={sessionId} />
-          ) : null}
-        </div>
-        {/* The foot has the page's background, so the transcript scrolling
+          <div className="flex flex-1 flex-col gap-6 pb-4">
+            {subagent === undefined ? null : (
+              <BriefCard subagents={subagents} subagent={subagent} brief={brief} />
+            )}
+            {turns.map((turn, index) => {
+              // Only the last turn can still be running.
+              //
+              // - An earlier turn with no `turn.completed` was abandoned by an
+              //   interrupt.
+              // - An unfinished last turn of an agent that cannot be running a
+              //   turn was abandoned: its session runs no harness, or the
+              //   subagent has ended. A session that reads `idle` has only not
+              //   been read again since the turn started.
+              //
+              // Neither abandoned turn is running, so both show as finished
+              // with no duration, rather than as working since they were last
+              // updated.
+              const isLive =
+                agent.mayBeRunningTurn && index === lastIndex && turn.duration === null;
+              return (
+                <Fragment key={turn.turnId}>
+                  {drawRuntimeNotesAfter(index)}
+                  <Turn
+                    turn={turn}
+                    spawnLines={
+                      <SpawnLines
+                        session={session}
+                        subagents={subagents}
+                        agentSubagentId={subagentId}
+                        turn={turn}
+                      />
+                    }
+                    live={isLive}
+                    // The tap buffer holds one item's text at a time, so only the
+                    // live last turn gets the live tail element.
+                    tailRef={isLive ? tailRef : undefined}
+                    stamp={stamps[index]}
+                    hidesOpeningMessage={turn.turnId === brief?.turnId}
+                  />
+                </Fragment>
+              );
+            })}
+            {drawRuntimeNotesAfter(turns.length)}
+            {isStreamUnreadable ? (
+              <RuntimeNoteLine note={buildUnreadableStreamNote(streamUnreadableAt)} />
+            ) : null}
+            {subagent === undefined ? (
+              <SendingMessages client={client} sessionId={sessionId} />
+            ) : null}
+          </div>
+          {/* The foot has the page's background, so the transcript scrolling
             beneath it never shows through beside the tally or between the
             cards. */}
-        <div className="sticky bottom-0 flex flex-col gap-2 bg-bg">
-          <TallyPill session={session} subagents={subagents} />
-          {subagent === undefined ? <QueuedInputs client={client} sessionId={sessionId} /> : null}
-          <div className="flex flex-col">
-            <RequestDock
-              client={client}
-              session={session}
-              subagents={subagents}
-              subagent={subagent}
-              composer={
-                assistantId !== null ? "none" : subagent === undefined ? "below" : "elsewhere"
-              }
-            />
-            {subagent !== undefined ? (
-              <StatusCard
+          <div className="sticky bottom-0 flex flex-col gap-2 bg-bg">
+            <TallyPill session={session} subagents={subagents} />
+            {subagent === undefined ? <QueuedInputs client={client} sessionId={sessionId} /> : null}
+            <div className="flex flex-col">
+              <RequestDock
                 client={client}
                 session={session}
                 subagents={subagents}
                 subagent={subagent}
+                composer={
+                  assistantId !== null ? "none" : subagent === undefined ? "below" : "elsewhere"
+                }
               />
-            ) : assistantId === null ? (
-              <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
-            ) : (
-              <ConversationSessionNotice
-                client={client}
-                sessionId={sessionId}
-                assistantId={assistantId}
-                busy={session.status === "busy"}
-              />
-            )}
+              {subagent !== undefined ? (
+                <StatusCard
+                  client={client}
+                  session={session}
+                  subagents={subagents}
+                  subagent={subagent}
+                />
+              ) : assistantId === null ? (
+                <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
+              ) : (
+                <ConversationSessionNotice
+                  client={client}
+                  sessionId={sessionId}
+                  assistantId={assistantId}
+                  busy={session.status === "busy"}
+                />
+              )}
+            </div>
           </div>
-        </div>
-      </ContentColumn>
-    </div>
+        </ContentColumn>
+      </div>
+    </ThreadServersProvider>
   );
 }

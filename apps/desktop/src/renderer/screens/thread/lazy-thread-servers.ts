@@ -9,7 +9,6 @@ import { lazy } from "react";
  *   when a composer first draws. A plain `+` stands in until then.
  * - `LazyThreadServersMenu`: the submenu, loaded when the "MCP servers" row opens.
  * - `LazyThreadServerPicker`: the picker, loaded when "N more servers…" is pressed.
- * - `LazyHoldMcpServers`: the read of the servers a thread with servers keeps.
  *
  * This file must never import any of these modules as a value, or its code
  * would load with the composer again.
@@ -25,5 +24,3 @@ export const LazyDraftPlus = lazy(() =>
 export const LazyThreadServersMenu = lazy(() => import("./thread-servers-menu"));
 
 export const LazyThreadServerPicker = lazy(() => import("./thread-server-picker"));
-
-export const LazyHoldMcpServers = lazy(() => import("./hold-mcp-servers"));

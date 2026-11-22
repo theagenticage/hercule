@@ -62,7 +62,7 @@ import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
 import { LazyStartedThreadPlus } from "./lazy-thread-servers";
-import { StartedThreadPlusPlaceholder } from "./plus-placeholder";
+import { PlusPlaceholder } from "./plus-placeholder";
 import { QueuedInputs } from "./queued-inputs";
 import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
 
@@ -71,7 +71,8 @@ import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
  * agent's question. It edits the thread's list, not the answer, so it does.
  * Set it to `false` to draw the row off, as the attach row is while
  * answering, with `SERVERS_OFF_WHILE_ANSWERING` as the reason. This is the
- * one place that decides it (spec 17, the `+` menu).
+ * one place that decides it. Decided by Rogier, 2026-11-22 (spec 17, the `+`
+ * menu, answer mode).
  */
 const SERVERS_WORK_WHILE_ANSWERING = true;
 const SERVERS_OFF_WHILE_ANSWERING = "Not while answering a question";
@@ -337,7 +338,7 @@ export function ThreadComposer({
       step={answer?.step}
       renderPlus={(attach) => (
         // Without its own boundary, the menu's load would suspend the composer.
-        <Suspense fallback={<StartedThreadPlusPlaceholder session={session} />}>
+        <Suspense fallback={<PlusPlaceholder />}>
           <LazyStartedThreadPlus
             session={session}
             attach={attach}

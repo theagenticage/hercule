@@ -55,6 +55,7 @@ export {
   type NamingProjects,
 } from "./settings-list";
 export { resolveDraftMcpServerIds } from "./draft-pick";
+export { decideDraftServersPick } from "./draft-servers-pick";
 export {
   decideThreadStartList,
   decideThreadStartSource,
@@ -73,6 +74,14 @@ export {
   type ServerPickerRow,
   type ThreadServerMenu,
 } from "./thread-menu";
+export {
+  decideThreadServersDemand,
+  describeThreadServers,
+  type ThreadServersDemand,
+  type ThreadServersDescription,
+  type ThreadServersRecords,
+  type ThreadServersSubject,
+} from "./thread-servers";
 export { describeThreadServersRow, type ThreadServersRow } from "./thread-servers-row";
 export {
   buildMcpServerViews,

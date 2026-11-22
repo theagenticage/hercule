@@ -4,34 +4,33 @@
  * `lazy-thread-servers.ts`).
  */
 import { useRef, type JSX } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { describeThreadStartFoot, type McpServerView } from "@hercule/client-core/mcp-servers";
-import { useMcpServerViews } from "../../app/mcp-server-views";
-import { pluginsQuery, settingsQuery } from "../../app/queries";
+import { pluginsQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
 import { ServerPickerDialog } from "../settings/mcp-servers/server-picker";
-import { useThreadStartDecision, type ThreadServers } from "./use-thread-servers";
+import { useThreadServers } from "./thread-servers";
+import type { ThreadServerEdits } from "./use-thread-edits";
 
 /**
- * Renders the picker "MCP servers of this thread" for `servers`, once the
- * servers and the default list are read: the cache first, and the topic held
- * while the dialog is open. When the servers cannot be read, a dialog says
+ * Renders the picker "MCP servers of this thread" for the open thread's
+ * servers, once they are read: the cache first, and the topic held while the
+ * dialog is open (see `ThreadServersProvider`). Changes are made through
+ * `edits`. When the servers cannot be read, a dialog says
  * why instead. `onClose` is called whenever the dialog closes, and the
  * caller then unmounts it.
  */
 export default function ThreadServerPicker({
-  servers,
+  edits,
   onClose,
 }: {
-  readonly servers: ThreadServers;
+  readonly edits: ThreadServerEdits;
   readonly onClose: () => void;
 }): JSX.Element | null {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { views, failure } = useMcpServerViews("read");
-  const settings = useQuery(settingsQuery(client));
+  const { views, readFailure } = useThreadServers();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  if (failure !== null) {
+  if (readFailure !== null) {
     return (
       <GlassDialog
         dialogRef={dialogRef}
@@ -40,7 +39,7 @@ export default function ThreadServerPicker({
         onClose={onClose}
       >
         <p className="mcp-picker-error" role="alert">
-          {`Could not read the servers: ${failure}`}
+          {`Could not read the servers: ${readFailure}`}
         </p>
         <div className="mcp-picker-foot">
           <button
@@ -54,37 +53,38 @@ export default function ThreadServerPicker({
       </GlassDialog>
     );
   }
-  if (views === undefined || settings.isPending) return null;
-  return <ThreadPickerDialog views={views} servers={servers} onClose={onClose} />;
+  if (views === undefined) return null;
+  return <ThreadPickerDialog views={views} edits={edits} onClose={onClose} />;
 }
 
-/** Renders the dialog once the servers and the default list are read, so the foot can say where the list started. */
+/** Renders the dialog once the servers are read. Its foot says where the list started, or why that is not known yet. */
 function ThreadPickerDialog({
   views,
-  servers,
+  edits,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
-  readonly servers: ThreadServers;
+  readonly edits: ThreadServerEdits;
   readonly onClose: () => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
+  const { described } = useThreadServers();
   const { foot, reset } = describeThreadStartFoot(
-    useThreadStartDecision(servers.projectId, views),
-    servers.ids,
+    described.start ?? { kind: "pending" },
+    described.mcpServerIds,
   );
   return (
     <ServerPickerDialog
       views={views}
       plugins={plugins}
-      mcpServerIds={servers.ids}
+      mcpServerIds={described.mcpServerIds}
       title="MCP servers of this thread"
       foot={foot}
       reset={reset}
-      busy={servers.busy}
-      error={servers.refusal}
-      onChoose={servers.apply}
+      busy={edits.busy}
+      error={edits.refusal}
+      onChoose={edits.apply}
       onClose={onClose}
     />
   );

@@ -5,7 +5,7 @@
  * (spec 17 §What MCP servers cost). Nothing outside the lazy file may import it.
  */
 import { useState, type JSX } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   buildThreadServerMenu,
@@ -15,42 +15,42 @@ import {
   type RememberedAccounts,
   type ServerMenuRow,
 } from "@hercule/client-core/mcp-servers";
-import { useMcpServerViews } from "../../app/mcp-server-views";
-import { pluginsQuery, settingsQuery } from "../../app/queries";
+import { pluginsQuery } from "../../app/queries";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { PluginMark } from "../../marks/plugin-mark";
 import { ServerName, ServerSwitch } from "../settings/mcp-servers/server-parts";
-import { useThreadStartDecision, type ThreadServers } from "./use-thread-servers";
+import { useThreadServers } from "./thread-servers";
+import type { ThreadServerEdits } from "./use-thread-edits";
 import "./thread-servers.css";
 
 /**
- * Renders the submenu "Servers of this thread" for `servers`: the servers
- * are read when it opens (the cache first), and while it is open the
- * `mcpServer` topic is held. `onOpenPicker` and `onReconnect` are called with
+ * Renders the submenu "Servers of this thread" for the open thread's servers:
+ * they are read when it opens (the cache first), and while it is open the
+ * `mcpServer` topic is held (see `ThreadServersProvider`). Changes are made
+ * through `edits`. `onOpenPicker` and `onReconnect` are called with
  * the menu still open: the caller closes it and opens the dialog. `onClose`
  * closes the menu, for the link to Settings.
  */
 export default function ThreadServersMenu({
-  servers,
+  edits,
   onOpenPicker,
   onReconnect,
   onClose,
 }: {
-  readonly servers: ThreadServers;
+  readonly edits: ThreadServerEdits;
   readonly onOpenPicker: () => void;
   readonly onReconnect: (connectionId: string) => void;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { views, failure } = useMcpServerViews("read");
-  const settings = useQuery(settingsQuery(client));
-  // The foot names where the list started, which needs the default list when the thread has no project.
-  if (views === undefined || settings.isPending) {
+  const { views, readFailure } = useThreadServers();
+  if (views === undefined) {
     return (
       <div className="pop plus-sub" role="group" aria-label="Servers of this thread">
         <div className="q-h plus-sub-top">Servers of this thread</div>
-        <p className="menu-note plus-sub-note" role={failure === null ? "status" : "alert"}>
-          {failure === null ? "Reading the servers…" : `Could not read the servers: ${failure}`}
+        <p className="menu-note plus-sub-note" role={readFailure === null ? "status" : "alert"}>
+          {readFailure === null
+            ? "Reading the servers…"
+            : `Could not read the servers: ${readFailure}`}
         </p>
       </div>
     );
@@ -58,7 +58,7 @@ export default function ThreadServersMenu({
   return (
     <SubmenuRows
       views={views}
-      servers={servers}
+      edits={edits}
       onOpenPicker={onOpenPicker}
       onReconnect={onReconnect}
       onClose={onClose}
@@ -67,19 +67,20 @@ export default function ThreadServersMenu({
 }
 
 /**
- * Renders the rows once the servers and the default list are read. The order
- * of the names is taken when it first renders and kept, so no row jumps while
- * the user switches them.
+ * Renders the rows once the servers are read. The foot says where the list
+ * started, or why that is not known yet: only its way back is lost then. The
+ * order of the names is taken when it first renders and kept, so no row jumps
+ * while the user switches them.
  */
 function SubmenuRows({
   views,
-  servers,
+  edits,
   onOpenPicker,
   onReconnect,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
-  readonly servers: ThreadServers;
+  readonly edits: ThreadServerEdits;
   readonly onOpenPicker: () => void;
   readonly onReconnect: (connectionId: string) => void;
   readonly onClose: () => void;
@@ -87,24 +88,23 @@ function SubmenuRows({
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const navigate = useNavigate();
-  const [order] = useState(() => orderMenuNames(views, servers.ids));
+  const { described } = useThreadServers();
+  const ids = described.mcpServerIds;
+  const [order] = useState(() => orderMenuNames(views, ids));
   // The account each name last showed, so switching a name back on picks it again.
   const [rememberedAccounts, setRememberedAccounts] = useState<RememberedAccounts>({});
   const menu = buildThreadServerMenu({
     views,
-    mcpServerIds: servers.ids,
+    mcpServerIds: ids,
     order,
     rememberedAccounts,
   });
-  const { foot, reset } = describeThreadStartFoot(
-    useThreadStartDecision(servers.projectId, views),
-    servers.ids,
-  );
+  const { foot, reset } = describeThreadStartFoot(described.start ?? { kind: "pending" }, ids);
 
   const choose = (row: ServerMenuRow, serverId: string | null, shownId: string): void => {
-    if (servers.busy) return;
+    if (edits.busy) return;
     setRememberedAccounts({ ...rememberedAccounts, [row.name]: shownId });
-    servers.apply({
+    edits.apply({
       kind: "name",
       name: row.name,
       serverId,
@@ -150,7 +150,7 @@ function SubmenuRows({
                   aria-label={`Account of ${row.name}`}
                   value={row.shown.server.id}
                   disabled={!row.on}
-                  aria-disabled={servers.busy}
+                  aria-disabled={edits.busy}
                   onChange={(event) => {
                     choose(row, event.target.value, event.target.value);
                   }}
@@ -166,7 +166,7 @@ function SubmenuRows({
             <ServerSwitch
               on={row.on}
               label={`${row.name} in this thread`}
-              busy={servers.busy}
+              busy={edits.busy}
               onFlip={() => {
                 choose(row, row.on ? null : row.shown.server.id, row.shown.server.id);
               }}
@@ -184,9 +184,9 @@ function SubmenuRows({
           </button>
         </div>
       )}
-      {servers.refusal !== null && (
+      {edits.refusal !== null && (
         <p className="plus-error" role="alert">
-          {servers.refusal}
+          {edits.refusal}
         </p>
       )}
       <div className="plus-foot">
@@ -198,11 +198,11 @@ function SubmenuRows({
               <button
                 type="button"
                 className="link"
-                aria-disabled={servers.busy}
+                aria-disabled={edits.busy}
                 onClick={() => {
-                  if (servers.busy) return;
+                  if (edits.busy) return;
                   // The start list is read when the user presses, not when the menu drew it.
-                  servers.apply({ kind: "reset" });
+                  edits.apply({ kind: "reset" });
                 }}
               >
                 {reset.label}

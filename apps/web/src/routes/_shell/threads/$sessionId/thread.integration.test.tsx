@@ -5918,6 +5918,55 @@ describe("Thread: the MCP servers of the + menu", () => {
     );
   });
 
+  it("keeps the topic and reads nothing more from the submenu to the picker, and drops it when the picker closes", async () => {
+    const user = userEvent.setup();
+    const { api, live } = await openServersThread([]);
+    const submenu = await openServersSubmenu(user);
+    await waitFor(() => {
+      expect(readServerReads(api)).toBe(2);
+    });
+
+    await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+
+    expect(live.topics()).toContain("mcpServer");
+    expect(readServerReads(api)).toBe(2);
+    await user.click(within(picker).getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
+  });
+
+  it("leaves the switches usable when the project the thread started from cannot be read", async () => {
+    const user = userEvent.setup();
+    const state = {
+      session: buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+    };
+    await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": { body: { items: [] } },
+      [`GET /api/v1/projects/${WEBSHOP.id}`]: {
+        status: 500,
+        body: buildErrorBody("internal", "The project could not be read."),
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+    });
+
+    const submenu = await openServersSubmenu(user);
+
+    await within(submenu).findByText(/Where this list started could not be read/);
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "notion in this thread" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+  });
+
   it("opens the picker from 'more servers', which lists every server, and writes its choice at once", async () => {
     const user = userEvent.setup();
     const { api } = await openServersThread([S_GITHUB]);

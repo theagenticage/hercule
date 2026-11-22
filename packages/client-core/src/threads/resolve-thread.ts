@@ -75,10 +75,12 @@ export interface ResolvedDraft {
    */
   readonly menuRunnerId: string | null;
   /**
-   * The list of MCP Servers the draft sends, present only when the user
-   * changed the list in this draft's project (`resolveDraftMcpServerIds`).
-   * Absent for an untouched draft, which sends none, so the controller picks
-   * its project's list or the default.
+   * The list of MCP Servers the user picked for this draft, present only when
+   * the user changed the list in this draft's project
+   * (`resolveDraftMcpServerIds`). It may name a server deleted since, which
+   * `buildSubmission` drops once the app passes the servers it knows. Absent
+   * for an untouched draft, which sends none, so the controller picks its
+   * project's list or the default.
    */
   readonly mcpServerIds?: readonly string[];
 }
@@ -212,11 +214,7 @@ const resolveDraft = (
         : null;
 
   const runner = catalogs.runners.find((each) => each.id === runnerId);
-  const mcpServerIds = resolveDraftMcpServerIds(
-    picks,
-    base.projectId ?? null,
-    catalogs.knownMcpServerIds,
-  );
+  const mcpServerIds = resolveDraftMcpServerIds(picks, base.projectId ?? null);
   const diagnosticRunner =
     runner === undefined
       ? findReferenceRunner(catalogs.runners, runnerId, catalogs.thisMacRunnerId)

@@ -113,13 +113,6 @@ export interface ThreadCatalogs {
   readonly modelProfiles: readonly ModelProfile[];
   readonly runners: readonly Runner[];
   readonly thisMacRunnerId: string | null;
-  /**
-   * The ids of the MCP Servers the controller knows. Absent until the list
-   * of servers has been read, which is never needed while the draft's list is
-   * untouched. Ids only, so an app can pass its cached server list without
-   * joining the servers with their Connections.
-   */
-  readonly knownMcpServerIds?: ReadonlySet<string>;
   readonly projects?: readonly Project[];
   readonly resources?: readonly Resource[];
   readonly workspaces?: readonly Workspace[];

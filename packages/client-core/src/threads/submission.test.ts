@@ -242,11 +242,16 @@ describe("buildSubmission: a draft thread", () => {
 describe("buildSubmission: the draft's list of MCP Servers", () => {
   const pick = (projectId: string | null, mcpServerIds: string[]): ThreadPicks =>
     applyThreadChoice({}, { kind: "mcpServers", projectId, mcpServerIds });
-  const send = (picks: ThreadPicks, projectId: string | null = null) =>
-    buildDraftSubmission(
-      { ...NO_CATALOGS, knownMcpServerIds: new Set(["s-linear"]) },
-      { ...CONFIG, projectId },
-      picks,
+  const KNOWN = new Set(["s-linear"]);
+  const send = (picks: ThreadPicks, projectId: string | null = null, known = KNOWN) =>
+    buildSubmission(
+      resolveThreadConfig(NO_CATALOGS, { kind: "draft", config: { ...CONFIG, projectId } }, picks),
+      MESSAGE,
+      known,
+    );
+  const sendBeforeServersAreRead = (picks: ThreadPicks) =>
+    buildSubmission(
+      resolveThreadConfig(NO_CATALOGS, { kind: "draft", config: CONFIG }, picks),
       MESSAGE,
     );
 
@@ -264,8 +269,11 @@ describe("buildSubmission: the draft's list of MCP Servers", () => {
     expect(send(pick("p-shop", ["s-linear"]), "p-blog").input).not.toHaveProperty("mcpServerIds");
   });
 
-  it("drops a server deleted since the pick", () => {
+  it("drops a server deleted since the pick, and nothing while the servers are not read", () => {
     expect(send(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+    expect(sendBeforeServersAreRead(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(
+      ["s-gone", "s-linear"],
+    );
   });
 });
 

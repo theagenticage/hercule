@@ -10,19 +10,13 @@ import type { ThreadPicks } from "../threads/config";
  * servers of a thread started in another. An explicit empty list stays
  * empty: it is the user's choice of no servers.
  *
- * Ids not in `knownServerIds` (a server deleted since the pick) are dropped,
- * as the controller drops them from every list it stores. `knownServerIds`
- * is `undefined` while the list of servers has not been read, and then
- * nothing is dropped.
+ * The list may name a server deleted since the pick: `buildSubmission` drops
+ * those when it is sent.
  */
 export const resolveDraftMcpServerIds = (
   picks: ThreadPicks,
   projectId: string | null,
-  knownServerIds: ReadonlySet<string> | undefined,
 ): readonly string[] | undefined => {
   const pick = picks.mcpServers;
-  if (pick === undefined || pick.projectId !== projectId) return undefined;
-  return knownServerIds === undefined
-    ? pick.mcpServerIds
-    : pick.mcpServerIds.filter((id) => knownServerIds.has(id));
+  return pick === undefined || pick.projectId !== projectId ? undefined : pick.mcpServerIds;
 };

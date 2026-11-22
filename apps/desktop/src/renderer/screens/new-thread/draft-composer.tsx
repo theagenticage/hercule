@@ -19,7 +19,8 @@ import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { LazyDraftPlus } from "../thread/lazy-thread-servers";
-import { DraftPlusPlaceholder } from "../thread/plus-placeholder";
+import { PlusPlaceholder } from "../thread/plus-placeholder";
+import { ThreadServersProvider } from "../thread/thread-servers";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
@@ -233,174 +234,176 @@ export function DraftComposer({
   const workspace = fields.workspace.value;
 
   return (
-    <div className="composer">
-      <ComposerCard
-        text={text}
-        onTextChange={onTextChange}
-        placeholder={placeholder}
-        readOnly={false}
-        canSend={canSend}
-        onSend={onSubmit}
-        error={error}
-        notice={notice}
-        attachments={attachments}
-        aboveField={aboveField}
-        replaceMessageRef={replaceMessageRef}
-        skills={skills}
-        renderPlus={(attach) => (
-          // Without its own boundary, the menu's load would suspend the draft.
-          <Suspense fallback={<DraftPlusPlaceholder view={view} />}>
-            <LazyDraftPlus view={view} onChoose={onChoose} attach={attach} />
-          </Suspense>
-        )}
-        start={
-          offReason === null ? (
-            <>
-              <DraftPick
-                className="pick"
-                label={formatAccessMode(fields.accessMode.value)}
-                glyph={<ShieldIcon size={14} />}
-                locked={fields.accessMode.locked}
-                menuLabel="Access mode"
-                align="start"
-                width="narrow"
-              >
-                {(close) => (
-                  <AccessModeMenu
-                    value={fields.accessMode.value}
-                    rows={fields.accessMode.rows}
-                    reason={pickReasons?.accessMode ?? null}
-                    onPick={(mode) => {
-                      onChoose({ kind: "accessMode", value: mode });
-                      close();
-                    }}
+    <ThreadServersProvider thread={{ kind: "draft", view }}>
+      <div className="composer">
+        <ComposerCard
+          text={text}
+          onTextChange={onTextChange}
+          placeholder={placeholder}
+          readOnly={false}
+          canSend={canSend}
+          onSend={onSubmit}
+          error={error}
+          notice={notice}
+          attachments={attachments}
+          aboveField={aboveField}
+          replaceMessageRef={replaceMessageRef}
+          skills={skills}
+          renderPlus={(attach) => (
+            // Without its own boundary, the menu's load would suspend the draft.
+            <Suspense fallback={<PlusPlaceholder />}>
+              <LazyDraftPlus view={view} onChoose={onChoose} attach={attach} />
+            </Suspense>
+          )}
+          start={
+            offReason === null ? (
+              <>
+                <DraftPick
+                  className="pick"
+                  label={formatAccessMode(fields.accessMode.value)}
+                  glyph={<ShieldIcon size={14} />}
+                  locked={fields.accessMode.locked}
+                  menuLabel="Access mode"
+                  align="start"
+                  width="narrow"
+                >
+                  {(close) => (
+                    <AccessModeMenu
+                      value={fields.accessMode.value}
+                      rows={fields.accessMode.rows}
+                      reason={pickReasons?.accessMode ?? null}
+                      onPick={(mode) => {
+                        onChoose({ kind: "accessMode", value: mode });
+                        close();
+                      }}
+                    />
+                  )}
+                </DraftPick>
+                {descriptors === null ? null : (
+                  <OptionsPick
+                    descriptors={descriptors}
+                    selected={config.options}
+                    modelName={pill.name}
+                    disabled={false}
+                    onChoose={onChoose}
                   />
                 )}
-              </DraftPick>
-              {descriptors === null ? null : (
-                <OptionsPick
-                  descriptors={descriptors}
-                  selected={config.options}
-                  modelName={pill.name}
-                  disabled={false}
-                  onChoose={onChoose}
-                />
-              )}
-            </>
-          ) : (
+              </>
+            ) : (
+              <>
+                <OffPick reason={offReason} glyph={<ShieldIcon size={14} />} label="Access" />
+                <OffPick reason={offReason} glyph={<SlidersIcon size={14} />} label="Effort" />
+              </>
+            )
+          }
+          end={
+            offReason === null ? (
+              <ModelPick
+                pill={pill}
+                catalogs={catalogs}
+                config={config}
+                kind="draft"
+                runnerId={runnerId}
+                disabled={false}
+                readRecent={readRecent}
+                reason={pickReasons?.model ?? null}
+                onChoose={onChoose}
+                onSignIn={onSignIn}
+              />
+            ) : (
+              <OffPick reason={offReason} label="Profile" isPill />
+            )
+          }
+          fieldRef={fieldRef}
+          fieldId={fieldId ?? DRAFT_MESSAGE_ID}
+          // The book's draft field has the focus when the page opens, so the
+          // user can type the moment the draft shows.
+          autoFocus
+          sendTitle="Start thread"
+        />
+        <div className="lip">
+          {lipStart}
+          {offReason !== null ? null : (
             <>
-              <OffPick reason={offReason} glyph={<ShieldIcon size={14} />} label="Access" />
-              <OffPick reason={offReason} glyph={<SlidersIcon size={14} />} label="Effort" />
-            </>
-          )
-        }
-        end={
-          offReason === null ? (
-            <ModelPick
-              pill={pill}
-              catalogs={catalogs}
-              config={config}
-              kind="draft"
-              runnerId={runnerId}
-              disabled={false}
-              readRecent={readRecent}
-              reason={pickReasons?.model ?? null}
-              onChoose={onChoose}
-              onSignIn={onSignIn}
-            />
-          ) : (
-            <OffPick reason={offReason} label="Profile" isPill />
-          )
-        }
-        fieldRef={fieldRef}
-        fieldId={fieldId ?? DRAFT_MESSAGE_ID}
-        // The book's draft field has the focus when the page opens, so the
-        // user can type the moment the draft shows.
-        autoFocus
-        sendTitle="Start thread"
-      />
-      <div className="lip">
-        {lipStart}
-        {offReason !== null ? null : (
-          <>
-            <DraftPick
-              className="lip-pick"
-              label={workspaceLabel}
-              glyph={<WorkspaceIcon size={13} />}
-              locked={fields.workspace.locked}
-              menuLabel="Workspace"
-              align="start"
-              // The workspace's and the machine's rows carry a second line; the
-              // branch menu's rows are short.
-              width="widest"
-              onOpen={onOpenWorkspaceMenu}
-            >
-              {(close) => (
-                <WorkspaceMenuContent
-                  menu={workspaceMenu}
-                  reason={pickReasons?.workspace ?? null}
-                  onPick={(picked) => {
-                    onChoose({ kind: "workspace", workspace: picked });
-                    close();
-                  }}
-                />
-              )}
-            </DraftPick>
-            {branch === null ? null : (
               <DraftPick
                 className="lip-pick"
-                label={branch.label}
-                glyph={<BranchIcon size={13} />}
-                locked={branch.locked}
-                menuLabel="Branch"
+                label={workspaceLabel}
+                glyph={<WorkspaceIcon size={13} />}
+                locked={fields.workspace.locked}
+                menuLabel="Workspace"
                 align="start"
-                width="narrow"
+                // The workspace's and the machine's rows carry a second line; the
+                // branch menu's rows are short.
+                width="widest"
                 onOpen={onOpenWorkspaceMenu}
               >
                 {(close) => (
-                  <BranchMenuContent
-                    field={branch}
+                  <WorkspaceMenuContent
+                    menu={workspaceMenu}
+                    reason={pickReasons?.workspace ?? null}
                     onPick={(picked) => {
-                      onChoose({
-                        kind: "workspace",
-                        workspace: setWorkspaceStartingRevision(workspace, picked),
-                      });
+                      onChoose({ kind: "workspace", workspace: picked });
                       close();
                     }}
                   />
                 )}
               </DraftPick>
-            )}
-          </>
-        )}
-        <span className="spacer" />
-        {problem === null ? (
-          machinePick
-        ) : (
-          // The machine and its problem read as one item, so they share a
-          // span and the lip's wider gap stays between items. A machine with
-          // no problem has no span, so the lip is the book's.
-          <span className="lip-machine">
-            {machinePick}
-            <span aria-hidden="true">·</span>
-            {signIn === null ? (
-              problem.reason
-            ) : (
-              <button
-                type="button"
-                className="link"
-                aria-label={`Sign in to ${signIn.subject}`}
-                onClick={() => {
-                  onSignIn(signIn);
-                }}
-              >
-                Sign in
-              </button>
-            )}
-          </span>
-        )}
+              {branch === null ? null : (
+                <DraftPick
+                  className="lip-pick"
+                  label={branch.label}
+                  glyph={<BranchIcon size={13} />}
+                  locked={branch.locked}
+                  menuLabel="Branch"
+                  align="start"
+                  width="narrow"
+                  onOpen={onOpenWorkspaceMenu}
+                >
+                  {(close) => (
+                    <BranchMenuContent
+                      field={branch}
+                      onPick={(picked) => {
+                        onChoose({
+                          kind: "workspace",
+                          workspace: setWorkspaceStartingRevision(workspace, picked),
+                        });
+                        close();
+                      }}
+                    />
+                  )}
+                </DraftPick>
+              )}
+            </>
+          )}
+          <span className="spacer" />
+          {problem === null ? (
+            machinePick
+          ) : (
+            // The machine and its problem read as one item, so they share a
+            // span and the lip's wider gap stays between items. A machine with
+            // no problem has no span, so the lip is the book's.
+            <span className="lip-machine">
+              {machinePick}
+              <span aria-hidden="true">·</span>
+              {signIn === null ? (
+                problem.reason
+              ) : (
+                <button
+                  type="button"
+                  className="link"
+                  aria-label={`Sign in to ${signIn.subject}`}
+                  onClick={() => {
+                    onSignIn(signIn);
+                  }}
+                >
+                  Sign in
+                </button>
+              )}
+            </span>
+          )}
+        </div>
       </div>
-    </div>
+    </ThreadServersProvider>
   );
 }
 

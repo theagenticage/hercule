@@ -1,11 +1,12 @@
 /**
  * Reads a Draft Thread, for the draft screen and for the sidebar's draft row.
  */
-import { useMemo, useSyncExternalStore } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSyncExternalStore } from "react";
+import { useQuery, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildDraftView,
+  type HerculeClient,
   type DraftAddress,
   type DraftReads,
   type DraftView,
@@ -14,8 +15,8 @@ import { buildDraftKey } from "./pending-submissions";
 import { readRecentModels } from "./recent-models";
 import {
   harnessesQuery,
-  localRunnerQuery,
   mcpServersQuery,
+  localRunnerQuery,
   modelProfilesQuery,
   profilesQuery,
   projectsQuery,
@@ -29,6 +30,20 @@ import {
 } from "./queries";
 
 /**
+ * Returns the ids of the MCP servers the cache holds, or `undefined` while
+ * the list of servers has not been read. Reads nothing. A Draft Thread's pick
+ * is checked against them when it is sent (see `buildSubmission`), so the draft
+ * holds no observer of the list.
+ */
+export const readCachedMcpServerIds = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): ReadonlySet<string> | undefined => {
+  const servers = queryClient.getQueryData(mcpServersQuery(client).queryKey);
+  return servers === undefined ? undefined : new Set(servers.map((server) => server.id));
+};
+
+/**
  * Reads every record a Draft Thread is built from, for `buildDraftView`, and
  * returns them. Returns `null` while the settings or the profiles are not in
  * the cache, and while `isOpen` is false: then the reads that only a draft
@@ -39,11 +54,6 @@ import {
  * one costs the sidebar only its draft row. A later probe of the local
  * runner, when the runners change, keeps the previous answer until it
  * returns.
- *
- * The ids of the MCP servers in the cache go with the reads, so a pick of a
- * server deleted since is dropped when the draft is submitted. Nothing is read
- * for them: the list is in the cache once the draft's list of servers has
- * been shown, and until then the draft's list is untouched.
  */
 export function useDraftReads(isOpen: boolean): DraftReads | null {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
@@ -51,11 +61,6 @@ export function useDraftReads(isOpen: boolean): DraftReads | null {
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const settings = useQuery({ ...settingsQuery(client), enabled: isOpen }).data;
   const profiles = useQuery({ ...profilesQuery(client), enabled: isOpen }).data;
-  const servers = useQuery({ ...mcpServersQuery(client), enabled: false }).data;
-  const knownMcpServerIds = useMemo(
-    () => (servers === undefined ? undefined : new Set(servers.map((server) => server.id))),
-    [servers],
-  );
   const lists = {
     accounts: useSuspenseQuery(providerAccountsQuery(client)).data,
     providers: useSuspenseQuery(providersQuery(client)).data,
@@ -72,7 +77,6 @@ export function useDraftReads(isOpen: boolean): DraftReads | null {
   if (!isOpen || settings === undefined || profiles === undefined) return null;
   return {
     ...lists,
-    ...(knownMcpServerIds === undefined ? {} : { knownMcpServerIds }),
     settings,
     profiles,
     recent: readRecentModels(controller.url),

@@ -16,6 +16,7 @@ import {
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
+import { resolveDraftMcpServerIds } from "@hercule/client-core/mcp-servers";
 import { cn, ImageLightbox } from "@hercule/ui";
 import {
   harnessesQuery,
@@ -36,7 +37,7 @@ import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { ProviderMark } from "../provider-mark";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
-import { useKnownMcpServerIds } from "../use-mcp-server-views";
+import { ThreadServersProvider } from "../thread-servers";
 import { PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
@@ -60,7 +61,7 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * agent's question. It edits the thread's list, not the answer, so it does.
  * Set it to `false` to draw the row off, as the attach row is while
  * answering, with `SERVERS_OFF_WHILE_ANSWERING` as the reason. This is the
- * one place that decides it. Built so; Rogier to confirm (spec 17, the `+`
+ * one place that decides it. Decided by Rogier, 2026-11-22 (spec 17, the `+`
  * menu, answer mode).
  */
 const SERVERS_WORK_WHILE_ANSWERING = true;
@@ -84,7 +85,7 @@ const SERVERS_OFF_WHILE_ANSWERING = "Not while answering a question";
  * The `+` opens a menu: Attach, and the thread's MCP servers (`ThreadPlusMenu`).
  * Answer mode turns Attach off but leaves the MCP servers row working,
  * because that row edits the thread's list and not the answer being written
- * (`SERVERS_WORK_WHILE_ANSWERING`; built so, Rogier to confirm: spec 17, the
+ * (`SERVERS_WORK_WHILE_ANSWERING`; decided by Rogier, 2026-11-22: spec 17, the
  * `+` menu, answer mode). The servers are read only when the thread has
  * some, or when the MCP row or the picker opens.
  */
@@ -96,7 +97,7 @@ export function Composer({
   /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
-  const { client, live, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const { client, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
@@ -114,7 +115,6 @@ export function Composer({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
-  const knownMcpServerIds = useKnownMcpServerIds(client);
   const catalogs = {
     accounts,
     providers,
@@ -126,8 +126,6 @@ export function Composer({
     resources,
     workspaces,
     sessions,
-    // A draft's pick of MCP servers is checked against these when it is sent.
-    ...(knownMcpServerIds === undefined ? {} : { knownMcpServerIds }),
   };
   const [open, setOpen] = useState<SelectorKey | null>(null);
   // The model pill's element. The lip's branch menu measures it to stay clear of the pill.
@@ -214,7 +212,7 @@ export function Composer({
   const sendFailure = model.sendError === null ? null : readErrorMessage(model.sendError);
   const errorText =
     answer === null ? (sendFailure ?? stopFailure) : (answer.failure ?? stopFailure);
-  return (
+  const card = (
     // A draft shows its sentence above the card, and the sentence takes the free space.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       {fields.lead === null ? null : (
@@ -316,12 +314,8 @@ export function Composer({
             <div className="flex min-w-0 flex-[1_1_304px] items-center gap-1.5">
               <ThreadPlusMenu
                 client={client}
-                live={live}
                 thread={thread}
                 projectId={projectId}
-                projects={projects}
-                defaultIds={settings["thread.mcpServerIds"] ?? []}
-                picks={model.picks}
                 recordThreadChoice={model.recordThreadChoice}
                 plugins={plugins}
                 open={open === "plus"}
@@ -489,5 +483,19 @@ export function Composer({
         }}
       />
     </div>
+  );
+  // A started thread's servers are shared by its page, which also draws the lines about them.
+  return thread.kind === "draft" ? (
+    <ThreadServersProvider
+      thread={{
+        kind: "draft",
+        projectId,
+        pickedIds: resolveDraftMcpServerIds(model.picks, projectId),
+      }}
+    >
+      {card}
+    </ThreadServersProvider>
+  ) : (
+    card
   );
 }

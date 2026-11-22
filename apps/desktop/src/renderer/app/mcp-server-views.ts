@@ -1,54 +1,50 @@
 /**
- * Reads of the MCP servers for the screens of a thread and its composer: the
- * servers joined with their Connections, held only while a thread has a reason
- * to draw them.
+ * The MCP servers joined with their Connections, for the screens of an open
+ * thread (see `ThreadServersProvider`).
  */
-import { useMemo } from "react";
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
-import { buildMcpServerViews, type McpServerView } from "@hercule/client-core/mcp-servers";
-import type { MutableLiveTopic } from "@hercule/contract";
-import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "./live";
-import { connectionsQuery, mcpServersQuery, pluginsQuery } from "./queries";
+import { useEffect, useMemo, useState } from "react";
+import type { McpServerView } from "@hercule/client-core/mcp-servers";
+import { loadMcpServerViewsBuilder } from "./load-mcp-server-views-builder";
+import type { Connection, McpServer, PluginDetail } from "@hercule/contract";
 
-const NO_TOPICS: readonly MutableLiveTopic[] = [];
+type BuildViews = Awaited<ReturnType<typeof loadMcpServerViewsBuilder>>;
 
 /**
- * How `useMcpServerViews` gets the servers:
+ * Returns the views of every MCP server: the servers joined with their
+ * Connections and the plugins that offer them. Returns `undefined` while
+ * `wanted` is false, while the code that joins them loads, and until the
+ * three records are read.
  *
- * - `read`: from the cache, and from the controller when the cache holds none,
- *   with the `mcpServer` topic held while the caller is mounted;
- * - `cache`: only what the cache holds, never a read and never a topic;
- * - `off`: nothing, and no views are built.
+ * The code that joins them is not part of the first screen. It loads the
+ * first time `wanted` is true, and the views are built once for the records
+ * given, so a thread's line, menu and picker share them.
  */
-export type McpServerReadMode = "read" | "cache" | "off";
-
-/** What `useMcpServerViews` returns. */
-export interface McpServerViews {
-  /** The servers joined with their Connections, or `undefined` until they are read, and in mode `off`. */
-  readonly views: readonly McpServerView[] | undefined;
-  /** Why the read failed, such as a token without `mcp.read`, or `null`. */
-  readonly failure: string | null;
-}
-
-/**
- * Returns the views of every MCP server, as `mode` says. A thread with no
- * server and no line about servers reads nothing: its callers pass `off`.
- */
-export function useMcpServerViews(mode: McpServerReadMode): McpServerViews {
-  const { client, live } = useRouteContext({ from: "/_connected" }).controller;
-  const queryClient = useQueryClient();
-  useScreenTopicsLive(live, queryClient, mode === "read" ? MCP_SERVER_TOPICS : NO_TOPICS);
-  const servers = useQuery({ ...mcpServersQuery(client), enabled: mode === "read" });
-  const connections = useSuspenseQuery(connectionsQuery(client)).data;
-  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const views = useMemo(
+export function useMcpServerViews(
+  wanted: boolean,
+  servers: readonly McpServer[] | undefined,
+  connections: readonly Connection[] | undefined,
+  plugins: readonly PluginDetail[] | undefined,
+): readonly McpServerView[] | undefined {
+  const [build, setBuild] = useState<BuildViews | null>(null);
+  useEffect(() => {
+    if (!wanted || build !== null) return;
+    let cancelled = false;
+    void loadMcpServerViewsBuilder().then((loaded) => {
+      if (!cancelled) setBuild(() => loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [wanted, build]);
+  return useMemo(
     () =>
-      mode === "off" || servers.data === undefined
-        ? undefined
-        : buildMcpServerViews(servers.data, connections, plugins),
-    [mode, servers.data, connections, plugins],
+      wanted &&
+      build !== null &&
+      servers !== undefined &&
+      connections !== undefined &&
+      plugins !== undefined
+        ? build(servers, connections, plugins)
+        : undefined,
+    [wanted, build, servers, connections, plugins],
   );
-  return { views, failure: servers.error === null ? null : readErrorMessage(servers.error) };
 }
