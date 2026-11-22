@@ -6,8 +6,8 @@
  *
  * The model is the stand-in of `upstream.ts`, scripted to find a tool with
  * pi's `tool_search` and call it (`mcp-model.testing.ts`). The MCP server is
- * the fake of the Codex tests, which records what it receives
- * (`../codex/fake-mcp-server.testing.ts`). Neither needs a login or reaches an
+ * the fake shared with the Codex tests, which records what it receives
+ * (`../fake-mcp-server.testing.ts`). Neither needs a login or reaches an
  * outside service. The real pi starts with an environment built from nothing:
  * a throwaway `HOME` and agent directory, and a `PATH` of system folders.
  *
@@ -28,11 +28,7 @@ import type { ApprovalDecision, HarnessEvent, SessionSpec } from "@hercule/proto
 import { makePiAdapter } from "./adapter";
 import { killProcessesHolding, runProcess, spawnPi } from "../process";
 import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
-import {
-  SEARCH_ISSUES_TOOL,
-  startFakeMcpServer,
-  WHOAMI_TOOL,
-} from "../codex/fake-mcp-server.testing";
+import { SEARCH_ISSUES_TOOL, startFakeMcpServer, WHOAMI_TOOL } from "../fake-mcp-server.testing";
 import { buildMcpCallScript, TOOL_SEARCH_TOOL } from "./mcp-model.testing";
 import { buildPiTestPath, findPiTestBinary } from "./pi-binary.testing";
 import { buildContext, cleanupHomes, filterByTag, SPEC, waitUntil } from "./testing";
@@ -221,56 +217,39 @@ const createFixture = () => {
 describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () => {
   describe.each(["approval-required", "auto-accept-edits"] as const)("in %s", (accessMode) => {
     it(
-      "asks before each call, also for a tool marked read only, and runs none when denied",
+      "asks before each call, also for a tool marked read only, runs none when denied and one once when allowed",
       async () => {
         const { mcp, startRun } = createFixture();
         const run = await startRun(accessMode);
-        for (const tool of [SEARCH_ISSUES_TOOL, WHOAMI_TOOL]) {
-          const opened = await run.callToolUntilAsked(tool);
-          expect(opened.request).toMatchObject({
-            kind: "tool_approval",
-            detail: { toolName: buildExpectedToolName(tool) },
-          });
-          // pi holds the call until the answer comes, so the server cannot have it yet.
-          await new Promise((resolve) => setTimeout(resolve, UNANSWERED_MS));
-          expect(mcp.listCalledTools()).toEqual([]);
-          await run.answer(opened, "deny");
-          expect(mcp.listCalledTools()).toEqual([]);
-          expect(findMcpCallItems(run.seen).at(-1)).toMatchObject({
-            _tag: "item.completed",
-            status: "declined",
-          });
-        }
-        expect(run.listOpened()).toHaveLength(2);
-      },
-      TEST_MS,
-    );
 
-    it(
-      "asks before each call, also for a tool marked read only, and runs it once when allowed",
-      async () => {
-        const { mcp, startRun } = createFixture();
-        const run = await startRun(accessMode);
-        const calledSoFar: Array<string> = [];
-        for (const tool of [SEARCH_ISSUES_TOOL, WHOAMI_TOOL]) {
-          const opened = await run.callToolUntilAsked(tool);
-          // The approval is filed under the call's own item, so a surface can show it there.
-          expect(opened.request.itemId).toBe(findMcpCallItems(run.seen).at(-1)!.itemId);
-          expect(mcp.listCalledTools()).toEqual(calledSoFar);
-          await run.answer(opened, "allow");
-          calledSoFar.push(tool);
-          expect(mcp.listCalledTools()).toEqual(calledSoFar);
-          // The item names the MCP Server and the tool, as the model's tool is `<server>__<tool>`.
-          const [server, name] = tool.split("__");
-          expect(findMcpCallItems(run.seen).slice(-2)).toMatchObject([
-            { _tag: "item.started", detail: { name, server, kind: "mcp" } },
-            {
-              _tag: "item.completed",
-              status: "completed",
-              detail: { name, server, kind: "mcp" },
-            },
-          ]);
-        }
+        // The first call is denied. pi holds it until the answer comes, so the server cannot have it yet.
+        const denied = await run.callToolUntilAsked(SEARCH_ISSUES_TOOL);
+        expect(denied.request).toMatchObject({
+          kind: "tool_approval",
+          detail: { toolName: buildExpectedToolName(SEARCH_ISSUES_TOOL) },
+        });
+        await new Promise((resolve) => setTimeout(resolve, UNANSWERED_MS));
+        expect(mcp.listCalledTools()).toEqual([]);
+        await run.answer(denied, "deny");
+        expect(mcp.listCalledTools()).toEqual([]);
+        expect(findMcpCallItems(run.seen).at(-1)).toMatchObject({
+          _tag: "item.completed",
+          status: "declined",
+        });
+
+        // The second call is of a tool marked read only, and is asked about too.
+        const allowed = await run.callToolUntilAsked(WHOAMI_TOOL);
+        // The approval is filed under the call's own item, so a surface can show it there.
+        expect(allowed.request.itemId).toBe(findMcpCallItems(run.seen).at(-1)!.itemId);
+        expect(mcp.listCalledTools()).toEqual([]);
+        await run.answer(allowed, "allow");
+        expect(mcp.listCalledTools()).toEqual([WHOAMI_TOOL]);
+        // The item names the MCP Server and the tool, as the model's tool is `<server>__<tool>`.
+        const [server, name] = WHOAMI_TOOL.split("__");
+        expect(findMcpCallItems(run.seen).slice(-2)).toMatchObject([
+          { _tag: "item.started", detail: { name, server, kind: "mcp" } },
+          { _tag: "item.completed", status: "completed", detail: { name, server, kind: "mcp" } },
+        ]);
         expect(run.listOpened()).toHaveLength(2);
       },
       TEST_MS,

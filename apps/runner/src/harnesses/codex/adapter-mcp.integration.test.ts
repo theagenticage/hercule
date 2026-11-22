@@ -6,7 +6,7 @@
  *
  * The model is a local Responses API fixture that calls the tool the test
  * names (`mock-model.testing.ts`), and the MCP server is a fake that records
- * what it receives (`fake-mcp-server.testing.ts`). Neither needs a login or
+ * what it receives (`../fake-mcp-server.testing.ts`). Neither needs a login or
  * calls an outside service.
  *
  * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
@@ -30,7 +30,7 @@ import {
   SNAPSHOT_IMAGE_TOOL,
   startFakeMcpServer,
   WHOAMI_TOOL,
-} from "./fake-mcp-server.testing";
+} from "../fake-mcp-server.testing";
 import { cleanupHomes, createScratchHome, PNG_BYTES } from "../testing";
 import { buildContext, SESSION, SPEC } from "./testing";
 

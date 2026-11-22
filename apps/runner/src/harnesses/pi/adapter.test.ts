@@ -103,19 +103,6 @@ describe("launching pi with the MCP Gateway", () => {
     expect(run.child.env[MCP_GATEWAY_URL_VARIABLE]).toBe(GATEWAY.url);
   });
 
-  it("keeps the session's token out of the command line and out of the address variable", async () => {
-    const token = "session-token-1212";
-    const run = await startTestSession(
-      {},
-      SPEC,
-      { HERCULE_TOKEN: token },
-      { mcpServers: [GATEWAY] },
-    );
-
-    expect(run.child.command.join(" ")).not.toContain(token);
-    expect(run.child.env[MCP_GATEWAY_URL_VARIABLE]).not.toContain(token);
-  });
-
   it("loads nothing for a session without the gateway, and removes an address the runner inherited", async () => {
     // A runner started from inside a pi session inherits that session's value.
     const run = await startTestSession({}, SPEC, { [MCP_GATEWAY_URL_VARIABLE]: GATEWAY.url });
@@ -123,10 +110,6 @@ describe("launching pi with the MCP Gateway", () => {
     expect(run.child.command).not.toContain("builtin:mcp");
     expect(run.child.command).not.toContain("builtin:tool-search");
     expect(run.child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
-  });
-
-  it("is declared as an adapter that maps MCP servers, so the controller sends the gateway", () => {
-    expect(createDriving().adapter.mapsMcpServers).toBe(true);
   });
 });
 

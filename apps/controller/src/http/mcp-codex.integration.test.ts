@@ -62,33 +62,26 @@ import {
   type ScriptedModelRequest,
 } from "../../../runner/src/harnesses/codex/mock-model.testing";
 import type { ThreadStartParams, TurnStartParams } from "../../../runner/src/harnesses/codex/types";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createProfile, spawnThreadUnder } from "../sessions/testing";
+import { startFakeUpstream, type FakeTool, type FakeUpstream } from "../mcp-servers/testing";
 import {
-  createServers,
-  eventually,
-  readServer,
-  startFakeUpstream,
-  type FakeTool,
-  type FakeUpstream,
-} from "../mcp-servers/testing";
+  OLDER_ERA_REVISIONS,
+  WHOAMI_TOOL,
+  readUpstreamCalls,
+  withGatewayRig,
+  type GatewayRig,
+} from "./mcp-gateway-rig.testing";
 import {
   countListChanged,
   describeRequest,
   requestsOf,
-  startRecordingProxy,
   type RecordingProxy,
 } from "./mcp-recording-proxy.testing";
-import { send, waitWithin } from "./testing";
-import { withFleet } from "../workspaces/testing";
+import { waitWithin } from "./testing";
 
 const codex = findCodexTestBinary();
 
 /** The most one step of these tests waits for Codex, which is a separate process that starts slowly. */
 const STEP_MS = 30_000;
-
-/** The revisions of the older era, which Codex asks `initialize` for. */
-const OLDER_ERA_REVISIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
 /** The name the gateway has as an MCP server in Codex's config, as the runner names it. */
 const GATEWAY_NAME = "tools";
@@ -359,31 +352,10 @@ const withCodexHome = async (
 // -- The gateway -------------------------------------------------------------
 
 /** What `withGateway` gives a test. */
-interface Gateway {
-  readonly proxy: RecordingProxy;
-  /** The address Codex is given: the recording proxy in front of the controller. */
-  readonly gatewayUrl: string;
-  readonly sessionToken: string;
+interface Gateway extends GatewayRig {
   readonly upstream: FakeUpstream;
   readonly model: ReturnType<typeof startScriptedModel>;
-  /** Puts the `sentry` server in the Thread's list, or takes it out. */
-  readonly setListed: (listed: boolean) => Promise<void>;
-  /**
-   * Makes the gateway forget the MCP session that Codex holds, as a restart
-   * does for every session, and returns the id of the session that was
-   * forgotten. Codex is not told.
-   */
-  readonly forgetMcpSession: () => Promise<string>;
 }
-
-const WHOAMI_TOOL: FakeTool = {
-  name: "whoami",
-  description: "Returns the user the server acts as",
-};
-
-/** Returns the `tools/call` requests the fake upstream received. */
-const readUpstreamCalls = (upstream: FakeUpstream) =>
-  upstream.requests.filter((one) => one.method === "tools/call");
 
 /**
  * Runs `body` against a controller with a live Thread, a recording proxy in
@@ -398,63 +370,15 @@ const withGateway = async (
   const upstream = await startFakeUpstream({ tools: options.tools ?? [WHOAMI_TOOL] });
   const model = startScriptedModel(buildCallScript());
   try {
-    await withFleet(
-      async (arranged) => {
-        const controller = {
-          harness: arranged.harness,
-          base: arranged.harness.base,
-          token: arranged.token,
-        };
-        const [sentry] = await createServers(controller, [SERVER_NAME]);
-        await eventually(
-          () => readServer(controller, sentry!.id),
-          (record) => record.status === "ready",
-        );
-        const profile = await createProfile(arranged, "codex-gateway", ["mcp.use"]);
-        const thread = await spawnThreadUnder(arranged, profile, {
-          mcpServerIds: options.listed ? [sentry!.id] : [],
-        });
-        const proxy = startRecordingProxy(arranged.harness.base, {
-          answerDiscoverLikeOlderServer: false,
-        });
-        try {
-          await body({
-            proxy,
-            gatewayUrl: proxy.url,
-            sessionToken: thread.token,
-            upstream,
-            model,
-            setListed: async (listed) => {
-              const response = await send(
-                "PATCH",
-                arranged.harness.base,
-                `/api/v1/sessions/${thread.session.id}`,
-                { body: { mcpServerIds: listed ? [sentry!.id] : [] }, token: arranged.token },
-              );
-              expect(response.status).toBe(200);
-            },
-            forgetMcpSession: async () => {
-              const [initialize] = requestsOf(proxy.seen, "initialize");
-              const [list] = requestsOf(proxy.seen, "tools/list");
-              const gone = await fetch(`${proxy.url}/mcp`, {
-                method: "DELETE",
-                headers: {
-                  authorization: `Bearer ${thread.token}`,
-                  "mcp-session-id": initialize!.answeredSessionId!,
-                  "mcp-protocol-version": list!.protocolVersion!,
-                },
-              });
-              expect(gone.status).toBe(204);
-              return initialize!.answeredSessionId!;
-            },
-          });
-        } finally {
-          await proxy.stop();
-        }
-      },
+    await withGatewayRig(
       {
-        plugins: [buildMcpServerPlugin("acme", { server: buildDeskMcpServer("acme", upstream) })],
+        upstream,
+        profileName: "codex-gateway",
+        serverNames: [SERVER_NAME],
+        listed: options.listed ? [SERVER_NAME] : [],
+        answerDiscoverLikeOlderServer: false,
       },
+      (rig) => body({ ...rig, upstream, model }),
     );
   } finally {
     await model.stop();
@@ -542,7 +466,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       const [get] = requestsOf(rig.proxy.seen, "GET");
       const changesBefore = countListChanged([get!]);
 
-      await rig.setListed(true);
+      await rig.setList([SERVER_NAME]);
       expect(
         await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
         "list_changed on the GET stream",
@@ -569,7 +493,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       rig.proxy.withholdListChanged(true);
       const [get] = requestsOf(rig.proxy.seen, "GET");
       const changesBefore = countListChanged([get!]);
-      await rig.setListed(false);
+      await rig.setList([]);
       expect(
         await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
         "the gateway sent list_changed",

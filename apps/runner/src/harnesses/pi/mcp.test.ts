@@ -27,19 +27,18 @@ describe("what a pi process gets for MCP", () => {
     expect(everything).not.toContain("Bearer");
   });
 
-  it("loads nothing and removes an inherited address when the session has no servers", () => {
-    const launch = decideMcpLaunch([]);
+  it.each([
+    ["the session has no servers", []],
+    [
+      "the session has only a server of another name",
+      [{ name: "jira", url: "http://127.0.0.1:9/mcp" }],
+    ],
+  ])("loads nothing and removes an inherited address when %s", (_case, servers) => {
+    const launch = decideMcpLaunch(servers);
 
     expect(launch.argv).toEqual([]);
     // `undefined` is how the adapter asks for a variable to be removed, in case
     // the runner was started inside a pi session that had the gateway.
-    expect(launch.env).toHaveProperty(MCP_GATEWAY_URL_VARIABLE, undefined);
-  });
-
-  it("treats a server of another name as no gateway", () => {
-    const launch = decideMcpLaunch([{ name: "jira", url: "http://127.0.0.1:9/mcp" }]);
-
-    expect(launch.argv).toEqual([]);
     expect(launch.env).toHaveProperty(MCP_GATEWAY_URL_VARIABLE, undefined);
   });
 });

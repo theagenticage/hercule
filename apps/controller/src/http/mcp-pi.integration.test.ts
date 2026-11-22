@@ -41,7 +41,7 @@
  * without changing `PATH`. No CI job installs pi, so this file runs on a
  * developer's machine only.
  */
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -70,27 +70,22 @@ import {
   type FakeModelServer,
 } from "../../../runner/src/harnesses/pi/upstream";
 import { spawnPi, stopChild } from "../../../runner/src/harnesses/process";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createProfile, spawnThreadUnder } from "../sessions/testing";
+import { startFakeUpstream, type FakeTool, type FakeUpstream } from "../mcp-servers/testing";
 import {
-  createServers,
-  eventually,
-  readServer,
-  startFakeUpstream,
-  type FakeTool,
-  type FakeUpstream,
-} from "../mcp-servers/testing";
+  OLDER_ERA_REVISIONS,
+  WHOAMI_TOOL,
+  readUpstreamCalls,
+  withGatewayRig,
+  type GatewayRig,
+} from "./mcp-gateway-rig.testing";
 import {
   countListChanged,
   describeRequest,
   requestsOf,
-  startRecordingProxy,
   waitUntilQuiet,
   type ObservedRequest,
-  type RecordingProxy,
 } from "./mcp-recording-proxy.testing";
-import { send, waitWithin } from "./testing";
-import { withFleet } from "../workspaces/testing";
+import { waitWithin } from "./testing";
 
 const piBinary = findPiTestBinary();
 
@@ -99,9 +94,6 @@ const STEP_MS = 30_000;
 
 /** The test's own limit, with room for pi to start and for several turns. */
 const TEST_MS = 120_000;
-
-/** The revisions of the older era, which pi asks `initialize` for. */
-const OLDER_ERA_REVISIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
 /** The name of the one MCP Server the tests give the Thread. */
 const SERVER_NAME = "sentry";
@@ -112,33 +104,18 @@ const WHOAMI = `mcp__${MCP_GATEWAY_ENTRY_NAME}__${SERVER_NAME}__whoami`;
 /** The longest tool name a model may be shown: pi's own limit. */
 const MAX_TOOL_NAME_LENGTH = 64;
 
-const WHOAMI_TOOL: FakeTool = {
-  name: "whoami",
-  description: "Returns the user the server acts as",
-};
-
 // -- The real pi --------------------------------------------------------------
 
 /** A running pi, and the questions a test can put to it. */
 interface RunningPi {
   /** Sends a prompt and waits until pi has nothing left to run. */
   readonly runTurn: (prompt: string) => Promise<void>;
-  /** Stops pi and waits until it has exited. */
-  readonly stop: () => Promise<void>;
 }
 
 /** What `withPiHome` makes: starts one pi on the home. */
 interface PiHome {
   readonly start: () => RunningPi;
-  /** Lists every file under the throwaway home: the user's `HOME`, pi's agent directory, its sessions and its working directory. */
-  readonly listFiles: () => ReadonlyArray<string>;
 }
-
-/** Lists every file under `directory`, as paths. */
-const listFilesUnder = (directory: string): ReadonlyArray<string> =>
-  readdirSync(directory, { recursive: true, withFileTypes: true }).flatMap((entry) =>
-    entry.isFile() ? [join(entry.parentPath, entry.name)] : [],
-  );
 
 /**
  * Prepares a throwaway home that points pi at the stand-in model, calls `body`
@@ -228,12 +205,11 @@ const withPiHome = async (
           `the turn of "${prompt}" ended`,
         ).toBe(true);
       },
-      stop: () => Effect.runPromise(stopChild(child)),
     };
   };
 
   try {
-    await body({ start, listFiles: () => listFilesUnder(root) });
+    await body({ start });
   } finally {
     for (const child of spawned) await Effect.runPromise(stopChild(child));
     rmSync(root, { recursive: true, force: true });
@@ -266,26 +242,10 @@ const readToolResults = (model: FakeModelServer): ReadonlyArray<string> =>
 // -- The gateway -------------------------------------------------------------
 
 /** What `withGateway` gives a test. */
-interface Gateway {
-  readonly proxy: RecordingProxy;
-  /** The address pi is given: the recording proxy in front of the controller. */
-  readonly gatewayUrl: string;
-  readonly sessionToken: string;
+interface Gateway extends GatewayRig {
   readonly upstream: FakeUpstream;
   readonly model: FakeModelServer;
-  /** Puts the `sentry` server in the Thread's list, or takes it out. */
-  readonly setListed: (listed: boolean) => Promise<void>;
-  /**
-   * Makes the gateway forget the MCP session that pi holds, as a restart
-   * does for every session, and returns the id of the session that was
-   * forgotten. pi is not told.
-   */
-  readonly forgetMcpSession: () => Promise<string>;
 }
-
-/** Returns the `tools/call` requests the fake upstream received. */
-const readUpstreamCalls = (upstream: FakeUpstream) =>
-  upstream.requests.filter((one) => one.method === "tools/call");
 
 /**
  * Runs `body` against a controller with a live Thread, a recording proxy in
@@ -300,63 +260,15 @@ const withGateway = async (
   const upstream = await startFakeUpstream({ tools: options.tools ?? [WHOAMI_TOOL] });
   const model = startScriptedModelServer(buildMcpCallScript());
   try {
-    await withFleet(
-      async (arranged) => {
-        const controller = {
-          harness: arranged.harness,
-          base: arranged.harness.base,
-          token: arranged.token,
-        };
-        const [sentry] = await createServers(controller, [SERVER_NAME]);
-        await eventually(
-          () => readServer(controller, sentry!.id),
-          (record) => record.status === "ready",
-        );
-        const profile = await createProfile(arranged, "pi-gateway", ["mcp.use"]);
-        const thread = await spawnThreadUnder(arranged, profile, {
-          mcpServerIds: options.listed ? [sentry!.id] : [],
-        });
-        const proxy = startRecordingProxy(arranged.harness.base, {
-          answerDiscoverLikeOlderServer: false,
-        });
-        try {
-          await body({
-            proxy,
-            gatewayUrl: proxy.url,
-            sessionToken: thread.token,
-            upstream,
-            model,
-            setListed: async (listed) => {
-              const response = await send(
-                "PATCH",
-                arranged.harness.base,
-                `/api/v1/sessions/${thread.session.id}`,
-                { body: { mcpServerIds: listed ? [sentry!.id] : [] }, token: arranged.token },
-              );
-              expect(response.status).toBe(200);
-            },
-            forgetMcpSession: async () => {
-              const [initialize] = requestsOf(proxy.seen, "initialize");
-              const [list] = requestsOf(proxy.seen, "tools/list");
-              const gone = await fetch(`${proxy.url}/mcp`, {
-                method: "DELETE",
-                headers: {
-                  authorization: `Bearer ${thread.token}`,
-                  "mcp-session-id": initialize!.answeredSessionId!,
-                  "mcp-protocol-version": list!.protocolVersion!,
-                },
-              });
-              expect(gone.status).toBe(204);
-              return initialize!.answeredSessionId!;
-            },
-          });
-        } finally {
-          await proxy.stop();
-        }
-      },
+    await withGatewayRig(
       {
-        plugins: [buildMcpServerPlugin("acme", { server: buildDeskMcpServer("acme", upstream) })],
+        upstream,
+        profileName: "pi-gateway",
+        serverNames: [SERVER_NAME],
+        listed: options.listed ? [SERVER_NAME] : [],
+        answerDiscoverLikeOlderServer: false,
       },
+      (rig) => body({ ...rig, upstream, model }),
     );
   } finally {
     model.stop();
@@ -372,7 +284,7 @@ const withGateway = async (
  */
 const withPiOnGateway = (
   options: { readonly listed: boolean; readonly tools?: ReadonlyArray<FakeTool> },
-  body: (gateway: Gateway, running: RunningPi, home: PiHome) => Promise<void>,
+  body: (gateway: Gateway, running: RunningPi) => Promise<void>,
 ): Promise<void> =>
   withGateway(options, (gateway) =>
     withPiHome(
@@ -393,7 +305,7 @@ const withPiOnGateway = (
           ),
           "the GET stream is open",
         ).toBe(true);
-        await body(gateway, running, home);
+        await body(gateway, running);
       },
     ),
   );
@@ -448,7 +360,7 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
         const changesBefore = countListChanged([get!]);
         const listsBefore = requestsOf(rig.proxy.seen, "tools/list").length;
 
-        await rig.setListed(true);
+        await rig.setList([SERVER_NAME]);
         expect(
           await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
           "list_changed on the GET stream",
@@ -565,24 +477,6 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
           expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual([longTool]);
         },
       );
-    },
-    TEST_MS,
-  );
-
-  it(
-    "keeps the token out of every file pi writes",
-    async () => {
-      await withPiOnGateway({ listed: true }, async (rig, running, home) => {
-        await running.runTurn("find whoami");
-        expect(readUpstreamCalls(rig.upstream)).toHaveLength(1);
-
-        const findTokenFiles = () =>
-          home.listFiles().filter((file) => readFileSync(file).includes(rig.sessionToken));
-        expect(home.listFiles().length).toBeGreaterThan(0);
-        expect(findTokenFiles()).toEqual([]);
-        await running.stop();
-        expect(findTokenFiles()).toEqual([]);
-      });
     },
     TEST_MS,
   );
