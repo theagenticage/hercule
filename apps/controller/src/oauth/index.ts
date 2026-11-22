@@ -12,6 +12,7 @@ export {
   MAX_ANSWER_BYTES,
   parseTokens,
   postForm,
+  readBoundedText,
   ProviderRefused,
   ProviderUnreachable,
   refreshAccess,

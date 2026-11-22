@@ -196,25 +196,27 @@ export const computeChallenge = (verifier: string): string =>
 
 /**
  * Reads the body of an answer as text, and fails with `ProviderUnreachable`
- * once it passes `MAX_ANSWER_BYTES`. It reads as the body arrives, so a body
- * with no `Content-Length` is never buffered past the limit.
+ * once it passes `maxBytes` (`MAX_ANSWER_BYTES` unless given). It reads as the
+ * body arrives, so a body with no `Content-Length` is never buffered past the
+ * limit. The message names `endpointName` and the limit, never what was read.
  */
-const readBoundedText = (
+export const readBoundedText = (
   response: HttpClientResponse.HttpClientResponse,
   endpointName: string,
+  maxBytes: number = MAX_ANSWER_BYTES,
 ): Effect.Effect<string, ProviderUnreachable | HttpClientError.HttpClientError> => {
   const tooLarge = () =>
     failProviderUnreachable(
-      `the ${endpointName} answered with more than ${String(MAX_ANSWER_BYTES)} bytes`,
+      `the ${endpointName} answered with more than ${String(maxBytes)} bytes`,
     );
-  if (Number(response.headers["content-length"] ?? 0) > MAX_ANSWER_BYTES) return tooLarge();
+  if (Number(response.headers["content-length"] ?? 0) > maxBytes) return tooLarge();
   return Effect.gen(function* () {
     const chunks: Array<Uint8Array> = [];
     let total = 0;
     yield* response.stream.pipe(
       Stream.runForEach((chunk) => {
         total += chunk.byteLength;
-        if (total > MAX_ANSWER_BYTES) return tooLarge();
+        if (total > maxBytes) return tooLarge();
         chunks.push(chunk);
         return Effect.void;
       }),
