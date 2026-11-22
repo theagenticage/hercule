@@ -40,16 +40,12 @@ describe("useHasMcpLine", () => {
   });
 
   it("starts again for another thread, and is false for no thread", () => {
-    const { result, rerender } = renderHook(
-      ({ sessionId, blocks }: { sessionId: string | null; blocks: readonly ThreadBlock[] }) =>
-        useHasMcpLine(sessionId, blocks),
-      {
-        initialProps: {
-          sessionId: "session-1" as string | null,
-          blocks: [ABOUT_SERVERS] as readonly ThreadBlock[],
-        },
-      },
-    );
+    const { result, rerender } = renderHook<
+      boolean,
+      { sessionId: string | null; blocks: readonly ThreadBlock[] }
+    >(({ sessionId, blocks }) => useHasMcpLine(sessionId, blocks), {
+      initialProps: { sessionId: "session-1", blocks: [ABOUT_SERVERS] },
+    });
     expect(result.current).toBe(true);
 
     rerender({ sessionId: "session-2", blocks: [PLAIN] });
