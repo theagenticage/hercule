@@ -16,7 +16,8 @@
  *   list bundled in its release.
  * - `models.json`: the home's file, with the account's catalog models set in it
  *   when the launch carries a catalog (see `setProviderModels`). The home's file
- *   is where a user, or a test, points a provider at another `baseUrl`.
+ *   is where a user, or a test, points a provider at another `baseUrl`. It may
+ *   hold a literal `apiKey`, so each copy is written with mode 0600.
  * - `bin`: a link to the home's `bin` folder, when the home has one. pi looks
  *   for its `fd` and `rg` tools there before it looks on PATH, and offline it
  *   never downloads them. Without the link, a runner whose working copies of
@@ -24,6 +25,11 @@
  *   the folder and, offline, never writes into it.
  * - The extension of the agent and, for a session's own agent, its
  *   instructions, which the adapter writes beside them.
+ * - `mcp.log`: not written by Hercule. pi's MCP client appends there each log
+ *   message an MCP server sends it (`notifications/message`), and rotates
+ *   the file to `mcp.log.1` past 5 MB. pi creates both with its own mode, so
+ *   the folder's mode 0700 is what keeps them private. They are removed with
+ *   the folder.
  * - No `auth.json`: the account's key comes from the environment. No
  *   `settings.json`, `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`, `CLAUDE.md`,
  *   `keybindings.json`, `trust.json`, `prompts`, `themes`, `skills` or
@@ -119,8 +125,13 @@ export const removeAgentFolder = (path: string): void => {
  * Creates a private agent folder holding `files`, readable by this user only,
  * in the machine's temporary directory, and returns its path. That is where
  * the probe keeps its scratch folders too, and it keeps the folder away from
- * the Harness Home. When created, the folder holds no key, only the model
- * files. Throws when the folder cannot be created or the files cannot be
+ * the Harness Home. The folder is created with mode 0700 (`mkdtempSync`) and
+ * every file Hercule writes in it has mode 0600. When created, the folder
+ * holds the model files and nothing else. Those can hold a key: the home's
+ * `models.json` may carry a literal `apiKey` (pi's `docs/models.md`), and this
+ * is a copy of it, one per pi process, for as long as the process runs. The
+ * account's own key never goes into a file: it is in the process's
+ * environment. Throws when the folder cannot be created or the files cannot be
  * written, after removing the folder. A runner that crashes leaves its folders
  * behind, and the operating system's cleanup of the temporary directory
  * removes them.

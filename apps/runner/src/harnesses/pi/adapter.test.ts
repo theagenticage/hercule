@@ -4,7 +4,15 @@
  * pi 0.85.1's, and the commands and responses follow the shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
@@ -160,6 +168,30 @@ describe("launching pi for a session", () => {
     expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(run.child.env["PI_SKIP_VERSION_CHECK"]).toBe("1");
     expect(run.child.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
+  });
+
+  it("writes each file of the agent folder readable by this user only", async () => {
+    const run = createDriving();
+    writeFileSync(join(run.ctx.home, "models.json"), '{"providers":{}}');
+    writeFileSync(join(run.ctx.home, "models-store.json"), "{}");
+
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, systemPrompt: "Be brief." }, run.ctx),
+    );
+    await waitUntil("spawned a pi", () => listAgentSpawns(run.spawns).length === 1);
+
+    // The home's `models.json` may hold a literal `apiKey`, and the copy is the account's key on disk.
+    const folder = agentFolderOf(listAgentSpawns(run.spawns)[0]!);
+    const names = readdirSync(folder);
+    expect(names.toSorted()).toEqual([
+      "extension-" + SESSION + ".ts",
+      "models-store.json",
+      "models.json",
+      "system-prompt.txt",
+    ]);
+    for (const name of names) {
+      expect(lstatSync(join(folder, name)).mode & 0o777, name).toBe(0o600);
+    }
   });
 
   it("uses the account's key over a key from the runner's environment", async () => {
