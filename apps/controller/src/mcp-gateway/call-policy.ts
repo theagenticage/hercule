@@ -29,17 +29,25 @@ import {
 } from "./refusals";
 import { holdsMcpUse } from "./served";
 import { findOriginalToolName } from "./tool-names";
-import { notifyListChanged, selectOfferedTools, type McpSession, type TokenState } from "./tokens";
+import { findOffer, notifyListChanged, type McpSession, type TokenState } from "./tokens";
+
+/**
+ * Where an admitted call goes: the server of the called name in the session's
+ * list now, and the tool of that server the name stands for. This can be
+ * another server than the one the name was offered for (`OfferedTool`), when
+ * the offered one was replaced by a server of the same name. An early refusal
+ * names the offer, and a refusal after the call is sent names this target.
+ */
+interface DispatchTarget {
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly tool: string;
+}
 
 /** What a call turned out to be, before anything is sent. */
 type CallDecision =
   | { readonly _tag: "refused"; readonly refusal: Refusal }
-  | {
-      readonly _tag: "call";
-      readonly serverId: string;
-      readonly serverName: string;
-      readonly tool: string;
-    };
+  | { readonly _tag: "call"; readonly target: DispatchTarget };
 
 /** How an audited call ended. */
 type CallOutcome =
@@ -78,7 +86,7 @@ export const makeCallPolicy = Effect.gen(function* () {
       // a client remembers from before a restart or an upgrade is refused
       // once, and the streams are told to list again. The refusal names what
       // the name was offered for, whatever the records say today.
-      const offered = selectOfferedTools(state, session).get(toolName);
+      const offered = findOffer(state, session, toolName);
       if (offered === undefined) {
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
@@ -95,7 +103,10 @@ export const makeCallPolicy = Effect.gen(function* () {
       if (tool === undefined) {
         return { _tag: "refused", refusal: buildToolNotListedRefusal(offered) };
       }
-      return { _tag: "call", serverId: listed.id, serverName: offered.serverName, tool };
+      return {
+        _tag: "call",
+        target: { serverId: listed.id, serverName: offered.serverName, tool },
+      };
     });
 
   /**
@@ -233,15 +244,16 @@ export const makeCallPolicy = Effect.gen(function* () {
       decision._tag === "refused"
         ? refuse(decision.refusal)
         : Effect.suspend(() => {
-            server = { id: decision.serverId, name: decision.serverName };
-            tool = decision.tool;
+            const { target } = decision;
+            server = { id: target.serverId, name: target.serverName };
+            tool = target.tool;
             return catalogue
               .callTool({
                 upstreamScope: state.tokenHash,
-                serverId: decision.serverId,
-                tool: decision.tool,
+                serverId: target.serverId,
+                tool: target.tool,
                 arguments: call.arguments,
-                authorize: authorizeCall(state.tokenHash, decision.serverId),
+                authorize: authorizeCall(state.tokenHash, target.serverId),
               })
               .pipe(
                 Effect.map((result) => {
@@ -253,15 +265,15 @@ export const makeCallPolicy = Effect.gen(function* () {
                     notServing = true;
                     return refuseWhileNotServing(
                       actor.sessionId,
-                      decision.serverName,
-                      decision.tool,
+                      target.serverName,
+                      target.tool,
                       refused.message,
                     );
                   }
                   return refuse({
                     reason: refused.reason,
-                    server: { id: decision.serverId, name: decision.serverName },
-                    tool: decision.tool,
+                    server: { id: target.serverId, name: target.serverName },
+                    tool: target.tool,
                     message: refused.message,
                   });
                 }),
@@ -295,8 +307,8 @@ export const makeCallPolicy = Effect.gen(function* () {
         Effect.catchIf(isPromotionRefusal, (gate) =>
           refuseWhileNotServing(
             actor.sessionId,
-            decision._tag === "call" ? decision.serverName : decision.refusal.server?.name,
-            decision._tag === "call" ? decision.tool : undefined,
+            decision._tag === "call" ? decision.target.serverName : decision.refusal.server?.name,
+            decision._tag === "call" ? decision.target.tool : undefined,
             gate.error.message,
           ),
         ),

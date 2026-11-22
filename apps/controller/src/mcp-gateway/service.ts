@@ -63,7 +63,7 @@ import {
   makeTokenStates,
   type McpCaller,
   type McpSession,
-  selectOfferedTools,
+  recordOffer,
   type TokenState,
 } from "./tokens";
 
@@ -238,9 +238,8 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const { tools, leftOut } = projectTools(yield* reads.readServed(actor));
-      const offered = selectOfferedTools(state, session);
       for (const { name, serverId, serverName, tool } of tools) {
-        offered.set(name, { serverId, serverName, tool });
+        recordOffer(state, session, name, { serverId, serverName, tool });
       }
       // One line per list, with a count and no tool name: the names come from
       // outside servers and one list can leave out many tools.

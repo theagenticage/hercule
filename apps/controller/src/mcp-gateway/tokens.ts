@@ -64,7 +64,7 @@ export interface McpCaller {
  * list the tools itself before the name works, whatever another client of the
  * same token has listed.
  */
-export type OfferedTools = Map<string, OfferedTool>;
+type OfferedTools = Map<string, OfferedTool>;
 
 /** One stateful MCP session, which `initialize` creates. */
 export interface McpSession {
@@ -107,12 +107,37 @@ export interface TokenState {
 /**
  * Returns the record of the tool names offered to the client a request comes
  * from: its MCP session's, or the token's for the stateless era, where
- * `session` is `undefined`.
+ * `session` is `undefined`. The two functions below are the only readers and
+ * writers of these records.
  */
-export const selectOfferedTools = (
+const selectOfferedTools = (state: TokenState, session: McpSession | undefined): OfferedTools =>
+  session?.offered ?? state.offeredWithoutSession;
+
+/**
+ * Records that a `tools/list` answer offered `name` to the client a request
+ * comes from, for the tool `offered`. A name offered again is recorded again
+ * for what it stands for now. Names are never removed.
+ */
+export const recordOffer = (
   state: TokenState,
   session: McpSession | undefined,
-): OfferedTools => session?.offered ?? state.offeredWithoutSession;
+  name: string,
+  offered: OfferedTool,
+): void => {
+  selectOfferedTools(state, session).set(name, offered);
+};
+
+/**
+ * Returns what `name` was offered for to the client a request comes from, or
+ * `undefined` when no `tools/list` answer has offered it to that client. This
+ * is the answer to "may this client call this name", and it says nothing of
+ * what the name reaches now.
+ */
+export const findOffer = (
+  state: TokenState,
+  session: McpSession | undefined,
+  name: string,
+): OfferedTool | undefined => selectOfferedTools(state, session).get(name);
 
 /** Tells every open stream of the token to list the tools again. */
 export const notifyListChanged = (state: TokenState): Effect.Effect<void> =>
