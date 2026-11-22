@@ -4665,7 +4665,7 @@ export const CLI = {
             flags: {
               url: {
                 flag: "url",
-                help: "The server's address, starting with http:// or https://. It holds no user name or password and no #fragment. Requests go to it as the URL standard writes it (https:a.com/mcp is https://a.com/mcp), with a trailing dot on the host dropped and escaped plain characters decoded (/%6Dcp is /mcp), so keep a trailing slash if the server needs one. Its query values are hidden when the server is read. Put no secret in it: the token goes in --token-stdin.",
+                help: "The server's address, starting with http:// or https://. It holds no user name or password and no #fragment. Requests go to it as the URL standard writes it (https:a.com/mcp is https://a.com/mcp), with a trailing dot on the host dropped and escaped plain characters decoded (/%6Dcp is /mcp), so keep a trailing slash if the server needs one. Put no secret in it: it is shown whole to everyone who can read the server, and the token goes in --token-stdin.",
               },
               name: {
                 flag: "name",

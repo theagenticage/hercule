@@ -38,7 +38,6 @@ import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import {
   buildDefaultServerName,
   findPluginOnOrigin,
-  hideQueryValues,
   parseServerAddress,
   type ServerAddress,
 } from "./addresses";
@@ -80,7 +79,7 @@ const toRecord = (server: StoredMcpServer): McpServer => {
           }
         : {
             kind: "url",
-            url: hideQueryValues(source.url),
+            url: source.url,
             signIn: source.signIn,
             signInOffered: source.signInOffered,
           },
@@ -411,8 +410,8 @@ const make = Effect.gen(function* () {
   /**
    * Inserts a server added by address, with its token when one is given, in a
    * transaction `create` opened. The audit entry names the server by id and
-   * says only that it was added by address: the address may hold a secret in
-   * its query, and the token is never written anywhere but its secret.
+   * holds its address, which is not a secret. It never holds the token, which
+   * is written nowhere but its secret.
    */
   const insertUrlServer = (
     source: Extract<CreateSource, { readonly kind: "url" }>,
@@ -440,7 +439,7 @@ const make = Effect.gen(function* () {
         kind: "mcpServer.created",
         actor: yield* currentStamp,
         record: { topic: "mcpServer", id: server.id },
-        payload: { mcpServerId: server.id, sourceKind: "url" },
+        payload: { mcpServerId: server.id, sourceKind: "url", url: address.url },
         at,
       });
       return server;

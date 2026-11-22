@@ -669,7 +669,7 @@ describe("a credential the server echoes", () => {
     );
   });
 
-  it("is removed when it is a key-like value in the address's query, and an ordinary value is not", async () => {
+  it("is not removed from an answer when it is in the address's query: an address is not a secret", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       fake.intercept = ({ method, id, url }) =>
         method === "tools/call"
@@ -689,65 +689,13 @@ describe("a credential the server echoes", () => {
 
       expect(result).toMatchObject({
         _tag: "Success",
-        success: { content: [{ text: "you called /mcp?api_key=[removed]&org=acme" }] },
-      });
-    });
-  });
-
-  // `project_ref=abcd1234` is 8 letters and digits, so it passes the rule of a
-  // token and is removed like one. `true`, `docs` and `1` are not removed:
-  // they are in every answer.
-  it("leaves ordinary query values in the answers and the stored tools, and removes the key-like one", async () => {
-    await withUrlRig(
-      async ({ controller, fake }) => {
-        fake.intercept = ({ method, id }) =>
-          method === "tools/call"
-            ? Response.json({
-                jsonrpc: "2.0",
-                id,
-                result: {
-                  content: [
-                    {
-                      type: "text",
-                      text: '{"rls_enabled": true, "rows": 4110, "ref": "abcd1234", "topic": "docs"}',
-                    },
-                  ],
-                },
-              })
-            : undefined;
-        const serverId = await insertUrlServerAt(
-          controller,
-          `${fake.url}?project_ref=abcd1234&read_only=true&features=docs&v=1&format=object`,
-        );
-
-        const row = await waitForResult(controller);
-        const result = await callAs(controller, serverId);
-
-        expect(row.status).toBe("ready");
-        expect(JSON.parse(row.tools)).toMatchObject([
-          { name: "echo", inputSchema: { type: "object" } },
-          { name: "search_docs", inputSchema: { type: "object" } },
-        ]);
-        expect(result).toMatchObject({
-          _tag: "Success",
-          success: {
-            content: [
-              {
-                text: '{"rls_enabled": true, "rows": 4110, "ref": "[removed]", "topic": "docs"}',
-              },
-            ],
-          },
-        });
-      },
-      {
-        fake: {
-          tools: [
-            { name: "echo", description: "Echoes its text" },
-            { name: "search_docs", description: "Searches the docs" },
+        success: {
+          content: [
+            { text: "you called /mcp?api_key=key4eC39HqLyjWDarjtT1zdp7dcFakeForTests&org=acme" },
           ],
         },
-      },
-    );
+      });
+    });
   });
 
   it("leaves out a tool that no longer fits the tool schema once the credential is removed from one of its keys", async () => {

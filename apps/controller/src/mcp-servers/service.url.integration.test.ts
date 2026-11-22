@@ -103,11 +103,15 @@ describe("creating a server by its address", () => {
       );
 
       const [audited] = await controller.harness.audit("mcpServer.created");
-      expect(audited?.payload).toEqual({ mcpServerId: server.id, sourceKind: "url" });
+      expect(audited?.payload).toEqual({
+        mcpServerId: server.id,
+        sourceKind: "url",
+        url: fake.url,
+      });
     });
   });
 
-  it("shows the address with the value of every query parameter hidden, and calls the server at the full one", async () => {
+  it("shows the address whole, query included, and calls the server at it", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       const created = await readRecord(
         await createByAddress(controller, {
@@ -125,7 +129,7 @@ describe("creating a server by its address", () => {
       ).json()) as { items: ReadonlyArray<McpServer> };
 
       for (const server of [created, read, listed.items[0]!]) {
-        expect(server.source).toMatchObject({ url: `${fake.url}?api_key=…&org=…` });
+        expect(server.source).toMatchObject({ url: `${fake.url}?api_key=k3y-9f2a7c&org=acme` });
       }
       expect(fake.requests.map((request) => request.url)).toContain(
         "/mcp?api_key=k3y-9f2a7c&org=acme",
@@ -154,6 +158,15 @@ describe("creating a server by its address", () => {
       expect(new Set(fake.requests.map((request) => request.authorization))).toEqual(
         new Set([`Bearer ${TOKEN}`]),
       );
+
+      // The audit entry holds the address and never the token.
+      const [audited] = await controller.harness.audit("mcpServer.created");
+      expect(audited?.payload).toEqual({
+        mcpServerId: server.id,
+        sourceKind: "url",
+        url: fake.url,
+      });
+      expect(JSON.stringify(audited)).not.toContain(TOKEN);
     });
   });
 
