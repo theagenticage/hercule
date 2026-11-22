@@ -61,6 +61,7 @@ import {
   type UpstreamCredentials,
   type UpstreamEndpoint,
 } from "./access";
+import { parseBearerChallenge } from "./authorization";
 import { removeCredentialValues } from "./credential-values";
 import type { StoredMcpTool } from "./repository";
 
@@ -365,31 +366,6 @@ const buildFailure = (
   });
 
 /**
- * Tells whether a `WWW-Authenticate` header has a `Bearer` challenge with a
- * `resource_metadata` parameter, which is how a server points at the OAuth
- * metadata of its resource (RFC 9728). A header may hold several challenges
- * (`Basic realm="x", Bearer resource_metadata="..."`), and the parameter
- * counts only inside the `Bearer` one. Quoted values are blanked first, so a
- * comma or a parameter name inside another parameter's text changes nothing.
- */
-const offersOAuthMetadata = (wwwAuthenticate: string | undefined): boolean => {
-  if (wwwAuthenticate === undefined) return false;
-  let inBearerChallenge = false;
-  for (const part of wwwAuthenticate.replace(/"(?:[^"\\]|\\.)*"/g, '""').split(",")) {
-    const text = part.trim();
-    // A part that starts a challenge is a scheme, then a space, then the
-    // challenge's first parameter. A parameter of the current challenge is
-    // `name=value`, with the name directly followed by `=`.
-    const isParameter = /^[^\s=]+\s*=/.test(text);
-    const challenge = isParameter ? null : /^(\S+)(?:\s+(.*))?$/.exec(text);
-    if (challenge !== null) inBearerChallenge = challenge[1]?.toLowerCase() === "bearer";
-    const parameter = challenge === null ? text : (challenge[2] ?? "");
-    if (inBearerChallenge && /^resource_metadata\s*=/i.test(parameter)) return true;
-  }
-  return false;
-};
-
-/**
  * Counts one answer to `tools/list` into `listing`, and returns the client
  * failure that ends the listing when the tools read so far pass
  * `MAX_TOOL_DEFINITIONS_BYTES`, and `undefined` otherwise. Each tool is
@@ -508,7 +484,8 @@ export const describeClientFailure = (
       if (reason.status === 401) {
         return buildFailure("unauthorized", {
           ...(rejectedIdentity === undefined ? {} : { sentIdentity: rejectedIdentity }),
-          offersOAuth: offersOAuthMetadata(reason.wwwAuthenticate),
+          // A server points at its OAuth metadata with `resource_metadata` (RFC 9728).
+          offersOAuth: parseBearerChallenge(reason.wwwAuthenticate).resourceMetadata !== undefined,
         });
       }
       if (
