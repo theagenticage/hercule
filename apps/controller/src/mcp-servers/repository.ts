@@ -363,6 +363,19 @@ const make = Effect.gen(function* () {
 
     readMany,
 
+    /**
+     * Returns the servers that have this name, with their tools, sorted by id.
+     * Two servers on different accounts can share a name, so there can be
+     * more than one. The list is empty when no server has the name.
+     */
+    readByName: (name: string): Effect.Effect<ReadonlyArray<StoredMcpServer>, SqlError> =>
+      Effect.map(
+        sql<McpServerRow>`SELECT ${sql.literal(COLUMNS)} FROM mcp_servers
+                          WHERE name = ${name}
+                          ORDER BY id`,
+        (rows) => rows.map(toServer),
+      ),
+
     /** Returns every server, sorted by name and then by id. */
     list: (): Effect.Effect<ReadonlyArray<StoredMcpServer>, SqlError> =>
       Effect.map(

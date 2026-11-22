@@ -89,7 +89,21 @@ export const makeCallPolicy = Effect.gen(function* () {
       const views = yield* reads.readListedAvailability(actor.sessionId);
       const listed = views.find(({ server }) => server.name === serverName);
       if (listed === undefined) {
-        return { _tag: "refused", refusal: buildNotInListRefusal(serverName) };
+        // The server may have left the list and still exist. Then the refusal
+        // names it and its tool, the same way a refusal of a listed server does.
+        const left = yield* reads.readServerNamed(serverName);
+        return {
+          _tag: "refused",
+          refusal: buildNotInListRefusal(
+            serverName,
+            left === undefined
+              ? undefined
+              : {
+                  id: left.id,
+                  tool: findOriginalToolName(left.name, left.toolNames, toolName),
+                },
+          ),
+        };
       }
       const { server } = listed;
       const tool = findOriginalToolName(

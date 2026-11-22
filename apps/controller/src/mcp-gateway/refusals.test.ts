@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMissingGrantRefusal,
+  buildNotInListRefusal,
   buildToolNotListedRefusal,
   buildRefusalWarning,
   buildUnknownToolRefusal,
@@ -46,5 +47,22 @@ describe("buildUnknownToolRefusal", () => {
     expect(refusal.message).not.toContain("\n");
     // The Thread's line must stay under the protocol's 4,096 character bound.
     expect(buildRefusalWarning(refusal).length).toBeLessThan(4_096);
+  });
+});
+
+describe("buildNotInListRefusal", () => {
+  it("names the server and the tool when the server still exists, and the server's name alone otherwise", () => {
+    expect(buildNotInListRefusal("sentry", { id: "server-1", tool: "search" })).toMatchObject({
+      reason: "not-in-list",
+      server: sentry,
+      tool: "search",
+    });
+    const toolGone = buildNotInListRefusal("sentry", { id: "server-1", tool: undefined });
+    expect(toolGone.server).toEqual(sentry);
+    expect(toolGone.tool).toBeUndefined();
+
+    const deleted = buildNotInListRefusal("sentry");
+    expect(deleted.server).toBeUndefined();
+    expect(deleted.message).toContain('"sentry"');
   });
 });

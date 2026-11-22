@@ -964,28 +964,60 @@ describe("refused calls", () => {
     });
   });
 
-  it("refuses a call under the name of a server that left the list, and says which server in the words of the warning", async () => {
+  it("tells the Thread which server and which tool a call meant when its server left the list but still exists", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0], servers[1]]);
     const { sessionId } = await initialize(thread.token);
     await listToolNames(thread.token, sessionId);
     // Bravo leaves the list: its name was offered, so the call is understood and refused.
     expect((await updateList(thread.session.id, [servers[0].id])).status).toBe(200);
+    const mark = countUpstreamRequests();
     const refused = await callEcho(thread.token, "bravo__echo", sessionId);
     expect(refused.body.result.isError).toBe(true);
     expect(textOf(refused)).toContain('"bravo"');
+    expect(readUpstreamTools(mark)).toEqual([]);
 
-    // The name alone cannot tell which server that was once, so only the words name it.
     const [warning] = await eventually(
       () => readWarnings(thread.session.id),
       (warnings) => warnings.length >= 1,
     );
-    expect(warning?.mcpServers).toBeUndefined();
+    expect(warning?.mcpServers).toEqual([{ mcpServerId: servers[1].id, reason: "not-in-list" }]);
     const [entry] = await readCallAudit(thread.session.id);
     expect(entry?.payload).toMatchObject({
-      mcpServerId: null,
-      tool: null,
+      mcpServerId: servers[1].id,
+      tool: "echo",
       outcome: "refused",
       reason: "not-in-list",
+    });
+  });
+
+  it("names the server by its name only when it was deleted, and the Thread's warning names no server", async () => {
+    await withNotion([SEARCH_PAGES], async (notion) => {
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      const { sessionId } = await initialize(thread.token);
+      await listToolNames(thread.token, sessionId);
+      const deleted = await send("DELETE", base(), `/api/v1/mcp-servers/${notion.id}`, {
+        token: arranged.token,
+      });
+      expect(deleted.status).toBe(200);
+
+      const mark = countUpstreamRequests();
+      const refused = await callEcho(thread.token, NOTION_SEARCH_PAGES, sessionId);
+      expect(refused.body.result.isError).toBe(true);
+      expect(textOf(refused)).toContain('"notion"');
+      expect(readUpstreamTools(mark)).toEqual([]);
+
+      const [warning] = await eventually(
+        () => readWarnings(thread.session.id),
+        (warnings) => warnings.length >= 1,
+      );
+      expect(warning?.mcpServers).toBeUndefined();
+      const [entry] = await readCallAudit(thread.session.id);
+      expect(entry?.payload).toMatchObject({
+        mcpServerId: null,
+        tool: null,
+        outcome: "refused",
+        reason: "not-in-list",
+      });
     });
   });
 

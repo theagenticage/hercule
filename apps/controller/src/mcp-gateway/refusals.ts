@@ -59,11 +59,22 @@ export const buildUnknownToolRefusal = (toolName: string): Refusal => ({
 
 /**
  * The server the name belongs to is not in the session's list any more. The
- * refusal names the server by the name in the tool's name only: a server that
- * left the list cannot be told from its name alone, so it has no id here.
+ * name gives the server's name. `found` is the server of that name when one
+ * still exists (it left the list but was not deleted), with the tool the name
+ * stands for when the server still stores it. Without `found` the refusal
+ * names the server by its name only.
  */
-export const buildNotInListRefusal = (serverName: string): Refusal => ({
+export const buildNotInListRefusal = (
+  serverName: string,
+  found?: { readonly id: string; readonly tool: string | undefined },
+): Refusal => ({
   reason: "not-in-list",
+  ...(found === undefined
+    ? {}
+    : {
+        server: { id: found.id, name: serverName },
+        ...(found.tool === undefined ? {} : { tool: found.tool }),
+      }),
   message:
     `The MCP server "${serverName}" is not in this Thread's list any more. ` +
     "The user may have removed it from the Thread or deleted it. " +
