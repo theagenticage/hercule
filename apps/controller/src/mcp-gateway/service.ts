@@ -161,13 +161,6 @@ const readBody = (
  * for the session of another token), or when the `MCP-Protocol-Version`
  * header disagrees with the revision the session negotiated. Succeeds with the
  * session, or with `undefined` when the request names none.
- *
- * A 404 also records on the token that a client of it holds a session from
- * before: after a restart, or after the gateway dropped the session. The MCP
- * sessions the token opens from then on are marked, and their `tools/call`
- * requests are refused (`decideCall`) until the client lists the tools after a
- * refusal, because that client may resend calls under names that now mean
- * other tools.
  */
 const admitMcpSession = (
   request: HttpServerRequest.HttpServerRequest,
@@ -177,10 +170,7 @@ const admitMcpSession = (
   const sessionId = request.headers[SESSION_ID_HEADER];
   if (sessionId === undefined) return Effect.succeed(undefined);
   const session = state.mcpSessions.get(sessionId);
-  if (session === undefined) {
-    state.sawUnknownMcpSession = true;
-    return Effect.fail(respondSessionNotFound());
-  }
+  if (session === undefined) return Effect.fail(respondSessionNotFound());
   const refusal = checkSessionVersionHeader(
     request.headers["mcp-protocol-version"],
     session.revision,
@@ -235,25 +225,12 @@ const make = Effect.gen(function* () {
 
   /**
    * Answers `tools/list` and records the names it offers: only these names may
-   * be called. On an MCP session whose calls were refused because its client
-   * may hold names from before, a list that was asked after that refusal ends
-   * the refusals. A list asked before it does not: it is the client listing
-   * before it resends its call.
+   * be called.
    */
-  const respondToolsList = (
-    era: Era,
-    state: TokenState,
-    session: McpSession | undefined,
-    actor: SessionActor,
-    id: RequestId,
-  ) =>
+  const respondToolsList = (era: Era, state: TokenState, actor: SessionActor, id: RequestId) =>
     Effect.gen(function* () {
-      // Read before the list is built, because a refusal can come in while the list is read, and the
-      // client cannot have acted on that refusal when it asked.
-      const askedAfterRefusal = session?.namesFromBefore === "suspected-and-refused";
       const { tools, leftOut } = projectTools(yield* reads.readServed(actor));
       for (const { name } of tools) state.offeredToolNames.add(name);
-      if (session !== undefined && askedAfterRefusal) session.namesFromBefore = "not-suspected";
       // One line per list, with a count and no tool name: the names come from
       // outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
@@ -293,7 +270,7 @@ const make = Effect.gen(function* () {
         state,
         session,
         id,
-        callPolicy.runToolCall(state, session, actor, {
+        callPolicy.runToolCall(state, actor, {
           name,
           arguments: args as JsonObject | undefined,
         }),
@@ -382,7 +359,7 @@ const make = Effect.gen(function* () {
             : respondJson(buildMethodNotFound(id, method)),
         );
       case "tools/list":
-        return respondToolsList(era, state, session, caller.actor, id);
+        return respondToolsList(era, state, caller.actor, id);
       case "tools/call":
         return respondToolsCall(era, state, caller.actor, id, params, session);
       case "server/discover":

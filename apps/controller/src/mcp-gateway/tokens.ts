@@ -5,16 +5,6 @@
  * drops it, and a harness that names an unknown MCP session gets 404 and opens
  * a new one.
  *
- * The state also records that a client of the token has named an MCP session
- * the token does not keep, and marks each MCP session opened after that. A
- * client that lost its session may hold tool names from before, and it may
- * list the tools before it resends its call (pi does), and it may resend
- * several calls at once. Once it has listed, the names the token was sent no
- * longer prove that the client's name still means the tool the client chose.
- * So every call on such a session is refused until the client lists the tools
- * again after a refusal (`decideCall` in `call-policy.ts` refuses, and
- * `respondToolsList` in `service.ts` clears the mark).
- *
  * This module decides nothing about a request. The wire endpoint (`service.ts`)
  * and the call policy (`call-policy.ts`) use the state through the functions
  * here.
@@ -75,19 +65,7 @@ export interface McpSession {
    * running call, because two calls can share an id.
    */
   readonly calls: Map<Fiber.Fiber<unknown, unknown>, string>;
-  /**
-   * Whether the client of this session may hold tool names from before. It
-   * starts as `suspected` when the token had already seen a request name an
-   * MCP session it did not keep. A `tools/list` answered then does not clear
-   * it, because that is a client listing before it resends its call. The
-   * first refusal makes it `suspected-and-refused`, and the next `tools/list`
-   * answered after that refusal makes it `not-suspected` again.
-   */
-  namesFromBefore: NamesFromBefore;
 }
-
-/** What the gateway believes about the names a session's client holds. See `McpSession.namesFromBefore`. */
-export type NamesFromBefore = "not-suspected" | "suspected" | "suspected-and-refused";
 
 /** What the gateway remembers about the warnings it wrote to the Thread of one Session Token. */
 export interface WarningState {
@@ -102,13 +80,6 @@ export interface TokenState {
   readonly tokenHash: string;
   readonly sessionId: string;
   readonly mcpSessions: Map<string, McpSession>;
-  /**
-   * Whether any request of this token has named an MCP session the token does
-   * not keep. That happens after a controller restart, and after the gateway
-   * dropped a session itself. Never cleared while the token lives, so every
-   * MCP session opened later starts as `suspected`.
-   */
-  sawUnknownMcpSession: boolean;
   readonly streams: Set<OpenStream>;
   /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
   readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
@@ -170,7 +141,6 @@ export const makeTokenStates = Effect.gen(function* () {
       tokenHash,
       sessionId: actor.sessionId,
       mcpSessions: new Map(),
-      sawUnknownMcpSession: false,
       streams: new Set(),
       runningCalls: new Set(),
       offeredToolNames: new Set(),
@@ -211,8 +181,7 @@ export const makeTokenStates = Effect.gen(function* () {
     Effect.suspend(() => removeMcpSession(state, mcpSessionId));
 
   /**
-   * Opens an MCP session at `revision`, `suspected` when
-   * the token has seen an unknown MCP session id. A token that already keeps 16
+   * Opens an MCP session at `revision`. A token that already keeps 16
    * loses its oldest. The oldest leaves and the new session joins in one synchronous
    * step, so two `initialize` requests that arrive together never both find
    * room. The oldest session's streams and calls end after that.
@@ -228,7 +197,6 @@ export const makeTokenStates = Effect.gen(function* () {
         id: crypto.randomUUID(),
         revision,
         calls: new Map(),
-        namesFromBefore: state.sawUnknownMcpSession ? "suspected" : "not-suspected",
       };
       state.mcpSessions.set(session.id, session);
       return Effect.as(ending, session);

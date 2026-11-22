@@ -3,11 +3,11 @@
  * only assume (spec 21 section 3.11): that pi works on the older wire era,
  * finds a gateway tool with `tool_search` and calls it, hears
  * `notifications/tools/list_changed` and lists again, opens a new MCP session
- * when the gateway answers 404 for the one it holds and then meets the refusal
- * the gateway gives a call on a reopened session, and never shows the model a
- * tool name of more than 64 characters. What a user sees of approvals and
- * items is checked beside the adapter, in
- * `apps/runner/src/harnesses/pi/adapter-mcp.integration.test.ts`.
+ * when the gateway answers 404 for the one it holds and then sends its call
+ * again, which reaches the right tool, calls a hyphenated tool and a tool whose
+ * name carries a hash, and never shows the model a tool name of more than 64
+ * characters. What a user sees of approvals and items is checked beside the
+ * adapter, in `apps/runner/src/harnesses/pi/adapter-mcp.integration.test.ts`.
  *
  * Nothing here is billed and no login is used. pi starts the way the pi
  * adapter starts it: the adapter's own `buildArgv` and `decideMcpLaunch`
@@ -26,16 +26,14 @@
  * - **A real cold gateway.** The test controller cannot restart over the same
  *   database: `withServer` makes a new Hercule Home and a new gateway for
  *   each run, and its `reboot` repeats only the boot steps inside the same
- *   process, so the gateway keeps the names it has sent. The 404 test drops
+ *   process, so the gateway keeps the names it has offered. The 404 test drops
  *   pi's MCP session at the gateway, which is what a restart does to the
- *   session, but the gateway still knows every name it sent. The refusal it
- *   gives is the one for a reopened session (spec 21 section 3.4), not the
- *   one for an unknown name after a restart.
+ *   session, but the gateway still holds every name it offered. After a
+ *   restart the gateway would refuse a call before the list once (spec 21
+ *   section 3.4). `http/mcp.integration.test.ts` checks that with a token the
+ *   gateway has not served.
  * - **A real model.** The stand-in calls the tool the search returned. What a
  *   real model chooses to search for is not checked.
- * - **pi's text for a refused call.** The test asserts the words the gateway
- *   gives the agent, "list the tools again", reach the model, and not how pi
- *   words an error of its own.
  *
  * Skipped when no `pi` binary is found. `HERCULE_PI_TEST_BINARY` selects one
  * without changing `PATH`. No CI job installs pi, so this file runs on a
@@ -88,7 +86,6 @@ import {
   describeRequest,
   requestsOf,
   waitUntilQuiet,
-  type ObservedRequest,
 } from "./mcp-recording-proxy.testing";
 import { waitWithin } from "./testing";
 
@@ -443,7 +440,7 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
   );
 
   it(
-    "opens a new MCP session after a 404, is refused once on the resent call, lists again and then runs the next call",
+    "opens a new MCP session after a 404, lists, and sends the call again, which runs and reaches the right upstream tool",
     async () => {
       await withPiOnGateway({ listed: true }, async (rig, running) => {
         await running.runTurn("find whoami");
@@ -478,32 +475,16 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
         ).toBeGreaterThan(0);
         expect(after.indexOf(initialize!)).toBeLessThan(after.indexOf(listedBeforeResend[0]!));
 
-        // The list came before the refusal, so it does not end it: the gateway refuses the resent
-        // call, asks the agent to list again, and nothing reaches the server.
-        expect(readToolResults(rig.model).at(-1)).toContain("List the tools again");
-        expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
-
-        // The refusal sent list_changed to pi's new stream, so pi lists again.
-        const listedAfterRefusal = (): ReadonlyArray<ObservedRequest> =>
-          rig.proxy.seen
-            .slice(mark + after.indexOf(resent) + 1)
-            .filter((one) => one.rpcMethod === "tools/list" && one.sessionId === newSession);
-        expect(
-          await waitWithin(STEP_MS, () => listedAfterRefusal().length > 0),
-          "pi listed again after the refusal",
-        ).toBe(true);
-
-        // The next call on that session is judged as any other, and runs.
-        await running.runTurn("find whoami");
+        // The name is the same one the gateway offered before, so the resent call runs and reaches
+        // the same tool. The model sees no refusal.
         expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual([
           "whoami",
           "whoami",
         ]);
         expect(readToolResults(rig.model).at(-1)).toContain("hello");
-        // The refusal came once: no later call was told to list again.
         expect(
           readToolResults(rig.model).filter((text) => text.includes("List the tools again")),
-        ).toHaveLength(1);
+        ).toEqual([]);
       });
     },
     TEST_MS,
