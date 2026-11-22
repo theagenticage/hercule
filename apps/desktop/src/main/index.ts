@@ -50,6 +50,7 @@ import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { secureSession, secureWebContents } from "./security";
 import {
+  cancelWhenPageEnds,
   makeSignInReturnLayer,
   SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
   SignInReturn,
@@ -150,15 +151,7 @@ const startApp = (): void => {
   });
   app.on("web-contents-created", (_event, contents) => {
     secureWebContents(contents, (effect) => runtime.runFork(effect));
-    // A sign-in's return listener is for the page that started it. Once the
-    // page reloads, crashes or is destroyed, no one is left to use the
-    // return, so the port closes.
-    const endSignInReturn = () => runtime.runFork(SignInReturn.use((r) => r.cancelCurrent));
-    contents.once("destroyed", endSignInReturn);
-    contents.on("render-process-gone", endSignInReturn);
-    contents.on("did-start-navigation", (details) => {
-      if (details.isMainFrame && !details.isSameDocument) endSignInReturn();
-    });
+    cancelWhenPageEnds(contents, () => runtime.runFork(SignInReturn.use((r) => r.cancelCurrent)));
   });
   registerIpcHandlers(runtime);
 

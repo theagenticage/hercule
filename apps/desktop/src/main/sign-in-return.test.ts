@@ -1,15 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import {
   AuthorizationUrlHasNoState,
+  cancelWhenPageEnds,
   makeSignInReturnLayer,
   SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
   SignInReturn,
+  type PageEvents,
 } from "./sign-in-return";
 
 /** The scopes of the services these tests built; each test's service lives until the test ends. */
@@ -204,9 +206,8 @@ describe("the time limit", () => {
     const { redirectUri } = await listenOn(service);
     expect(await isListening(redirectUri)).toBe(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
-
-    expect(await isListening(redirectUri)).toBe(false);
+    // The listener closes by itself when its time limit passes.
+    await vi.waitFor(async () => expect(await isListening(redirectUri)).toBe(false));
   });
 
   it("answers timed-out when the browser does not return in time, and closes the port", async () => {
@@ -218,20 +219,34 @@ describe("the time limit", () => {
   });
 });
 
-describe("a wait that is interrupted", () => {
-  it("closes the port, because the page that waited went away", async () => {
-    const { service } = await openService();
-    const { listenerId, redirectUri } = await listenOn(service);
-    const waiting = Effect.runFork(
-      service.wait(listenerId, "https://mcp.example/authorize?state=s1"),
-    );
-    // The wait registers when the fiber first runs.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(await isListening(redirectUri)).toBe(true);
+describe("a page that ends", () => {
+  /** A page whose events a test emits, as Electron's `WebContents` would. */
+  const openPage = () => {
+    const page = new EventEmitter();
+    const cancel = vi.fn();
+    cancelWhenPageEnds(page as unknown as PageEvents, cancel);
+    return { page, cancel };
+  };
 
-    await Effect.runPromise(Fiber.interrupt(waiting));
+  it("cancels the listener when the page is destroyed or its renderer process is gone", () => {
+    const destroyed = openPage();
+    destroyed.page.emit("destroyed");
+    const gone = openPage();
+    gone.page.emit("render-process-gone");
 
-    expect(await isListening(redirectUri)).toBe(false);
+    expect(destroyed.cancel).toHaveBeenCalledTimes(1);
+    expect(gone.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the listener when the main frame navigates to another document, and not otherwise", () => {
+    const { page, cancel } = openPage();
+
+    page.emit("did-start-navigation", { isMainFrame: false, isSameDocument: false });
+    page.emit("did-start-navigation", { isMainFrame: true, isSameDocument: true });
+    expect(cancel).not.toHaveBeenCalled();
+
+    page.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });
 

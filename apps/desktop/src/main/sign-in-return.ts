@@ -18,13 +18,14 @@
  *   use up the listener.
  * - A listener ends after the browser returned, after it was cancelled, 10
  *   minutes after it started listening (also when no one ever waits for it),
- *   when the page that waits for it goes away, and when the app quits.
+ *   when the page that started it goes away (`cancelWhenPageEnds`), and when
+ *   the app quits.
  *
  * Main reads nothing in the returning request but those three names. The
  * renderer gets the raw query string and hands it to the controller, which
  * checks it.
  */
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
 import { parseCallbackQuery, readAuthorizationState } from "@hercule/contract";
@@ -61,8 +62,7 @@ export class SignInReturn extends Context.Service<
      * answers. Returns `received` with the raw query string of the request
      * whose `state` matches, `timed-out` when none came before the listener's
      * time limit, and `cancelled` when `cancel` or a newer `listen` ended the
-     * listener, or when no such listener exists. Interrupting the wait (the
-     * page that called it went away) ends the listener. Fails with
+     * listener, or when no such listener exists. Fails with
      * AuthorizationUrlHasNoState when no request could ever match.
      */
     readonly wait: (
@@ -151,6 +151,35 @@ const bindToLoopback = (server: Server): Promise<number | null> =>
     server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
   });
 
+/** The events of a page (an Electron `WebContents`) that `cancelWhenPageEnds` listens to. */
+export interface PageEvents {
+  once(event: "destroyed", listener: () => void): unknown;
+  on(event: "render-process-gone", listener: () => void): unknown;
+  on(
+    event: "did-start-navigation",
+    listener: (details: {
+      readonly isMainFrame: boolean;
+      readonly isSameDocument: boolean;
+    }) => void,
+  ): unknown;
+}
+
+/**
+ * Calls `cancel` when `page` is destroyed, its renderer process is gone, or
+ * its main frame starts a navigation to another document (a reload included).
+ * A sign-in's listener is for the page that started it: once the page ends,
+ * no one is left to use the return, so the port must close. Nothing else
+ * ends a listener when the page goes away, because a wait that main answers
+ * over IPC is not interrupted by it.
+ */
+export const cancelWhenPageEnds = (page: PageEvents, cancel: () => void): void => {
+  page.once("destroyed", cancel);
+  page.on("render-process-gone", cancel);
+  page.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) cancel();
+  });
+};
+
 /**
  * Builds the SignInReturn service. A listener lasts at most `lifetimeMilliseconds`
  * from the moment it is bound; the app passes `SIGN_IN_RETURN_LIFETIME_MILLISECONDS`,
@@ -199,6 +228,8 @@ export const makeSignInReturnLayer = (lifetimeMilliseconds: number): Layer.Layer
       };
 
       const listen = Effect.promise(async (): Promise<SignInReturnListenOutcome> => {
+        // Loaded here, so a launch with no sign-in never loads the module.
+        const { createServer } = await import("node:http");
         if (current !== null) end(current, { _tag: "cancelled" });
         const listener: Listener = {
           id: randomUUID(),
@@ -246,12 +277,6 @@ export const makeSignInReturnLayer = (lifetimeMilliseconds: number): Layer.Layer
               resume(Effect.succeed(outcome));
             };
             listener.answerWaits.add(answerWait);
-            // The page that waits went away (it reloaded or closed), so no
-            // one is left to use the return: the port must not stay open.
-            return Effect.sync(() => {
-              listener.answerWaits.delete(answerWait);
-              end(listener, { _tag: "cancelled" });
-            });
           });
         });
 
