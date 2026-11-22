@@ -8,8 +8,9 @@
  * pi's `tool_search` and call it (`mcp-model.testing.ts`). The MCP server is
  * the fake shared with the Codex tests, which records what it receives
  * (`../fake-mcp-server.testing.ts`). Neither needs a login or reaches an
- * outside service. The real pi starts with an environment built from nothing:
- * a throwaway `HOME` and agent directory, and a `PATH` of system folders.
+ * outside service. `real-pi-session.testing.ts` starts the real pi, with an
+ * environment built from nothing: a throwaway `HOME` and Harness Home, and a
+ * `PATH` of system folders.
  *
  * What this file does not assert: a real model's choice of tool, and the
  * gateway itself. The gateway is checked against pi in
@@ -23,17 +24,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, onTestFinished } from "vitest";
-import { Effect, Fiber, Stream } from "effect";
-import type { ApprovalDecision, HarnessEvent, SessionSpec } from "@hercule/protocol";
-import { makePiAdapter } from "./adapter";
-import { killProcessesHolding, runProcess, spawnPi } from "../process";
-import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
+import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { SEARCH_ISSUES_TOOL, startFakeMcpServer, WHOAMI_TOOL } from "../fake-mcp-server.testing";
 import { buildMcpCallScript, TOOL_SEARCH_TOOL } from "./mcp-model.testing";
-import { buildPiTestPath, findPiTestBinary } from "./pi-binary.testing";
-import { buildContext, cleanupHomes, filterByTag, SPEC, waitUntil } from "./testing";
-import { createScratchHome } from "../testing";
-import { pointAtFakeModel, startScriptedModelServer } from "./upstream";
+import { findPiTestBinary } from "./pi-binary.testing";
+import { startRealPiSession } from "./real-pi-session.testing";
+import { cleanupHomes, filterByTag, waitUntil } from "./testing";
+import { startScriptedModelServer } from "./upstream";
 
 afterAll(cleanupHomes);
 
@@ -42,7 +39,7 @@ const binary = findPiTestBinary();
 /** The value of the session token. A test looks for it in files and in the process arguments. */
 const TOKEN = "tok-synthetic-pi-4c81e2";
 
-/** The most one wait lasts: pi is a separate process that starts slowly, and several start in one test. */
+/** The most the wait for pi's first MCP list lasts: pi is a separate process that starts slowly. */
 const STEP_MS = 60_000;
 
 /** The test's own limit, with room for the several pi processes of a subagent test. */
@@ -57,25 +54,13 @@ const buildExpectedToolName = (tool: string): string => `mcp__tools__${tool}`;
 /** Returns the word of a tool's name that a prompt searches for: the part after the server's name. */
 const readSearchWord = (tool: string): string => tool.split("__")[1]!.split("_").at(-1)!;
 
-type Opened = Extract<HarnessEvent, { _tag: "request.opened" }>;
-
 type ItemEvent = Extract<HarnessEvent, { _tag: "item.started" | "item.completed" }>;
-
-/** The pi process the adapter started: its arguments, and the folder it was given as its agent directory. */
-interface SpawnedPi {
-  readonly command: ReadonlyArray<string>;
-  readonly agentFolder: string;
-}
 
 /** Lists every file under `directory`, as paths. */
 const listFiles = (directory: string): ReadonlyArray<string> =>
   readdirSync(directory, { recursive: true, withFileTypes: true }).flatMap((entry) =>
     entry.isFile() ? [join(entry.parentPath, entry.name)] : [],
   );
-
-/** Returns the events the session's own agent caused, which carry no subagent id. */
-const filterMainEvents = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<HarnessEvent> =>
-  seen.filter((event) => !("subagentId" in event) || event.subagentId === undefined);
 
 /** Returns the started and completed items of MCP tool calls, which are the ones whose detail says `mcp`. */
 const findMcpCallItems = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<ItemEvent> =>
@@ -90,95 +75,45 @@ const findMcpCallItems = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<Item
 const createFixture = () => {
   const mcp = startFakeMcpServer();
   const model = startScriptedModelServer(buildMcpCallScript());
-  const home = createScratchHome("pi-mcp");
-  pointAtFakeModel(home, model.baseUrl);
-  const userHome = createScratchHome("pi-mcp-user");
-  const cwd = createScratchHome("pi-mcp-cwd");
-  const spawned: Array<SpawnedPi> = [];
-  const stops: Array<() => Promise<void>> = [];
-  onTestFinished(async () => {
-    for (const stop of stops) await stop();
+  onTestFinished(() => {
     mcp.stop();
     model.stop();
   });
 
   /** Starts a session whose gateway entry points at the fake, and returns what a test drives and reads. */
   const startRun = async (accessMode: SessionSpec["accessMode"]) => {
-    const adapter = makePiAdapter({
-      spawn: (command, env, directory) => {
-        spawned.push({ command, agentFolder: env["PI_CODING_AGENT_DIR"]! });
-        return spawnPi(command, env, directory);
-      },
-      run: runProcess,
-      killProcessesHolding,
+    const session = await startRealPiSession({
+      binary: binary!,
+      mcpUrl: mcp.url,
+      sessionToken: TOKEN,
+      model,
+      accessMode,
     });
-    const sessionId = crypto.randomUUID();
-    const seen: Array<HarnessEvent> = [];
-    const listening = Effect.runFork(
-      Stream.runForEach(adapter.events, (event) =>
-        Effect.sync(() => {
-          if (event.sessionId === sessionId) seen.push(event);
-        }),
-      ),
-    );
-    await Effect.runPromise(
-      adapter.startSession(
-        sessionId,
-        {
-          ...SPEC,
-          modelSelection: { model: "fake-model", options: { thinking: "low" } },
-          accessMode,
-        },
-        {
-          ...buildContext(home, cwd),
-          binary: binary!,
-          mcpServers: [{ name: "tools", url: mcp.url }],
-          env: {
-            PATH: buildPiTestPath(binary!),
-            HOME: userHome,
-            [SESSION_TOKEN_VARIABLE]: TOKEN,
-          },
-        },
-      ),
-    );
-    const completedTurns = () =>
-      filterMainEvents(seen).filter((event) => event._tag === "turn.completed").length;
-    const listOpened = () => filterByTag(seen, "request.opened");
-    const describeProgress = () =>
-      `${seen.map((event) => event._tag).join(", ")}, after ${model.asked()} model requests`;
-    const waitReporting = (what: string, ready: () => boolean) =>
-      waitUntil(() => `${what}, having reported ${describeProgress()}`, ready, STEP_MS);
-    let stopped = false;
+    const { waitReporting, countCompletedTurns } = session;
+    /**
+     * Sends a prompt once pi is connected to the MCP server. pi connects in
+     * the background while it starts. A person types for longer than that,
+     * so the prompt waits for the connection, and `tool_search` then has
+     * the tools to search.
+     */
+    const send = async (text: string) => {
+      await waitUntil(
+        "connected to the MCP server",
+        () => mcp.requests.some((request) => request.method === "tools/list"),
+        STEP_MS,
+      );
+      await session.sendInput(text);
+    };
     const run = {
-      seen,
-      listOpened,
-      waitReporting,
-      /** Stops the session and waits for its pi processes to end, so their agent folders are gone. */
-      stop: async () => {
-        if (stopped) return;
-        stopped = true;
-        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-        await Effect.runPromise(Fiber.interrupt(listening));
-      },
-      /**
-       * Sends a prompt once pi is connected to the MCP server. pi connects in
-       * the background while it starts. A person types for longer than that,
-       * so the prompt waits for the connection, and `tool_search` then has
-       * the tools to search.
-       */
-      send: async (text: string) => {
-        await waitUntil(
-          "connected to the MCP server",
-          () => mcp.requests.some((request) => request.method === "tools/list"),
-          STEP_MS,
-        );
-        await Effect.runPromise(adapter.sendInput(sessionId, { text }));
-      },
+      ...session,
       /** Sends `find <word>` and returns once that turn has ended. */
       callTool: async (tool: string) => {
-        const before = completedTurns();
-        await run.send(`find ${readSearchWord(tool)}`);
-        await waitReporting(`the turn that calls ${tool} ended`, () => completedTurns() > before);
+        const before = countCompletedTurns();
+        await send(`find ${readSearchWord(tool)}`);
+        await waitReporting(
+          `the turn that calls ${tool} ended`,
+          () => countCompletedTurns() > before,
+        );
       },
       /**
        * Sends `find <word>` and returns the approval it opens, while the turn
@@ -186,32 +121,25 @@ const createFixture = () => {
        * is what a call that never reached the extension looks like.
        */
       callToolUntilAsked: async (tool: string) => {
-        const askedBefore = listOpened().length;
-        const turnsBefore = completedTurns();
-        await run.send(`find ${readSearchWord(tool)}`);
+        const askedBefore = session.listOpened().length;
+        const turnsBefore = countCompletedTurns();
+        await send(`find ${readSearchWord(tool)}`);
         await waitReporting(
           `the approval of ${tool} was asked`,
-          () => listOpened().length > askedBefore || completedTurns() > turnsBefore,
+          () => session.listOpened().length > askedBefore || countCompletedTurns() > turnsBefore,
         );
-        expect(listOpened().length, `no approval of ${tool} before the turn ended`).toBeGreaterThan(
-          askedBefore,
-        );
-        return listOpened().at(-1)!;
+        expect(
+          session.listOpened().length,
+          `no approval of ${tool} before the turn ended`,
+        ).toBeGreaterThan(askedBefore);
+        return session.listOpened().at(-1)!;
       },
-      /** Answers an approval and returns once the turn it held has ended. */
-      answer: async (opened: Opened, decision: ApprovalDecision) => {
-        const before = completedTurns();
-        await Effect.runPromise(
-          adapter.respondToApprovalRequest(sessionId, opened.request.requestId, decision),
-        );
-        await waitReporting(`the turn after ${decision} ended`, () => completedTurns() > before);
-      },
+      send,
     };
-    stops.push(run.stop);
     return run;
   };
 
-  return { mcp, home, userHome, cwd, spawned, startRun };
+  return { mcp, startRun };
 };
 
 describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () => {
@@ -351,7 +279,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () 
   it(
     "keeps the token out of every argument and every file under the session's folders",
     async () => {
-      const { mcp, home, userHome, cwd, spawned, startRun } = createFixture();
+      const { mcp, startRun } = createFixture();
       const run = await startRun("approval-required");
       await run.answer(await run.callToolUntilAsked(SEARCH_ISSUES_TOOL), "allow");
       expect(mcp.requests.length).toBeGreaterThan(0);
@@ -360,7 +288,8 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () 
       );
 
       // The folders are listed while pi runs: it removes its agent folder when it exits.
-      const scanFolders = [home, userHome, cwd, ...spawned.map((one) => one.agentFolder)];
+      const { home, userHome, cwd } = run.folders;
+      const scanFolders = [home, userHome, cwd, ...run.spawned.map((one) => one.agentFolder)];
       const findTokenFiles = () =>
         scanFolders
           .filter(existsSync)
@@ -368,7 +297,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () 
           .filter((file) => readFileSync(file).includes(TOKEN));
       expect(scanFolders.filter(existsSync).flatMap(listFiles).length).toBeGreaterThan(0);
       expect(findTokenFiles()).toEqual([]);
-      for (const one of spawned) expect(one.command.join(" ")).not.toContain(TOKEN);
+      for (const one of run.spawned) expect(one.command.join(" ")).not.toContain(TOKEN);
       await run.stop();
       expect(findTokenFiles()).toEqual([]);
     },

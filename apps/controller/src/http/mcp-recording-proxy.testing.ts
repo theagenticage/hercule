@@ -36,6 +36,12 @@ export interface RecordingProxy {
    * its way when the harness acts on the list it holds.
    */
   readonly withholdListChanged: (withhold: boolean) => void;
+  /**
+   * Makes the proxy wait `ms` milliseconds before it forwards each request with
+   * this JSON-RPC method, so the harness gets the answer late. The request is
+   * recorded when it arrives, with no `status` until the answer comes.
+   */
+  readonly delayRequests: (rpcMethod: string, ms: number) => void;
   readonly stop: () => Promise<void>;
 }
 
@@ -110,6 +116,7 @@ export const startRecordingProxy = (
 ): RecordingProxy => {
   const seen: Array<ObservedRequest> = [];
   let withholding = false;
+  const delays = new Map<string, number>();
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -139,6 +146,8 @@ export const startRecordingProxy = (
         streamed: [],
       };
       seen.push(observed);
+      const delay = delays.get(observed.rpcMethod);
+      if (delay !== undefined) await Bun.sleep(delay);
       if (options.answerDiscoverLikeOlderServer && observed.rpcMethod === "server/discover") {
         observed.status = 400;
         return Response.json(
@@ -176,6 +185,9 @@ export const startRecordingProxy = (
     seen,
     withholdListChanged: (withhold) => {
       withholding = withhold;
+    },
+    delayRequests: (rpcMethod, ms) => {
+      delays.set(rpcMethod, ms);
     },
     stop: async () => {
       await server.stop(true);

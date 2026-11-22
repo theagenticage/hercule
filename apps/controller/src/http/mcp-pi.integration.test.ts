@@ -5,18 +5,19 @@
  * `notifications/tools/list_changed` and lists again, opens a new MCP session
  * when the gateway answers 404 for the one it holds and then sends its call
  * again, which reaches the right tool, calls a hyphenated tool and a tool whose
- * name carries a hash, and never shows the model a tool name of more than 64
- * characters. What a user sees of approvals and items is checked beside the
+ * name carries a hash, never shows the model a tool name of more than 64
+ * characters, and runs a call from a first input that arrives before pi has
+ * listed the tools. What a user sees of approvals and items is checked beside the
  * adapter, in `apps/runner/src/harnesses/pi/adapter-mcp.integration.test.ts`.
  *
- * Nothing here is billed and no login is used. pi starts the way the pi
- * adapter starts it: the adapter's own `buildArgv` and `decideMcpLaunch`
- * give the command line and the gateway's address, the adapter's own
- * extension (`EXTENSION_SOURCE`) registers the gateway, and the session token
- * is in `HERCULE_TOKEN`. The environment is built from nothing (a throwaway
- * `HOME` and agent directory). The model is the local stand-in of
- * `apps/runner/src/harnesses/pi/upstream.ts`, scripted to find a tool with
- * `tool_search` and call it, so no real model is reached.
+ * Nothing here is billed and no login is used. pi starts through the pi
+ * adapter's own `startSession`, as it does in a real session
+ * (`startRealPiSession`), so its command line, its extension and the gateway's
+ * address are the adapter's. The session token is in `HERCULE_TOKEN`. The
+ * environment is built from nothing (a throwaway `HOME` and Harness Home). The
+ * model is the local stand-in of `apps/runner/src/harnesses/pi/upstream.ts`,
+ * scripted to find a tool with `tool_search` and call it, so no real model is
+ * reached.
  *
  * A recording proxy sits between pi and the controller and keeps what the
  * gateway receives, as in `mcp-codex.integration.test.ts`.
@@ -39,32 +40,19 @@
  * without changing `PATH`. No CI job installs pi, so this file runs on a
  * developer's machine only.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
-import { SESSION_TOKEN_VARIABLE } from "../../../runner/src/credentials/helper";
-import { buildArgv } from "../../../runner/src/harnesses/pi/adapter";
-import {
-  ACCESS_MODE_VARIABLE,
-  AGENT_FILE_VARIABLE,
-  EXTENSION_SOURCE,
-} from "../../../runner/src/harnesses/pi/extension";
-import { decideMcpLaunch } from "../../../runner/src/harnesses/pi/mcp";
+import { findPiTestBinary } from "../../../runner/src/harnesses/pi/pi-binary.testing";
 import {
   buildMcpCallScript,
   TOOL_SEARCH_TOOL,
 } from "../../../runner/src/harnesses/pi/mcp-model.testing";
 import {
-  buildPiTestPath,
-  findPiTestBinary,
-} from "../../../runner/src/harnesses/pi/pi-binary.testing";
-import { makeRpc, STARTUP_DEADLINE } from "../../../runner/src/harnesses/pi/rpc";
-import { buildContext, SPEC } from "../../../runner/src/harnesses/pi/testing";
+  startRealPiSession,
+  type RealPiSession,
+} from "../../../runner/src/harnesses/pi/real-pi-session.testing";
+import { cleanupHomes } from "../../../runner/src/harnesses/pi/testing";
 import {
-  pointAtFakeModel,
   readRequestMessageText,
   startScriptedModelServer,
   type FakeModelReply,
@@ -72,7 +60,6 @@ import {
   type FakeModelScript,
   type FakeModelServer,
 } from "../../../runner/src/harnesses/pi/upstream";
-import { spawnPi, stopChild } from "../../../runner/src/harnesses/process";
 import { startFakeUpstream, type FakeTool, type FakeUpstream } from "../mcp-servers/testing";
 import {
   OLDER_ERA_REVISIONS,
@@ -97,6 +84,9 @@ const STEP_MS = 30_000;
 /** The test's own limit, with room for pi to start and for several turns. */
 const TEST_MS = 120_000;
 
+/** How long the gateway holds back its first list in the test of an input that arrives before it. Longer than pi needs to start and ask the model. */
+const LATE_LIST_MS = 2_000;
+
 /** The name of the one MCP Server the tests give the Thread. */
 const SERVER_NAME = "sentry";
 
@@ -106,118 +96,7 @@ const WHOAMI = `mcp__${MCP_GATEWAY_ENTRY_NAME}__${SERVER_NAME}__whoami`;
 /** The longest tool name a model may be shown: pi's own limit. */
 const MAX_TOOL_NAME_LENGTH = 64;
 
-// -- The real pi --------------------------------------------------------------
-
-/** A running pi, and the questions a test can put to it. */
-interface RunningPi {
-  /** Sends a prompt and waits until pi has nothing left to run. */
-  readonly runTurn: (prompt: string) => Promise<void>;
-}
-
-/** What `withPiHome` makes: starts one pi on the home. */
-interface PiHome {
-  readonly start: () => RunningPi;
-}
-
-/**
- * Prepares a throwaway home that points pi at the stand-in model, calls `body`
- * with a way to start a pi on it, then stops every pi it started and removes
- * the folders. A pi is registered for the stop when it is spawned, so one that
- * fails to start up is stopped too.
- *
- * pi is started with the runner's own parts: the adapter's command line, its
- * extension, `spawnPi` and the RPC client `makeRpc`. The adapter's
- * `startSession` is not used, because this file checks the gateway against
- * the real pi without the adapter in between.
- */
-const withPiHome = async (
-  options: {
-    readonly gatewayUrl: string;
-    readonly sessionToken: string;
-    readonly model: FakeModelServer;
-  },
-  body: (home: PiHome) => Promise<void>,
-): Promise<void> => {
-  const root = mkdtempSync(join(tmpdir(), "hercule-pi-gateway-"));
-  const userHome = join(root, "user");
-  const agentFolder = join(root, "agent");
-  const harnessHome = join(root, "harness-home");
-  const cwd = join(root, "cwd");
-  for (const folder of [userHome, agentFolder, harnessHome, cwd]) mkdirSync(folder);
-  pointAtFakeModel(agentFolder, options.model.baseUrl);
-  const extensionFile = join(agentFolder, "extension.ts");
-  writeFileSync(extensionFile, EXTENSION_SOURCE);
-  const spawned: Array<ReturnType<typeof spawnPi>> = [];
-
-  const start = (): RunningPi => {
-    const context = {
-      ...buildContext(harnessHome, cwd),
-      mcpServers: [{ name: MCP_GATEWAY_ENTRY_NAME, url: `${options.gatewayUrl}/mcp` }],
-    };
-    const command = [
-      piBinary!,
-      ...buildArgv(
-        {
-          ...SPEC,
-          modelSelection: { model: "fake-model", options: { thinking: "low" } },
-          accessMode: "full-access",
-        },
-        context,
-        { model: "fake-model", options: { thinking: "low" } },
-        {
-          kind: "session",
-          sessionId: crypto.randomUUID(),
-          transcript: undefined,
-          systemPromptFile: undefined,
-        },
-        extensionFile,
-        decideMcpLaunch(context.mcpServers),
-      ),
-    ];
-    const child = spawnPi(
-      command,
-      {
-        PATH: buildPiTestPath(piBinary!),
-        HOME: userHome,
-        PI_CODING_AGENT_DIR: agentFolder,
-        PI_SKIP_VERSION_CHECK: "1",
-        [SESSION_TOKEN_VARIABLE]: options.sessionToken,
-        [ACCESS_MODE_VARIABLE]: "full-access",
-        [AGENT_FILE_VARIABLE]: extensionFile,
-        ...decideMcpLaunch(context.mcpServers).env,
-      },
-      cwd,
-    );
-    spawned.push(child);
-    // Read to the end, so a full pipe never holds pi up.
-    void Array.fromAsync(child.stderr);
-
-    let settledTurns = 0;
-    const rpc = makeRpc(child, (_line, frame) => {
-      if ((frame as { readonly type?: string } | undefined)?.type === "agent_settled") {
-        settledTurns += 1;
-      }
-    });
-    Effect.runFork(rpc.pump);
-    return {
-      runTurn: async (prompt) => {
-        const before = settledTurns;
-        await Effect.runPromise(rpc.send({ type: "prompt", message: prompt }, STARTUP_DEADLINE));
-        expect(
-          await waitWithin(STEP_MS, () => settledTurns > before),
-          `the turn of "${prompt}" ended`,
-        ).toBe(true);
-      },
-    };
-  };
-
-  try {
-    await body({ start });
-  } finally {
-    for (const child of spawned) await Effect.runPromise(stopChild(child));
-    rmSync(root, { recursive: true, force: true });
-  }
-};
+afterAll(cleanupHomes);
 
 // -- What the model was shown -------------------------------------------------
 
@@ -328,11 +207,22 @@ const withGateway = async (
   }
 };
 
+/** Starts a pi session on the gateway of `gateway`, in full-access so that no call waits for an approval. */
+const startPiOnGateway = (gateway: Gateway): Promise<RealPiSession> =>
+  startRealPiSession({
+    binary: piBinary!,
+    mcpUrl: `${gateway.gatewayUrl}/mcp`,
+    sessionToken: gateway.sessionToken,
+    model: gateway.model,
+    accessMode: "full-access",
+  });
+
 /**
  * Runs `body` with a started pi on a gateway whose session lists `sentry` when
  * `listed` is true. The pi has opened its MCP session and listed the tools
  * before `body` starts: a person types for longer than pi needs to connect,
- * and `tool_search` finds nothing before the list has arrived.
+ * and `tool_search` finds nothing before the list has arrived. The pi is
+ * stopped before the gateway is.
  */
 const withPiOnGateway = (
   options: {
@@ -340,31 +230,26 @@ const withPiOnGateway = (
     readonly tools?: ReadonlyArray<FakeTool>;
     readonly script?: FakeModelScript;
   },
-  body: (gateway: Gateway, running: RunningPi) => Promise<void>,
+  body: (gateway: Gateway, running: RealPiSession) => Promise<void>,
 ): Promise<void> =>
-  withGateway(options, (gateway) =>
-    withPiHome(
-      {
-        gatewayUrl: gateway.gatewayUrl,
-        sessionToken: gateway.sessionToken,
-        model: gateway.model,
-      },
-      async (home) => {
-        const running = home.start();
-        expect(
-          await waitWithin(STEP_MS, () => requestsOf(gateway.proxy.seen, "tools/list").length > 0),
-          "pi listed the tools",
-        ).toBe(true);
-        expect(
-          await waitWithin(STEP_MS, () =>
-            requestsOf(gateway.proxy.seen, "GET").some((one) => one.status === 200),
-          ),
-          "the GET stream is open",
-        ).toBe(true);
-        await body(gateway, running);
-      },
-    ),
-  );
+  withGateway(options, async (gateway) => {
+    const running = await startPiOnGateway(gateway);
+    try {
+      expect(
+        await waitWithin(STEP_MS, () => requestsOf(gateway.proxy.seen, "tools/list").length > 0),
+        "pi listed the tools",
+      ).toBe(true);
+      expect(
+        await waitWithin(STEP_MS, () =>
+          requestsOf(gateway.proxy.seen, "GET").some((one) => one.status === 200),
+        ),
+        "the GET stream is open",
+      ).toBe(true);
+      await body(gateway, running);
+    } finally {
+      await running.stop();
+    }
+  });
 
 describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => {
   it(
@@ -400,6 +285,32 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
         ]);
         expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
         expect(readToolResults(rig.model).at(-1)).toContain("hello");
+      });
+    },
+    TEST_MS,
+  );
+
+  it(
+    "runs a call from a first input that arrives before pi has listed the tools",
+    async () => {
+      await withGateway({ listed: true }, async (rig) => {
+        // The gateway answers the list late, so pi has not got it when the input arrives and `tool_search` runs.
+        rig.proxy.delayRequests("tools/list", LATE_LIST_MS);
+        const running = await startPiOnGateway(rig);
+        try {
+          expect(
+            requestsOf(rig.proxy.seen, "tools/list").filter((one) => one.status !== undefined),
+            "no list was answered when the input was sent",
+          ).toEqual([]);
+
+          await running.runTurn("find whoami");
+
+          expect(requestsOf(rig.proxy.seen, "tools/list").map((one) => one.status)).toContain(200);
+          expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
+          expect(readToolResults(rig.model).at(-1)).toContain("hello");
+        } finally {
+          await running.stop();
+        }
       });
     },
     TEST_MS,
