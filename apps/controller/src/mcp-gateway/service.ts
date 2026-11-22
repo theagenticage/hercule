@@ -161,6 +161,12 @@ const readBody = (
  * for the session of another token), or when the `MCP-Protocol-Version`
  * header disagrees with the revision the session negotiated. Succeeds with the
  * session, or with `undefined` when the request names none.
+ *
+ * A 404 also records on the token that a client of it holds a session from
+ * before: after a restart, or after the gateway dropped the session. The MCP
+ * sessions the token opens from then on are marked, and their first
+ * `tools/call` is refused once (`decideCall`), because that client may resend
+ * a call under a name that now means another tool.
  */
 const admitMcpSession = (
   request: HttpServerRequest.HttpServerRequest,
@@ -170,7 +176,10 @@ const admitMcpSession = (
   const sessionId = request.headers[SESSION_ID_HEADER];
   if (sessionId === undefined) return Effect.succeed(undefined);
   const session = state.mcpSessions.get(sessionId);
-  if (session === undefined) return Effect.fail(respondSessionNotFound());
+  if (session === undefined) {
+    state.sawUnknownMcpSession = true;
+    return Effect.fail(respondSessionNotFound());
+  }
   const refusal = checkSessionVersionHeader(
     request.headers["mcp-protocol-version"],
     session.revision,
@@ -269,7 +278,10 @@ const make = Effect.gen(function* () {
         state,
         session,
         id,
-        callPolicy.runToolCall(state, actor, { name, arguments: args as JsonObject | undefined }),
+        callPolicy.runToolCall(state, session, actor, {
+          name,
+          arguments: args as JsonObject | undefined,
+        }),
       );
       if (Option.isNone(ran)) {
         const refused = yield* callPolicy.refuseCall(

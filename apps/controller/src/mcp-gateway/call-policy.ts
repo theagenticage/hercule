@@ -27,7 +27,7 @@ import {
   type Refusal,
 } from "./refusals";
 import { holdsMcpUse } from "./served";
-import { notifyListChanged, type TokenState } from "./tokens";
+import { notifyListChanged, type McpSession, type TokenState } from "./tokens";
 
 /** What a call turned out to be, before anything is sent. */
 type CallDecision =
@@ -57,9 +57,14 @@ export const makeCallPolicy = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
 
-  /** Reads what a call means and whether it may go on, without sending anything. */
+  /**
+   * Reads what a call means and whether it may go on, without sending anything.
+   * `session` is the MCP session the call came in on, or `undefined` for the
+   * stateless era. This is the one place that admits a call by its name.
+   */
   const decideCall = (
     state: TokenState,
+    session: McpSession | undefined,
     actor: SessionActor,
     toolName: string,
   ): Effect.Effect<CallDecision> =>
@@ -70,8 +75,18 @@ export const makeCallPolicy = Effect.gen(function* () {
       // a harness remembers from before a restart is refused, because the list
       // may have changed and a recomputed name could reach another tool than
       // the one the harness showed. The streams are told to list again.
+      //
+      // The same holds for the first call of an MCP session that may hold
+      // names from before. A harness that lost its session lists the tools
+      // again before it resends the call (pi does), so the name is in the
+      // ledger by then, but it may now stand for another tool than the one the
+      // harness chose. Only the first call is refused, and a call refused as
+      // unknown counts as that first call, so a harness that calls before it
+      // lists is refused once.
       const meaning = state.names.find(toolName);
-      if (meaning === undefined) {
+      const mayHoldNameFromBefore = session?.mayHoldNamesFromBefore === true;
+      if (session !== undefined) session.mayHoldNamesFromBefore = false;
+      if (meaning === undefined || mayHoldNameFromBefore) {
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }
@@ -315,11 +330,13 @@ export const makeCallPolicy = Effect.gen(function* () {
 
     /**
      * Runs one `tools/call` for the session and returns its tool result: the
-     * server's answer, or a refusal with `isError: true`. Never fails: a defect
-     * is left to the caller.
+     * server's answer, or a refusal with `isError: true`. `session` is the MCP
+     * session of the call, or `undefined` in the stateless era. Never fails: a
+     * defect is left to the caller.
      */
     runToolCall: (
       state: TokenState,
+      session: McpSession | undefined,
       actor: SessionActor,
       call: { readonly name: string; readonly arguments: JsonObject | undefined },
     ): Effect.Effect<McpSchema.CallToolResult> =>
@@ -329,7 +346,7 @@ export const makeCallPolicy = Effect.gen(function* () {
         // its entry, as `failed`. While the controller is frozen or sealed the
         // gate refuses the write, and then the call goes unaudited as spec 21
         // section 3.9 says of every call in that window.
-        const decision = yield* decideCall(state, actor, call.name).pipe(
+        const decision = yield* decideCall(state, session, actor, call.name).pipe(
           Effect.onError(() =>
             Effect.uninterruptible(
               promotion

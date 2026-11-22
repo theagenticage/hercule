@@ -430,7 +430,8 @@ const withGateway = (
         arranged,
         {
           serverIds: [alpha!.id],
-          tools: ["mcp__tools__alpha__echo"],
+          // Twice, because the test that loses its MCP session sees its first call refused and calls again.
+          tools: ["mcp__tools__alpha__echo", "mcp__tools__alpha__echo"],
           answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
         },
         (rig) =>
@@ -563,14 +564,19 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
 
         // Its own next request is a tool call, which names the forgotten session.
         const afterRestart = rig.proxy.seen.length;
-        const result = await running.runToolCall();
-        expect(result.isError).toBe(false);
-        expect(result.text).toContain("hello");
+        const refusedResult = await running.runToolCall();
+        expect(refusedResult.isError).toBe(true);
+        expect(refusedResult.text).toContain("List the tools again");
         const [refused] = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call");
         expect(describeRequest(refused!)).toBe("POST tools/call 2025-11-25 session 404");
         expect(refused!.sessionId).toBe(firstSession);
+        // The gateway refuses the first call on a session opened after it lost one, because the CLI may hold
+        // a name from before. The next call is judged as any other, and runs.
+        const result = await running.runToolCall();
+        expect(result.isError).toBe(false);
+        expect(result.text).toContain("hello");
 
-        // The CLI handshakes again and sends the call once more on a session of its own making.
+        // The CLI handshakes again and sends the calls on a session of its own making.
         const newSessions = requestsOf(rig.proxy.seen.slice(afterRestart), "initialize").map(
           (one) => one.answeredSessionId,
         );

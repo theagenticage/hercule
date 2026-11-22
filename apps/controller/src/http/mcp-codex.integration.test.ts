@@ -586,7 +586,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 
-  it("opens a new MCP session and sends the call again after the gateway forgot the one it held", async () => {
+  it("opens a new MCP session and is refused once on its first call after the gateway forgot the one it held", async () => {
     await withCodexOnGateway({ listed: true }, async (rig, home) => {
       const running = await home.start();
       const threadId = await running.startThread();
@@ -621,10 +621,17 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
         );
       }
 
-      // Each call reached the server once, and the one the gateway answered with 404 never did.
+      // The gateway refuses the first call on a session opened after it lost one, because Codex may
+      // hold a name from before. The refusal never reached the server.
+      expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
+      expect(running.readFinishedCalls().map((one) => one.status)).toEqual(["completed", "failed"]);
+
+      // The next call on that session is judged as any other, and runs.
+      await running.runTurn(threadId, `call ${WHOAMI}`);
       expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami", "whoami"]);
       expect(running.readFinishedCalls().map((one) => one.status)).toEqual([
         "completed",
+        "failed",
         "completed",
       ]);
     });

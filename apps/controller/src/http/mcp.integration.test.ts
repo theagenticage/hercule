@@ -42,8 +42,10 @@ import {
   type SpawnedThread,
 } from "../sessions/testing";
 import {
+  createServer,
   createServers,
   eventually,
+  insertPastedConnection,
   readServer,
   startFakeUpstream,
   type FakeUpstream,
@@ -1323,6 +1325,122 @@ describe("names a call may use", () => {
     } finally {
       stream.close();
     }
+  });
+});
+
+describe("a client that holds an MCP session from before", () => {
+  /** Names an MCP session the token never issued, as a harness does after a controller restart. */
+  const nameLostMcpSession = (token: string) =>
+    sendMcp(token, request("tools/list"), { "mcp-session-id": "from-before-the-restart" });
+
+  it("refuses the first call of the session it opens next once, even when it listed the tools first, and runs the next", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    expect((await nameLostMcpSession(thread.token)).status).toBe(404);
+    const { sessionId } = await initialize(thread.token);
+    const stream = await openGetStream(thread.token, sessionId);
+    try {
+      await waitForListChanges(stream, 1);
+      // pi lists the tools before it resends the call that got the 404.
+      expect(await listToolNames(thread.token, sessionId)).toContain("alpha__echo");
+
+      const mark = countUpstreamRequests();
+      const refused = await callEcho(thread.token, "alpha__echo", sessionId);
+      expect(refused.body.result.isError).toBe(true);
+      expect(textOf(refused)).toContain("List the tools again");
+      expect(listToolPostsSince(mark)).toEqual([]);
+      await waitForListChanges(stream, 2);
+
+      expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+        undefined,
+      );
+      expect(listToolPostsSince(mark)).toHaveLength(1);
+    } finally {
+      stream.close();
+    }
+  });
+
+  it("never sends a resent call to the tool that holds its name now", async () => {
+    // Before a restart `search_pages` was the only tool and got `notion__search_pages`.
+    // The server has gained `search-pages`, which sorts first and takes that name now.
+    await upstream.configure({
+      tools: [
+        { name: "search-pages", description: "Searches the pages" },
+        { name: "search_pages", description: "Searches the pages" },
+      ],
+    });
+    try {
+      const controller = { harness: arranged.harness, base: base(), token: arranged.token };
+      // A server is unique per account, so it gets an account no other server of this file uses.
+      const connectionId = await insertPastedConnection(
+        arranged.harness,
+        "acme/desk",
+        "t0ken",
+        "desk-notion",
+      );
+      const notion = await createServer(controller, { connectionId, name: "notion" });
+      await eventually(
+        () => readServer(controller, notion.id),
+        (record) => record.status === "ready",
+      );
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      await nameLostMcpSession(thread.token);
+      const { sessionId } = await initialize(thread.token);
+      const names = await listToolNames(thread.token, sessionId);
+      expect(names).toHaveLength(2);
+      expect(names).toContain("notion__search_pages");
+
+      const mark = countUpstreamRequests();
+      const resent = await callEcho(thread.token, "notion__search_pages", sessionId);
+      expect(resent.body.result.isError).toBe(true);
+      expect(textOf(resent)).toContain("List the tools again");
+      expect(listToolPostsSince(mark)).toEqual([]);
+    } finally {
+      await upstream.configure({
+        tools: [
+          { name: "echo", description: "Echoes its text" },
+          { name: "get-issue.details", description: "Reads an issue" },
+        ],
+      });
+    }
+  });
+
+  it("is refused once, not twice, when it calls before it lists", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await nameLostMcpSession(thread.token);
+    const { sessionId } = await initialize(thread.token);
+
+    const refused = await callEcho(thread.token, "alpha__echo", sessionId);
+    expect(refused.body.result.isError).toBe(true);
+    expect(textOf(refused)).toContain("List the tools again");
+
+    const mark = countUpstreamRequests();
+    await listToolNames(thread.token, sessionId);
+    expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+      undefined,
+    );
+    expect(listToolPostsSince(mark)).toHaveLength(1);
+  });
+
+  it("is not refused by a token that never named an unknown MCP session, and a session opened before it did is not either", async () => {
+    const fresh = await spawnThread(["mcp.use"], [servers[0]]);
+    const freshSession = await initialize(fresh.token);
+    await listToolNames(fresh.token, freshSession.sessionId);
+    expect(
+      (await callEcho(fresh.token, "alpha__echo", freshSession.sessionId)).body.result.isError,
+    ).toBeUndefined();
+
+    const earlier = await spawnThread(["mcp.use"], [servers[0]]);
+    const earlierSession = await initialize(earlier.token);
+    await listToolNames(earlier.token, earlierSession.sessionId);
+    await nameLostMcpSession(earlier.token);
+    expect(
+      (await callEcho(earlier.token, "alpha__echo", earlierSession.sessionId)).body.result.isError,
+    ).toBeUndefined();
+    // The stateless era has no MCP session, and is not refused either.
+    await sendMcp(earlier.token, request("tools/list", STATELESS_META));
+    expect((await callEcho(earlier.token, "alpha__echo", undefined)).body.result.isError).toBe(
+      undefined,
+    );
   });
 });
 
