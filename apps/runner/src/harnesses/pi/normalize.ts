@@ -30,6 +30,7 @@ import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize
 import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
 import { buildEditedPathFields } from "../edited-paths";
+import { splitPrefixedGatewayToolName } from "../gateway-tool-name";
 import { requireText, truncateFact, truncateMessage } from "../text";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { resolvePiPath } from "./edited-path";
@@ -519,6 +520,9 @@ export const readFactArg = (
  * - A file change shows the edited path in the fixed field `path`, whole and
  *   as pi reads it (see `resolvePiPath`). When the path is missing or
  *   longer than the fact bound, it shows the tool's name instead.
+ * - A tool of the MCP Gateway shows the MCP Server and the tool, as the other
+ *   harnesses do. Its arguments belong to an outside server, so a `command`
+ *   or `path` among them is not shown as a shell command or a workspace file.
  * - Any other tool shows its command, else its file path, else its name.
  */
 const buildToolDetail = (
@@ -548,6 +552,14 @@ const buildToolDetail = (
     const fields =
       typeof edited === "string" ? buildEditedPathFields([resolvePiPath(edited, home)]) : undefined;
     return fields ?? { name: truncateFact(toolName) };
+  }
+  const gateway = splitPrefixedGatewayToolName(toolName);
+  if (gateway !== undefined) {
+    return {
+      name: truncateFact(gateway.tool),
+      server: truncateFact(gateway.server),
+      kind: "mcp",
+    };
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };

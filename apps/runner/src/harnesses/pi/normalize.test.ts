@@ -285,6 +285,61 @@ describe("normalizing a tool call on a pi turn", () => {
   });
 });
 
+describe("normalizing a call to the MCP Gateway on a pi turn", () => {
+  const GATEWAY_TOOL = "mcp__tools__sentry__search_issues";
+  const SHOWN = { name: "search_issues", server: "sentry", kind: "mcp" };
+
+  it("shows the call as an MCP call to the server and tool, and its result as output", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart(GATEWAY_TOOL, { query: "is:unresolved" }),
+      { ...buildToolUpdate("3 issues"), toolName: GATEWAY_TOOL },
+      { ...buildToolEnd(false), toolName: GATEWAY_TOOL },
+    ]);
+
+    const started = filterByTag(events, "item.started")[0];
+    expect(started?.kind).toBe("tool_call");
+    expect(started?.detail).toEqual(SHOWN);
+    expect(filterByTag(events, "content.delta").map((event) => event.delta)).toEqual(["3 issues"]);
+    const completed = filterByTag(events, "item.completed")[0];
+    expect(completed?.status).toBe("completed");
+    expect(completed?.detail).toEqual(SHOWN);
+  });
+
+  it("reports a gateway call whose result is an error as a failed item", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart(GATEWAY_TOOL, { query: "is:unresolved" }),
+      { ...buildToolEnd(true), toolName: GATEWAY_TOOL },
+    ]);
+
+    const completed = filterByTag(events, "item.completed")[0];
+    expect(completed?.status).toBe("failed");
+    expect(completed?.detail).toEqual(SHOWN);
+  });
+
+  it("does not show a command or a path among the call's arguments, which belong to the outside server", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart(GATEWAY_TOOL, { command: "rm -rf /", path: "/etc/passwd" }),
+    ]);
+
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual(SHOWN);
+  });
+
+  it("keeps showing the tool of another MCP server by its command, path, or name", () => {
+    const detailOf = (args: Record<string, unknown>) =>
+      filterByTag(
+        normalizeFromStart([{ type: "agent_start" }, buildToolStart("mcp__jira__create", args)]),
+        "item.started",
+      )[0]?.detail;
+
+    expect(detailOf({ command: "make" })).toEqual({ command: "make" });
+    expect(detailOf({ path: "a.txt" })).toEqual({ path: "a.txt" });
+    expect(detailOf({ summary: "ship it" })).toEqual({ name: "mcp__jira__create" });
+  });
+});
+
 describe("the edited path of a pi file change", () => {
   const startEdit = (toolName: string, args: Record<string, unknown>) =>
     filterByTag(

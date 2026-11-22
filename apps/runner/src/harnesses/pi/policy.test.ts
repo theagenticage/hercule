@@ -35,7 +35,9 @@ type Tool =
   | "edit"
   | "submit_result"
   | "subagent"
-  | "mcp__jira__create";
+  | "tool_search"
+  | "mcp__jira__create"
+  | "mcp__tools__sentry__search_issues";
 
 /** True means the approval hook holds the call and asks; false means it lets the call run. */
 const TABLE: Readonly<
@@ -57,7 +59,13 @@ const TABLE: Readonly<
     // Hercule's own tool: starting a subagent changes nothing by itself, and
     // each of the subagent's own calls is asked about under the same mode.
     subagent: false,
+    // pi's own tool: it only loads the definitions of matching tools for the
+    // next model request. Each loaded tool is asked about when called.
+    tool_search: false,
     mcp__jira__create: true,
+    // A tool of the MCP Gateway runs on an outside server, so it is asked
+    // about like any other MCP tool.
+    mcp__tools__sentry__search_issues: true,
   },
   "auto-accept-edits": {
     read: false,
@@ -71,7 +79,9 @@ const TABLE: Readonly<
     edit: false,
     submit_result: false,
     subagent: false,
+    tool_search: false,
     mcp__jira__create: true,
+    mcp__tools__sentry__search_issues: true,
   },
   "full-access": {
     read: false,
@@ -84,7 +94,9 @@ const TABLE: Readonly<
     edit: false,
     submit_result: false,
     subagent: false,
+    tool_search: false,
     mcp__jira__create: false,
+    mcp__tools__sentry__search_issues: false,
   },
 };
 
