@@ -308,6 +308,35 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () 
     );
   });
 
+  describe("in a subagent, when the call is denied", () => {
+    it(
+      "sends nothing to the MCP server, and the subagent's call is declined",
+      async () => {
+        const { mcp, startRun } = createFixture();
+        const run = await startRun("approval-required");
+
+        await run.send("delegate whoami");
+        await run.waitReporting(
+          "the subagent's call was asked about",
+          () => run.listOpened().length > 0,
+        );
+        const [opened] = run.listOpened();
+        await new Promise((resolve) => setTimeout(resolve, UNANSWERED_MS));
+        expect(mcp.listCalledTools()).toEqual([]);
+
+        await run.answer(opened!, "deny");
+
+        expect(mcp.listCalledTools()).toEqual([]);
+        expect(findMcpCallItems(run.seen).at(-1)).toMatchObject({
+          _tag: "item.completed",
+          status: "declined",
+          subagentId: opened!.subagentId,
+        });
+      },
+      TEST_MS,
+    );
+  });
+
   it(
     "keeps the token out of every argument and every file under the session's folders",
     async () => {

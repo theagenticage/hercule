@@ -13,6 +13,7 @@
  * Any other request, and any tool result that follows a call, ends the turn
  * with text.
  */
+import { MCP_GATEWAY_HARNESS_PREFIX } from "@hercule/protocol";
 import { SUBAGENT_TOOL } from "./extension";
 import {
   readRequestMessageText,
@@ -20,9 +21,6 @@ import {
   type FakeModelRequest,
   type FakeModelScript,
 } from "./upstream";
-
-/** The prefix pi puts in front of every tool of the gateway: its `mcp__` prefix and the gateway's entry name. */
-const GATEWAY_TOOL_PREFIX = "mcp__tools__";
 
 /** The name of pi's own tool for finding MCP tools. */
 export const TOOL_SEARCH_TOOL = "tool_search";
@@ -64,7 +62,7 @@ export const buildMcpCallScript =
       if (wanted === undefined) return { text: "There is nothing to do." };
       const declared = (request.tools ?? [])
         .map((tool) => tool.function.name)
-        .find((name) => name.startsWith(GATEWAY_TOOL_PREFIX) && name.includes(wanted));
+        .find((name) => name.startsWith(MCP_GATEWAY_HARNESS_PREFIX) && name.includes(wanted));
       return declared === undefined
         ? buildToolCall(TOOL_SEARCH_TOOL, { query: wanted })
         : buildToolCall(declared, { text: "hello" });

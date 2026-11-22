@@ -37,7 +37,12 @@ export interface McpLaunch {
  * `HERCULE_TOKEN` variable, which pi reads itself when it connects, so the
  * token is in no argument (the process list shows those) and in no variable
  * this function sets. A server of another name is not the gateway and is
- * ignored: the controller only ever sends the gateway.
+ * ignored. The controller sends only the gateway today, so there is nothing
+ * else to map. A server that runs on the runner itself, over stdio, is a later
+ * ticket ([#1213](https://github.com/theagenticage/hercule/issues/1213)). The
+ * Codex adapter maps every server it is given; pi's registration in
+ * `extension.ts` is written for the gateway alone, so this function does not
+ * pass another server on to it.
  */
 export const decideMcpLaunch = (servers: ReadonlyArray<ResolvedMcpServer>): McpLaunch => {
   const gateway = servers.find((server) => server.name === MCP_GATEWAY_ENTRY_NAME);
