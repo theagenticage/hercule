@@ -163,7 +163,7 @@ export interface FakeUpstream {
    * response, for the metadata a server publishes at a well-known address.
    * The request is not recorded. The default answers nothing.
    */
-  answerFirst: (request: Request) => Response | undefined;
+  answerFirst: (request: Request) => Response | undefined | Promise<Response | undefined>;
   /** When set, every request gets a 302 to this address instead of an answer. */
   redirectTo: string | undefined;
   /** When set, every request gets this HTTP status and an empty body instead of an answer. */
@@ -292,7 +292,7 @@ export const startFakeUpstream = (
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
-      const early = fake.answerFirst(request);
+      const early = await fake.answerFirst(request);
       if (early !== undefined) return early;
       let method = "?";
       let params: Record<string, unknown> | undefined;
@@ -983,11 +983,14 @@ export interface FakeAuthorizationServer {
   currentAccessToken: () => string;
   /** Makes the fake MCP server refuse every access token issued so far, as a server that revoked them does. */
   revokeAccessTokens: () => void;
-  stop: () => Promise<void>;
+  /** Whether `stop` was called. */
+  stopped: boolean;
+  /** Makes the fake answer HTTP 503 to every request, as an authorization server that is down. */
+  stop: () => void;
 }
 
 /**
- * Starts a fake OAuth authorization server on a free loopback port. It serves
+ * Starts a fake OAuth authorization server on the origin of the fake MCP server. It serves
  * the metadata, Dynamic Client Registration, an authorization endpoint that
  * redirects with a code, and a token endpoint that checks what a real one
  * checks (PKCE, the redirect address, the client, the `resource`) and rotates
@@ -997,10 +1000,8 @@ export interface FakeAuthorizationServer {
  * server's protected resource metadata there, makes the server's 401 point at
  * it, and lets the server accept only the tokens it issued.
  */
-export const startFakeAuthorizationServer = (
-  upstream: FakeUpstream,
-): Promise<FakeAuthorizationServer> => {
-  const origin = (port: number) => `http://127.0.0.1:${String(port)}`;
+export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthorizationServer => {
+  const issuer = upstream.origin;
   const codes = new Map<
     string,
     { readonly challenge: string; readonly redirectUri: string; readonly clientId: string }
@@ -1031,109 +1032,114 @@ export const startFakeAuthorizationServer = (
   };
   const refuse = (error: string) => Response.json({ error }, { status: 400 });
 
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    async fetch(request) {
-      const url = new URL(request.url);
-      const issuer = origin(server.port as number);
-      if (url.pathname.startsWith("/.well-known/")) {
-        if (fake.redirectMetadataTo !== undefined) {
-          return new Response(null, {
-            status: 302,
-            headers: { location: fake.redirectMetadataTo },
-          });
-        }
-        if (url.pathname !== "/.well-known/oauth-authorization-server") {
-          return new Response("not found", { status: 404 });
-        }
-        return Response.json({
-          issuer,
-          authorization_endpoint: `${issuer}${fake.authorizePath}`,
-          token_endpoint: `${issuer}${fake.tokenPath}`,
-          registration_endpoint: `${issuer}/register`,
-          code_challenge_methods_supported: ["S256"],
-          token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
-          ...(fake.sendsIssuer ? { authorization_response_iss_parameter_supported: true } : {}),
+  /**
+   * Answers a request of the authorization server, or returns `undefined` for
+   * any other. The fake MCP server calls it first, because the authorization
+   * server has the MCP server's own origin: Hercule accepts an http
+   * authorization server only on the origin of an http MCP server.
+   */
+  const handle = async (request: Request): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    const isMine = [
+      "/.well-known/oauth-authorization-server",
+      "/register",
+      fake.authorizePath,
+      fake.tokenPath,
+    ].includes(url.pathname);
+    if (isMine && fake.stopped) return new Response("down", { status: 503 });
+    if (url.pathname === "/.well-known/oauth-authorization-server") {
+      if (fake.redirectMetadataTo !== undefined) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: fake.redirectMetadataTo },
         });
       }
-      if (url.pathname === "/register" && request.method === "POST") {
-        const body = (await request.json()) as Record<string, unknown>;
-        registrations.push(body);
-        const clientId = `client-${String(registrations.length)}`;
-        clients.add(clientId);
-        if (fake.issuesClientSecrets) {
-          const secret = `dcr-secret-${Math.random().toString(36).slice(2)}`;
-          clientSecrets.set(clientId, secret);
-          return Response.json(
-            {
-              ...body,
-              client_id: clientId,
-              client_secret: secret,
-              token_endpoint_auth_method: "client_secret_post",
-            },
-            { status: 201 },
-          );
-        }
+      return Response.json({
+        issuer,
+        authorization_endpoint: `${issuer}${fake.authorizePath}`,
+        token_endpoint: `${issuer}${fake.tokenPath}`,
+        registration_endpoint: `${issuer}/register`,
+        code_challenge_methods_supported: ["S256"],
+        token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
+        ...(fake.sendsIssuer ? { authorization_response_iss_parameter_supported: true } : {}),
+      });
+    }
+    if (url.pathname === "/register" && request.method === "POST") {
+      const body = (await request.json()) as Record<string, unknown>;
+      registrations.push(body);
+      const clientId = `client-${String(registrations.length)}`;
+      clients.add(clientId);
+      if (fake.issuesClientSecrets) {
+        const secret = `dcr-secret-${Math.random().toString(36).slice(2)}`;
+        clientSecrets.set(clientId, secret);
         return Response.json(
-          { ...body, client_id: clientId, token_endpoint_auth_method: "none" },
+          {
+            ...body,
+            client_id: clientId,
+            client_secret: secret,
+            token_endpoint_auth_method: "client_secret_post",
+          },
           { status: 201 },
         );
       }
-      if (url.pathname === fake.authorizePath) {
-        authorizationRequests.push(url);
-        const params = url.searchParams;
-        const redirect = URL.parse(params.get("redirect_uri") ?? "");
-        const problems = [
-          params.get("response_type") === "code" ? "" : "response_type",
-          clients.has(params.get("client_id") ?? "") ? "" : "client_id",
-          redirect?.hostname === "127.0.0.1" && redirect.pathname === "/callback"
-            ? ""
-            : "redirect_uri",
-          params.get("code_challenge_method") === "S256" ? "" : "code_challenge_method",
-          params.get("code_challenge") ? "" : "code_challenge",
-          params.get("state") ? "" : "state",
-          params.get("resource") === upstream.url ? "" : "resource",
-          params.get("scope") === OAUTH_TEST_SCOPE ? "" : "scope",
-        ].filter((problem) => problem !== "");
-        if (problems.length > 0)
-          return new Response(`bad request: ${problems.join(",")}`, { status: 400 });
-        return new Response(null, { status: 204 });
-      }
-      if (url.pathname === fake.tokenPath && request.method === "POST") {
-        const form = Object.fromEntries(new URLSearchParams(await request.text()));
-        tokenRequests.push(form);
-        if (!clients.has(form.client_id ?? "")) return refuse("invalid_client");
-        const secret = clientSecrets.get(form.client_id ?? "");
-        if (secret !== undefined && form.client_secret !== secret) return refuse("invalid_client");
-        if (form.resource !== upstream.url) return refuse("invalid_target");
-        if (form.grant_type === "refresh_token") {
-          if (fake.refuseRefresh) return refuse("invalid_grant");
-          const token = form.refresh_token ?? "";
-          if (!refreshTokens.has(token)) return refuse("invalid_grant");
-          // A rotating provider: the old refresh token dies the moment it is used.
-          refreshTokens.delete(token);
-          return issueTokens();
-        }
-        const code = codes.get(form.code ?? "");
-        if (form.grant_type !== "authorization_code" || code === undefined)
-          return refuse("invalid_grant");
-        codes.delete(form.code ?? "");
-        if (
-          code.redirectUri !== form.redirect_uri ||
-          code.clientId !== form.client_id ||
-          computeChallenge(form.code_verifier ?? "") !== code.challenge
-        ) {
-          return refuse("invalid_grant");
-        }
+      return Response.json(
+        { ...body, client_id: clientId, token_endpoint_auth_method: "none" },
+        { status: 201 },
+      );
+    }
+    if (url.pathname === fake.authorizePath) {
+      authorizationRequests.push(url);
+      const params = url.searchParams;
+      const redirect = URL.parse(params.get("redirect_uri") ?? "");
+      const problems = [
+        params.get("response_type") === "code" ? "" : "response_type",
+        clients.has(params.get("client_id") ?? "") ? "" : "client_id",
+        redirect?.hostname === "127.0.0.1" && redirect.pathname === "/callback"
+          ? ""
+          : "redirect_uri",
+        params.get("code_challenge_method") === "S256" ? "" : "code_challenge_method",
+        params.get("code_challenge") ? "" : "code_challenge",
+        params.get("state") ? "" : "state",
+        params.get("resource") === upstream.url ? "" : "resource",
+        params.get("scope") === OAUTH_TEST_SCOPE ? "" : "scope",
+      ].filter((problem) => problem !== "");
+      if (problems.length > 0)
+        return new Response(`bad request: ${problems.join(",")}`, { status: 400 });
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === fake.tokenPath && request.method === "POST") {
+      const form = Object.fromEntries(new URLSearchParams(await request.text()));
+      tokenRequests.push(form);
+      if (!clients.has(form.client_id ?? "")) return refuse("invalid_client");
+      const secret = clientSecrets.get(form.client_id ?? "");
+      if (secret !== undefined && form.client_secret !== secret) return refuse("invalid_client");
+      if (form.resource !== upstream.url) return refuse("invalid_target");
+      if (form.grant_type === "refresh_token") {
+        if (fake.refuseRefresh) return refuse("invalid_grant");
+        const token = form.refresh_token ?? "";
+        if (!refreshTokens.has(token)) return refuse("invalid_grant");
+        // A rotating provider: the old refresh token dies the moment it is used.
+        refreshTokens.delete(token);
         return issueTokens();
       }
-      return new Response("not found", { status: 404 });
-    },
-  });
+      const code = codes.get(form.code ?? "");
+      if (form.grant_type !== "authorization_code" || code === undefined)
+        return refuse("invalid_grant");
+      codes.delete(form.code ?? "");
+      if (
+        code.redirectUri !== form.redirect_uri ||
+        code.clientId !== form.client_id ||
+        computeChallenge(form.code_verifier ?? "") !== code.challenge
+      ) {
+        return refuse("invalid_grant");
+      }
+      return issueTokens();
+    }
+    return undefined;
+  };
 
   const fake: FakeAuthorizationServer = {
-    issuer: origin(server.port as number),
+    issuer,
     tokenPath: "/token",
     authorizePath: "/authorize",
     sendsIssuer: true,
@@ -1184,8 +1190,9 @@ export const startFakeAuthorizationServer = (
     revokeAccessTokens: () => {
       accessTokens = new Set();
     },
-    stop: async () => {
-      await server.stop(true);
+    stopped: false,
+    stop: () => {
+      fake.stopped = true;
     },
   };
 
@@ -1198,8 +1205,8 @@ export const startFakeAuthorizationServer = (
           authorization_servers: [fake.issuer],
           scopes_supported: ["other.scope"],
         })
-      : undefined;
-  return Promise.resolve(fake);
+      : handle(request);
+  return fake;
 };
 
 /** What `withOAuthRig` hands the test. */
@@ -1217,12 +1224,7 @@ export const withOAuthRig = async (
   options: Pick<RigOptions, "fake"> = {},
 ) => {
   await withUrlRig(async (rig) => {
-    const authorizationServer = await startFakeAuthorizationServer(rig.fake);
-    try {
-      await body({ ...rig, authorizationServer });
-    } finally {
-      await authorizationServer.stop();
-    }
+    await body({ ...rig, authorizationServer: startFakeAuthorizationServer(rig.fake) });
   }, options);
 };
 

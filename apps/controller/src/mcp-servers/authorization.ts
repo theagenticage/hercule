@@ -9,8 +9,8 @@
  * from servers that the user chose but did not write:
  *
  * - the address is http or https, holds no user name or password, and is
- *   https, except on the same host as an http MCP server (a server that signs
- *   its users in itself, in a private network). A code, a client secret or a
+ *   https, except on the same host and port as an http MCP server (a server
+ *   that signs its users in itself, in a private network). A code, a client secret or a
  *   token must never cross the network in clear text because a server's
  *   metadata said so;
  * - a redirect is a failure and is never followed;
@@ -113,6 +113,8 @@ export interface DiscoveredAuthorization extends AuthorizationServer {
 /** A client registered with an authorization server. `authMethod` says how it signs its token requests. */
 export interface RegisteredClient extends OAuthClient {
   readonly authMethod: ClientAuthMethod;
+  /** When the client's secret stops working, as the registration said (RFC 7591), or `undefined` when it never does. */
+  readonly secretExpiresAtMillis?: number;
 }
 
 /** What a `WWW-Authenticate` header's `Bearer` challenge says about OAuth. */
@@ -124,37 +126,85 @@ export interface BearerChallenge {
 }
 
 /**
- * One piece of a `WWW-Authenticate` header: either `name=value` (a parameter,
- * whose value is a token or a quoted string) or a bare word (the start of a
- * challenge). A quoted value is matched whole, so a comma or an `=` inside it
- * is never read as structure.
+ * The longest `WWW-Authenticate` header that is read. A real challenge is a
+ * few hundred bytes, and the header comes from a server the user did not
+ * write, so a longer one counts as having no challenge.
  */
-const CHALLENGE_PIECE = /([^\s=,"]+)\s*=\s*("(?:[^"\\]|\\.)*"|[^\s,"]*)|([^\s,=]+)(?=[\s,]|$)/g;
+const MAX_CHALLENGE_LENGTH = 8 * 1024;
 
-/** Removes the quotes of a quoted string and the backslashes in it, or returns an unquoted value as it is. */
-const unquote = (value: string): string =>
-  value.startsWith('"') ? value.slice(1, -1).replace(/\\(.)/g, "$1") : value;
+/** Checks whether `character` ends a token in a `WWW-Authenticate` header: a space, a tab, a comma, an equals sign or a quote. */
+const endsChallengeToken = (character: string): boolean =>
+  character === " " ||
+  character === "\t" ||
+  character === "," ||
+  character === "=" ||
+  character === '"';
 
 /**
  * Reads the `resource_metadata` and `scope` parameters of the `Bearer`
  * challenge in a `WWW-Authenticate` header (RFC 9728 section 5.1, RFC 6750
  * section 3). A header may hold several challenges (`Basic realm="x", Bearer
  * scope="y"`), and a parameter counts only inside the `Bearer` one. Parameter
- * names are case-insensitive. Returns `undefined` for each that is absent,
- * and for both when the header itself is.
+ * names are case-insensitive, and the first of a name wins. A quoted value is
+ * read whole, so a comma or an `=` inside it is never read as structure.
+ * Returns `undefined` for each that is absent, and for both when the header
+ * itself is, or is longer than `MAX_CHALLENGE_LENGTH`.
+ *
+ * It reads the header in one pass from left to right, so its time is linear
+ * in the length of the header, whatever the header holds.
  */
 export const parseBearerChallenge = (header: string | undefined): BearerChallenge => {
   let resourceMetadata: string | undefined;
   let scope: string | undefined;
+  if (header === undefined || header.length > MAX_CHALLENGE_LENGTH) {
+    return { resourceMetadata, scope };
+  }
+  const skipBlanks = (from: number): number => {
+    let at = from;
+    while (header[at] === " " || header[at] === "\t") at += 1;
+    return at;
+  };
   let inBearerChallenge = false;
-  for (const piece of (header ?? "").matchAll(CHALLENGE_PIECE)) {
-    const [, name, value, scheme] = piece;
-    if (scheme !== undefined) {
-      inBearerChallenge = scheme.toLowerCase() === "bearer";
-    } else if (inBearerChallenge && name !== undefined && value !== undefined) {
+  let at = 0;
+  while (at < header.length) {
+    if (header[at] === " " || header[at] === "\t" || header[at] === ",") {
+      at += 1;
+      continue;
+    }
+    const nameStart = at;
+    while (at < header.length && !endsChallengeToken(header[at]!)) at += 1;
+    const name = header.slice(nameStart, at);
+    if (name === "") {
+      // A stray `=` or quote that no name leads: skip it.
+      at += 1;
+      continue;
+    }
+    const afterName = skipBlanks(at);
+    if (header[afterName] !== "=") {
+      // A bare word starts a challenge.
+      inBearerChallenge = name.toLowerCase() === "bearer";
+      continue;
+    }
+    at = skipBlanks(afterName + 1);
+    let value = "";
+    if (header[at] === '"') {
+      at += 1;
+      while (at < header.length && header[at] !== '"') {
+        if (header[at] === "\\" && at + 1 < header.length) at += 1;
+        value += header[at];
+        at += 1;
+      }
+      at += 1;
+    } else {
+      const valueStart = at;
+      // An unquoted value may hold `=`, as in an address with a query.
+      while (at < header.length && !/[ \t,"]/.test(header[at]!)) at += 1;
+      value = header.slice(valueStart, at);
+    }
+    if (inBearerChallenge) {
       const parameter = name.toLowerCase();
-      if (parameter === "resource_metadata") resourceMetadata ??= unquote(value);
-      if (parameter === "scope") scope ??= unquote(value);
+      if (parameter === "resource_metadata") resourceMetadata ??= value;
+      if (parameter === "scope") scope ??= value;
     }
   }
   return { resourceMetadata, scope };
@@ -221,7 +271,7 @@ export const buildAuthorizationServerMetadataUrls = (issuer: URL): ReadonlyArray
  * Parses an address that an OAuth server named, and checks the outbound rules
  * on it. Fails with `AuthorizationUnreadable` when it is not an address, is not
  * http or https, holds a user name or a password, or is http while it is not on
- * the same host as an http MCP server. `what` names the address in the
+ * the same host and port as an http MCP server. `what` names the address in the
  * message, which never quotes the address.
  */
 export const checkOutboundUrl = (
@@ -236,11 +286,8 @@ export const checkOutboundUrl = (
   if (url.username !== "" || url.password !== "") {
     return failUnreadable(`the ${what} holds a user name or a password`);
   }
-  if (
-    url.protocol === "http:" &&
-    !(server.protocol === "http:" && url.hostname === server.hostname)
-  ) {
-    return failUnreadable(`the ${what} is http, and only the MCP server's own host may be`);
+  if (url.protocol === "http:" && !(server.protocol === "http:" && url.host === server.host)) {
+    return failUnreadable(`the ${what} is http, and only the MCP server's own origin may be`);
   }
   return Effect.succeed(url);
 };
@@ -402,6 +449,7 @@ const RegistrationAnswer = Schema.Struct({
   client_secret: Schema.optional(Schema.NullOr(Schema.String)),
   token_endpoint_auth_method: Schema.optional(Schema.NullOr(Schema.String)),
   redirect_uris: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  client_secret_expires_at: Schema.optional(Schema.NullOr(Schema.Number)),
 });
 
 const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
@@ -412,7 +460,8 @@ const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
  * when it lists redirect addresses that do not include the registered one
  * (a sign-in would then be refused at the browser), when it gives a client
  * authentication method Hercule does not speak, or when it gives a method that
- * needs a secret and no secret.
+ * needs a secret and no secret. A secret's `client_secret_expires_at` is kept
+ * as `secretExpiresAtMillis`.
  *
  * A client that got a secret signs its token requests with the method the
  * answer names. When the answer names none, the method is
@@ -456,7 +505,14 @@ export const readRegisteredClient = (
     if (clientSecret === undefined || clientSecret === "") {
       return yield* failUnreadable("the client registration answer has no client secret");
     }
-    return { clientId, clientSecret, authMethod };
+    // The time is in seconds since the epoch, and 0 means it never expires.
+    const expiresAt = answer.client_secret_expires_at ?? 0;
+    return {
+      clientId,
+      clientSecret,
+      authMethod,
+      ...(expiresAt > 0 ? { secretExpiresAtMillis: expiresAt * 1000 } : {}),
+    };
   });
 
 /**

@@ -65,9 +65,34 @@ describe("parseBearerChallenge", () => {
       'Bearer scope="a\\"b"',
       { resourceMetadata: undefined, scope: 'a"b' },
     ],
+    [
+      "an unquoted address that holds an equals sign",
+      "Bearer resource_metadata=https://a.example/meta?x=1",
+      { resourceMetadata: "https://a.example/meta?x=1", scope: undefined },
+    ],
     ["no header", undefined, { resourceMetadata: undefined, scope: undefined }],
   ])("reads %s", (_name, header, expected) => {
     expect(parseBearerChallenge(header)).toEqual(expected);
+  });
+
+  it("reads no challenge from a header over 8 KiB, and a hostile 64 KiB header in a few milliseconds", () => {
+    const tooLong = `Bearer scope="read", ${"a".repeat(8 * 1024)}`;
+    expect(parseBearerChallenge(tooLong)).toEqual({
+      resourceMetadata: undefined,
+      scope: undefined,
+    });
+
+    // Shapes that make a backtracking pattern run in quadratic time.
+    for (const hostile of [
+      `Bearer ${"a".repeat(8000)}"=`,
+      `Bearer ${"a=".repeat(4000)}"`,
+      `Bearer ${' a "'.repeat(2000)}`,
+      `Bearer x="${"\\".repeat(8000)}`,
+    ]) {
+      const started = performance.now();
+      parseBearerChallenge(hostile);
+      expect(performance.now() - started).toBeLessThan(50);
+    }
   });
 });
 
@@ -153,15 +178,11 @@ describe("checkOutboundUrl", () => {
     }
   });
 
-  it("accepts an http address on the host of an http server, whatever its port", async () => {
+  it("accepts an http address on the origin of an http server", async () => {
     expect(
       (await Effect.runPromise(checkOutboundUrl("http://127.0.0.1:9/token", HTTP_SERVER, "t")))
         .href,
     ).toBe("http://127.0.0.1:9/token");
-    expect(
-      (await Effect.runPromise(checkOutboundUrl("http://127.0.0.1:77/token", HTTP_SERVER, "t")))
-        .href,
-    ).toBe("http://127.0.0.1:77/token");
   });
 
   it.each([
@@ -188,19 +209,25 @@ describe("checkOutboundUrl", () => {
       "an http address for an https server",
       "http://a.example/x",
       SERVER,
-      "the token endpoint is http, and only the MCP server's own host may be",
+      "the token endpoint is http, and only the MCP server's own origin may be",
     ],
     [
       "an http address on the host of an https server",
       "http://mcp.example.com/x",
       SERVER,
-      "the token endpoint is http, and only the MCP server's own host may be",
+      "the token endpoint is http, and only the MCP server's own origin may be",
+    ],
+    [
+      "an http address on another port of an http server's host",
+      "http://127.0.0.1:77/token",
+      HTTP_SERVER,
+      "the token endpoint is http, and only the MCP server's own origin may be",
     ],
     [
       "an http address on another host than an http server",
       "http://127.0.0.2:9/x",
       HTTP_SERVER,
-      "the token endpoint is http, and only the MCP server's own host may be",
+      "the token endpoint is http, and only the MCP server's own origin may be",
     ],
   ])("refuses %s, and never quotes the address", async (_name, raw, server, message) => {
     const error = await fails(checkOutboundUrl(raw, server, "token endpoint"));
