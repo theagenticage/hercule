@@ -6,7 +6,7 @@
  */
 import type { JSX } from "react";
 import { Transcript } from "./transcript";
-import { CachedThreadViews } from "./thread-servers";
+import { CachedThreadViews } from "./thread-servers-join";
 import { useHasMcpLine } from "./use-has-mcp-line";
 import { useLiveThreadBlocks } from "./use-live-thread-blocks";
 import "../session/transcript.css";

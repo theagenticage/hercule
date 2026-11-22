@@ -2,7 +2,8 @@
  * Where a Thread's list of MCP Servers starts, and the words that say so in
  * the composer's menu and picker (spec 17, the composer's `+` menu).
  */
-import type { Project } from "@hercule/contract";
+import type { McpServer, Project } from "@hercule/contract";
+import type { ThreadServersRecords } from "./thread-servers";
 import type { McpServerView } from "./views";
 
 /** Where a Thread's list started. */
@@ -106,6 +107,24 @@ export const decideThreadStartSource = ({
     start: list.mcpServerIds.length === 0 ? { ...list, source: { kind: "none" } } : list,
   };
 };
+
+/**
+ * Returns where the thread of `records` started its list, or `undefined`
+ * until the servers are read (`servers`). The first screen never calls it:
+ * only the editor shows where a list started.
+ */
+export const decideThreadStart = (
+  { thread, project, defaultIds }: Pick<ThreadServersRecords, "thread" | "project" | "defaultIds">,
+  servers: readonly McpServer[] | undefined,
+): ThreadStartDecision | undefined =>
+  servers === undefined
+    ? undefined
+    : decideThreadStartSource({
+        projectId: thread.kind === "draft" ? thread.projectId : thread.session.projectId,
+        project,
+        defaultIds,
+        knownServerIds: new Set(servers.map((server) => server.id)),
+      });
 
 /**
  * Returns the line under the menu or the picker that says where the list

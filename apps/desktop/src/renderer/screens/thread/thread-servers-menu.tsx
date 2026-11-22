@@ -116,7 +116,7 @@ function SubmenuRows({
   readonly onClose: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
-  const { described } = useThreadServers();
+  const { described, start } = useThreadServers();
   const ids = described.mcpServerIds;
   const [order] = useState(() => orderMenuNames(views, ids));
   // The account each name last showed, so switching a name back on picks it again.
@@ -127,7 +127,7 @@ function SubmenuRows({
     order,
     rememberedAccounts,
   });
-  const { foot, reset } = describeThreadStartFoot(described.start ?? { kind: "pending" }, ids);
+  const { foot, reset } = describeThreadStartFoot(start ?? { kind: "pending" }, ids);
 
   const choose = (row: ServerMenuRow, serverId: string | null, shownId: string): void => {
     if (edits.busy) return;

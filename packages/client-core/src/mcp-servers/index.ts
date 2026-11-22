@@ -39,7 +39,9 @@ export {
   buildOfferSwitchTarget,
   buildServerSwitchTarget,
   createMcpServerSwitches,
+  decideServerPageSwitch,
   findOrCreateMcpServerSwitches,
+  type ServerPageSwitch,
   type McpServerSwitchCache,
   type McpServerSwitches,
   type McpServerSwitchTarget,
@@ -69,6 +71,7 @@ export { resolveDraftMcpServerIds } from "./draft-pick";
 export { decideDraftServersPick } from "./draft-servers-pick";
 export {
   canResetToStart,
+  decideThreadStart,
   decideThreadStartSource,
   describeThreadStartFoot,
   listKnownServerIds,

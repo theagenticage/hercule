@@ -5,6 +5,7 @@ import { describeAge, showsAccountBesideLabel, type HerculeClient } from "@hercu
 import type { PluginDetail } from "@hercule/contract";
 import {
   buildServerSwitchTarget,
+  decideServerPageSwitch,
   describeConnectionRowProblem,
   isCheckDisabled,
   type McpServerView,
@@ -49,16 +50,15 @@ export function ServerSection({
   const catalogued = useSuspenseQuery(mcpServersQuery(client)).data.items.find(
     ({ id }) => id === server.id,
   );
-  const pageFailed = useQuery(mcpServerQuery(client, server.id)).isError;
-  const pageLags = catalogued !== undefined && catalogued.enabled !== server.enabled;
-  const switchWaits = switchServer.blocked || pageLags;
-  const switchProblem =
-    switchServer.problem ??
-    (pageLags
-      ? pageFailed
-        ? "This page could not read the server again, so the switch waits. Reload the page to try again."
-        : "This page is reading the server again, so the switch waits."
-      : null);
+  const pageRead = useQuery(mcpServerQuery(client, server.id));
+  const pageSwitch = decideServerPageSwitch({
+    page: server,
+    catalogued,
+    pageReadFailed: pageRead.isError,
+    reload: "Reload the page",
+  });
+  const switchWaits = switchServer.blocked || pageSwitch.waitReason !== null;
+  const switchProblem = switchServer.problem ?? pageSwitch.waitReason;
 
   const cannotCheck = checkPending || isCheckDisabled(view);
   const connectionProblem = describeConnectionRowProblem(view);
@@ -70,7 +70,7 @@ export function ServerSection({
           <Switch
             id="mcp-server-offered"
             aria-disabled={switchWaits}
-            checked={catalogued?.enabled ?? server.enabled}
+            checked={pageSwitch.on}
             onCheckedChange={switchServer.press}
           />
           <p className="text-fine text-faint">

@@ -2,8 +2,9 @@
  * What a screen shows as an MCP server's status, and what each status means.
  * Every screen that draws or counts a server's status reads this one table,
  * so none of them keeps its own list of the statuses that "fail" or "need
- * sign-in". The `+` row of the composer reads it on the first screen, so this
- * file imports nothing.
+ * sign-in". The composer's `+` row is drawn on the first screen and does not
+ * read this table (see `needsSignIn` in `display-status.ts`), so this file is
+ * not part of the first screen.
  */
 
 /**

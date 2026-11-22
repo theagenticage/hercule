@@ -10,12 +10,7 @@
  * first screen draws the `+` with it.
  */
 import type { McpServer, Session } from "@hercule/contract";
-import {
-  decideThreadStartSource,
-  type StartProjectRecord,
-  type StartRecord,
-  type ThreadStartDecision,
-} from "./start-list";
+import type { StartProjectRecord, StartRecord } from "./start-list";
 import { describeThreadServersRow, type ThreadServersRow } from "./thread-servers-row";
 
 /** The thread whose servers are described. */
@@ -58,9 +53,6 @@ export interface ThreadServersDemand {
   /** The records of the list a thread started from, which the menu's foot and its reset need. */
   readonly start: boolean;
 }
-
-const readThreadProjectId = (thread: ThreadServersSubject): string | null =>
-  thread.kind === "draft" ? thread.projectId : thread.session.projectId;
 
 /**
  * Returns the ids of the thread's list as the records store them, before the
@@ -110,8 +102,6 @@ export interface ThreadServersDescription {
    * the session's own.
    */
   readonly mcpServerIds: readonly string[];
-  /** Where the list started, or why that is not known. `undefined` until the servers are read. */
-  readonly start: ThreadStartDecision | undefined;
   /** The words and the red dot of the `+` menu's "MCP servers" row. */
   readonly row: ThreadServersRow;
 }
@@ -122,48 +112,28 @@ export interface ThreadServersDescription {
  *
  * - A draft with a pick in its own project shows the pick, and otherwise the
  *   list it starts from: its project's, or for no project the default list.
- * - `start` is decided by `decideThreadStartSource`, so a record that is
- *   pending or failed, or a project that is gone, only takes away the way
- *   back to the start list.
+ * - A record that is pending or failed, or a project that is gone, gives a
+ *   draft no list to start from, so it shows none.
  * - `row` takes the server records alone, so the first screen can draw it.
+ *
+ * It does not say where the list started: that needs `decideThreadStart`,
+ * which only the editor calls, so the first screen does not load it.
  */
 export const describeThreadServers = (
   records: ThreadServersRecords,
   servers: readonly McpServer[] | undefined,
 ): ThreadServersDescription => {
-  const { thread } = records;
   const storedIds = readStoredIds(records);
-  const knownServerIds =
-    servers === undefined ? undefined : new Set(servers.map((each) => each.id));
-  const start =
-    knownServerIds === undefined
-      ? undefined
-      : decideThreadStartSource({
-          projectId: readThreadProjectId(thread),
-          project: records.project,
-          defaultIds: records.defaultIds,
-          knownServerIds,
-        });
-  const mcpServerIds = decideShownIds(records, storedIds, start, knownServerIds);
+  // A started thread's list is the session's own: the controller drops a deleted server from it.
+  // A draft's list leaves out the servers the catalogue lacks, once it is read.
+  const knownServerIds = new Set((servers ?? []).map((server) => server.id));
+  const mcpServerIds =
+    records.thread.kind === "started" || servers === undefined
+      ? storedIds
+      : storedIds.filter((id) => knownServerIds.has(id));
   return {
     storedIds,
     mcpServerIds,
-    start,
     row: describeThreadServersRow(servers ?? [], mcpServerIds),
   };
-};
-
-const decideShownIds = (
-  { thread }: ThreadServersRecords,
-  storedIds: readonly string[],
-  start: ThreadStartDecision | undefined,
-  knownServerIds: ReadonlySet<string> | undefined,
-): readonly string[] => {
-  if (thread.kind === "started") return storedIds;
-  if (thread.pickedIds !== undefined) {
-    return knownServerIds === undefined
-      ? storedIds
-      : storedIds.filter((id) => knownServerIds.has(id));
-  }
-  return start?.kind === "start" ? start.start.mcpServerIds : storedIds;
 };

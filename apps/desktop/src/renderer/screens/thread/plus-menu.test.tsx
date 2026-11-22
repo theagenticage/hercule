@@ -15,9 +15,9 @@ const SERVERS: ThreadServers = {
   described: {
     storedIds: [],
     mcpServerIds: [],
-    start: undefined,
     row: { words: "none", failing: false },
   },
+  start: undefined,
   plugins: undefined,
   readFailure: null,
   setEditing: () => undefined,

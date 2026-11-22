@@ -8,7 +8,12 @@
 import { createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { readErrorMessage } from "@hercule/client-core";
-import { buildMcpServerViews, type McpServerView } from "@hercule/client-core/mcp-servers";
+import {
+  buildMcpServerViews,
+  decideThreadStart,
+  type McpServerView,
+  type ThreadStartDecision,
+} from "@hercule/client-core/mcp-servers";
 import {
   decideThreadServersDemand,
   describeThreadServers,
@@ -32,8 +37,13 @@ import {
 
 /** What an open thread shares with the components that draw its servers. */
 export interface ThreadServers {
-  /** The thread's list, where it started, and the words of the `+` menu's row. */
+  /** The thread's list and the words of the `+` menu's row. */
   readonly described: ThreadServersDescription;
+  /**
+   * Where the list started, or why that is not known. `undefined` until the
+   * menu or picker is open and the servers are read.
+   */
+  readonly start: ThreadStartDecision | undefined;
   /**
    * The servers joined with their Connections, built once for the thread.
    * `undefined` until a line about servers or the open menu or picker asks
@@ -179,13 +189,18 @@ export function ThreadServersProvider({
     () => describeThreadServers(records, serverRecords),
     [records, serverRecords],
   );
+  // Only the open menu or picker shows where the list started.
+  const start = useMemo(
+    () => (demand.start ? decideThreadStart(records, serverRecords) : undefined),
+    [demand.start, records, serverRecords],
+  );
   const failure = servers.error ?? connections.error ?? plugins.error;
   const readFailure = failure === null ? null : readErrorMessage(failure);
   // The plugins are those the views were joined with, so they are `undefined` together.
   const joinedPlugins = views === undefined ? undefined : plugins.data;
   const shared = useMemo<ThreadServers>(
-    () => ({ described, views, plugins: joinedPlugins, readFailure, setEditing }),
-    [described, views, joinedPlugins, readFailure],
+    () => ({ described, start, views, plugins: joinedPlugins, readFailure, setEditing }),
+    [described, start, views, joinedPlugins, readFailure],
   );
   return <ThreadServersContext value={shared}>{children}</ThreadServersContext>;
 }

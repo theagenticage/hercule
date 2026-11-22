@@ -2,11 +2,10 @@
  * The words and the red dot the composer's `+` shows for a Thread's MCP
  * servers. Kept apart from the rest of the thread menu because the first
  * screen draws the `+` before the menu's code has loaded, and this file
- * imports nothing but the display status (`display-status.ts`, `status.ts`).
+ * imports nothing but the display status check (`display-status.ts`).
  */
 import type { McpServer } from "@hercule/contract";
-import { decideDisplayStatus } from "./display-status";
-import { MCP_SERVER_STATUS_FACTS } from "./status";
+import { needsSignIn } from "./display-status";
 
 /**
  * Returns how many of the Thread's servers need sign-in, for the "1 needs
@@ -17,11 +16,7 @@ export const countServersNeedingSignIn = (
   servers: readonly McpServer[],
   mcpServerIds: readonly string[],
 ): number =>
-  servers.filter(
-    (server) =>
-      mcpServerIds.includes(server.id) &&
-      MCP_SERVER_STATUS_FACTS[decideDisplayStatus(server)].needsSignIn,
-  ).length;
+  servers.filter((server) => mcpServerIds.includes(server.id) && needsSignIn(server)).length;
 
 /** The words on the `+` menu's "MCP servers" row. */
 export interface ThreadServersRow {

@@ -62,8 +62,6 @@ describe("the first screen's import of the MCP server models", () => {
       "display-status.ts",
       "first-screen.ts",
       "mcp-line-presence.ts",
-      "start-list.ts",
-      "status.ts",
       "thread-servers-row.ts",
       "thread-servers.ts",
     ]);

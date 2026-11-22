@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
 import { buildProject, buildSession } from "../threads/workspaces.testing";
-import type { StartProjectRecord, StartRecord } from "./start-list";
+import type { StartRecord } from "./start-list";
 import { LINEAR, SENTRY_WORK, buildServer } from "./testing";
 import {
   decideThreadServersDemand,
@@ -112,7 +112,6 @@ describe("describeThreadServers, for a started thread", () => {
     expect(describeThreadServers(records, undefined)).toEqual({
       storedIds: ["s-work", "s-linear"],
       mcpServerIds: ["s-work", "s-linear"],
-      start: undefined,
       row: { words: "2", failing: false },
     });
   });
@@ -133,58 +132,14 @@ describe("describeThreadServers, for a started thread", () => {
     });
   });
 
-  it("starts from the project's list for a thread in a project, and from the default list for none", () => {
-    const inShop = started([], {
-      thread: { kind: "started", session: startedWith([], "p-shop") },
-      project: { kind: "read", value: WEBSHOP },
-    });
-
-    expect(describeThreadServers(inShop, SERVERS).start).toEqual({
-      kind: "start",
-      start: {
-        mcpServerIds: ["s-work"],
-        source: { kind: "project", projectName: "webshop" },
-        complete: true,
-      },
-    });
-    expect(describeThreadServers(started([]), SERVERS).start).toEqual({
-      kind: "start",
-      start: { mcpServerIds: [], source: { kind: "none" }, complete: true },
-    });
-  });
-
-  it("keeps the pending, failed and missing records as they are, so only the way back is lost", () => {
-    const inShop = (project: StartProjectRecord): ThreadServersRecords =>
-      started(["s-work"], {
-        thread: { kind: "started", session: startedWith(["s-work"], "p-shop") },
-        project,
-      });
+  it("keeps a started thread's own list whatever its start records say", () => {
     const failed: StartRecord<never> = { kind: "failed", message: "offline" };
-
-    expect(describeThreadServers(inShop({ kind: "pending" }), SERVERS).start).toEqual({
-      kind: "pending",
-    });
-    expect(describeThreadServers(inShop({ kind: "missing" }), SERVERS).start).toEqual({
-      kind: "missing",
-    });
-    expect(describeThreadServers(inShop(failed), SERVERS).start).toEqual(failed);
-    // The list itself is the session's whatever the start says.
-    expect(describeThreadServers(inShop(failed), SERVERS).mcpServerIds).toEqual(["s-work"]);
-    expect(
-      describeThreadServers(started(["s-work"], { defaultIds: failed }), SERVERS).start,
-    ).toEqual(failed);
-  });
-
-  it("marks the start incomplete while its source names a server the catalogue lacks", () => {
-    const inShop = started([], {
-      thread: { kind: "started", session: startedWith([], "p-shop") },
-      project: { kind: "read", value: { ...WEBSHOP, mcpServerIds: ["s-gone", "s-work"] } },
+    const inShop = started(["s-work"], {
+      thread: { kind: "started", session: startedWith(["s-work"], "p-shop") },
+      project: failed,
     });
 
-    expect(describeThreadServers(inShop, SERVERS).start).toMatchObject({
-      kind: "start",
-      start: { mcpServerIds: ["s-work"], complete: false },
-    });
+    expect(describeThreadServers(inShop, SERVERS).mcpServerIds).toEqual(["s-work"]);
   });
 });
 
@@ -223,13 +178,15 @@ describe("describeThreadServers, for a draft", () => {
     expect(describeThreadServers(records, SERVERS).mcpServerIds).toEqual(["s-linear"]);
   });
 
-  it("shows no servers while the project's record is not read, and decides no start", () => {
-    const records = draft("p-shop", undefined, { project: { kind: "pending" } });
-
-    expect(describeThreadServers(records, SERVERS)).toMatchObject({
-      storedIds: [],
-      mcpServerIds: [],
-      start: { kind: "pending" },
-    });
+  it("shows no servers while the project's record is not read or could not be read", () => {
+    for (const project of [
+      { kind: "pending" },
+      { kind: "failed", message: "offline" },
+      { kind: "missing" },
+    ] as const) {
+      expect(describeThreadServers(draft("p-shop", undefined, { project }), SERVERS)).toMatchObject(
+        { storedIds: [], mcpServerIds: [] },
+      );
+    }
   });
 });

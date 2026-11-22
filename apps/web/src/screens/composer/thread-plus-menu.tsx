@@ -62,7 +62,7 @@ export function ThreadPlusMenu({
   readonly onFiles: (files: readonly File[]) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const { described, views, plugins, readFailure, setEditing } = useThreadServers();
+  const { described, start, views, plugins, readFailure, setEditing } = useThreadServers();
   // Whether the picker is open. It opens from the `+` menu, which closes.
   const [picking, setPicking] = useState(false);
   // Whether the MCP row has opened its submenu. It closes with the menu,
@@ -114,12 +114,12 @@ export function ThreadPlusMenu({
         serversOpen={showsServers}
         onServersOpenChange={setShowsServers}
         submenu={
-          views !== undefined && plugins !== undefined && described.start !== undefined ? (
+          views !== undefined && plugins !== undefined && start !== undefined ? (
             <ThreadServersMenu
               views={views}
               plugins={plugins}
               mcpServerIds={described.mcpServerIds}
-              start={described.start}
+              start={start}
               writing={edit.blocked}
               refusal={refusal}
               onChoose={apply}
@@ -138,12 +138,12 @@ export function ThreadPlusMenu({
           )
         }
       />
-      {picking && views !== undefined && plugins !== undefined && described.start !== undefined ? (
+      {picking && views !== undefined && plugins !== undefined && start !== undefined ? (
         <ThreadServerPicker
           views={views}
           plugins={plugins}
           mcpServerIds={described.mcpServerIds}
-          start={described.start}
+          start={start}
           writing={edit.blocked}
           refusal={refusal}
           onChoose={apply}

@@ -9,6 +9,7 @@ import {
   buildOfferSwitchTarget,
   buildServerSwitchTarget,
   createMcpServerSwitches,
+  decideServerPageSwitch,
   findOrCreateMcpServerSwitches,
   type McpServerSwitchCache,
   type McpServerSwitchTarget,
@@ -329,5 +330,36 @@ describe("a press on the switch", () => {
     };
 
     expect(findOrCreateMcpServerSwitches(options)).toBe(findOrCreateMcpServerSwitches(options));
+  });
+});
+
+describe("decideServerPageSwitch", () => {
+  const page = buildServer("s-1", "sentry", "c-work", { enabled: true });
+  const decide = (catalogued: McpServer | undefined, pageReadFailed = false) =>
+    decideServerPageSwitch({ page, catalogued, pageReadFailed, reload: "Reload the page" });
+
+  it("shows the record of the list, and waits for nothing while the page agrees with it", () => {
+    expect(decide({ ...page })).toEqual({ on: true, waitReason: null });
+  });
+
+  it("shows the page's own value while the list has no record of the server", () => {
+    expect(decide(undefined)).toEqual({ on: true, waitReason: null });
+  });
+
+  it("shows the list's value and waits while the page's read shows another one", () => {
+    expect(decide({ ...page, enabled: false })).toEqual({
+      on: false,
+      waitReason: "This page is reading the server again, so the switch waits.",
+    });
+  });
+
+  it("says the page could not read the server again when that read failed, with the app's words to reopen it", () => {
+    expect(decide({ ...page, enabled: false }, true).waitReason).toBe(
+      "This page could not read the server again, so the switch waits. Reload the page to try again.",
+    );
+  });
+
+  it("does not blame a failed read while the page agrees with the list", () => {
+    expect(decide({ ...page }, true).waitReason).toBeNull();
   });
 });

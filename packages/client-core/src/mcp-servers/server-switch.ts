@@ -61,6 +61,49 @@ export const buildServerSwitchTarget = (server: McpServer): McpServerSwitchTarge
       }
     : { kind: "url", serverId: server.id };
 
+/** What the switch on a server's page shows. */
+export interface ServerPageSwitch {
+  /** Whether the switch is on: the server's record in the list of servers, else the page's own read. */
+  readonly on: boolean;
+  /**
+   * Why the switch cannot be pressed now, or `null` when the page and the
+   * list agree. It is set while the page's read of the server shows another
+   * value than the list, because that read is still running or failed.
+   */
+  readonly waitReason: string | null;
+}
+
+/**
+ * Decides what the switch on the page of `page` shows. A press is decided on
+ * the server's record in the list of servers (`catalogued`, `undefined` while
+ * the list has no record of it), so the switch shows that record. When the
+ * page's own read shows another value, a press could land on an old one: the
+ * switch then waits and says why. `pageReadFailed` tells whether the page's
+ * last read failed, and `reload` is the app's words for opening the page again
+ * ("Reload the page", "Reopen the page"), used in the reason of a failed read.
+ */
+export const decideServerPageSwitch = ({
+  page,
+  catalogued,
+  pageReadFailed,
+  reload,
+}: {
+  readonly page: McpServer;
+  readonly catalogued: McpServer | undefined;
+  readonly pageReadFailed: boolean;
+  readonly reload: string;
+}): ServerPageSwitch => {
+  const lags = catalogued !== undefined && catalogued.enabled !== page.enabled;
+  return {
+    on: catalogued?.enabled ?? page.enabled,
+    waitReason: !lags
+      ? null
+      : pageReadFailed
+        ? `This page could not read the server again, so the switch waits. ${reload} to try again.`
+        : "This page is reading the server again, so the switch waits.",
+  };
+};
+
 /** How an app's cache holds what a switch reads. The module decides everything else. */
 export interface McpServerSwitchCache {
   /** Returns the servers the cache holds now, or `undefined` while the list is not cached. */

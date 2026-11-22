@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildProject } from "../threads/workspaces.testing";
+import { buildProject, buildSession } from "../threads/workspaces.testing";
 import {
   canResetToStart,
+  decideThreadStart,
   decideThreadStartSource,
   describeStartLine,
   describeThreadStartFoot,
@@ -9,6 +10,7 @@ import {
   type StartProjectRecord,
   type StartRecord,
 } from "./start-list";
+import type { ThreadServersRecords } from "./thread-servers";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildViews } from "./testing";
 
 const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
@@ -121,6 +123,67 @@ describe("decideThreadStartSource", () => {
     const shop = { ...WEBSHOP, mcpServerIds: ["s-new", "s-work"] };
 
     expect(decide("p-shop", read(shop), { kind: "pending" })).toMatchObject({
+      start: { mcpServerIds: ["s-work"], complete: false },
+    });
+  });
+});
+
+describe("decideThreadStart", () => {
+  const SERVERS = [SENTRY_WORK, LINEAR];
+  const inShop = (
+    project: StartProjectRecord,
+  ): Pick<ThreadServersRecords, "thread" | "project" | "defaultIds"> => ({
+    thread: { kind: "started", session: buildSession({ id: "t-1", projectId: "p-shop" }) },
+    project,
+    defaultIds: { kind: "read", value: [] },
+  });
+  const failed: StartRecord<never> = { kind: "failed", message: "offline" };
+
+  it("decides nothing until the servers are read", () => {
+    expect(decideThreadStart(inShop({ kind: "read", value: WEBSHOP }), undefined)).toBeUndefined();
+  });
+
+  it("starts from the project's list for a thread in a project, and from the default list for none", () => {
+    expect(decideThreadStart(inShop({ kind: "read", value: WEBSHOP }), SERVERS)).toEqual({
+      kind: "start",
+      start: {
+        mcpServerIds: ["s-work"],
+        source: { kind: "project", projectName: "webshop" },
+        complete: true,
+      },
+    });
+    const inNoProject: Pick<ThreadServersRecords, "thread" | "project" | "defaultIds"> = {
+      thread: { kind: "draft", projectId: null, pickedIds: undefined },
+      project: { kind: "pending" },
+      defaultIds: { kind: "read", value: [] },
+    };
+    expect(decideThreadStart(inNoProject, SERVERS)).toEqual({
+      kind: "start",
+      start: { mcpServerIds: [], source: { kind: "none" }, complete: true },
+    });
+  });
+
+  it("keeps the pending, failed and missing records as they are, so only the way back is lost", () => {
+    expect(decideThreadStart(inShop({ kind: "pending" }), SERVERS)).toEqual({ kind: "pending" });
+    expect(decideThreadStart(inShop({ kind: "missing" }), SERVERS)).toEqual({ kind: "missing" });
+    expect(decideThreadStart(inShop(failed), SERVERS)).toEqual(failed);
+    expect(
+      decideThreadStart(
+        {
+          thread: { kind: "started", session: buildSession({ id: "t-1", projectId: null }) },
+          project: { kind: "pending" },
+          defaultIds: failed,
+        },
+        SERVERS,
+      ),
+    ).toEqual(failed);
+  });
+
+  it("marks the start incomplete while its source names a server the catalogue lacks", () => {
+    const project = { ...WEBSHOP, mcpServerIds: ["s-gone", "s-work"] };
+
+    expect(decideThreadStart(inShop({ kind: "read", value: project }), SERVERS)).toMatchObject({
+      kind: "start",
       start: { mcpServerIds: ["s-work"], complete: false },
     });
   });

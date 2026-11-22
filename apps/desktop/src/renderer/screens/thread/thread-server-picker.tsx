@@ -84,9 +84,9 @@ function ThreadPickerDialog({
   readonly edits: ThreadServerEdits;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { described } = useThreadServers();
+  const { described, start } = useThreadServers();
   const { foot, reset } = describeThreadStartFoot(
-    described.start ?? { kind: "pending" },
+    start ?? { kind: "pending" },
     described.mcpServerIds,
   );
   return (
