@@ -54,8 +54,8 @@ export const makeFreshReads = Effect.gen(function* () {
    * called `serverName` in the session's list. Returns `undefined` when no
    * server of the list has that name. It reads what a call needs and no more:
    * the list's ids, then their names in one query, then the tools of the one
-   * server found. It does not read the servers' status or dependencies, which
-   * the catalogue judges when the call is sent.
+   * server found. The record of that one server comes with its status, but this
+   * path does not judge it: the catalogue does that when the call is sent.
    */
   const readListedServerNamed = (
     sessionId: string,
