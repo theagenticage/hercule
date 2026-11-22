@@ -27,6 +27,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
+import { parseCallbackQuery, readAuthorizationState } from "@hercule/contract";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -132,24 +133,23 @@ const answerNotFound = (response: ServerResponse): void => {
   response.end("Not found");
 };
 
+/**
+ * Checks that a callback query is a well-formed return (`parseCallbackQuery`
+ * of the contract) of the sign-in whose `state` is `expectedState`. The
+ * controller refuses a malformed return without using the sign-in up, so the
+ * listener must not end its wait on one.
+ */
+const isReturnOfState = (query: string, expectedState: string | null): boolean => {
+  const callback = parseCallbackQuery(query);
+  return callback._tag === "Callback" && callback.state === expectedState;
+};
+
 /** Binds `server` to 127.0.0.1 on a port the system picks, and returns the port, or null when it cannot. */
 const bindToLoopback = (server: Server): Promise<number | null> =>
   new Promise((resolve) => {
     server.once("error", () => resolve(null));
     server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
   });
-
-/**
- * Checks that a callback query is a return that the controller can judge: one
- * `state` that is `expectedState`, and exactly one of `code` and `error`. A
- * name that appears twice makes the return ambiguous, so it is refused.
- */
-const isWellFormedReturn = (query: string, expectedState: string): boolean => {
-  const parameters = new URLSearchParams(query);
-  const states = parameters.getAll("state");
-  const outcomes = parameters.getAll("code").length + parameters.getAll("error").length;
-  return states.length === 1 && states[0] === expectedState && outcomes === 1;
-};
 
 /**
  * Builds the SignInReturn service. A listener lasts at most `lifetimeMilliseconds`
@@ -183,8 +183,7 @@ export const makeSignInReturnLayer = (lifetimeMilliseconds: number): Layer.Layer
         const matches =
           request.method === "GET" &&
           path === "/callback" &&
-          listener.expectedState !== null &&
-          isWellFormedReturn(query, listener.expectedState);
+          isReturnOfState(query, listener.expectedState);
         if (!matches) {
           answerNotFound(response);
           return;
@@ -230,8 +229,8 @@ export const makeSignInReturnLayer = (lifetimeMilliseconds: number): Layer.Layer
 
       const wait = (listenerId: string, authorizationUrl: string) =>
         Effect.gen(function* () {
-          const state = new URL(authorizationUrl).searchParams.get("state");
-          if (state === null || state === "") {
+          const state = readAuthorizationState(authorizationUrl);
+          if (state === undefined) {
             return yield* new AuthorizationUrlHasNoState({
               message: "the authorization URL has no state, so no return could be matched to it",
             });

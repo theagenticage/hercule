@@ -20,8 +20,13 @@
  *
  * The CLI opens no browser: it prints the address.
  */
-import { ApiError, createClient, type HerculeClient } from "@hercule/client-core";
-import type { McpServer } from "@hercule/contract";
+import {
+  ApiError,
+  buildPastedRedirectUri,
+  createClient,
+  type HerculeClient,
+} from "@hercule/client-core";
+import { parseCallbackQuery, readAuthorizationState, type McpServer } from "@hercule/contract";
 import { coerceFieldValue, parseArguments } from "./commands/args";
 import { resolveTails } from "./commands/execute";
 import type { HandWrittenHelp } from "./commands/help";
@@ -78,23 +83,12 @@ interface ReturnListener {
 }
 
 /**
- * Checks that a return carries exactly one `state`, which is `expectedState`,
- * and exactly one of `code` and `error`. A name that appears twice makes the
- * return ambiguous. The controller refuses such a return without using the
- * attempt up, so the listener must not take it as the answer either.
- */
-const isWellFormedReturn = (parameters: URLSearchParams, expectedState: string): boolean => {
-  const states = parameters.getAll("state");
-  const outcomes = parameters.getAll("code").length + parameters.getAll("error").length;
-  return states.length === 1 && states[0] === expectedState && outcomes === 1;
-};
-
-/**
  * Starts a listener on a free port of 127.0.0.1. It answers only
- * `GET /callback` with the state it accepts and a well-formed outcome
- * (`isWellFormedReturn`), and 404 to everything else, so a stray request, a
+ * `GET /callback` with the state it accepts and a well-formed return
+ * (`parseCallbackQuery`), and 404 to everything else, so a stray request, a
  * request carrying another attempt's state or a malformed return does not end
- * the wait.
+ * the wait. The controller refuses a malformed return without using the
+ * attempt up, so the listener must not take it as the answer either.
  */
 const listenForReturn = (): ReturnListener => {
   let acceptedState: string | undefined;
@@ -107,11 +101,12 @@ const listenForReturn = (): ReturnListener => {
     port: 0,
     fetch: (request) => {
       const url = new URL(request.url);
+      const callback = parseCallbackQuery(url.search);
       if (
         request.method === "GET" &&
         url.pathname === "/callback" &&
-        acceptedState !== undefined &&
-        isWellFormedReturn(url.searchParams, acceptedState)
+        callback._tag === "Callback" &&
+        callback.state === acceptedState
       ) {
         deliver(url.search.slice(1));
         return new Response(RETURN_PAGE, {
@@ -130,9 +125,6 @@ const listenForReturn = (): ReturnListener => {
     close: () => void server.stop(),
   };
 };
-
-/** Returns a random port from the range for dynamic ports, 49152 to 65535. */
-const pickDynamicPort = (): number => 49152 + Math.floor(Math.random() * (65535 - 49152 + 1));
 
 /**
  * Builds the error for a sign-in that ran out of time, with the advice to run
@@ -181,19 +173,6 @@ const readPastedAddress = async (io: Io): Promise<string> => {
     );
   }
   return address;
-};
-
-/**
- * Returns the `state` of an authorization address, which the browser's return
- * must carry. Fails with a `UsageError` when the address has none, which the
- * controller never returns.
- */
-const readState = (authorizationUrl: string): string => {
-  const state = new URL(authorizationUrl).searchParams.get("state");
-  if (state === null) {
-    throw new UsageError("the controller's sign-in address has no state", "mcp-server sign-in");
-  }
-  return state;
 };
 
 /**
@@ -251,7 +230,7 @@ export const signInMcpServer = async (
     const started = await client.mcpServer.startSignIn({
       params: { id },
       payload: {
-        redirectUri: listener?.redirectUri ?? `http://127.0.0.1:${pickDynamicPort()}/callback`,
+        redirectUri: listener?.redirectUri ?? buildPastedRedirectUri(),
       },
     });
     say("Open this address in your browser to sign in:");
@@ -269,7 +248,11 @@ export const signInMcpServer = async (
         again,
       );
     } else {
-      listener.acceptState(readState(started.authorizationUrl));
+      const state = readAuthorizationState(started.authorizationUrl);
+      if (state === undefined) {
+        throw new UsageError("the controller's sign-in address has no state", command.spelling);
+      }
+      listener.acceptState(state);
       const minutes = Math.max(1, Math.ceil((Date.parse(started.expiresAt) - Date.now()) / 60_000));
       say(
         `Waiting for your browser to come back to this computer, for up to ${minutes} minute${minutes === 1 ? "" : "s"}. Press Ctrl-C to cancel.`,

@@ -168,6 +168,13 @@ export {
 } from "./agent-text";
 
 export { appendPromptContext, splitPromptContext } from "./prompt-context";
+
+export {
+  parseCallbackQuery,
+  readAuthorizationState,
+  type ParsedCallback,
+  type RefusedCallback,
+} from "./sign-in-callback";
 export type {
   PromptContextBlock,
   PromptContextInput,

@@ -28,8 +28,10 @@ import * as HttpClient from "effect/http/HttpClient";
 import {
   createInvalidStateError,
   createValidationError,
+  parseCallbackQuery,
   type InvalidState,
   type McpServerSignInStart,
+  type ParsedCallback,
   type Validation,
 } from "@hercule/contract";
 import { currentStamp } from "../actor";
@@ -73,74 +75,17 @@ const STANDARD_AUTHORIZATION_ERRORS: ReadonlySet<string> = new Set([
   "temporarily_unavailable",
 ]);
 
-/** What the browser came back with, read from the text a client sent. */
-export interface Callback {
-  /** The address the browser ended on, when the client sent a whole address. */
-  readonly address: URL | undefined;
-  readonly state: string;
-  /** The authorization code. Exactly one of `code` and `error` is set. */
-  readonly code: string | undefined;
-  readonly error: string | undefined;
-  /**
-   * The issuer the authorization server says the answer is from (RFC 9207).
-   * `undefined` when the answer has no `iss` parameter at all. An `iss` that is
-   * present and empty stays the empty text, so it is told apart from an absent
-   * one and is compared like any other value.
-   */
-  readonly iss: string | undefined;
-}
-
 const refuseCallback = (message: string): Effect.Effect<never, Validation> =>
   Effect.fail(createValidationError([{ path: ["callbackQuery"], message }]));
 
 /**
- * Reads what the browser came back with. The text is the whole address the
- * browser ended on, or only its query (with or without the leading `?`). A
- * fragment is dropped. Fails with `Validation` when the text is not a redirect
- * answer, with a message that never quotes it, because it holds a code:
- *
- * - it starts like an address and is not one;
- * - a parameter appears twice (the answer would have two readings);
- * - there is no `state`;
- * - it holds both `code` and `error`, or neither.
- *
- * A `state`, `code` or `error` with an empty value counts as absent. An empty
- * `iss` does not: it is kept as the empty text, which no issuer equals.
+ * Reads what the browser came back with (`parseCallbackQuery` of the
+ * contract). Fails with `Validation` when the text is not a redirect answer,
+ * with a message that never quotes it, because it holds a code.
  */
-export const parseCallbackQuery = (text: string): Effect.Effect<Callback, Validation> => {
-  const trimmed = text.trim();
-  let address: URL | undefined;
-  let query: string;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    const parsed = URL.parse(trimmed);
-    if (parsed === null) {
-      return refuseCallback("this is not an address: paste the address the browser ended on");
-    }
-    address = parsed;
-    query = parsed.search;
-  } else {
-    query = trimmed.split("#")[0] ?? "";
-  }
-  const params = new URLSearchParams(query);
-  if (new Set(params.keys()).size !== [...params.keys()].length) {
-    return refuseCallback("a parameter appears twice, so the answer has two readings");
-  }
-  const read = (name: string): string | undefined => {
-    const value = params.get(name);
-    return value === null || value === "" ? undefined : value;
-  };
-  const state = read("state");
-  if (state === undefined) {
-    return refuseCallback(
-      "there is no state: paste the whole address the browser ended on, or its query",
-    );
-  }
-  const code = read("code");
-  const error = read("error");
-  if ((code === undefined) === (error === undefined)) {
-    return refuseCallback("the answer holds both a code and an error, or neither");
-  }
-  return Effect.succeed({ address, state, code, error, iss: params.get("iss") ?? undefined });
+const readCallback = (text: string): Effect.Effect<ParsedCallback, Validation> => {
+  const parsed = parseCallbackQuery(text);
+  return parsed._tag === "Refused" ? refuseCallback(parsed.reason) : Effect.succeed(parsed);
 };
 
 /**
@@ -305,7 +250,7 @@ const make = Effect.gen(function* () {
    */
   const claimAttempt = (
     server: Pick<SignInTarget, "id">,
-    callback: Callback,
+    callback: ParsedCallback,
   ): Effect.Effect<Attempt, InvalidState | Validation> =>
     withServerLock(
       server.id,
@@ -351,7 +296,10 @@ const make = Effect.gen(function* () {
    * An answer from another authorization server could otherwise be mixed up
    * with this one's. Fails with `InvalidState` (`sign-in-refused`).
    */
-  const checkIssuer = (attempt: Attempt, callback: Callback): Effect.Effect<void, InvalidState> =>
+  const checkIssuer = (
+    attempt: Attempt,
+    callback: ParsedCallback,
+  ): Effect.Effect<void, InvalidState> =>
     (callback.iss === undefined && attempt.discovery.sendsIssuer) ||
     (callback.iss !== undefined && callback.iss !== attempt.discovery.issuer)
       ? Effect.fail(
@@ -573,7 +521,7 @@ const make = Effect.gen(function* () {
      * it. `callbackQuery` is the whole address the browser ended on, or its
      * query. The checks run in this order, and the first to fail ends it:
      *
-     * 1. the text is a redirect answer (`parseCallbackQuery`), and a whole
+     * 1. the text is a redirect answer (`readCallback`), and a whole
      *    address is the attempt's own redirect address;
      * 2. the server's attempt has that `state` (it is taken, so it is used
      *    once);
@@ -600,7 +548,7 @@ const make = Effect.gen(function* () {
       callbackQuery: string,
     ): Effect.Effect<void, InvalidState | Validation | SqlError> =>
       Effect.gen(function* () {
-        const callback = yield* parseCallbackQuery(callbackQuery);
+        const callback = yield* readCallback(callbackQuery);
         const attempt = yield* claimAttempt(server, callback);
         // The attempt is taken, so whatever fails from here on uses it up.
         yield* Effect.gen(function* () {

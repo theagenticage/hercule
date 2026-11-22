@@ -110,7 +110,7 @@ describe("the browser's return", () => {
     expect(await waiting).toEqual({ _tag: "received", callbackQuery: "code=a&state=s1" });
   });
 
-  it("answers 404 to a return that is not exactly one state and one of code and error, and goes on waiting", async () => {
+  it("answers 404 to a return the parser refuses, and goes on waiting", async () => {
     const { service } = await openService();
     const { listenerId, redirectUri } = await listenOn(service);
     const waiting = waitFor(service, listenerId, "s1");
@@ -119,19 +119,10 @@ describe("the browser's return", () => {
       ended = true;
     });
 
-    const malformed = [
-      "state=s1",
-      "state=s1&state=s1&code=a",
-      "state=s1&state=s2&code=a",
-      "state=s1&code=a&code=b",
-      "state=s1&code=a&error=access_denied",
-      "state=s1&error=a&error=b",
-    ];
-    for (const query of malformed) {
-      const response = await fetch(`${redirectUri}?${query}`);
-      await response.text();
-      expect(response.status, query).toBe(404);
-    }
+    // Which returns the parser refuses has its own tests in the contract.
+    const response = await fetch(`${redirectUri}?state=s1&code=a&error=access_denied`);
+    await response.text();
+    expect(response.status).toBe(404);
     expect(ended).toBe(false);
 
     await fetch(`${redirectUri}?error=access_denied&state=s1`);

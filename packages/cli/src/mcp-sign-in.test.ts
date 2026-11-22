@@ -137,14 +137,7 @@ describe("hercule mcp-server sign-in", () => {
         await visit(controller.browser, redirectUri, "/callback?code=c&state=state-of-another");
         await visit(controller.browser, redirectUri, "/callback");
         await visit(controller.browser, redirectUri, `/callback?code=c&state=${STATE}`, "POST");
-        // A return that is not one state and one of code and error is no answer.
-        await visit(controller.browser, redirectUri, `/callback?state=${STATE}`);
-        await visit(
-          controller.browser,
-          redirectUri,
-          `/callback?code=c&state=${STATE}&state=${STATE}`,
-        );
-        await visit(controller.browser, redirectUri, `/callback?code=c&code=d&state=${STATE}`);
+        // A return the parser refuses (here, a code and an error) is no answer.
         await visit(controller.browser, redirectUri, `/callback?code=c&error=x&state=${STATE}`);
         await visit(controller.browser, redirectUri, `/callback?code=the-code&state=${STATE}`);
       },
@@ -155,9 +148,9 @@ describe("hercule mcp-server sign-in", () => {
     await controller.settleBrowser();
 
     expect(controller.browser.map((request) => request.status)).toEqual([
-      404, 404, 404, 404, 404, 404, 404, 404, 200,
+      404, 404, 404, 404, 404, 200,
     ]);
-    const answered = controller.browser[8]!.headers;
+    const answered = controller.browser[5]!.headers;
     expect(answered.get("cache-control")).toBe("no-store");
     expect(answered.get("referrer-policy")).toBe("no-referrer");
 
