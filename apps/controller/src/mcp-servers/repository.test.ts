@@ -124,33 +124,4 @@ describe("the MCP Server repository", () => {
     expect(Option.isNone(found.unknown)).toBe(true);
     expect(found.second.reason._tag).toBe("UniqueViolation");
   });
-
-  it("reads every server of a name, sorted by id, and none for a name no server has", async () => {
-    const found = await Effect.runPromise(
-      Effect.gen(function* () {
-        const servers = yield* arrange;
-        // A second server may share a name: the name is unique per list, not per catalogue.
-        yield* inTransaction(
-          servers.insertUrl({
-            name: "linear",
-            url: "https://mcp.other.app/mcp",
-            normalizedUrl: "https://mcp.other.app/mcp",
-            signIn: "none",
-            at: AT,
-          }),
-        );
-        return {
-          desk: (yield* servers.readByName("desk")).map((server) => server.id),
-          linear: (yield* servers.readByName("linear")).map((server) => server.id),
-          none: yield* servers.readByName("nothing"),
-        };
-      }).pipe(Effect.provide(TestDatabase), Effect.scoped, Effect.orDie),
-    );
-
-    expect(found.desk).toHaveLength(1);
-    expect(found.linear).toHaveLength(2);
-    expect(found.linear).toContain(URL_SERVER_ID);
-    expect(found.linear).toEqual(found.linear.toSorted());
-    expect(found.none).toEqual([]);
-  });
 });

@@ -502,7 +502,9 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
   }, 120_000);
 
   it("works on the older path when server/discover is refused, lists again on list_changed from the GET stream, and opens a new MCP session after a 404", async () => {
-    await withGateway({ upstream, answerDiscoverLikeOlderServer: true }, async (rig) => {
+    // The model calls `echo` twice: once for the call the 404 interrupts, and once after the refusal.
+    const calls = ["mcp__tools__alpha__echo", "mcp__tools__alpha__echo"];
+    await withGateway({ upstream, answerDiscoverLikeOlderServer: true, calls }, async (rig) => {
       await withClaude(rig, async (running) => {
         await waitForTools(running, ALPHA_TOOLS);
 
@@ -535,8 +537,6 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         // Its own next request is a tool call, which names the forgotten session.
         const afterRestart = rig.proxy.seen.length;
         const result = await running.runToolCall();
-        expect(result.isError).toBe(false);
-        expect(result.text).toContain("hello");
         const [refused] = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call");
         expect(describeRequest(refused!)).toBe("POST tools/call 2025-11-25 session 404");
         expect(refused!.sessionId).toBe(firstSession);
@@ -550,6 +550,25 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         const retried = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call").at(-1)!;
         expect(retried.status).toBe(200);
         expect(newSessions).toContain(retried.sessionId);
+
+        // It sends the call before it lists, and the gateway has offered no name to the new MCP
+        // session, so the model sees one refusal that asks it to list again. This is the accepted
+        // cost of keeping the names offered per MCP session (spec 21 section 3.4).
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain("List the tools again");
+
+        // The refusal sent list_changed, the CLI lists again on its new session, and then the call runs.
+        expect(
+          await waitWithin(STEP_MS, () =>
+            requestsOf(rig.proxy.seen.slice(afterRestart), "tools/list").some((one) =>
+              newSessions.includes(one.sessionId),
+            ),
+          ),
+          "tools/list on a new MCP session",
+        ).toBe(true);
+        const again = await running.runToolCall();
+        expect(again.isError).toBe(false);
+        expect(again.text).toContain("hello");
 
         // The new MCP sessions have streams of their own, and a change reaches the CLI on them.
         // The CLI may still be handshaking, so wait until it has been quiet for a moment.

@@ -35,6 +35,13 @@ export interface ToolKey {
   readonly tool: string;
 }
 
+/** What a gateway name was offered for: the server's id and name, and the tool's original name. */
+export interface OfferedTool {
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly tool: string;
+}
+
 /** A server's tools, to be named. */
 export interface ServerTools {
   readonly serverName: string;
@@ -111,16 +118,6 @@ export const buildToolNames = (servers: ReadonlyArray<ServerTools>): NamedTools 
     .filter(({ name }) => counts.get(name) !== 1)
     .map(({ serverName, tool }): ToolKey => ({ serverName, tool }));
   return { named, leftOut };
-};
-
-/**
- * Returns the server's name in a gateway name: the text before the first `__`.
- * Returns `undefined` when the name has no `__` or no text before it. A
- * server's name holds no `__`, so this split is unambiguous.
- */
-export const readServerName = (name: string): string | undefined => {
-  const end = name.indexOf(SEPARATOR);
-  return end > 0 ? name.slice(0, end) : undefined;
 };
 
 /**

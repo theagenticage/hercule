@@ -990,7 +990,7 @@ describe("refused calls", () => {
     });
   });
 
-  it("names the server by its name only when it was deleted, and the Thread's warning names no server", async () => {
+  it("names the server and the tool the name was offered for when the server was deleted", async () => {
     await withNotion([SEARCH_PAGES], async (notion) => {
       const thread = await spawnThread(["mcp.use"], [notion]);
       const { sessionId } = await initialize(thread.token);
@@ -1010,12 +1010,44 @@ describe("refused calls", () => {
         () => readWarnings(thread.session.id),
         (warnings) => warnings.length >= 1,
       );
-      expect(warning?.mcpServers).toBeUndefined();
+      expect(warning?.mcpServers).toEqual([{ mcpServerId: notion.id, reason: "not-in-list" }]);
       const [entry] = await readCallAudit(thread.session.id);
       expect(entry?.payload).toMatchObject({
-        mcpServerId: null,
-        tool: null,
+        mcpServerId: notion.id,
+        tool: "search_pages",
         outcome: "refused",
+        reason: "not-in-list",
+      });
+    });
+  });
+
+  it("names the server the name was offered for, not another server of the same name, when the first was deleted", async () => {
+    await withNotion([SEARCH_PAGES], async (notion) => {
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      const { sessionId } = await initialize(thread.token);
+      await listToolNames(thread.token, sessionId);
+      // Another account's server has the name now, but it is not in this Thread's list.
+      const other = await createNotion();
+      expect(other.id).not.toBe(notion.id);
+      const deleted = await send("DELETE", base(), `/api/v1/mcp-servers/${notion.id}`, {
+        token: arranged.token,
+      });
+      expect(deleted.status).toBe(200);
+
+      const mark = countUpstreamRequests();
+      const refused = await callEcho(thread.token, NOTION_SEARCH_PAGES, sessionId);
+      expect(refused.body.result.isError).toBe(true);
+      expect(readUpstreamTools(mark)).toEqual([]);
+
+      const [warning] = await eventually(
+        () => readWarnings(thread.session.id),
+        (warnings) => warnings.length >= 1,
+      );
+      expect(warning?.mcpServers).toEqual([{ mcpServerId: notion.id, reason: "not-in-list" }]);
+      const [entry] = await readCallAudit(thread.session.id);
+      expect(entry?.payload).toMatchObject({
+        mcpServerId: notion.id,
+        tool: "search_pages",
         reason: "not-in-list",
       });
     });
@@ -1380,6 +1412,25 @@ const NOTION_SEARCH_PAGES_WITH_DOT = "notion__search_pages_52ac82";
 /** Counts the accounts `withNotion` made, so that each server has an account of its own. */
 let notionAccounts = 0;
 
+/** Adds a server called `notion` over the fake server, on an account no other server of this file uses, and waits until it is ready. */
+const createNotion = async (): Promise<ServerRef> => {
+  const controller = { harness: arranged.harness, base: base(), token: arranged.token };
+  // A server is unique per account, so each one gets an account of its own.
+  notionAccounts += 1;
+  const connectionId = await insertPastedConnection(
+    arranged.harness,
+    "acme/desk",
+    "t0ken",
+    `desk-notion-${String(notionAccounts)}`,
+  );
+  const notion = await createServer(controller, { connectionId, name: "notion" });
+  await eventually(
+    () => readServer(controller, notion.id),
+    (record) => record.status === "ready",
+  );
+  return notion;
+};
+
 /**
  * Gives the fake server `tools`, adds a ready server called `notion` over it,
  * and calls `body` with the server and a function that changes the tools the
@@ -1396,19 +1447,7 @@ const withNotion = async (
   await upstream.configure({ tools });
   try {
     const controller = { harness: arranged.harness, base: base(), token: arranged.token };
-    // A server is unique per account, so it gets an account no other server of this file uses.
-    notionAccounts += 1;
-    const connectionId = await insertPastedConnection(
-      arranged.harness,
-      "acme/desk",
-      "t0ken",
-      `desk-notion-${String(notionAccounts)}`,
-    );
-    const notion = await createServer(controller, { connectionId, name: "notion" });
-    await eventually(
-      () => readServer(controller, notion.id),
-      (record) => record.status === "ready",
-    );
+    const notion = await createNotion();
     await body(notion, async (replacement) => {
       await upstream.configure({ tools: replacement });
       expect((await requestCheck(controller, notion.id)).status).toBe(200);
@@ -1481,6 +1520,19 @@ describe("tool names that no list and no restart can change", () => {
       expect(refused.body.result.isError).toBe(true);
       expect(textOf(refused)).toContain("no longer offers this tool");
       expect(readUpstreamTools(mark)).toEqual([]);
+      // The refusal keeps the original name of the tool the name was offered for.
+      const [warning] = await eventually(
+        () => readWarnings(thread.session.id),
+        (warnings) => warnings.length >= 1,
+      );
+      expect(warning?.mcpServers).toEqual([{ mcpServerId: notion.id, reason: "error" }]);
+      const [entry] = await readCallAudit(thread.session.id);
+      expect(entry?.payload).toMatchObject({
+        mcpServerId: notion.id,
+        tool: "search_pages",
+        outcome: "refused",
+        reason: "error",
+      });
       expect(
         (await callEcho(thread.token, NOTION_SEARCH_PAGES_WITH_HYPHEN, sessionId)).body.result
           .isError,
@@ -1495,8 +1547,8 @@ describe("a client that lost its MCP session", () => {
   const nameLostMcpSession = (token: string) =>
     sendMcp(token, request("tools/list"), { "mcp-session-id": "from-before-the-restart" });
 
-  it("runs a call on the session it opens next without listing again, when the gateway offered the name before", async () => {
-    // Codex and Claude Code send the call again before they list, after the gateway dropped their session.
+  it("is refused on the session it opens next, though the gateway offered the name on the lost one, and runs once that session lists", async () => {
+    // Codex and Claude Code send the call again before they list. The accepted cost: that call is refused once.
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const first = await initialize(thread.token);
     await listToolNames(thread.token, first.sessionId);
@@ -1504,10 +1556,51 @@ describe("a client that lost its MCP session", () => {
     const { sessionId } = await initialize(thread.token);
 
     const mark = countUpstreamRequests();
+    const refused = await callEcho(thread.token, "alpha__echo", sessionId);
+    expect(refused.body.result.isError).toBe(true);
+    expect(textOf(refused)).toContain("List the tools again");
+    expect(readUpstreamTools(mark)).toEqual([]);
+
+    await listToolNames(thread.token, sessionId);
     expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
       undefined,
     );
     expect(readUpstreamTools(mark)).toEqual(["echo"]);
+  });
+
+  it("refuses a name another MCP session of the token was offered, until its own session lists", async () => {
+    // The upgrade fence. Before the upgrade a client learned `notion__search_pages` for the tool `search-pages`.
+    // Now that name stands for `search_pages`. Another client of the token lists first, so a record kept per
+    // token would accept the old client's call and run the wrong tool.
+    await withNotion([SEARCH_PAGES], async (notion) => {
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      const listing = await initialize(thread.token);
+      const surviving = await initialize(thread.token);
+      expect(await listToolNames(thread.token, listing.sessionId)).toEqual([NOTION_SEARCH_PAGES]);
+
+      const mark = countUpstreamRequests();
+      const stream = await openGetStream(thread.token, listing.sessionId);
+      try {
+        await waitForListChanges(stream, 1);
+        const refused = await callEcho(thread.token, NOTION_SEARCH_PAGES, surviving.sessionId);
+        expect(refused.body.result.isError).toBe(true);
+        expect(textOf(refused)).toContain("List the tools again");
+        expect(readUpstreamTools(mark)).toEqual([]);
+        await waitForListChanges(stream, 2);
+      } finally {
+        stream.close();
+      }
+
+      expect(
+        (await callEcho(thread.token, NOTION_SEARCH_PAGES, listing.sessionId)).body.result.isError,
+      ).toBeUndefined();
+      await listToolNames(thread.token, surviving.sessionId);
+      expect(
+        (await callEcho(thread.token, NOTION_SEARCH_PAGES, surviving.sessionId)).body.result
+          .isError,
+      ).toBeUndefined();
+      expect(readUpstreamTools(mark)).toEqual(["search_pages", "search_pages"]);
+    });
   });
 
   it("still reaches search_pages under the name it holds, and each of the tools that came after it under its own name, with a client that lists before it resends and sends its calls together", async () => {

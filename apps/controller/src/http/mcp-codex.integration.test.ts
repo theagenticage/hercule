@@ -33,11 +33,12 @@
  *   on the new session.
  * - **A real cold gateway.** The test controller cannot restart over the same
  *   database: `withServer` makes a new Hercule Home and a new gateway for each
- *   run, and its `reboot` repeats only the boot steps inside the same process,
- *   so the gateway keeps the names it has offered. A test of the call that follows
- *   a restart (the gateway refuses it once with "list the tools again", spec 21
- *   section 3.4, and nothing reaches the server) needs a controller that can be
- *   stopped and started over one database.
+ *   run, and its `reboot` repeats only the boot steps inside the same process.
+ *   The 404 test makes the gateway forget one MCP session instead. The new
+ *   MCP session has offered no name, which is what a restart leaves, so the
+ *   call Codex sends before it lists is refused once, as spec 21 section 3.4
+ *   says. A call after a real restart needs a controller that can be stopped
+ *   and started over one database.
  *
  * Skipped when no `codex` binary is found. `HERCULE_CODEX_TEST_BINARY` selects
  * one without changing `PATH`. No CI job installs Codex, so this file runs on a
@@ -568,10 +569,18 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
         );
       }
 
-      // Each call reached the server once, and the one the gateway answered with 404 never did.
+      // The gateway offered no name to the new MCP session, so the call sent before the list is refused
+      // once (the accepted cost of offering names per MCP session, spec 21 section 3.4), and the one the
+      // gateway answered with 404 never reached the server either.
+      expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
+      expect(running.readFinishedCalls().map((one) => one.status)).toEqual(["completed", "failed"]);
+
+      // The refusal told Codex's streams to list again, so the next call runs.
+      await running.runTurn(threadId, `call ${WHOAMI}`);
       expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami", "whoami"]);
       expect(running.readFinishedCalls().map((one) => one.status)).toEqual([
         "completed",
+        "failed",
         "completed",
       ]);
     });

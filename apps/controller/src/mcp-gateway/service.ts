@@ -63,6 +63,7 @@ import {
   makeTokenStates,
   type McpCaller,
   type McpSession,
+  selectOfferedTools,
   type TokenState,
 } from "./tokens";
 
@@ -224,13 +225,23 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Answers `tools/list` and records the names it offers: only these names may
-   * be called.
+   * Answers `tools/list` and records, for the client that asked, the names it
+   * offers and what each was offered for: only these names may be called by
+   * that client, and a refusal names what the name was offered for.
    */
-  const respondToolsList = (era: Era, state: TokenState, actor: SessionActor, id: RequestId) =>
+  const respondToolsList = (
+    era: Era,
+    state: TokenState,
+    session: McpSession | undefined,
+    actor: SessionActor,
+    id: RequestId,
+  ) =>
     Effect.gen(function* () {
       const { tools, leftOut } = projectTools(yield* reads.readServed(actor));
-      for (const { name } of tools) state.offeredToolNames.add(name);
+      const offered = selectOfferedTools(state, session);
+      for (const { name, serverId, serverName, tool } of tools) {
+        offered.set(name, { serverId, serverName, tool });
+      }
       // One line per list, with a count and no tool name: the names come from
       // outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
@@ -270,7 +281,7 @@ const make = Effect.gen(function* () {
         state,
         session,
         id,
-        callPolicy.runToolCall(state, actor, {
+        callPolicy.runToolCall(state, session, actor, {
           name,
           arguments: args as JsonObject | undefined,
         }),
@@ -359,7 +370,7 @@ const make = Effect.gen(function* () {
             : respondJson(buildMethodNotFound(id, method)),
         );
       case "tools/list":
-        return respondToolsList(era, state, caller.actor, id);
+        return respondToolsList(era, state, session, caller.actor, id);
       case "tools/call":
         return respondToolsCall(era, state, caller.actor, id, params, session);
       case "server/discover":

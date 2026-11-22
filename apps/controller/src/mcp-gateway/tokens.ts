@@ -1,7 +1,7 @@
 /**
  * What the gateway keeps for each Session Token, and keeps in step with the
  * database: its MCP sessions, its open streams, the calls running for it, and
- * the tool names it was offered. State lives in memory only. A controller restart
+ * the tool names each of its clients was offered. State lives in memory only. A controller restart
  * drops it, and a harness that names an unknown MCP session gets 404 and opens
  * a new one.
  *
@@ -26,6 +26,7 @@ import { makeFreshReads } from "./reads";
 import type { SeenWarning } from "./refusals";
 import { fingerprintServed } from "./served";
 import type { OpenStream } from "./streams";
+import type { OfferedTool } from "./tool-names";
 
 /** How often the sweep forgets the Session Tokens that ended. */
 const SWEEP_INTERVAL = Duration.minutes(1);
@@ -54,11 +55,24 @@ export interface McpCaller {
   readonly actor: SessionActor;
 }
 
+/**
+ * The tool names a `tools/list` answer offered to one client, each with what
+ * it was offered for. A client of the stateful era is one MCP session. The
+ * stateless era has no MCP session, so its clients share their token's record.
+ * A call is accepted only under a name in the record of the client it comes
+ * from, so a client that learned a name before a restart or an upgrade must
+ * list the tools itself before the name works, whatever another client of the
+ * same token has listed.
+ */
+export type OfferedTools = Map<string, OfferedTool>;
+
 /** One stateful MCP session, which `initialize` creates. */
 export interface McpSession {
   readonly id: string;
   /** The revision `initialize` negotiated. Later requests of the session must not name another. */
   readonly revision: string;
+  /** The tool names offered on this MCP session since it opened. */
+  readonly offered: OfferedTools;
   /**
    * The `tools/call` requests running now, each with its JSON-RPC id as JSON
    * text, so `notifications/cancelled` can stop the ones it names. Keyed by the
@@ -83,17 +97,22 @@ export interface TokenState {
   readonly streams: Set<OpenStream>;
   /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
   readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
-  /**
-   * The tool names a `tools/list` answer offered to this token since the
-   * controller started. A call is accepted only under one of them, which
-   * proves the name was offered. It does not say what a name means: a name
-   * is a pure function of its tool (`buildToolName`).
-   */
-  readonly offeredToolNames: Set<string>;
+  /** The tool names offered to the token's clients of the stateless era, which have no MCP session. */
+  readonly offeredWithoutSession: OfferedTools;
   /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
   readonly admission: Semaphore.Semaphore;
   readonly warnings: WarningState;
 }
+
+/**
+ * Returns the record of the tool names offered to the client a request comes
+ * from: its MCP session's, or the token's for the stateless era, where
+ * `session` is `undefined`.
+ */
+export const selectOfferedTools = (
+  state: TokenState,
+  session: McpSession | undefined,
+): OfferedTools => session?.offered ?? state.offeredWithoutSession;
 
 /** Tells every open stream of the token to list the tools again. */
 export const notifyListChanged = (state: TokenState): Effect.Effect<void> =>
@@ -143,7 +162,7 @@ export const makeTokenStates = Effect.gen(function* () {
       mcpSessions: new Map(),
       streams: new Set(),
       runningCalls: new Set(),
-      offeredToolNames: new Set(),
+      offeredWithoutSession: new Map(),
       admission: Semaphore.makeUnsafe(1),
       warnings: { seen: new Map(), writing: Semaphore.makeUnsafe(1) },
     };
@@ -196,6 +215,7 @@ export const makeTokenStates = Effect.gen(function* () {
       const session: McpSession = {
         id: crypto.randomUUID(),
         revision,
+        offered: new Map(),
         calls: new Map(),
       };
       state.mcpSessions.set(session.id, session);

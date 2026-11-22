@@ -10,7 +10,6 @@ import type { SessionActor } from "../actor";
 import {
   isServable,
   mcpServerCatalogue,
-  mcpServerRepository,
   type McpServerAvailabilityView,
   type McpServerView,
 } from "../mcp-servers";
@@ -23,7 +22,6 @@ export const makeFreshReads = Effect.gen(function* () {
   const tokens = yield* SessionTokens;
   const sessions = yield* sessionRepository;
   const catalogue = yield* mcpServerCatalogue;
-  const servers = yield* mcpServerRepository;
 
   /** Reads the ids of the servers in the session's own list. */
   const readListedServerIds = (sessionId: string): Effect.Effect<ReadonlyArray<string>> =>
@@ -58,25 +56,6 @@ export const makeFreshReads = Effect.gen(function* () {
       (views.get(serverId)?.server.tools ?? []).map((tool) => tool.name),
     );
 
-  /**
-   * Reads the server of this name that exists now, whether or not any session
-   * lists it, with the original names of its stored tools. Returns `undefined`
-   * when no server has the name, and also when several do (two accounts of one
-   * plugin can share a name), because then the name does not tell which one.
-   */
-  const readServerNamed = (
-    name: string,
-  ): Effect.Effect<
-    | { readonly id: string; readonly name: string; readonly toolNames: ReadonlyArray<string> }
-    | undefined
-  > =>
-    Effect.map(Effect.orDie(servers.readByName(name)), (found) => {
-      const [only, ...others] = found;
-      return only === undefined || others.length > 0
-        ? undefined
-        : { id: only.id, name: only.name, toolNames: only.tools.map((tool) => tool.name) };
-    });
-
   /** Keeps the servers `tools/list` shows, and none for a session without `mcp.use`. */
   const keepServed = <View extends McpServerAvailabilityView>(
     actor: SessionActor,
@@ -94,7 +73,6 @@ export const makeFreshReads = Effect.gen(function* () {
     readListedServerIds,
     readListedAvailability,
     readStoredToolNames,
-    readServerNamed,
 
     /** Reads the servers the session is served now, with their tools: none without `mcp.use`. */
     readServed: (actor: SessionActor): Effect.Effect<ReadonlyArray<McpServerView>> =>

@@ -4,7 +4,7 @@
  * changed name ends in a hash, and the whole name fits behind `mcp__tools__`.
  */
 import { describe, expect, it } from "vitest";
-import { buildToolName, buildToolNames, findOriginalToolName, readServerName } from "./tool-names";
+import { buildToolName, buildToolNames, findOriginalToolName } from "./tool-names";
 
 /** What is left of 64 characters after the harness's `mcp__tools__`. */
 const MAX_NAME_LENGTH = 52;
@@ -110,19 +110,6 @@ describe("buildToolNames", () => {
       { serverName: "sentry", tool: "twin" },
       { serverName: "sentry", tool: "twin" },
     ]);
-  });
-});
-
-describe("readServerName", () => {
-  it("returns the text before the first double underscore", () => {
-    expect(readServerName("sentry__search_issues")).toBe("sentry");
-    expect(readServerName("sentry___private")).toBe("sentry");
-    expect(readServerName("my_server__a__b")).toBe("my_server");
-  });
-
-  it("returns undefined for a name with no server part", () => {
-    expect(readServerName("search_issues")).toBeUndefined();
-    expect(readServerName("__search")).toBeUndefined();
   });
 });
 
