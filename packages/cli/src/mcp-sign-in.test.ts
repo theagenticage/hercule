@@ -164,6 +164,7 @@ describe("hercule mcp-server sign-in", () => {
 
     const out = io.stdout.join("\n");
     expect(out).toContain(`https://auth.test/authorize?client_id=c&state=${STATE}`);
+    expect(out).toContain("You will approve on auth.test.");
     expect(out).toContain("Press Ctrl-C to cancel");
     expect(out).toContain("--paste");
     expect(out).toContain("Signed in. notion is checking.");
@@ -215,22 +216,19 @@ describe("hercule mcp-server sign-in", () => {
     expect(await isClosed(controller.getRedirectUri())).toBe(true);
   });
 
-  it("adds the advice to run the command again when the controller says the sign-in expired", async () => {
+  it("prints the controller's expired message as it is, which already says how to start again", async () => {
+    const message = `This sign-in can no longer be finished. Start it again: hercule mcp-server sign-in ${SERVER_ID}`;
     const controller = stubController({
       whenStarted: (redirectUri) =>
         visit(controller.browser, redirectUri, `/callback?code=c&state=${STATE}`),
       finish: () =>
-        buildErrorEnvelope("invalid_state", 409, "The sign-in expired.", {
-          reason: "sign-in-expired",
-        }),
+        buildErrorEnvelope("invalid_state", 409, message, { reason: "sign-in-expired" }),
     });
     const io = ioFor(controller.fetch);
 
     expect(await run(io, SERVER_ID)).toBe(1);
 
-    expect(io.stderr).toEqual([
-      `hercule: The sign-in expired. Run \`hercule mcp-server sign-in ${SERVER_ID}\` again.`,
-    ]);
+    expect(io.stderr).toEqual([`hercule: ${message}`]);
   });
 
   it("resolves a tail of the id through the server list", async () => {
@@ -275,17 +273,19 @@ describe("hercule mcp-server sign-in --paste", () => {
     expect(io.stdout.join("\n")).toContain("Signed in. notion is checking.");
   });
 
-  it("gives up waiting for the address when the attempt expires, and says to run the command again", async () => {
-    const controller = stubController({ expiresInMs: 150 });
-    // Stdin never ends, as a terminal that nobody types into.
-    const io = { ...ioFor(controller.fetch), stdin: () => new Promise<string>(() => undefined) };
+  it("sends an address pasted after the attempt expired, and prints the controller's refusal as it is", async () => {
+    const message = `This sign-in can no longer be finished. Start it again: hercule mcp-server sign-in ${SERVER_ID}`;
+    const controller = stubController({
+      expiresInMs: 0,
+      finish: () =>
+        buildErrorEnvelope("invalid_state", 409, message, { reason: "sign-in-expired" }),
+    });
+    const io = ioFor(controller.fetch, { stdin: "code=c&state=s\n" });
 
     expect(await run(io, SERVER_ID, "--paste")).toBe(1);
 
-    expect(io.stderr.join("\n")).toContain(
-      `hercule: The sign-in expired before you gave the address. Run \`hercule mcp-server sign-in ${SERVER_ID} --paste\` again.`,
-    );
-    expect(controller.fetch.calls.some((call) => call.path.endsWith("/finish"))).toBe(false);
+    expect(controller.fetch.calls.some((call) => call.path.endsWith("/finish"))).toBe(true);
+    expect(io.stderr).toEqual([`hercule: ${message}`]);
   });
 
   it("refuses at a terminal before anything is sent, never prompting", async () => {

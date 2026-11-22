@@ -46,11 +46,11 @@ export const SIGN_IN_HELP: HandWrittenHelp = {
     {
       label: "--paste",
       notes: "optional; for a browser on another computer",
-      help: "Listen for nothing. After you approve, your browser fails to load a page on 127.0.0.1: copy that page's whole address and give it on stdin, because the CLI never prompts. At a terminal, `cat | hercule mcp-server sign-in <id> --paste` waits for it: paste the address, press Enter, then Ctrl-D.",
+      help: "Listen for nothing. After you approve, your browser fails to load a page on 127.0.0.1: copy that page's whole address and give it on stdin, because the CLI never prompts. Example: `echo 'http://127.0.0.1:51234/callback?code=4b1f0c7e&state=Zr8m2Qk1' | hercule mcp-server sign-in 1f3a9c2e --paste`. At a terminal, `cat | hercule mcp-server sign-in <id> --paste` waits for it: paste the address, press Enter, then Ctrl-D.",
     },
   ],
   prints:
-    'The address to open in your browser, and once the sign-in is finished the line "Signed in. <name> is <status>.". With --json, the address and the waiting text go to stderr, and stdout holds the server, as `hercule mcp-server read` prints it.',
+    'The address to open in your browser and the host that asks for the approval, and once the sign-in is finished the line "Signed in. <name> is <status>.". With --json, the address and the waiting text go to stderr, and stdout holds the server, as `hercule mcp-server read` prints it.',
 };
 
 /** What the browser is shown after it returns to the listener. */
@@ -127,34 +127,33 @@ const listenForReturn = (): ReturnListener => {
 };
 
 /**
- * Builds the error for a sign-in that ran out of time, with the advice to run
- * the command again. `message` is what went wrong, `again` the command line
- * to run.
+ * Waits for `returned`, up to `expiresAt`, and returns what it resolves with.
+ * Fails with an `invalid_state` error that says to run `again`, when time runs
+ * out first. The listener's wait is not cancelled: the command ends right
+ * after. A pasted address has no such wait: the controller refuses an expired
+ * attempt, and the stdin read cannot be cancelled.
  */
-const buildExpiredError = (message: string, again: string, details: unknown): ApiError =>
-  new ApiError("invalid_state", `${message} Run \`${again}\` again.`, details);
-
-/**
- * Waits for `waiting`, up to `expiresAt`, and returns what it resolves with.
- * Fails with an `invalid_state` error that says what ran out (`what`) and to
- * run the command again, when time runs out first. What `waiting` reads is not
- * cancelled: the command ends right after.
- */
-const waitUntilExpiry = async <Result>(
-  waiting: Promise<Result>,
+const waitUntilExpiry = async (
+  returned: Promise<string>,
   expiresAt: string,
-  what: string,
   again: string,
-): Promise<Result> => {
+): Promise<string> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(buildExpiredError(what, again, { reason: "sign-in-expired" })),
+      () =>
+        reject(
+          new ApiError(
+            "invalid_state",
+            `The sign-in expired before your browser came back. Run \`${again}\` again.`,
+            { reason: "sign-in-expired" },
+          ),
+        ),
       Math.max(0, Date.parse(expiresAt) - Date.now()),
     );
   });
   try {
-    return await Promise.race([waiting, expired]);
+    return await Promise.race([returned, expired]);
   } finally {
     clearTimeout(timer);
   }
@@ -220,7 +219,7 @@ export const signInMcpServer = async (
       {},
     )
   )[idField.name] as string;
-  const again = `hercule mcp-server sign-in ${given}${paste ? " --paste" : ""}`;
+  const again = `hercule mcp-server sign-in ${given}`;
 
   // With `--json` stdout holds the answer alone, so the instructions go to stderr.
   const say = args.json ? io.err : io.out;
@@ -235,18 +234,16 @@ export const signInMcpServer = async (
     });
     say("Open this address in your browser to sign in:");
     say(`  ${started.authorizationUrl}`);
+    // The page that asks for the approval belongs to this host, which the
+    // user may not know the server by.
+    say(`You will approve on ${new URL(started.authorizationUrl).host}.`);
     say("");
 
     let callbackQuery: string;
     if (listener === undefined) {
       say("After you approve, your browser fails to load a page on 127.0.0.1. That is expected.");
       say("Copy that page's whole address and give it on stdin.");
-      callbackQuery = await waitUntilExpiry(
-        readPastedAddress(io),
-        started.expiresAt,
-        "The sign-in expired before you gave the address.",
-        again,
-      );
+      callbackQuery = await readPastedAddress(io);
     } else {
       const state = readAuthorizationState(started.authorizationUrl);
       if (state === undefined) {
@@ -258,25 +255,13 @@ export const signInMcpServer = async (
         `Waiting for your browser to come back to this computer, for up to ${minutes} minute${minutes === 1 ? "" : "s"}. Press Ctrl-C to cancel.`,
       );
       say("If your browser is on another computer, cancel and run this again with --paste.");
-      callbackQuery = await waitUntilExpiry(
-        listener.returned,
-        started.expiresAt,
-        "The sign-in expired before your browser came back.",
-        again,
-      );
+      callbackQuery = await waitUntilExpiry(listener.returned, started.expiresAt, again);
       // The browser is done with the listener, so nothing else may reach it
       // while the controller finishes the sign-in.
       listener.close();
     }
 
-    server = await client.mcpServer
-      .finishSignIn({ params: { id }, payload: { callbackQuery } })
-      .catch((error: unknown) => {
-        const reason = (error as { details?: { reason?: unknown } } | undefined)?.details?.reason;
-        throw error instanceof ApiError && reason === "sign-in-expired"
-          ? buildExpiredError(error.message, again, error.details)
-          : error;
-      });
+    server = await client.mcpServer.finishSignIn({ params: { id }, payload: { callbackQuery } });
   } finally {
     listener?.close();
   }
