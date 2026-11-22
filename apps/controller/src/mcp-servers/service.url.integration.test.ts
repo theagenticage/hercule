@@ -148,9 +148,10 @@ describe("creating a server by its address", () => {
   it("sends a token it was given as a bearer token from the first check", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       fake.authorize = (authorization) => authorization === `Bearer ${TOKEN}`;
+      const address = `${fake.url}?api_key=k3y9f2a7c&org=acme`;
 
       const server = await readRecord(
-        await createByAddress(controller, { url: fake.url, name: "remote", token: TOKEN }),
+        await createByAddress(controller, { url: address, name: "remote", token: TOKEN }),
       );
 
       expect(server.source).toMatchObject({ kind: "url", signIn: "token" });
@@ -159,12 +160,12 @@ describe("creating a server by its address", () => {
         new Set([`Bearer ${TOKEN}`]),
       );
 
-      // The audit entry holds the address and never the token.
+      // The audit entry holds the whole address, query included, and never the token.
       const [audited] = await controller.harness.audit("mcpServer.created");
       expect(audited?.payload).toEqual({
         mcpServerId: server.id,
         sourceKind: "url",
-        url: fake.url,
+        url: address,
       });
       expect(JSON.stringify(audited)).not.toContain(TOKEN);
     });

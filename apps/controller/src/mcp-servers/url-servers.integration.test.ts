@@ -630,19 +630,26 @@ describe("an upstream session of a server added by URL", () => {
   });
 });
 
+/** A query whose value looks like a key; it is not a secret, so no answer removes it. */
+const QUERY = "api_key=k3y4eC39HqLyjWDarjtT1zdp7dc&org=acme";
+
 describe("a credential the server echoes", () => {
-  it("is removed from the tool definitions that are stored and from the answer of a call", async () => {
+  it("is removed from the tool definitions that are stored and from the answer of a call, while the address's query is not", async () => {
     await withUrlRig(
-      async ({ controller, fake, insertUrlServer }) => {
-        fake.intercept = ({ method, id, authorization }) =>
+      async ({ controller, fake }) => {
+        fake.intercept = ({ method, id, authorization, url }) =>
           method === "tools/call"
             ? Response.json({
                 jsonrpc: "2.0",
                 id,
-                result: { content: [{ type: "text", text: `you sent ${authorization}` }] },
+                result: {
+                  content: [{ type: "text", text: `you sent ${authorization} to ${url}` }],
+                },
               })
             : undefined;
-        const serverId = await insertUrlServer({ token: "s3cret-t0ken" });
+        const serverId = await insertUrlServerAt(controller, `${fake.url}?${QUERY}`, {
+          token: "s3cret-t0ken",
+        });
 
         const row = await waitForResult(controller);
         const result = await callAs(controller, serverId, { tool: "plain" });
@@ -650,19 +657,27 @@ describe("a credential the server echoes", () => {
         expect(row.status).toBe("ready");
         expect(row.tools).not.toContain("s3cret-t0ken");
         expect(JSON.parse(row.tools)).toMatchObject([
-          { name: "plain", description: "sent Bearer [removed] to this tool" },
+          {
+            name: "plain",
+            description: `sent Bearer [removed] to this tool at ?${QUERY}`,
+          },
         ]);
         expect(JSON.stringify(result)).not.toContain("s3cret-t0ken");
         expect(result).toMatchObject({
           _tag: "Success",
-          success: { content: [{ text: "you sent Bearer [removed]" }] },
+          success: {
+            content: [{ text: `you sent Bearer [removed] to /mcp?${QUERY}` }],
+          },
         });
       },
       {
         fake: {
           tools: [
             { name: "Bearer s3cret-t0ken", description: "named after the credential" },
-            { name: "plain", description: "sent Bearer s3cret-t0ken to this tool" },
+            {
+              name: "plain",
+              description: `sent Bearer s3cret-t0ken to this tool at ?${QUERY}`,
+            },
           ],
         },
       },

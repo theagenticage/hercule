@@ -95,9 +95,10 @@ const buildNormalizedAddress = (parsed: URL): string => {
  * `https:`, holds a user name or password, or holds a `#fragment`. A
  * fragment and a password are refused and not dropped, so the address a user
  * sees is the address the server is called at. Userinfo is refused and a
- * query is not, because an HTTP client sends userinfo as credentials of its
- * own (a `Basic` Authorization header) next to the token, which a query never
- * is. The query is part of the address and is shown whole, like the rest.
+ * query is not, because userinfo can supply credentials to the HTTP client on
+ * its own (it sends them as `Basic` when no Authorization header is set),
+ * which a query never does. The query is part of the address and is shown
+ * whole, like the rest.
  */
 export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, Validation> =>
   Effect.gen(function* () {
