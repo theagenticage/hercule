@@ -32,7 +32,6 @@ import {
   type UsablePlugin,
 } from "./catalogue";
 import type { McpServerUrlSource, StoredMcpServerAvailability } from "./repository";
-import { listSecretLikeQueryValues } from "./addresses";
 import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
 
 /**
@@ -369,9 +368,6 @@ const resolvePluginAccess = (
   };
 };
 
-/** The name prefix of the credentials that hold the values of an address's query. */
-const QUERY_VALUE_PREFIX = "query-";
-
 /**
  * Builds the access of a server added by URL: requests go to its own address,
  * with its pasted token as a bearer token when it holds one. There is nothing
@@ -388,21 +384,10 @@ const resolveUrlAccess = (
   signIns: McpServerSignIns,
 ): UsableAccess => {
   const toUpstream = (token: string | undefined): UpstreamCredentials => {
-    // The address's query values are secret too: many servers take an API key
-    // there, and one that echoes its request URL must not hand it to an agent.
-    const queryValues = Object.fromEntries(
-      listSecretLikeQueryValues(url).map((value, index) => [
-        `${QUERY_VALUE_PREFIX}${String(index)}`,
-        value,
-      ]),
-    );
-    const credentials = {
-      ...(token === undefined ? {} : { [SIGN_IN_TOKEN_SECRET]: token }),
-      ...queryValues,
-    };
+    const credentials = token === undefined ? {} : { [SIGN_IN_TOKEN_SECRET]: token };
     return {
       credentials,
-      secretNames: [SIGN_IN_TOKEN_SECRET, ...Object.keys(queryValues)],
+      secretNames: [SIGN_IN_TOKEN_SECRET],
       config: {},
       identity: computeCredentialsIdentity(credentials),
     };

@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import {
-  buildDefaultServerName,
-  findPluginOnOrigin,
-  hideQueryValues,
-  listSecretLikeQueryValues,
-  parseServerAddress,
-} from "./addresses";
+import { buildDefaultServerName, findPluginOnOrigin, parseServerAddress } from "./addresses";
 
 interface Refusal {
   readonly code: string;
@@ -204,56 +198,5 @@ describe("findPluginOnOrigin", () => {
     ]) {
       expect(findPluginOnOrigin(origin, contributions), origin).toBeUndefined();
     }
-  });
-});
-
-describe("hideQueryValues", () => {
-  it("keeps every query parameter's name and hides its value", () => {
-    expect(hideQueryValues("https://mcp.x.com/mcp?api_key=K&org=o")).toBe(
-      "https://mcp.x.com/mcp?api_key=…&org=…",
-    );
-  });
-
-  it("hides a part with no equals sign whole, as it is a value with no name", () => {
-    expect(hideQueryValues("https://mcp.x.com/mcp?SECRETKEY")).toBe("https://mcp.x.com/mcp?…");
-    expect(hideQueryValues("https://mcp.x.com/mcp?a=1&SECRETKEY")).toBe(
-      "https://mcp.x.com/mcp?a=…&…",
-    );
-  });
-
-  it("returns an address with no query as it is", () => {
-    expect(hideQueryValues("https://mcp.x.com/mcp")).toBe("https://mcp.x.com/mcp");
-  });
-});
-
-describe("listSecretLikeQueryValues", () => {
-  it("lists a key-like value and leaves out the ordinary ones", () => {
-    expect(
-      listSecretLikeQueryValues(
-        "https://x.com/mcp?api_key=key4eC39HqLyjWDarjtT1zdp7dcFakeForTests&read_only=true&features=docs&v=1&format=object&empty=&flag",
-      ),
-    ).toEqual(["key4eC39HqLyjWDarjtT1zdp7dcFakeForTests"]);
-  });
-
-  it("lists a part with no equals sign as a value when it is key-like", () => {
-    expect(listSecretLikeQueryValues("https://x.com/mcp?SECRETKEY1&flag")).toEqual(["SECRETKEY1"]);
-  });
-
-  it("lists a value of exactly 8 characters and leaves out one of 7", () => {
-    expect(listSecretLikeQueryValues("https://x.com/mcp?a=abcd1234&b=abcd123")).toEqual([
-      "abcd1234",
-    ]);
-  });
-
-  it("lists the decoded form of a value too when the decoded form is key-like", () => {
-    expect(listSecretLikeQueryValues("https://x.com/mcp?k=abc%2Fdef%2Bghi")).toEqual([
-      "abc/def+ghi",
-    ]);
-  });
-
-  it("leaves out a value that has a character a token cannot have", () => {
-    expect(listSecretLikeQueryValues("https://x.com/mcp?a=p%40ssw0rd1&b=two+words+here")).toEqual([
-      "two+words+here",
-    ]);
   });
 });

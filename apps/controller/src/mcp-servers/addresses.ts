@@ -9,7 +9,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { createValidationError, McpServerToken, type Validation } from "@hercule/contract";
+import { createValidationError, type Validation } from "@hercule/contract";
 import { McpServerName } from "@hercule/plugin-host";
 
 /** An address a user gave, read and checked. */
@@ -94,7 +94,11 @@ const buildNormalizedAddress = (parsed: URL): string => {
  * `["source", "url"]` when the text is not an address, is not `http:` or
  * `https:`, holds a user name or password, or holds a `#fragment`. A
  * fragment and a password are refused and not dropped, so the address a user
- * sees is the address the server is called at.
+ * sees is the address the server is called at. Userinfo is refused and a
+ * query is not, because userinfo can supply credentials to the HTTP client on
+ * its own (it sends them as `Basic` when no Authorization header is set),
+ * which a query never does. The query is part of the address and is shown
+ * whole, like the rest.
  */
 export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, Validation> =>
   Effect.gen(function* () {
@@ -112,7 +116,7 @@ export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, 
     }
     if (parsed.username !== "" || parsed.password !== "") {
       return yield* refuseUrl(
-        "The address holds a user name or a password. An address is shown to everyone who can read the server, so a credential must not be part of it. Remove it, and give the credential as a token instead: --token-stdin when you add the server, or `hercule mcp-server set-token` after.",
+        "The address holds a user name or a password. An address is shown whole to everyone who can read the server, so a secret must not be part of it. Remove it, and give the credential as a token instead: --token-stdin when you add the server, or `hercule mcp-server set-token` after.",
       );
     }
     // The parser reads a lone `#` as an empty fragment, so the text is checked, not `parsed.hash`.
@@ -131,65 +135,6 @@ export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, 
       origin: parsed.origin,
     };
   });
-
-/** What replaces the value of each query parameter in an address shown to clients. */
-const HIDDEN_QUERY_VALUE = "…";
-
-/**
- * Returns the address as clients see it: every query parameter keeps its name
- * and loses its value, so `https://mcp.x.com/mcp?api_key=K&org=o` is
- * `https://mcp.x.com/mcp?api_key=…&org=…`. A part with no `=` (`?SECRETKEY`)
- * is a value with no name, and it is hidden whole: `?…`. An address with no query is returned
- * as it is. Many servers take an API key in the query, so no value of it may be
- * shown; the stored address keeps the full query, because requests go there.
- */
-export const hideQueryValues = (address: string): string => {
-  const { search } = new URL(address);
-  if (search === "") return address;
-  const hidden = search
-    .slice(1)
-    .split("&")
-    .map((parameter) => {
-      const equals = parameter.indexOf("=");
-      return equals === -1
-        ? HIDDEN_QUERY_VALUE
-        : `${parameter.slice(0, equals)}=${HIDDEN_QUERY_VALUE}`;
-    })
-    .join("&");
-  return `${address.slice(0, address.indexOf("?"))}?${hidden}`;
-};
-
-const isSecretLike = Schema.is(McpServerToken);
-
-/**
- * Lists the value of every query parameter of the address that could be a
- * secret, in the form it is written in the address and, when it differs,
- * decoded. A part with no `=` counts as a value. A server that echoes its request URL may use either form. A value
- * could be a secret when it passes the rule of a pasted token
- * (`McpServerToken`); every other value, empty ones included, is left out.
- *
- * Why not every value: ordinary values such as `true`, `1`, `docs` or `object`
- * appear in every answer, and removing them would corrupt answers and tool
- * definitions (`"rows": 4110` would become `"rows": 4[removed][removed]0`). A
- * key is long and key-like enough to be a secret exactly when it passes the
- * same rule as a token, and the rule also keeps a short value from matching
- * the `[removed]` marker itself.
- */
-export const listSecretLikeQueryValues = (address: string): ReadonlyArray<string> => {
-  const { search } = new URL(address);
-  const values = new Set<string>();
-  for (const parameter of search.slice(1).split("&")) {
-    // A part with no `=` is a value with no name, so it is listed whole.
-    const written = parameter.slice(parameter.indexOf("=") + 1);
-    values.add(written);
-    try {
-      values.add(decodeURIComponent(written.replaceAll("+", " ")));
-    } catch {
-      // A malformed escape has no decoded form; the written form is still listed.
-    }
-  }
-  return [...values].filter(isSecretLike);
-};
 
 /** The host labels that say what a server is and not whose it is, so they never name a server. */
 const GENERIC_HOST_LABELS: ReadonlyArray<string> = ["mcp", "www", "api"];
