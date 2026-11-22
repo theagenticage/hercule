@@ -30,7 +30,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
@@ -493,38 +492,42 @@ interface Answer {
  * and headers matter. A redirect, an answer over 1 MiB, a transport failure
  * and a request that takes over 30 seconds fail with `AuthorizationUnreadable`.
  * `what` names the request in the message.
+ *
+ * The request lives in a scope that ends with this call. Closing the scope
+ * aborts the request, which cancels a body that was not read to its end, so a
+ * redirect, an error status, a refused size or a dropped probe body never
+ * leaves a connection open.
  */
 const send = (
   request: HttpClientRequest.HttpClientRequest,
   what: string,
   readsBody: boolean,
 ): Effect.Effect<Answer, AuthorizationUnreadable, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const client = (yield* HttpClient.HttpClient).pipe(
-      HttpClient.transform((execute) =>
-        execute.pipe(
-          // A redirect would send the request to an address the server picked.
-          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          // No span at all: a client span records the address, and a failed
-          // one records the error text.
-          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+  Effect.scoped(
+    Effect.gen(function* () {
+      const client = (yield* HttpClient.HttpClient).pipe(
+        HttpClient.transform((execute) =>
+          execute.pipe(
+            // A redirect would send the request to an address the server picked.
+            Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+            // No span at all: a client span records the address, and a failed
+            // one records the error text.
+            Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+          ),
         ),
-      ),
-    );
-    const response: HttpClientResponse.HttpClientResponse = yield* client.execute(request);
-    const { status } = response;
-    const wwwAuthenticate = response.headers["www-authenticate"];
-    if (status >= 300 && status < 400) {
-      yield* Stream.runDrain(Stream.take(response.stream, 0));
-      return yield* failUnreadable(`the ${what} answered with a redirect, which is not followed`);
-    }
-    if (!readsBody) {
-      yield* Stream.runDrain(Stream.take(response.stream, 0));
-      return { status, wwwAuthenticate, body: "" };
-    }
-    const body = yield* readBoundedText(response, what, MAX_METADATA_BYTES);
-    return { status, wwwAuthenticate, body };
-  }).pipe(
+        HttpClient.withScope,
+      );
+      const response: HttpClientResponse.HttpClientResponse = yield* client.execute(request);
+      const { status } = response;
+      const wwwAuthenticate = response.headers["www-authenticate"];
+      if (status >= 300 && status < 400) {
+        return yield* failUnreadable(`the ${what} answered with a redirect, which is not followed`);
+      }
+      if (!readsBody) return { status, wwwAuthenticate, body: "" };
+      const body = yield* readBoundedText(response, what, MAX_METADATA_BYTES);
+      return { status, wwwAuthenticate, body };
+    }),
+  ).pipe(
     Effect.timeoutOrElse({
       duration: Duration.seconds(REQUEST_TIMEOUT_SECONDS),
       orElse: () =>

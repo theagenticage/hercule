@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import {
   isStale,
   MAX_ANSWER_BYTES,
   parseTokens,
+  postForm,
   refreshAccess,
   serializeTokens,
   type OAuthClient,
@@ -375,5 +377,79 @@ describe("the lifetime and the type of a token", () => {
       message: "the token endpoint's response holds a token that is not a bearer token",
     });
     expect(accepted.accessToken).toBe("a");
+  });
+});
+
+describe("the body of an answer that is not read to its end", () => {
+  /**
+   * Starts a server whose every answer has the given status and a body that
+   * never ends, `chunkBytes` at a time, and records whether the client
+   * cancelled that body.
+   */
+  const startEndlessBodyServer = (init: {
+    status: number;
+    headers?: Record<string, string>;
+    chunkBytes?: number;
+  }) => {
+    const state = { cancelled: false };
+    const chunk = new Uint8Array(init.chunkBytes ?? 1);
+    const { chunkBytes: _chunkBytes, ...responseInit } = init;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => {
+        let timer: ReturnType<typeof setInterval> | undefined;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(chunk);
+              timer = setInterval(() => controller.enqueue(chunk), 20);
+            },
+            cancel() {
+              state.cancelled = true;
+              clearInterval(timer);
+            },
+          }),
+          responseInit,
+        );
+      },
+    });
+    return {
+      state,
+      url: `http://127.0.0.1:${String(server.port)}/token`,
+      stop: () => server.stop(true),
+    };
+  };
+
+  /**
+   * Waits until the server saw the body cancelled, and gives up after 300
+   * milliseconds. A client that only gives up its connection later (when its
+   * runtime notices, almost a second on Bun) fails this on purpose.
+   */
+  const waitForCancel = async (state: { cancelled: boolean }): Promise<boolean> => {
+    for (let waited = 0; waited < 300 && !state.cancelled; waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return state.cancelled;
+  };
+
+  it.each([
+    ["a redirect", { status: 302, headers: { location: "http://127.0.0.1:1/elsewhere" } }],
+    ["a server error", { status: 502 }],
+    ["a body over the limit", { status: 200, chunkBytes: MAX_ANSWER_BYTES + 1 }],
+  ])("is cancelled for %s", async (_name, init) => {
+    const server = startEndlessBodyServer(init);
+    try {
+      const failure = await Effect.runPromise(
+        Effect.flip(postForm(server.url, { a: "b" }, "token endpoint")).pipe(
+          Effect.provide(FetchHttpClient.layer),
+        ),
+      );
+
+      expect(failure._tag).toBe("ProviderUnreachable");
+      expect(await waitForCancel(server.state)).toBe(true);
+    } finally {
+      await server.stop();
+    }
   });
 });

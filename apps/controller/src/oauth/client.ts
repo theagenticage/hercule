@@ -282,6 +282,10 @@ export const readBoundedText = (
  * refresh token, a code or a device code), and a 307 or 308 makes a client
  * send the same form to whatever address the response names.
  *
+ * The request lives in a scope that ends with this call, and closing the scope
+ * aborts the request. A body that was not read to its end (a redirect, a
+ * server error, a refused size) is cancelled, so no connection stays open.
+ *
  * `endpointName` names the endpoint in the error messages. No message holds
  * text the provider sent: a `ProviderRefused` names the provider's error code
  * only when it is one of `STANDARD_ERROR_CODES`.
@@ -292,63 +296,68 @@ export const postForm = (
   endpointName: string,
   headers: Record<string, string> = {},
 ): Effect.Effect<unknown, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const response = yield* HttpClient.post(url, {
-      body: HttpBody.urlParams(form),
-      acceptJson: true,
-      headers,
-    }).pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
-    const status = String(response.status);
-    if (response.status >= 300 && response.status < 400) {
-      return yield* failProviderUnreachable(
-        `the ${endpointName} answered with a redirect, which is not followed`,
-      );
-    }
-    if (response.status >= 500) {
-      return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
-    }
-    const text = yield* readBoundedText(response, endpointName);
-    let body: unknown;
-    try {
-      body = text === "" ? null : JSON.parse(text);
-    } catch {
-      if (response.status === 200) {
+  Effect.scoped(
+    Effect.gen(function* () {
+      const client = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
+      const response = yield* client
+        .post(url, {
+          body: HttpBody.urlParams(form),
+          acceptJson: true,
+          headers,
+        })
+        .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
+      const status = String(response.status);
+      if (response.status >= 300 && response.status < 400) {
         return yield* failProviderUnreachable(
-          `the ${endpointName} returned a response that is not JSON`,
+          `the ${endpointName} answered with a redirect, which is not followed`,
         );
       }
-    }
-    const refusal = decodeErrorResponse(body);
-    if (Option.isSome(refusal)) {
-      const { error, interval } = refusal.value;
-      const code = STANDARD_ERROR_CODES.has(error) ? error : undefined;
-      return yield* Effect.fail(
-        new ProviderRefused({
-          message:
-            code === undefined
-              ? `the ${endpointName} refused the request`
-              : `the ${endpointName} refused the request: ${code}`,
-          ...(code === undefined ? {} : { code }),
-          ...(interval === undefined ? {} : { interval }),
-        }),
-      );
-    }
-    // A 403 or 429 with no OAuth error is a rate limit or a temporary block,
-    // as GitHub sends when a client polls too often. It says nothing about the
-    // request itself, so the same request may work later.
-    if (response.status === 403 || response.status === 429) {
-      return yield* failProviderUnreachable(
-        `the ${endpointName} returned HTTP ${status}: it is rate limiting requests or is ` +
-          "temporarily unavailable",
-      );
-    }
-    if (response.status !== 200) {
-      return yield* Effect.fail(
-        new ProviderRefused({ message: `the ${endpointName} returned HTTP ${status}` }),
-      );
-    }
-    return body;
-  }).pipe(
+      if (response.status >= 500) {
+        return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
+      }
+      const text = yield* readBoundedText(response, endpointName);
+      let body: unknown;
+      try {
+        body = text === "" ? null : JSON.parse(text);
+      } catch {
+        if (response.status === 200) {
+          return yield* failProviderUnreachable(
+            `the ${endpointName} returned a response that is not JSON`,
+          );
+        }
+      }
+      const refusal = decodeErrorResponse(body);
+      if (Option.isSome(refusal)) {
+        const { error, interval } = refusal.value;
+        const code = STANDARD_ERROR_CODES.has(error) ? error : undefined;
+        return yield* Effect.fail(
+          new ProviderRefused({
+            message:
+              code === undefined
+                ? `the ${endpointName} refused the request`
+                : `the ${endpointName} refused the request: ${code}`,
+            ...(code === undefined ? {} : { code }),
+            ...(interval === undefined ? {} : { interval }),
+          }),
+        );
+      }
+      // A 403 or 429 with no OAuth error is a rate limit or a temporary block,
+      // as GitHub sends when a client polls too often. It says nothing about the
+      // request itself, so the same request may work later.
+      if (response.status === 403 || response.status === 429) {
+        return yield* failProviderUnreachable(
+          `the ${endpointName} returned HTTP ${status}: it is rate limiting requests or is ` +
+            "temporarily unavailable",
+        );
+      }
+      if (response.status !== 200) {
+        return yield* Effect.fail(
+          new ProviderRefused({ message: `the ${endpointName} returned HTTP ${status}` }),
+        );
+      }
+      return body;
+    }),
+  ).pipe(
     Effect.catchTag("HttpClientError", (error) =>
       failProviderUnreachable(`the ${endpointName} could not be reached: ${error.message}`),
     ),

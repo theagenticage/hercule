@@ -8,11 +8,13 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import {
   buildAuthorizationServerMetadataUrls,
   buildAuthorizationUrl,
   buildResourceMetadataCandidates,
   checkOutboundUrl,
+  discoverAuthorization,
   parseBearerChallenge,
   readAuthorizationServerMetadata,
   readProtectedResourceMetadata,
@@ -428,5 +430,118 @@ describe("buildAuthorizationUrl", () => {
     );
     expect(url.searchParams.getAll("state")).toEqual(["state"]);
     expect(url.searchParams.getAll("response_type")).toEqual(["code"]);
+  });
+});
+
+describe("the body of an answer that discovery does not read", () => {
+  /** How the test server answers: a body that never ends, or one that is a few bytes. */
+  interface Answer {
+    readonly status: number;
+    readonly headers?: Record<string, string>;
+    /** The size of each chunk of a body that never ends. A body with no `endless` is empty. */
+    readonly endless?: number;
+  }
+
+  /**
+   * Starts a server that answers a POST (the probe of the MCP server) and a
+   * GET (a metadata request) as `answers` say, and records which endless
+   * bodies the client cancelled.
+   */
+  const startServer = (answers: { readonly post: Answer; readonly get: Answer }) => {
+    const cancelled = { post: false, get: false };
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request) => {
+        const kind = request.method === "POST" ? "post" : "get";
+        const { endless, ...init } = answers[kind];
+        if (endless === undefined) return new Response(null, init);
+        const chunk = new Uint8Array(endless);
+        let timer: ReturnType<typeof setInterval> | undefined;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(chunk);
+              timer = setInterval(() => controller.enqueue(chunk), 20);
+            },
+            cancel() {
+              cancelled[kind] = true;
+              clearInterval(timer);
+            },
+          }),
+          init,
+        );
+      },
+    });
+    return {
+      cancelled,
+      url: `http://127.0.0.1:${String(server.port)}/mcp`,
+      stop: () => server.stop(true),
+    };
+  };
+
+  /**
+   * Waits until the server saw the body cancelled, and gives up after 300
+   * milliseconds. A client that only gives up its connection later (when its
+   * runtime notices, almost a second on Bun) fails this on purpose.
+   */
+  const waitForCancel = async (read: () => boolean): Promise<boolean> => {
+    for (let waited = 0; waited < 300 && !read(); waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return read();
+  };
+
+  const discover = (url: string) =>
+    Effect.runPromise(
+      Effect.flip(discoverAuthorization(url)).pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
+  it("is cancelled for the probe, which only its status and headers matter for", async () => {
+    // The probe answers 200 with a body that never ends, so discovery goes on
+    // to the metadata, which is not there.
+    const server = startServer({ post: { status: 200, endless: 1 }, get: { status: 404 } });
+    try {
+      expect((await discover(server.url))._tag).toBe("AuthorizationUnsupported");
+      expect(await waitForCancel(() => server.cancelled.post)).toBe(true);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("is cancelled for a redirect", async () => {
+    const server = startServer({
+      post: { status: 302, headers: { location: "http://127.0.0.1:1/elsewhere" }, endless: 1 },
+      get: { status: 404 },
+    });
+    try {
+      expect(await discover(server.url)).toMatchObject({ _tag: "AuthorizationUnreadable" });
+      expect(await waitForCancel(() => server.cancelled.post)).toBe(true);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("is cancelled for a server error", async () => {
+    const server = startServer({ post: { status: 503, endless: 1 }, get: { status: 404 } });
+    try {
+      expect(await discover(server.url)).toMatchObject({ _tag: "AuthorizationUnreadable" });
+      expect(await waitForCancel(() => server.cancelled.post)).toBe(true);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("is cancelled for a body over the limit", async () => {
+    const server = startServer({
+      post: { status: 401 },
+      get: { status: 200, endless: 1024 * 1024 + 1 },
+    });
+    try {
+      expect(await discover(server.url)).toMatchObject({ _tag: "AuthorizationUnreadable" });
+      expect(await waitForCancel(() => server.cancelled.get)).toBe(true);
+    } finally {
+      await server.stop();
+    }
   });
 });
