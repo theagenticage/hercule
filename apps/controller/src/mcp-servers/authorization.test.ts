@@ -363,12 +363,9 @@ describe("readAuthorizationServerMetadata", () => {
       "is refused as the %s of an https issuer, even on the host of an http server",
       async (key) => {
         const body = { ...valid, [key]: "http://127.0.0.1:9/endpoint" };
-        expect(
-          await fails(readAuthorizationServerMetadata(body, ISSUER, httpServer)),
-        ).toMatchObject({
-          _tag: "AuthorizationUnreadable",
-          message: expect.stringContaining("but its authorization server is https"),
-        });
+        const error = await fails(readAuthorizationServerMetadata(body, ISSUER, httpServer));
+        expect(error).toMatchObject({ _tag: "AuthorizationUnreadable" });
+        expect(error.message).toContain("but its authorization server is https");
       },
     );
   });
