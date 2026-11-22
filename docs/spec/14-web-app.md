@@ -523,24 +523,26 @@ A "last check-in" divider marks what the user has already seen: the `lastChecked
 - the per-connection events view, which Everything replaces ([./08-events-and-connections.md](./08-events-and-connections.md) section 10);
 - the since control and the marker behind it.
 
+*(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The desktop Intake screen is deleted too, on Rogier's word of 2026-11-21, and so are Everything and the handlings behind it. So the web app has no Intake to follow, and the list below is kept for the record. A Signal about an External Entity is seen on the desktop's Inbox ([./20-external-entities.md](./20-external-entities.md#85-signals-inside-a-card)). A signal with no entity is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox.
+
 Intake is specified elsewhere now:
 
 - What Intake holds is Signals, not triage Notifications: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#91-the-record) section 9.1, and the reason in [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).
-- What came of each event, Intake's events and their handlings: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings) section 9.10.
-- The screen, with Everything in it: the desktop app, [./17-desktop-app.md](./17-desktop-app.md#intake).
+- ~~What came of each event,~~ Intake's events ~~and their handlings~~ *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): handlings are retired)*: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings) section 9.10.
+- ~~The screen, with Everything in it: the desktop app, [./17-desktop-app.md](./17-desktop-app.md#intake).~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the desktop screen is deleted.)*
 
-The web app has no Settings > Intake section in v1 either. The desktop app's Settings > Intake and the CLI (`hercule plugin update-intake`, `hercule ignore-rule`) set the same values.
+The web app has no Settings > Intake section in v1 either. The desktop app's Settings > ~~Intake~~ Signals *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): renamed)* and the CLI (`hercule plugin update-intake`, `hercule ignore-rule`) set the same values.
 
-**The web's Intake follows the desktop's, later.** When the web app builds Intake, it draws it from the same app-neutral model the desktop app draws from, and adds no model of its own:
+~~**The web's Intake follows the desktop's, later.**~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): there is no desktop Intake to follow. The rule below still holds for whatever the web app builds over Signals.)* When the web app builds ~~Intake~~ a view over Signals, it draws it from the same app-neutral model the desktop app draws from, and adds no model of its own:
 
 - the Signal record and its core kinds ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#91-the-record) section 9.1);
 - its actions, Done and Hand to an agent (section [9.4](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent));
 - its blocks (section [9.5](./10-triage-intake-and-notifications.md#95-blocks));
-- Intake's events and their handlings (section [9.10](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings));
+- Intake's events~~ and their handlings~~ (section [9.10](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings));
 - the `signal` operations and live topic ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal));
 - the client-core functions that interpret all of these, so the two apps can never disagree about what a Signal means.
 
-The desktop app's screen ([./17-desktop-app.md](./17-desktop-app.md#intake)) is the reference the web follows. The struck text below is the web's design from before #395, kept for the record.
+~~The desktop app's screen ([./17-desktop-app.md](./17-desktop-app.md#intake)) is the reference the web follows.~~ The struck text below is the web's design from before #395, kept for the record.
 
 ~~Forward-looking decision-making over prepared work: signals already triaged, grouped and enriched by agents, presented as Proposals for go/no-go. Settled by four prototype rounds ([Prototype: the Intake view](https://github.com/theagenticage/hercule/issues/30)); semantics pinned in the "Intake semantics" section of [../design-language.md](../design-language.md). Intake and check-in are **two separate views**, not one spine; merging is a post-dogfooding question.~~
 

@@ -84,7 +84,6 @@ erDiagram
   NOTIFICATION }o--o| SESSION : "about (optional)"
   SIGNAL }o--o| EVENT : "origin and resolution (optional)"
   SIGNAL }o--o| RUN : "raised by (optional)"
-  SIGNAL ||--o| SNOOZE : "hidden until (optional)"
   IGNORE_RULE ||--o{ IGNORE_RULE_CATCH : "caught"
   IGNORE_RULE_CATCH ||--|| EVENT : "eventId"
   SCREENING }o--|| EVENT : "one per event and kind"
@@ -99,7 +98,7 @@ erDiagram
   SKILL |o--o| SKILL_REVISION : "availableRevisionHash (optional)"
 ```
 
-*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
+*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)* *(Diagram amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is removed.)*
 
 *(Diagram amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665): Discussion, Post, Wiki Page and its revisions.)*
 
@@ -870,15 +869,15 @@ Delivery: the notification center always records; per-sink deliveries are outbox
 
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#388](https://github.com/theagenticage/hercule/issues/388) and [#392](https://github.com/theagenticage/hercule/issues/392); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*
 
-Purpose: one thing a person, a system or one of Hercule's agents asks of the user, shown on Intake. A Signal is never a Notification.
+Purpose: one thing a person, a system or one of Hercule's agents asks of the user, ~~shown on Intake~~ shown on the Inbox with the External Entity it is about *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the Intake screen is deleted; a Signal with no entity is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox)*. A Signal is never a Notification.
 
 Fields: owned by [10 section 9.1](./10-triage-intake-and-notifications.md#91-the-record). A plugin kind is qualified (`github/review-requested`); the core kinds are `proposal`, `offer`, `unsure` and `fyi`. A `proposal` carries the Task that Accept would create; no Task exists until then.
 
 Relationships: raised from one event, or through `signal.raise` by a run, an assistant or the user, naming the events behind it; resolved, optionally, by a later event on its source. The events it names stay alive under the retention rule ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)). Its answers are Bound Actions (above), allowed where an operation's `usableIn` lists `signal.answer`.
 
-Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. No operation deletes a Signal in v1.
+Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): nothing lowers a priority any more, since `signal.lowerPriority` is removed; a priority lowered before then stays lowered.)* No operation deletes a Signal in v1.
 
-**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.
+~~**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is retired. A migration drops its table, so a Signal that was snoozed is live again. Neither a Signal nor a Notification can be snoozed.)*
 
 ### Screening
 
@@ -896,7 +895,7 @@ Status axis: `pending` -> `yes` | `no` | `failed`. Pruned with its event, and ne
 
 Purpose: the user's rule that keeps Signals of one plugin kind, with given field values, from being raised. It never applies to a core kind.
 
-Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule, so Intake's Everything still says why.
+Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule~~, so Intake's Everything still says why~~ *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Everything is retired; `ignoreRule.query` still counts the catches)*.
 
 Status axis: none. A rule is never edited or paused: only the user creates or deletes one, and deleting it works forward only. A catch is pruned with its event, and never keeps that event alive.
 
@@ -975,7 +974,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The Intake records:
 
 - **Signal**: no operation deletes one in v1. A Signal leaves the user's list by resolving.
-- **Snooze**: deleted on unsnooze and when its Signal resolves.
+- ~~**Snooze**: deleted on unsnooze and when its Signal resolves.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is retired.)*
 - **Ignore Rule**: hard-deleted by the user, with nothing to refuse it; its catches stay and keep the rule's text.
 - **Screening** and **Ignore Rule catch**: pruned with their event ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)).
 
