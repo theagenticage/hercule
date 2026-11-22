@@ -585,6 +585,8 @@ These rules cover every URL the controller follows for a server, sign-in include
 - A redirect is not followed with a credential to another origin.
 - The URL that a plugin's `buildUpstreamRequest` returns must be on the `origin` the contribution declared.
 - Private addresses are allowed. Hercule is single-user on a LAN or tailnet, and only the user adds a URL.
+- *(Amended 2026-11-22, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* **Addresses the server names, not the user.** A sign-in follows addresses that the MCP server and its authorization server give: the metadata documents, the registration, the authorization and the token endpoints. They may name any https host, a private one included, and an http one only on the http MCP server's own origin. A server could use that to make the controller send a GET with a path and query it chose, the fixed registration POST, and token POSTs to such a host. That is accepted, because those requests carry no Hercule credential, are never redirected, are read with a size bound and a timeout, and their answers reach no one but the sign-in. It is a known limit of signing in at a server the user added by address (For Rogier, PR #1255).
+- *(Amended 2026-11-22, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* **Which host asks for the approval.** A server added by address chooses its authorization server, and nothing ties the endpoints to the issuer beyond what OAuth checks (`state`, PKCE, `iss` when the authorization server sends it). So a client shows the user the host of the authorization address before it opens the browser: the CLI prints it, and the dialog shows it ([./17-desktop-app.md](./17-desktop-app.md)).
 
 ## 6. The plugin servers
 
