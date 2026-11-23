@@ -459,8 +459,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
   {
     name: "settings-mcp-sign-in-refused",
     path: "settings-mcp-servers.html?state=sign-in-refused",
-    contentSelector: "dialog.url-dialog .warn",
-    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+    contentSelector: 'dialog.url-dialog [role="alert"]',
+    nonTextParts: [],
   },
   {
     name: "settings-mcp-url-page",
@@ -523,8 +523,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
   {
     name: "settings-mcp-sign-in-timed-out",
     path: "settings-mcp-servers.html?state=sign-in-timed-out",
-    contentSelector: "dialog.url-dialog .warn",
-    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+    contentSelector: 'dialog.url-dialog [role="alert"]',
+    nonTextParts: [],
   },
   {
     name: "settings-mcp-token",
@@ -543,6 +543,54 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "settings-mcp-servers.html?state=replace-stale",
     contentSelector: "dialog.confirm-dialog .fl-err",
     nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-opened",
+    path: "settings-mcp-servers.html?state=sign-in-opened",
+    contentSelector: "dialog.url-dialog .url-stuck",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-paste-opened",
+    path: "settings-mcp-servers.html?state=sign-in-paste-opened",
+    contentSelector: "dialog.url-dialog .url-paste",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-ready",
+    path: "settings-mcp-servers.html?state=sign-in-ready",
+    contentSelector: "dialog.url-dialog .url-tools",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-writing",
+    path: "settings-mcp-servers.html?state=replace-writing",
+    contentSelector: 'dialog.confirm-dialog [role="status"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-unread",
+    path: "settings-mcp-servers.html?state=replace-unread",
+    contentSelector: "dialog.confirm-dialog .fl-err",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-url-page-none",
+    path: "settings-mcp-servers.html?state=url-page-none",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-url-page-long",
+    path: "settings-mcp-servers.html?state=url-page-long",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
   },
   {
     name: "settings-mcp-url-page-token",

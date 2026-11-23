@@ -271,7 +271,12 @@ function TokenForm({
     >
       {subjectCard}
       <p className="setup-lead">{words.intro}</p>
-      <FormField label="Token" hint={words.note} error={words.problemText ?? refusedReason}>
+      {refusedReason !== null && (
+        <p className="fl-err setup-error" role="alert">
+          {refusedReason}
+        </p>
+      )}
+      <FormField label="Token" hint={words.note} error={words.problemText}>
         <input
           type="password"
           autoFocus
@@ -428,7 +433,9 @@ export function StepView({
     case "sign-in-refused":
       return (
         <>
-          <Warning icon={<QuestionIcon size={14} />}>{step.message}</Warning>
+          <p className="fl-err setup-error" role="alert">
+            {step.message}
+          </p>
           {step.closingNote !== null && <p className="url-note">{step.closingNote}</p>}
           <div className="setup-acts">
             <button type="button" className="btn btn--quiet" onClick={attempt.cancelSignIn}>
@@ -557,8 +564,8 @@ export function StepView({
  * The open button takes the focus, so Enter opens the page. It is the primary
  * button, except while the paste field is open: then "Finish sign-in" is the
  * one primary button, and opening the page again is the second choice.
- * While the page failed to open the wait line has no spinner, because nothing
- * is being waited for.
+ * The wait line has a spinner only while the browser is waited for: not before
+ * the press, and not after the page failed to open.
  */
 function WaitingView({
   step,
@@ -580,7 +587,7 @@ function WaitingView({
           detail={step.approval}
           end={null}
         >
-          <WaitLine text={step.instruction} spinning={step.openError === null} />
+          <WaitLine text={step.instruction} spinning={step.waiting} />
           {step.openError !== null && (
             <p className="fl-err" role="alert">
               {step.openError}

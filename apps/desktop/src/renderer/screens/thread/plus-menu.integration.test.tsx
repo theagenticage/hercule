@@ -675,7 +675,7 @@ describe("the + menu on a started thread", () => {
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Sign in with your browser" }),
       );
-      await within(dialog).findByText("Finish in your browser");
+      await within(dialog).findByText("Sign in through your browser");
 
       change(app);
       act(() => {

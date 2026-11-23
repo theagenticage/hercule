@@ -6345,13 +6345,13 @@ describe("Thread: the MCP servers of the + menu", () => {
       await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
       const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
       await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
-      await within(dialog).findByText("Finish in your browser");
+      await within(dialog).findByText("Sign in through your browser");
 
       servers = change(server);
       await pushServerChange(live, server.id);
 
       await within(dialog).findByText(words);
-      expect(within(dialog).queryByText("Finish in your browser")).toBeNull();
+      expect(within(dialog).queryByText("Sign in through your browser")).toBeNull();
       expect(api.calls.filter((call) => call.path.endsWith("/sign-in/finish"))).toEqual([]);
     },
   );

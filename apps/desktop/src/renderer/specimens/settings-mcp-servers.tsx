@@ -1,7 +1,7 @@
 /**
  * The Settings > MCP servers specimen: the app, booted through its own router
  * over a fake controller (mcp-scene.ts), with Settings open on the MCP servers
- * section, drawn from the world in mcp-fixture.ts. `capture:ui` draws its four
+ * section, drawn from the world in mcp-fixture.ts. `capture:ui` draws its
  * states (scripts/ui-screens.ts); open it in the dev server for a check by eye.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`,
@@ -60,11 +60,29 @@
  * - `url-page-oauth`: the page of a ready server that holds a sign-in through
  *   the browser, with "Sign in again...";
  * - `urls-long`: the list with a server whose address is far longer than its row.
+ *
+ * The last ones draw a state of the sign-in, of Replace and of a page that
+ * the others do not:
+ * - `sign-in-opened`: the waiting step after "Open" opened the browser, which
+ *   does not come back: the button reads "Open again" and no error shows;
+ * - `sign-in-paste-opened`: the same with the field to paste the browser's
+ *   address, opened by the button under the card;
+ * - `sign-in-ready`: the dialog after the browser came back and the server
+ *   answered: the server with its tools;
+ * - `replace-writing`: the Replace dialog while the controller has not
+ *   answered the write;
+ * - `replace-unread`: the Replace dialog after the write succeeded and the
+ *   list of servers could not be read again, with "Read again";
+ * - `url-page-none`: the page of a ready server that holds no sign-in
+ *   ("None needed");
+ * - `url-page-long`: the page of a server whose address is far longer than
+ *   the page, wrapped inside its chip.
  */
 // The fixed clock comes first: a page places a time against the moment the
 // server was checked, and the sidebar's age clock reads the time when it loads.
 import "./fixed-clock";
 import {
+  MCP_ARCHIVE_SERVER_ID,
   MCP_ATLAS_SERVER_ID,
   MCP_DOCS_SERVER_ID,
   MCP_GITHUB_SERVER_ID,
@@ -76,6 +94,8 @@ import {
   MCP_NEW_URL_SERVER,
   MCP_NO_OFFERS,
   MCP_OAUTH_RECORDS,
+  MCP_POSTHOG_URL_SERVER,
+  MCP_SIGNED_IN_OAUTH_SERVER,
   MCP_NOTION_SERVER_ID,
   MCP_RECORDS,
   MCP_READY_NEW_URL_SERVER,
@@ -113,9 +133,16 @@ function chooseAddress(name: string): string {
     case "replace-stale":
     case "urls-long":
       return "/settings/mcp-servers";
+    case "replace-writing":
+    case "replace-unread":
+      return "/settings/mcp-servers";
     case "url-page":
     case "token":
       return `/settings/mcp-servers/${MCP_NOTION_SERVER_ID}`;
+    case "url-page-none":
+      return `/settings/mcp-servers/${MCP_DOCS_SERVER_ID}`;
+    case "url-page-long":
+      return `/settings/mcp-servers/${MCP_ARCHIVE_SERVER_ID}`;
     case "url-page-token":
       return `/settings/mcp-servers/${MCP_LEDGER_SERVER_ID}`;
     case "url-page-oauth":
@@ -127,6 +154,9 @@ function chooseAddress(name: string): string {
     case "sign-in-paste":
     case "sign-in-timed-out":
     case "sign-in-refused":
+    case "sign-in-opened":
+    case "sign-in-paste-opened":
+    case "sign-in-ready":
       return `/settings/mcp-servers/${MCP_ATLAS_SERVER_ID}`;
     case "page":
       return `/settings/mcp-servers/${MCP_LINEAR_SERVER_ID}`;
@@ -214,6 +244,32 @@ function chooseScene(name: string): McpScene {
         browserOpens: false,
         signIn: answerSignInStart("auth.atlas.example"),
       };
+    case "sign-in-opened":
+    case "sign-in-paste-opened":
+      return {
+        ...oauthScene,
+        signInReturn: "listens",
+        signIn: answerSignInStart("auth.atlas.example"),
+      };
+    case "sign-in-ready":
+      return {
+        ...oauthScene,
+        signInReturn: "returns",
+        signIn: answerSignInStart("auth.atlas.example"),
+        signedIn: MCP_SIGNED_IN_OAUTH_SERVER,
+      };
+    case "replace-writing":
+      return { ...urlScene, update: "never-answers" };
+    case "replace-unread":
+      return {
+        ...urlScene,
+        update: { status: 200, body: MCP_POSTHOG_URL_SERVER },
+        listUnreadableAfterUpdate: true,
+      };
+    case "url-page-none":
+      return urlScene;
+    case "url-page-long":
+      return { ...scene, mcp: MCP_LONG_ADDRESS_RECORDS };
     case "sign-in-paste":
       return { ...oauthScene, signIn: answerSignInStart("auth.atlas.example") };
     case "sign-in-timed-out":
@@ -372,29 +428,60 @@ if (
   state === "sign-in-open-failed" ||
   state === "sign-in-paste" ||
   state === "sign-in-timed-out" ||
-  state === "sign-in-refused"
+  state === "sign-in-refused" ||
+  state === "sign-in-opened" ||
+  state === "sign-in-paste-opened" ||
+  state === "sign-in-ready"
 ) {
   await pressPart(".mcp-band button");
   await pressPart("dialog[open] .setup-acts .btn--accent");
   await waitForPart(
     state === "sign-in-timed-out" || state === "sign-in-refused"
-      ? "dialog[open] .warn"
+      ? 'dialog[open] [role="alert"]'
       : state === "sign-in-paste"
         ? "dialog[open] .url-paste"
         : "dialog[open] .url-waiting > .setup-acts > .btn:last-child",
   );
 }
+if (state === "sign-in-opened" || state === "sign-in-paste-opened") {
+  // Opening the page asks for the paste, which a browser that does not come back needs.
+  await pressPart("dialog[open] .url-waiting > .setup-acts > .btn:last-child");
+  await waitForPart("dialog[open] .url-stuck .btn");
+}
+if (state === "sign-in-paste-opened") {
+  await pressPart("dialog[open] .url-stuck .btn");
+  await waitForPart("dialog[open] .url-paste");
+}
+if (state === "sign-in-ready") {
+  // The browser comes back as the page opens, so the sign-in finishes.
+  await pressPart("dialog[open] .url-waiting > .setup-acts > .btn:last-child");
+  await waitForPart("dialog[open] .url-tools");
+}
 if (state === "sign-in-open-failed") {
   await pressPart("dialog[open] .url-waiting > .setup-acts > .btn:last-child");
   await waitForPart("dialog[open] .url-waiting .fl-err");
 }
-if (state === "replace" || state === "replace-several" || state === "replace-stale") {
+if (
+  state === "replace" ||
+  state === "replace-several" ||
+  state === "replace-stale" ||
+  state === "replace-writing" ||
+  state === "replace-unread"
+) {
   await pressPart('[role="switch"][aria-label="Offer posthog webshop to threads"]');
   await waitForPart(
     state === "replace-several" ? "dialog[open] .options" : "dialog[open] .url-replace",
   );
 }
 if (state === "replace-stale") {
+  await pressPart('dialog[open] button[type="submit"]');
+  await waitForPart("dialog[open] .fl-err");
+}
+if (state === "replace-writing") {
+  await pressPart('dialog[open] button[type="submit"]');
+  await waitForPart('dialog[open] [role="status"]');
+}
+if (state === "replace-unread") {
   await pressPart('dialog[open] button[type="submit"]');
   await waitForPart("dialog[open] .fl-err");
 }

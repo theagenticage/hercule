@@ -81,6 +81,8 @@ export interface ReplaceDialogView {
   readonly notice: ReplaceNotice | null;
   /** Whether Replace can be pressed now. */
   readonly canReplace: boolean;
+  /** The label of the Replace button: "Replacing…" while the write runs, else "Replace". */
+  readonly confirmLabel: string;
   /** True once the confirmed server is on the Connection: the dialog closes. */
   readonly done: boolean;
 }
@@ -89,7 +91,12 @@ export interface ReplaceDialogView {
 export type ReplaceOutcome =
   /** Nothing was confirmed, or a write ended and was released. */
   | { readonly kind: "choosing" }
-  | { readonly kind: "working"; readonly message: string }
+  | {
+      readonly kind: "working";
+      readonly message: string;
+      /** `writing`: the write runs. `reading-list`: the list is read again. */
+      readonly step: "writing" | "reading-list";
+    }
   | { readonly kind: "unread"; readonly message: string }
   | { readonly kind: "replaced" }
   | {
@@ -253,6 +260,8 @@ export const buildReplaceDialogView = ({
       !namesWinner &&
       selectedId !== null &&
       !isServerBlocked(selectedId),
+    confirmLabel:
+      outcome.kind === "working" && outcome.step === "writing" ? "Replacing…" : "Replace",
     done: outcome.kind === "replaced",
   };
 };

@@ -3,10 +3,13 @@ import type { McpServer } from "@hercule/contract";
 import { buildServer, OFFERING_PLUGINS, CONNECTIONS } from "./testing";
 import type { SignInStep } from "./browser-sign-in";
 import type { ServerOutcome, UrlServerAttemptState } from "./url-server-attempt";
+import { ApiError } from "../errors";
 import {
+  describeServerReadFailure,
   describeUrlServerDialogTitle,
   describeUrlServerStep,
   type UrlServerDialog,
+  type UrlServerStep,
 } from "./url-server-step";
 
 const ADDRESS = "https://mcp.docs.example/mcp";
@@ -327,11 +330,28 @@ describe("the sign-in that waits for the browser", () => {
 
     expect(before).toMatchObject({
       kind: "sign-in-waiting",
-      heading: "Finish in your browser",
       approval: "You will approve on auth.docs.example.",
       open: { label: "Open the browser", url: "https://auth.docs.example/authorize?state=x" },
     });
     expect(after).toMatchObject({ open: { label: "Open again" } });
+  });
+
+  it("asks for the press before it, and waits for the browser only after it, with no spinner when the page did not open", () => {
+    const step = (overrides: Parameters<typeof waiting>[0]) =>
+      describeUrlServerStep(signingIn(waiting(overrides)), ADD) as Extract<
+        UrlServerStep,
+        { kind: "sign-in-waiting" }
+      >;
+
+    const before = step({});
+    expect(before.heading).not.toBe("Finish in your browser");
+    expect(before.waiting).toBe(false);
+    expect(before.instruction).toContain('Press "Open the browser"');
+    expect(step({ opened: true })).toMatchObject({
+      heading: "Finish in your browser",
+      waiting: true,
+    });
+    expect(step({ opened: true, openError: "no browser" }).waiting).toBe(false);
   });
 
   it("says the desktop app finishes by itself and keeps the paste behind a question, asked only once the browser was opened, while the web app asks for the paste at once", () => {
@@ -529,6 +549,16 @@ describe("what closing does", () => {
     expect(note(following({ kind: "ready", toolCount: 1, newServer: true }), ADD)).toBeNull();
   });
 
+  it("says nothing of ending the sign-in once the sign-in failed: it was refused, timed out, or its page did not open", () => {
+    const refused = signingIn({ kind: "refused", reason: "timed-out", message: "It timed out." });
+    const notOpened = signingIn(waiting({ openError: "no browser" }));
+
+    expect(note(refused, tokenDialog())).toBeNull();
+    expect(note(notOpened, tokenDialog())).toBeNull();
+    expect(note(refused, ADD)).toBe("The server stays in the list.");
+    expect(note(notOpened, ADD)).toBe("The server stays in the list.");
+  });
+
   it("says nothing of the list in a token form, which never created the server", () => {
     expect(note(following({ kind: "checking" }), tokenDialog())).toBeNull();
     expect(note(signingIn({ kind: "starting" }), tokenDialog())).toBe(
@@ -540,5 +570,18 @@ describe("what closing does", () => {
     expect(note(signingIn({ kind: "finishing" }), tokenDialog())).toBe(
       "The sign-in is being finished. Closing now does not undo it.",
     );
+  });
+});
+
+describe("a server that could not be read for the sign-in dialog", () => {
+  it("says a removed server is gone, and shows the reason of any other failure", () => {
+    expect(describeServerReadFailure(new ApiError("not_found", "No such server."))).toEqual({
+      headline: "This server was removed.",
+      body: "There is nothing left to sign in to.",
+    });
+    expect(describeServerReadFailure(new Error("offline"))).toEqual({
+      headline: "The server could not be read.",
+      body: "offline",
+    });
   });
 });
