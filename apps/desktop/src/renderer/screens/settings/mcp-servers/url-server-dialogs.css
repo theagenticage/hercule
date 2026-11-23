@@ -3,6 +3,12 @@
    (connection-setup.css), which give them its 448px width; only what those
    do not draw is here. */
 
+/* Replace is a confirm dialog, which is 400px wide. It is as wide as the other
+   three, so the four read as one family. */
+.confirm-dialog.url-replace-dialog {
+  width: 448px;
+}
+
 /* The Address, the refusal under it and the Name, one gap apart. */
 .url-form {
   display: grid;
@@ -13,6 +19,14 @@
 }
 .url-wait {
   padding: 6px 2px;
+}
+/* A wait line may run to two lines, and its spinner sits beside the first one,
+   not in the middle of the block. */
+.url-dialog .wait {
+  align-items: flex-start;
+}
+.url-dialog .wait > .spin {
+  margin-top: calc((1lh - 13px) / 2);
 }
 /* The refusal sits between the two fields, and the form's gap spaces it. */
 .url-form > .warn {
@@ -35,15 +49,31 @@ p.setup-lead.url-note {
   font-size: inherit;
 }
 
-/* The waiting card says who asks for the approval in a whole sentence, which wraps beside the
-   buttons instead of being cut short as a record's address is. */
+/* The waiting card says who asks for the approval in a whole sentence, which wraps instead of
+   being cut short as a record's address is. A host with no hyphen has no place to break, so it
+   breaks anywhere: the end of the host names who asks, and it must stay in view. */
 .url-waiting > .hx {
   margin-top: 0;
 }
 .url-waiting .hx-name > span {
   overflow: visible;
+  overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
+}
+/* The button that opens the sign-in page names the host, which can be as wide as the dialog.
+   It wraps, with the host's end in view, and grows taller. */
+.url-open {
+  min-width: 0;
+  height: auto;
+  min-height: 30px;
+  padding-block: 6px;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+.url-open > svg {
+  flex: none;
 }
 /* The paste field of the waiting card: the field under the card's text, and its button at the end. */
 .url-paste {
@@ -100,23 +130,4 @@ p.setup-lead.url-note {
 }
 .url-replace b {
   font-weight: var(--w-medium);
-}
-/* The servers a Replace can move: one radio each, the address under the name. */
-.url-choice {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 12px;
-}
-.url-choice label {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 4px 10px;
-  align-items: baseline;
-  cursor: pointer;
-}
-.url-choice label > span {
-  grid-column: 2;
-  overflow-wrap: anywhere;
-  color: var(--muted);
-  font-size: var(--t-12);
 }

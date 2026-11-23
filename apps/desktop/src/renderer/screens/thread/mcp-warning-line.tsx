@@ -4,7 +4,7 @@
  * `lazy-mcp-warning-line.ts`); until then the transcript draws it as a plain
  * warning.
  */
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   buildMcpWarningLine,
@@ -13,7 +13,7 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import { useThreadViews } from "./thread-servers";
 import { RuntimeNote } from "./blocks";
-import { SignInDialog } from "./sign-in-dialog";
+import { LazySignInDialog } from "./lazy-thread-servers";
 
 /**
  * Renders a runtime warning that names MCP servers (`entries`) as the
@@ -82,12 +82,15 @@ export default function McpWarningLine({
         }
       />
       {signingIn !== null && (
-        <SignInDialog
-          action={signingIn}
-          onClose={() => {
-            setSigningIn(null);
-          }}
-        />
+        // Without its own boundary, the dialog's load would suspend the whole transcript.
+        <Suspense fallback={null}>
+          <LazySignInDialog
+            action={signingIn}
+            onClose={() => {
+              setSigningIn(null);
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

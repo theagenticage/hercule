@@ -16,6 +16,9 @@
  * `import()`, which loads later, is not followed. The generated route tree is
  * not followed either: it names every route, and the build splits each route's
  * code at build time, so only the routes the first screen renders are listed.
+ *
+ * The last test is of the same kind for the screens that open a dialog that
+ * writes a server added by URL: they must load that dialog's code only when it opens.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -158,5 +161,25 @@ describe("the first moments of a Thread, which the Inbox loads with a started Th
     expect(reached).not.toContain("app/build-mcp-server-views.ts");
     const allowed = listNarrowModels();
     expect(pickMcpServerModels(reachedFiles).filter((file) => !allowed.includes(file))).toEqual([]);
+  });
+});
+
+describe("the screens that open a dialog that writes a server added by URL", () => {
+  it("never load the dialogs' code with the screen, only when a dialog opens", () => {
+    const screens = [
+      "routes/_connected/_shell/settings/mcp-servers/index.tsx",
+      "routes/_connected/_shell/settings/mcp-servers/-server-row.tsx",
+      "routes/_connected/_shell/settings/mcp-servers/$id.tsx",
+      "screens/thread/mcp-warning-line.tsx",
+    ].map((screen) => join(rendererSource, screen));
+
+    const reached = [...collectReachedFiles(screens)].map((file) =>
+      file.slice(rendererSource.length + 1),
+    );
+
+    // The walk does reach the screens' own parts, so a walk that follows nothing cannot pass.
+    expect(reached).toContain("screens/settings/mcp-servers/server-list.tsx");
+    expect(reached).not.toContain("screens/settings/mcp-servers/url-server-dialog-parts.tsx");
+    expect(reached).not.toContain("app/mcp-url-flows.ts");
   });
 });

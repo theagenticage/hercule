@@ -29,7 +29,7 @@ export const findReplaceCandidates = (
 };
 
 /** One line of the Replace dialog: a bold label, then the text. */
-export interface ReplaceLine {
+interface ReplaceLine {
   /** `Stays`, `Changes` or `Goes`. */
   readonly label: string;
   /** A full sentence, such as "the name and the projects that name it." */
@@ -37,7 +37,7 @@ export interface ReplaceLine {
 }
 
 /** One server the Replace dialog lists to choose from. */
-export interface ReplaceChoice {
+interface ReplaceChoice {
   readonly serverId: string;
   readonly name: string;
   /** The address the server was added by. */
@@ -56,7 +56,7 @@ export interface ReplaceChoice {
  * - `lost-choice`: the server the user chose is not a candidate any more.
  * - `empty`: no server is left to replace.
  */
-export interface ReplaceNotice {
+interface ReplaceNotice {
   readonly kind: "working" | "unread" | "refused" | "lost-choice" | "empty";
   readonly message: string;
   readonly winner: { readonly serverId: string; readonly label: string } | null;

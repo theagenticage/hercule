@@ -1,12 +1,10 @@
-import { useEffect, useState, type JSX } from "react";
-import { Link, createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { Suspense, useEffect, useState, type JSX } from "react";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, queryKeys, readErrorMessage } from "@hercule/client-core";
 import {
   buildMcpServerViews,
-  describeServerPageFields,
   describeSignInRow,
-  describeSourceChip,
   type SignInEntry,
 } from "@hercule/client-core/mcp-servers";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
@@ -18,10 +16,10 @@ import {
   projectsQuery,
   settingsQuery,
 } from "../../../../app/queries";
-import { McpServerMark } from "../../../../screens/mcp-server-mark";
-import { TokenDialog } from "../../../../screens/mcp-url-server/token-dialog";
+import { LazyTokenDialog } from "../../../../screens/mcp-url-server/lazy-dialogs";
 import { Projects } from "./-projects";
 import { Remove } from "./-remove";
+import { ServerHeading } from "./-server-heading";
 import { ServerSection } from "./-server-section";
 import { StatusBand } from "./-status-band";
 import { Tools } from "./-tools";
@@ -98,35 +96,10 @@ function McpServerPage(): JSX.Element | null {
   if (server === undefined || gone) return null;
 
   const view = buildMcpServerViews([server], connections, plugins)[0]!;
-  // The second chip and the account beside the name are decided in client-core, as on the desktop.
-  const { address, account } = describeServerPageFields(view, plugins);
-  const pluginName = plugins.find((plugin) => plugin.id === view.pluginId)?.displayName;
-  const chip = "rounded-full border border-line px-2 py-0.5 text-fine text-muted";
 
   return (
     <div className="flex flex-col gap-4">
-      <Link to="/settings/mcp-servers" className="text-fine text-muted hover:text-ink">
-        ← MCP servers
-      </Link>
-
-      <div className="flex flex-col gap-2.5">
-        <h2 className="flex items-center gap-2.5 text-[17px] font-emph tracking-[-0.01em] text-ink">
-          <McpServerMark view={view} plugins={plugins} className="size-5" />
-          <span>
-            {server.name}
-            {account === null ? null : (
-              <>
-                {" "}
-                <span className="text-row font-normal text-muted">{account}</span>
-              </>
-            )}
-          </span>
-        </h2>
-        <div className="flex flex-wrap gap-1.5">
-          <span className={chip}>{describeSourceChip(view, pluginName)}</span>
-          {address === null ? null : <span className={chip}>{address}</span>}
-        </div>
-      </div>
+      <ServerHeading view={view} plugins={plugins} />
 
       <StatusBand
         view={view}
@@ -160,15 +133,17 @@ function McpServerPage(): JSX.Element | null {
       <Projects client={client} view={view} />
       <Remove client={client} view={view} />
       {signingIn === null ? null : (
-        <TokenDialog
-          client={client}
-          server={server}
-          openedOn="server-page"
-          entry={signingIn}
-          onClose={() => {
-            setSigningIn(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LazyTokenDialog
+            client={client}
+            server={server}
+            openedOn="server-page"
+            entry={signingIn}
+            onClose={() => {
+              setSigningIn(null);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

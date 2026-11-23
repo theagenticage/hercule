@@ -10,13 +10,13 @@ import { ERROR_STATUS, readAuthorizationState, type McpServer } from "@hercule/c
 import { createApiStub, type Answer, type Call } from "../api-stub";
 import { createClient, type HerculeClient } from "../client";
 import { invalidateWithoutCancelling } from "../live/invalidation";
+import type { BrowserSignInPort } from "./browser-sign-in";
 import { buildMcpListQuery } from "./list-edits";
+import type { McpServerQueries } from "./reconcile";
 import { buildMcpControllerHandlers, buildMcpWorld, buildServer } from "./testing";
 import {
   openUrlServerAttempt,
   type AttemptTarget,
-  type BrowserSignInPort,
-  type McpServerQueries,
   type UrlServerAttempt,
   type UrlServerAttemptState,
 } from "./url-server-attempt";

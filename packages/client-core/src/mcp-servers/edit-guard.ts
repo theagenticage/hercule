@@ -28,7 +28,7 @@ export type McpListRefusal =
   | { readonly kind: "taken"; readonly occupant: McpServerView; readonly serverId: string };
 
 /** What is true while the cache could not be read again after a write. */
-export interface McpListUnread {
+interface McpListUnread {
   /** True when the controller acknowledged the write: the change is saved, but the cache lacks it. */
   readonly saved: boolean;
 }

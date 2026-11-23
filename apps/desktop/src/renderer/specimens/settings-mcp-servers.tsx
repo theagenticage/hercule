@@ -28,14 +28,38 @@
  *   a server added by URL sits on PostHog's address;
  * - `url-page`: the page of Notion, a server added by URL that needs sign-in.
  *
- * Two more draw the sign-in through the browser, on the page of Atlas, a
- * server added by URL that signs in through the browser. Main's listener
- * answers, as it does on a Mac, so the dialog shows the card that waits for
- * the browser, with the way to paste the address under it:
+ * More draw the sign-in through the browser, on the page of Atlas, a server
+ * added by URL that signs in through the browser. Main's listener answers, as
+ * it does on a Mac, so the dialog shows the card that waits for the browser,
+ * with the way to paste the address under it:
+ * - `sign-in-choice`: the dialog the band's "Sign in..." opens, at the choice
+ *   "Sign in with your browser";
  * - `sign-in-waiting`: the dialog after "Sign in with your browser", at "Finish
- *   in your browser";
+ *   in your browser", before the browser was opened;
+ * - `sign-in-long-host`: the same, for a host of 45 characters with no hyphen;
+ * - `sign-in-open-failed`: the same after "Open" when the system could not
+ *   open the browser;
+ * - `sign-in-paste`: the same when main cannot listen, so the paste field is
+ *   the only way back;
+ * - `sign-in-timed-out`: the dialog after main gave up waiting for the browser;
  * - `sign-in-refused`: the dialog after the controller refused to start the
  *   sign-in.
+ *
+ * The rest draw the other steps of the dialogs and the pages of ready servers
+ * added by URL:
+ * - `add-empty`: the Add by URL dialog as it opens;
+ * - `add-checking`: the dialog while "Check server" waits for the controller;
+ * - `add-ready`: the dialog at the end, when the new server answered with its tools;
+ * - `add-plugin-origin`: the dialog with the refusal of an address a plugin offers;
+ * - `token`: the sign-in dialog on the page of Notion, a server that takes a
+ *   pasted token, at its token field;
+ * - `replace-several`: the Replace dialog with two servers to choose from;
+ * - `replace-stale`: the Replace dialog after the controller refused, because
+ *   the Connection has a server already;
+ * - `url-page-token`: the page of a ready server that holds a token, with "Replace token...";
+ * - `url-page-oauth`: the page of a ready server that holds a sign-in through
+ *   the browser, with "Sign in again...";
+ * - `urls-long`: the list with a server whose address is far longer than its row.
  */
 // The fixed clock comes first: a page places a time against the moment the
 // server was checked, and the sidebar's age clock reads the time when it loads.
@@ -47,13 +71,19 @@ import {
   MCP_GRAFANA_SERVER_ID,
   MCP_HOBBY_SERVER_ID,
   MCP_LINEAR_SERVER_ID,
+  MCP_LEDGER_SERVER_ID,
+  MCP_LONG_ADDRESS_RECORDS,
   MCP_NEW_URL_SERVER,
   MCP_NO_OFFERS,
   MCP_OAUTH_RECORDS,
   MCP_NOTION_SERVER_ID,
   MCP_RECORDS,
+  MCP_READY_NEW_URL_SERVER,
+  MCP_READY_URL_RECORDS,
   MCP_RECORDS_GITHUB_ERROR,
   MCP_RECORDS_GRAFANA_UNREACHABLE,
+  MCP_RELAY_SERVER_ID,
+  MCP_REPLACE_SEVERAL_RECORDS,
   MCP_SETTINGS_PAGE_RECORDS,
   MCP_STRIPE_SERVER_ID,
   MCP_URL_RECORDS,
@@ -74,11 +104,28 @@ function chooseAddress(name: string): string {
     case "urls":
     case "add-token":
     case "add-duplicate":
+    case "add-empty":
+    case "add-checking":
+    case "add-ready":
+    case "add-plugin-origin":
     case "replace":
+    case "replace-several":
+    case "replace-stale":
+    case "urls-long":
       return "/settings/mcp-servers";
     case "url-page":
+    case "token":
       return `/settings/mcp-servers/${MCP_NOTION_SERVER_ID}`;
+    case "url-page-token":
+      return `/settings/mcp-servers/${MCP_LEDGER_SERVER_ID}`;
+    case "url-page-oauth":
+      return `/settings/mcp-servers/${MCP_RELAY_SERVER_ID}`;
+    case "sign-in-choice":
     case "sign-in-waiting":
+    case "sign-in-long-host":
+    case "sign-in-open-failed":
+    case "sign-in-paste":
+    case "sign-in-timed-out":
     case "sign-in-refused":
       return `/settings/mcp-servers/${MCP_ATLAS_SERVER_ID}`;
     case "page":
@@ -112,10 +159,35 @@ function muteReadFailureLog(): void {
   };
 }
 
+/** The host of the long-host scene: 45 characters, with no hyphen to break at. */
+const LONG_APPROVAL_HOST = "authorization.identity.northwindtraders.co.uk";
+
+/** The controller's answer to `startSignIn` for a sign-in page on `host`. */
+const answerSignInStart = (host: string): NonNullable<McpScene["signIn"]> => ({
+  status: 200,
+  body: {
+    authorizationUrl: `https://${host}/authorize?state=abc123`,
+    expiresAt: "2026-11-23T10:10:00.000Z",
+  },
+});
+
+/** The controller's answer to a Replace it refuses, because the Connection has a server already. */
+const REPLACE_REFUSED: NonNullable<McpScene["update"]> = {
+  status: 409,
+  body: {
+    error: {
+      code: "conflict",
+      message: "This Connection has a server already.",
+      details: { reason: "mcp-server-exists", mcpServerId: MCP_DOCS_SERVER_ID },
+    },
+  },
+};
+
 /** The records and answers the scene of `name` is drawn from. */
 function chooseScene(name: string): McpScene {
   const scene = { records: MCP_SETTINGS_PAGE_RECORDS, mcp: MCP_RECORDS };
   const urlScene = { ...scene, mcp: MCP_URL_RECORDS };
+  const oauthScene = { ...scene, mcp: MCP_OAUTH_RECORDS };
   switch (name) {
     case "urls":
     case "replace":
@@ -125,21 +197,76 @@ function chooseScene(name: string): McpScene {
       return { ...urlScene, create: { status: 200, body: MCP_NEW_URL_SERVER } };
     case "sign-in-waiting":
       return {
+        ...oauthScene,
+        signInReturn: "listens",
+        signIn: answerSignInStart("auth.atlas.example"),
+      };
+    case "sign-in-long-host":
+      return {
+        ...oauthScene,
+        signInReturn: "listens",
+        signIn: answerSignInStart(LONG_APPROVAL_HOST),
+      };
+    case "sign-in-open-failed":
+      return {
+        ...oauthScene,
+        signInReturn: "listens",
+        browserOpens: false,
+        signIn: answerSignInStart("auth.atlas.example"),
+      };
+    case "sign-in-paste":
+      return { ...oauthScene, signIn: answerSignInStart("auth.atlas.example") };
+    case "sign-in-timed-out":
+      return {
+        ...oauthScene,
+        signInReturn: "times-out",
+        signIn: answerSignInStart("auth.atlas.example"),
+      };
+    case "sign-in-choice":
+      return oauthScene;
+    case "add-empty":
+      return urlScene;
+    case "add-checking":
+      return {
+        ...urlScene,
+        // The controller never answers, so the dialog stays at its wait.
+        handlers: { "POST /api/v1/mcp-servers": () => new Promise(() => undefined) },
+      };
+    case "add-ready":
+      return { ...urlScene, create: { status: 200, body: MCP_READY_NEW_URL_SERVER } };
+    case "add-plugin-origin":
+      return {
         ...scene,
-        mcp: MCP_OAUTH_RECORDS,
-        signInListens: true,
-        signIn: {
-          status: 200,
+        create: {
+          status: 409,
           body: {
-            authorizationUrl: "https://auth.atlas.example/authorize?state=abc123",
-            expiresAt: "2026-11-23T10:10:00.000Z",
+            error: {
+              code: "conflict",
+              message: "The PostHog plugin offers this server.",
+              details: {
+                reason: "mcp-server-on-plugin-origin",
+                contributionId: "posthog/posthog",
+                connectionId: "c-posthog",
+                pluginState: "active",
+              },
+            },
           },
         },
       };
+    case "token":
+      return urlScene;
+    case "replace-several":
+      return { ...scene, mcp: MCP_REPLACE_SEVERAL_RECORDS };
+    case "replace-stale":
+      return { ...urlScene, update: REPLACE_REFUSED };
+    case "url-page-token":
+    case "url-page-oauth":
+      return { ...scene, mcp: MCP_READY_URL_RECORDS };
+    case "urls-long":
+      return { ...scene, mcp: MCP_LONG_ADDRESS_RECORDS };
     case "sign-in-refused":
       return {
-        ...scene,
-        mcp: MCP_OAUTH_RECORDS,
+        ...oauthScene,
         signIn: {
           status: 409,
           body: {
@@ -205,24 +332,70 @@ if (state === "picker") {
   await pressPart('section[aria-label="Threads without a project"] button');
   await waitForPart("dialog[open].mcp-picker .mcp-pick-row");
 }
-if (state === "add-token" || state === "add-duplicate") {
+/** Presses "Add by URL" and returns when the dialog's Address field is there. */
+const openAddDialog = async (): Promise<void> => {
   await pressPart('section[aria-label="Added by URL"] .mcp-group-top button');
-  await typeInto(
-    'dialog[open] input[placeholder="https://mcp.example.com/mcp"]',
-    state === "add-token" ? "https://mcp.wiki.example/mcp" : "https://mcp.docs.example/mcp",
-  );
+  await waitForPart(ADDRESS_FIELD);
+};
+const ADDRESS_FIELD = 'dialog[open] input[placeholder="https://mcp.example.com/mcp"]';
+
+/** The address each Add scene types, and what its dialog shows once the controller answered. */
+const ADD_SCENES: Readonly<Record<string, { address: string; settled: string }>> = {
+  "add-token": {
+    address: "https://mcp.wiki.example/mcp",
+    settled: 'dialog[open] input[type="password"]',
+  },
+  "add-duplicate": { address: "https://mcp.docs.example/mcp", settled: "dialog[open] .warn" },
+  "add-plugin-origin": { address: "https://mcp.posthog.com/mcp", settled: "dialog[open] .warn" },
+  "add-checking": { address: "https://mcp.wiki.example/mcp", settled: "dialog[open] .wait" },
+  "add-ready": { address: "https://mcp.knowledge.example/mcp", settled: "dialog[open] .url-tools" },
+};
+if (state === "add-empty") await openAddDialog();
+const addScene = ADD_SCENES[state];
+if (addScene !== undefined) {
+  await openAddDialog();
+  await typeInto(ADDRESS_FIELD, addScene.address);
   await pressPart('dialog[open] button[type="submit"]');
+  await waitForPart(addScene.settled);
+}
+if (state === "sign-in-choice" || state === "token") {
+  await pressPart(".mcp-band button");
   await waitForPart(
-    state === "add-token" ? 'dialog[open] input[type="password"]' : "dialog[open] .warn",
+    state === "token"
+      ? 'dialog[open] input[type="password"]'
+      : "dialog[open] .setup-acts .btn--accent",
   );
 }
-if (state === "sign-in-waiting" || state === "sign-in-refused") {
+if (
+  state === "sign-in-waiting" ||
+  state === "sign-in-long-host" ||
+  state === "sign-in-open-failed" ||
+  state === "sign-in-paste" ||
+  state === "sign-in-timed-out" ||
+  state === "sign-in-refused"
+) {
   await pressPart(".mcp-band button");
   await pressPart("dialog[open] .setup-acts .btn--accent");
-  await waitForPart(state === "sign-in-waiting" ? "dialog[open] .url-stuck" : "dialog[open] .warn");
+  await waitForPart(
+    state === "sign-in-timed-out" || state === "sign-in-refused"
+      ? "dialog[open] .warn"
+      : state === "sign-in-paste"
+        ? "dialog[open] .url-paste"
+        : "dialog[open] .url-open",
+  );
 }
-if (state === "replace") {
+if (state === "sign-in-open-failed") {
+  await pressPart("dialog[open] .url-open");
+  await waitForPart("dialog[open] .url-waiting .fl-err");
+}
+if (state === "replace" || state === "replace-several" || state === "replace-stale") {
   await pressPart('[role="switch"][aria-label="Offer posthog webshop to threads"]');
-  await waitForPart("dialog[open] .url-replace");
+  await waitForPart(
+    state === "replace-several" ? "dialog[open] .options" : "dialog[open] .url-replace",
+  );
+}
+if (state === "replace-stale") {
+  await pressPart('dialog[open] button[type="submit"]');
+  await waitForPart("dialog[open] .fl-err");
 }
 await markMcpSceneReady(page);

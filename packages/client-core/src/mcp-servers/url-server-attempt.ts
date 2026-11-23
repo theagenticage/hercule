@@ -37,27 +37,21 @@
  * servers in `McpServerQueries`, and its way to catch the browser's return in
  * a `BrowserSignInPort`.
  */
-import {
-  ConflictDetails,
-  InvalidStateDetails,
-  parseCallbackQuery,
-  type McpServer,
-  type McpServerSignInStart,
-} from "@hercule/contract";
+import { ConflictDetails, type McpServer } from "@hercule/contract";
 import { Schema } from "effect";
-import { matchQuery, QueryObserver, type QueryClient, type QueryKey } from "@tanstack/query-core";
+import { matchQuery, QueryObserver, type QueryClient } from "@tanstack/query-core";
 import type { HerculeClient } from "../client";
-import { ApiError, readErrorMessage, readValidationIssues } from "../errors";
-import { buildPastedRedirectUri } from "../mcp-server-sign-in";
+import { ApiError, readErrorMessage } from "../errors";
 import { readAddForm, readFieldIssues, readTokenField, type FieldIssues } from "./add-by-url";
 import type { ExistingServer, PluginOriginRefusal } from "./add-refusal";
-import { readBaseAfterWrite, type McpListQuery } from "./reconcile";
 import {
-  BROWSER_SIGN_IN_UNSUPPORTED,
-  describePasteRefusal,
-  describeSignInRefusal,
-  type SignInRefusalReason,
-} from "./sign-in-words";
+  createBrowserSignIn,
+  type BrowserSignInPort,
+  type SignInUnsupportedProblem,
+  type SigningInPhase,
+  type SigningInState,
+} from "./browser-sign-in";
+import { readBaseAfterWrite, type McpServerQueries } from "./reconcile";
 
 /** What a refused or failed write leaves in the form. */
 export type AttemptProblem =
@@ -78,7 +72,7 @@ export type AttemptProblem =
   /** The write failed for another reason, such as a lost connection: `message` says why. */
   | { readonly kind: "failed"; readonly message: string }
   /** The controller says no sign-in through the browser works for this server, so only a pasted token does. */
-  | { readonly kind: "sign-in-unsupported"; readonly message: string };
+  | SignInUnsupportedProblem;
 
 /** How a dialog wrote the server's sign-in: the pasted token, or the browser sign-in. */
 export type WrittenMethod = "token" | "sign-in";
@@ -146,11 +140,7 @@ export const CHECK_ANSWER_WAIT_MILLIS = 30_000;
 export type UrlServerAttemptState =
   | { readonly kind: "form"; readonly problem: AttemptProblem | null }
   | { readonly kind: "writing"; readonly write: "create" | "token" }
-  | {
-      readonly kind: "signing-in";
-      readonly mcpServerId: string;
-      readonly step: SignInStep;
-    }
+  | SigningInState
   | {
       readonly kind: "following";
       readonly mcpServerId: string;
@@ -170,40 +160,6 @@ export type UrlServerAttemptState =
       readonly name: string | null;
       /** The controller's own words, when it ended the attempt by refusing a write. */
       readonly message: string | null;
-    };
-
-/**
- * Where the browser sign-in of an attempt is.
- *
- * - `starting`: the listener is starting and the controller is preparing the sign-in.
- * - `waiting`: the authorization address is out and the browser has not come back. The user opens the browser by pressing the button beside the host.
- * - `finishing`: the browser's answer is with the controller.
- * - `refused`: the sign-in ended without a sign-in. `message` says why and what to do.
- */
-export type SignInStep =
-  | { readonly kind: "starting" }
-  | {
-      readonly kind: "waiting";
-      /** The address the browser opens. It is an http or https address without credentials, so an app may use it as a link. */
-      readonly authorizationUrl: string;
-      /** The host that asks for the approval, shown before the browser is opened. */
-      readonly approvalHost: string;
-      /** The time after which the controller no longer accepts the answer. */
-      readonly expiresAt: string;
-      /** `listener`: the app catches the browser's return itself. `paste`: the user pastes the address the browser ended on. */
-      readonly returnBy: "listener" | "paste";
-      /** True once the user asked to open the sign-in page (`openSignInPage`). */
-      readonly opened: boolean;
-      /** Why the app could not open the browser, or `null`. */
-      readonly openError: string | null;
-      /** Why the last pasted address was not accepted, or `null`. */
-      readonly pasteProblem: string | null;
-    }
-  | { readonly kind: "finishing" }
-  | {
-      readonly kind: "refused";
-      readonly reason: SignInRefusalReason;
-      readonly message: string;
     };
 
 /** What the last read of the server's record found. */
@@ -288,60 +244,6 @@ export const decideFollowing = ({
     }
   }
 };
-
-/**
- * How an app's query cache holds the servers. Each app defines this once, for
- * its own cache shapes, and every module that reads servers uses that one
- * definition.
- */
-export interface McpServerQueries {
-  /** Returns the servers the cache holds now, or `undefined` while the list is not cached. */
-  readServers(): readonly McpServer[] | undefined;
-  /** Returns the query that reads the list of servers. After a write it is read again, so the list shows what the write did. */
-  readCatalogue(): McpListQuery;
-  /**
-   * Returns the key and the read of one server's page. An attempt follows the
-   * server with it, so the live topic's pushes read it again, and it is marked
-   * stale when a write of a closed attempt leaves the server changed.
-   */
-  readServerQuery(mcpServerId: string): {
-    readonly queryKey: QueryKey;
-    readonly queryFn: () => Promise<McpServer>;
-  };
-}
-
-/**
- * What an app that catches the browser's return itself (the desktop app) gives
- * the attempts. The web app gives none, and its sign-in uses the paste alone.
- */
-export interface BrowserSignInPort {
-  /**
-   * Starts a listener for the browser's return. Answers `listening` with the
-   * address the browser returns to, or `unavailable` when it cannot listen,
-   * in which case the attempt asks for the paste.
-   */
-  readonly listen: () => Promise<
-    | { readonly kind: "listening"; readonly listenerId: string; readonly redirectUri: string }
-    | { readonly kind: "unavailable" }
-  >;
-  /**
-   * Waits until the browser comes back to the listener `listenerId` with the
-   * `state` of `authorizationUrl`. `received` carries the query the browser
-   * sent, which goes to `mcpServer.finishSignIn` as it is.
-   */
-  readonly wait: (
-    listenerId: string,
-    authorizationUrl: string,
-  ) => Promise<
-    | { readonly kind: "received"; readonly callbackQuery: string }
-    | { readonly kind: "cancelled" }
-    | { readonly kind: "timed-out" }
-  >;
-  /** Closes the listener `listenerId`, which ends its `wait` with `cancelled`. */
-  readonly cancel: (listenerId: string) => Promise<void>;
-  /** Opens `url` in the user's browser. Fails when the browser cannot be opened. */
-  readonly open: (url: string) => Promise<void>;
-}
 
 /** The fields of the Add by URL form. */
 export interface AddFields {
@@ -475,37 +377,7 @@ export const createAttemptSlot = (): AttemptSlot => {
   };
 };
 
-/** What a failed sign-in step leads to. */
-type SignInFailure =
-  /** The server was deleted, or is reached with a Connection now: the attempt has nothing left to do. */
-  | { readonly kind: "ended"; readonly reason: "gone" | "moved"; readonly message: string | null }
-  /** Only a pasted token works for this server. */
-  | { readonly kind: "unsupported" }
-  /** The controller says the text sent is not a redirect answer. */
-  | { readonly kind: "invalid"; readonly message: string }
-  /** The sign-in ended: `message` says why and what to do. */
-  | {
-      readonly kind: "refused";
-      readonly reason: SignInRefusalReason;
-      readonly message: string;
-    };
-
-const isInvalidStateDetails = Schema.is(InvalidStateDetails);
 const isConflictDetails = Schema.is(ConflictDetails);
-
-const refused = (reason: SignInRefusalReason, detail: string): SignInFailure => ({
-  kind: "refused",
-  reason,
-  message: describeSignInRefusal(reason, detail),
-});
-
-/** What the controller's authorization address is worth: its host, or `null` when the address must not be opened. */
-const readApprovalHost = (authorizationUrl: string): string | null => {
-  if (!URL.canParse(authorizationUrl)) return null;
-  const { protocol, host, username, password } = new URL(authorizationUrl);
-  const isWebAddress = protocol === "http:" || protocol === "https:";
-  return isWebAddress && host !== "" && username === "" && password === "" ? host : null;
-};
 
 /** The phase a sign-in or a token write returns to when it does not lead on. */
 type Back =
@@ -532,15 +404,6 @@ interface WritingPhase {
   state: StateOf<"writing">;
   /** Where a refused or failed token write returns to. */
   readonly back: Back;
-  release: () => void;
-}
-
-interface SigningInPhase {
-  readonly kind: "signing-in";
-  state: StateOf<"signing-in">;
-  readonly back: Back;
-  /** The listener of the browser's return, or `null` while there is none. */
-  listenerId: string | null;
   release: () => void;
 }
 
@@ -762,7 +625,7 @@ export const openUrlServerAttempt = (
   };
 
   /** Shows the phase `back` names, with `problem` for its form. */
-  const returnTo = (back: Back, problem: AttemptProblem | null): void => {
+  const returnToBack = (back: Back, problem: AttemptProblem | null): void => {
     if (back.kind === "form") enterForm(problem);
     else enterFollowing(back.origin, problem, back);
   };
@@ -929,264 +792,47 @@ export const openUrlServerAttempt = (
       else if (failure instanceof ApiError && failure.code === "invalid_state") {
         // The record is reached with a Connection now, whose sign-in this form cannot write.
         end("moved", failure.message, null);
-      } else returnTo(back, describeFailure(failure));
+      } else returnToBack(back, describeFailure(failure));
     })();
   };
 
   // ---- the sign-in through the browser
 
-  /** Closes the listener of the phase's browser return, and forgets it. */
-  const retireListener = (owner: SigningInPhase): void => {
-    const { listenerId } = owner;
-    owner.listenerId = null;
-    if (listenerId !== null) void browserSignIn?.cancel(listenerId).catch(() => {});
-  };
-
-  /** Turns the failure of `startSignIn` or `finishSignIn` into what the attempt does next. */
-  const readSignInFailure = (error: unknown): SignInFailure => {
-    if (!(error instanceof ApiError)) return refused("failed", readErrorMessage(error));
-    if (error.code === "not_found") return { kind: "ended", reason: "gone", message: null };
-    if (error.code === "validation") {
-      // The controller's own words for what is wrong are in the first issue: the message above them is generic.
-      return {
-        kind: "invalid",
-        message: readValidationIssues(error)?.[0]?.message ?? readErrorMessage(error),
-      };
-    }
-    if (error.code !== "invalid_state") return refused("failed", readErrorMessage(error));
-    if (!isInvalidStateDetails(error.details)) {
-      // No details: the server is reached with a Connection now.
-      return { kind: "ended", reason: "moved", message: error.message };
-    }
-    switch (error.details.reason) {
-      case "sign-in-unsupported":
-        return { kind: "unsupported" };
-      case "sign-in-expired":
-      case "sign-in-refused":
-      case "source-unreadable":
-        return refused(error.details.reason, error.message);
-      default:
-        return refused("failed", error.message);
-    }
-  };
-
-  /** Shows what a failed sign-in step leads to, for the sign-in phase `owner`. */
-  const showSignInFailure = (owner: SigningInPhase, failure: SignInFailure): void => {
-    if (phase !== owner) return;
-    switch (failure.kind) {
-      case "ended":
-        end(failure.reason, failure.message, null);
-        return;
-      case "unsupported":
-        returnTo(owner.back, { kind: "sign-in-unsupported", message: BROWSER_SIGN_IN_UNSUPPORTED });
-        return;
-      case "refused":
-        retireListener(owner);
-        show(owner, {
-          kind: "signing-in",
-          mcpServerId: owner.state.mcpServerId,
-          step: { kind: "refused", reason: failure.reason, message: failure.message },
-        });
-        return;
-      case "invalid":
-        // Only a pasted address is judged by its text, and `finishSignIn` handles that. Any other
-        // validation failure is a request the controller refused.
-        showSignInFailure(owner, refused("failed", failure.message));
-    }
-  };
-
-  /**
-   * Sends what the browser came back with to `mcpServer.finishSignIn` and
-   * follows the signed-in server. `waiting` is the step to return to when the
-   * controller finds the pasted text is not a redirect answer, or `null` when
-   * the text came from the listener.
-   */
-  const finishSignIn = async (
-    owner: SigningInPhase,
-    callbackQuery: string,
-    waiting: Extract<SignInStep, { kind: "waiting" }> | null,
-  ): Promise<void> => {
-    const id = owner.state.mcpServerId;
-    show(owner, { kind: "signing-in", mcpServerId: id, step: { kind: "finishing" } });
-    let failure: unknown;
-    let finished = false;
-    try {
-      await client.mcpServer.finishSignIn({ params: { id }, payload: { callbackQuery } });
-      finished = true;
-    } catch (error) {
-      failure = error;
-    }
-    if (finished) {
-      // Whoever shows the server reads it again, whether or not this dialog is still open.
+  const browser = createBrowserSignIn({
+    client,
+    port: browserSignIn,
+    isCurrent: (owner) => phase === owner,
+    enter,
+    show,
+    end: (reason, message) => end(reason, message, null),
+    follow: () => enterFollowing("sign-in", null),
+    watchCatalogue,
+    readAgainAfterWrite: (id) => {
       invalidateServerPage(id);
       readCatalogueAgain();
-    }
-    if (phase !== owner) return;
-    if (finished) {
-      enterFollowing("sign-in", null);
-      return;
-    }
-    const result = readSignInFailure(failure);
-    if (result.kind === "invalid" && waiting !== null) {
-      show(owner, {
-        kind: "signing-in",
-        mcpServerId: id,
-        step: { ...waiting, returnBy: "paste", pasteProblem: result.message },
-      });
-      return;
-    }
-    showSignInFailure(owner, result);
-  };
-
-  /** Waits for the browser to come back to the listener, then finishes the sign-in or shows why it did not. Runs beside the waiting step, so a pasted address or a cancel can take over. */
-  const awaitReturn = async (
-    owner: SigningInPhase,
-    listenerId: string,
-    authorizationUrl: string,
-  ): Promise<void> => {
-    if (browserSignIn === undefined) return;
-    const outcome = await browserSignIn
-      .wait(listenerId, authorizationUrl)
-      .catch((): { kind: "cancelled" } => ({ kind: "cancelled" }));
-    // A paste, a cancel, a close or a newer sign-in took this listener over.
-    if (phase !== owner || owner.listenerId !== listenerId) return;
-    owner.listenerId = null;
-    switch (outcome.kind) {
-      case "received":
-        await finishSignIn(owner, outcome.callbackQuery, null);
-        return;
-      case "timed-out":
-        showSignInFailure(owner, refused("timed-out", ""));
-        return;
-      case "cancelled":
-        showSignInFailure(
-          owner,
-          refused("failed", "The app stopped waiting for the browser. Start again."),
-        );
-    }
-  };
+    },
+  });
 
   const startSignIn = async (): Promise<void> => {
     const before = phase;
     const id = mcpServerId;
     if (id === null) return;
-    let back: Back;
-    if (before.kind === "form") back = { kind: "form" };
-    else if (before.kind === "following") {
-      back = {
-        kind: "following",
-        origin: before.origin,
-        server: before.state.server,
-        outcome: before.state.outcome,
-      };
-    } else if (before.kind === "signing-in" && before.state.step.kind === "refused") {
-      back = before.back;
+    let returnTo: SigningInPhase["returnTo"];
+    if (before.kind === "signing-in" && before.state.step.kind === "refused") {
+      ({ returnTo } = before);
+    } else if (before.kind === "form" || before.kind === "following") {
+      const back: Back =
+        before.kind === "form"
+          ? { kind: "form" }
+          : {
+              kind: "following",
+              origin: before.origin,
+              server: before.state.server,
+              outcome: before.state.outcome,
+            };
+      returnTo = (problem) => returnToBack(back, problem);
     } else return;
-    const owner: SigningInPhase = {
-      kind: "signing-in",
-      state: { kind: "signing-in", mcpServerId: id, step: { kind: "starting" } },
-      back,
-      listenerId: null,
-      release: noRelease,
-    };
-    enter(owner);
-    const stopWatching = watchCatalogue(owner, id);
-    owner.release = () => {
-      stopWatching();
-      retireListener(owner);
-    };
-
-    let started: McpServerSignInStart;
-    try {
-      const listening = browserSignIn === undefined ? undefined : await browserSignIn.listen();
-      let redirectUri: string;
-      if (listening?.kind === "listening") {
-        if (phase !== owner) {
-          void browserSignIn?.cancel(listening.listenerId).catch(() => {});
-          return;
-        }
-        owner.listenerId = listening.listenerId;
-        redirectUri = listening.redirectUri;
-      } else {
-        if (phase !== owner) return;
-        redirectUri = buildPastedRedirectUri();
-      }
-      started = await client.mcpServer.startSignIn({ params: { id }, payload: { redirectUri } });
-    } catch (error) {
-      showSignInFailure(owner, readSignInFailure(error));
-      return;
-    }
-    if (phase !== owner) return;
-    const approvalHost = readApprovalHost(started.authorizationUrl);
-    if (approvalHost === null) {
-      showSignInFailure(
-        owner,
-        refused(
-          "failed",
-          "The sign-in address the controller gave is not a web address Hercule can open, so nothing was opened. Try again later, or paste a token instead.",
-        ),
-      );
-      return;
-    }
-    const { listenerId } = owner;
-    // The wait starts when the step shows, so a return that comes at once finds it.
-    show(owner, {
-      kind: "signing-in",
-      mcpServerId: id,
-      step: {
-        kind: "waiting",
-        authorizationUrl: started.authorizationUrl,
-        approvalHost,
-        expiresAt: started.expiresAt,
-        returnBy: listenerId === null ? "paste" : "listener",
-        opened: false,
-        openError: null,
-        pasteProblem: null,
-      },
-    });
-    if (listenerId !== null) void awaitReturn(owner, listenerId, started.authorizationUrl);
-  };
-
-  const finishSignInByPaste = async (pasted: string): Promise<void> => {
-    const owner = phase;
-    if (owner.kind !== "signing-in" || owner.state.step.kind !== "waiting") return;
-    const { step, mcpServerId: id } = owner.state;
-    const parsed = parseCallbackQuery(pasted);
-    if (parsed._tag === "Refused") {
-      show(owner, {
-        kind: "signing-in",
-        mcpServerId: id,
-        step: { ...step, pasteProblem: describePasteRefusal(parsed.reason) },
-      });
-      return;
-    }
-    // The pasted address replaces the listener: closing it ends the wait, which then changes nothing.
-    retireListener(owner);
-    await finishSignIn(owner, pasted.trim(), step);
-  };
-
-  const openSignInPage = async (): Promise<void> => {
-    const owner = phase;
-    if (owner.kind !== "signing-in" || owner.state.step.kind !== "waiting") return;
-    const { step: waiting, mcpServerId: id } = owner.state;
-    // Marked before the call, so a second press while the browser opens reads "Open again" too.
-    show(owner, {
-      kind: "signing-in",
-      mcpServerId: id,
-      step: { ...waiting, opened: true, openError: null },
-    });
-    if (browserSignIn === undefined) return;
-    let openError: string | null = null;
-    try {
-      await browserSignIn.open(waiting.authorizationUrl);
-    } catch (error) {
-      openError = readErrorMessage(error);
-    }
-    const { state } = owner;
-    if (phase !== owner || state.step.kind !== "waiting" || state.step.openError === openError) {
-      return;
-    }
-    show(owner, { kind: "signing-in", mcpServerId: id, step: { ...state.step, openError } });
+    await browser.start(id, returnTo);
   };
 
   // ---- Check now
@@ -1304,12 +950,16 @@ export const openUrlServerAttempt = (
     },
     submitToken,
     startSignIn,
-    finishSignInByPaste,
-    openSignInPage,
+    finishSignInByPaste: async (pasted) => {
+      if (phase.kind === "signing-in") await browser.finishByPaste(phase, pasted);
+    },
+    openSignInPage: async () => {
+      if (phase.kind === "signing-in") await browser.openPage(phase);
+    },
     cancelSignIn: () => {
       const owner = phase;
       if (owner.kind !== "signing-in" || owner.state.step.kind === "finishing") return;
-      returnTo(owner.back, null);
+      owner.returnTo(null);
     },
     retryRead: () => {
       const owner = phase;

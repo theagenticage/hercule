@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -19,8 +19,8 @@ import {
   ServerList,
   UrlServers,
 } from "../../../../../screens/settings/mcp-servers/server-list";
-import { AddServerDialog } from "./-add-server-dialog";
 import { DefaultList } from "./-default-list";
+import { LazyAddServerDialog } from "./-lazy-dialogs";
 import { ServerRow } from "./-server-row";
 import { UrlServerRow } from "./-url-server-row";
 
@@ -80,11 +80,14 @@ function McpServers(): JSX.Element {
       </UrlServers>
       <DefaultList />
       {adding && (
-        <AddServerDialog
-          onClose={() => {
-            setAdding(false);
-          }}
-        />
+        // Without its own boundary, the dialog's load would suspend the whole list behind it.
+        <Suspense fallback={null}>
+          <LazyAddServerDialog
+            onClose={() => {
+              setAdding(false);
+            }}
+          />
+        </Suspense>
       )}
     </ServerList>
   );

@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -8,7 +8,7 @@ import {
 import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
 import { pluginsQuery, projectsQuery } from "../../../../../app/queries";
 import { ServerRowView } from "../../../../../screens/settings/mcp-servers/server-list";
-import { ReplaceDialog } from "./-replace-dialog";
+import { LazyReplaceDialog } from "./-lazy-dialogs";
 
 /**
  * Renders one row of "From your Connections" and owns its switch (spec 17
@@ -51,12 +51,14 @@ export function ServerRow({ row }: { readonly row: McpServerSettingsRow }): JSX.
         }}
       />
       {replacing && (
-        <ReplaceDialog
-          target={offerTarget}
-          onClose={() => {
-            setReplacing(false);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LazyReplaceDialog
+            target={offerTarget}
+            onClose={() => {
+              setReplacing(false);
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

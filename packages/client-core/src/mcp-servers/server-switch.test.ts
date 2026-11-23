@@ -29,6 +29,11 @@ const SERVERS_KEY = ["mcp-servers"];
 const OFFER_ORIGIN = (contributionId: string) =>
   contributionId === "sentry/sentry" ? "https://mcp.sentry.example" : undefined;
 const PAGE_KEY = (id: string) => ["mcp-server", id];
+/** The read of a server's page. The switch only marks it stale, so no test reads it. */
+const READ_PAGE = (id: string) => ({
+  queryKey: PAGE_KEY(id),
+  queryFn: () => Promise.reject(new Error(`the page of ${id} is not read`)),
+});
 
 /** A promise the test settles by hand. */
 const hold = () => {
@@ -112,7 +117,7 @@ const setup = async (initial: readonly McpServer[] = []) => {
     readServers: () => queryClient.getQueryData<McpServer[]>(SERVERS_KEY),
     readCatalogue: () => catalogue,
     readOfferOrigin: OFFER_ORIGIN,
-    readPageKey: PAGE_KEY,
+    readServerQuery: READ_PAGE,
   };
   const switches = createMcpServerSwitches({
     queryClient,
@@ -340,7 +345,7 @@ describe("a press on the switch", () => {
         readServers: () => undefined,
         readCatalogue: () => catalogue,
         readOfferOrigin: OFFER_ORIGIN,
-        readPageKey: PAGE_KEY,
+        readServerQuery: READ_PAGE,
       },
     });
 
@@ -397,7 +402,7 @@ describe("a press on the switch", () => {
         readCatalogue: () =>
           buildMcpListQuery(queryClient, { queryKey: SERVERS_KEY, queryFn: () => [] }),
         readOfferOrigin: OFFER_ORIGIN,
-        readPageKey: PAGE_KEY,
+        readServerQuery: READ_PAGE,
       },
     };
 

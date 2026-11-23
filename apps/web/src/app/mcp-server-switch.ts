@@ -7,7 +7,6 @@ import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
-  buildMcpListQuery,
   describeMcpListProblem,
   findOrCreateMcpServerSwitches,
   readMcpServerOffers,
@@ -16,7 +15,8 @@ import {
   type McpServerSwitches,
   type ReplaceDialogView,
 } from "@hercule/client-core/mcp-servers";
-import { mcpServerQuery, mcpServersQuery, pluginsQuery } from "./queries";
+import { buildMcpServerQueries } from "./mcp-server-queries";
+import { pluginsQuery } from "./queries";
 
 /** What a switch control gets from `useMcpServerSwitch`. */
 export interface McpServerSwitch {
@@ -44,13 +44,11 @@ function useMcpServerSwitches(client: HerculeClient): McpServerSwitches {
     queryClient,
     client,
     cache: {
-      readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey)?.items,
-      readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
+      ...buildMcpServerQueries(queryClient, client),
       readOfferOrigin: (contributionId) =>
         readMcpServerOffers(queryClient.getQueryData(pluginsQuery(client).queryKey) ?? []).find(
           (offer) => offer.contributionId === contributionId,
         )?.origin,
-      readPageKey: (serverId) => mcpServerQuery(client, serverId).queryKey,
     },
   });
 }

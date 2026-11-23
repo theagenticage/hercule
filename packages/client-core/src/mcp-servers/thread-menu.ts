@@ -68,7 +68,7 @@ export interface ServerMenuRow {
 }
 
 /** The submenu under the `+` button. */
-export interface ThreadServerMenu {
+interface ThreadServerMenu {
   readonly rows: readonly ServerMenuRow[];
   /** How many server names the rows leave out, those that only switched-off servers have included. They are in the picker. */
   readonly moreCount: number;

@@ -46,6 +46,7 @@ export function ReplaceDialog({
       title={view.title}
       actionLabel={notice?.kind === "working" ? "Replacing…" : "Replace"}
       actionClass="accent"
+      className="url-replace-dialog"
       initialFocus="close"
       pending={!view.canReplace}
       refusal={notice?.kind === "empty" ? notice.message : null}
@@ -56,20 +57,22 @@ export function ReplaceDialog({
       }}
     >
       {view.choices !== null && (
-        <div className="url-choice" role="radiogroup" aria-label="Server to replace">
+        <div className="options" role="radiogroup" aria-label="Server to replace">
           {view.choices.map((choice) => (
-            <label key={choice.serverId}>
-              <input
-                type="radio"
-                name="replace-server"
-                checked={view.selectedId === choice.serverId}
-                disabled={view.locked}
-                onChange={() => {
-                  pick(choice.serverId);
-                }}
-              />
+            <label key={choice.serverId} className="option">
+              <span className="choice-box">
+                <input
+                  type="radio"
+                  name="replace-server"
+                  checked={view.selectedId === choice.serverId}
+                  disabled={view.locked}
+                  onChange={() => {
+                    pick(choice.serverId);
+                  }}
+                />
+              </span>
               <b>{choice.name}</b>
-              <span>{choice.address}</span>
+              <small>{choice.address}</small>
             </label>
           ))}
         </div>

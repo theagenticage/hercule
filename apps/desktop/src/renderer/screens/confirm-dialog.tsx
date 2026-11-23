@@ -22,6 +22,7 @@ import { GlassDialog } from "./glass-dialog";
  *   for an action that takes something away, so a stray Enter does not press
  *   it, and `action` for one that only adds. A body whose first control is a
  *   checkbox or a radio needs it, so the focus starts on a button.
+ * - `className`, when given, is added to the dialog's own, to size it.
  * - `error`, when given, is shown under `children` as an alert.
  * - `refusal`, when given, is shown the same way, and the action button goes:
  *   the controller refused the action because of a state that asking again
@@ -37,6 +38,7 @@ export function ConfirmDialog({
   actionLabel,
   actionClass,
   closeLabel = "Cancel",
+  className = "",
   initialFocus,
   pending = false,
   error = null,
@@ -50,6 +52,7 @@ export function ConfirmDialog({
   readonly actionLabel: string;
   readonly actionClass: "danger" | "accent";
   readonly closeLabel?: string;
+  readonly className?: string;
   readonly initialFocus?: "close" | "action" | undefined;
   readonly pending?: boolean;
   readonly error?: string | null;
@@ -68,7 +71,12 @@ export function ConfirmDialog({
     (initialFocus === "close" ? closeRef : actionRef).current?.focus();
   }, [initialFocus]);
   return (
-    <GlassDialog dialogRef={dialogRef} className="confirm-dialog" label={title} onClose={onClose}>
+    <GlassDialog
+      dialogRef={dialogRef}
+      className={`confirm-dialog ${className}`.trim()}
+      label={title}
+      onClose={onClose}
+    >
       <div className="pop-h">
         <b>{title}</b>
       </div>

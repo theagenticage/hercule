@@ -1,9 +1,9 @@
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import type { HerculeClient } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
 import type { UrlServerSettingsRow } from "@hercule/client-core/mcp-servers";
 import { Button, Group, LaneLabel } from "@hercule/ui";
-import { AddByUrlDialog } from "../../../../screens/mcp-url-server/add-dialog";
+import { LazyAddByUrlDialog } from "../../../../screens/mcp-url-server/lazy-dialogs";
 import { UrlServerRow } from "./-url-server-row";
 
 /**
@@ -61,13 +61,15 @@ export function UrlGroup({
         </Group>
       )}
       {adding ? (
-        <AddByUrlDialog
-          client={client}
-          onClose={() => {
-            setAdding(false);
-          }}
-          onShowOfferRow={onShowOfferRow}
-        />
+        <Suspense fallback={null}>
+          <LazyAddByUrlDialog
+            client={client}
+            onClose={() => {
+              setAdding(false);
+            }}
+            onShowOfferRow={onShowOfferRow}
+          />
+        </Suspense>
       ) : null}
     </section>
   );

@@ -62,7 +62,7 @@ export const describeTickedBoxes = (boxes: readonly ProjectBox[]): string =>
   `${String(boxes.filter((box) => box.ticked).length)} of ${String(boxes.length)}`;
 
 /** The words of the question asked before a server is removed. */
-export interface ServerRemovalWording {
+interface ServerRemovalWording {
   /** Which lists name the server, such as "webshop and threads without a project name it." */
   readonly naming: string;
   /** What the removal does to every list. */

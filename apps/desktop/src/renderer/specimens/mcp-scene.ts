@@ -43,11 +43,20 @@ export interface McpScene {
    */
   readonly signIn?: { readonly status: number; readonly body: unknown };
   /**
-   * True for a scene whose sign-in dialog is drawn after main started its
-   * listener for the browser's return, so the waiting step is the one a Mac
-   * shows. The browser never comes back in the scene.
+   * What `mcpServer.update` answers, for a scene whose Replace dialog is
+   * pressed, on every server of the scene.
    */
-  readonly signInListens?: boolean;
+  readonly update?: { readonly status: number; readonly body: unknown };
+  /**
+   * For a scene whose sign-in dialog is drawn after main started its listener
+   * for the browser's return, so the waiting step is the one a Mac shows:
+   * `listens`, and the browser never comes back, or `times-out`, and main
+   * reports at once that it did not come back within 10 minutes. Without it,
+   * main cannot listen, and the sign-in shows its paste step.
+   */
+  readonly signInReturn?: "listens" | "times-out";
+  /** False for a scene where main cannot open the browser. */
+  readonly browserOpens?: boolean;
   /** The thread the scene opens. */
   readonly thread?: ThreadScreenRecords;
   /** The Draft Thread the scene opens. */
@@ -84,6 +93,7 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
     draft,
     create,
     signIn,
+    update,
     handlers: replacements,
   } = scene;
   // The server `mcpServer.create` made, once it has been called.
@@ -128,6 +138,11 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
       };
     }
   }
+  if (update !== undefined) {
+    for (const { id } of mcp.servers) {
+      handlers[`PATCH /api/v1/mcp-servers/${id}`] = { status: update.status, body: update.body };
+    }
+  }
   if (thread !== undefined) {
     const path = `/api/v1/sessions/${thread.session.id}`;
     handlers[`GET ${path}`] = { body: thread.session };
@@ -162,7 +177,12 @@ export function mountMcpScene(
     path: fixturePath.replace(/[^/?=&]+/g, (part) => convertIds(part)),
     username: scene.records.user.username,
     appearance: readSheetAppearance(),
-    ...(scene.signInListens === true ? { signInReturn: LISTENING_SIGN_IN_RETURN } : {}),
+    ...(scene.signInReturn === undefined
+      ? {}
+      : { signInReturn: SIGN_IN_RETURNS[scene.signInReturn] }),
+    ...(scene.browserOpens === false
+      ? { linkOpen: () => Promise.resolve(BROWSER_NOT_OPENED) }
+      : {}),
     prepare: ({ controller }) => {
       if (draft === undefined || controller === null) return;
       for (const entry of draft.recent ?? []) rememberRecentModel(CONTROLLER_URL, entry);
@@ -171,16 +191,28 @@ export function mountMcpScene(
   });
 }
 
-/** Main's answers when it listens for the browser's return, which never comes. */
-const LISTENING_SIGN_IN_RETURN: Bridge["signInReturn"] = {
+/** Main's answer when the system could not open the browser, in main's own sentence. */
+const BROWSER_NOT_OPENED = {
+  _tag: "NotOpened",
+  reason: "The system could not open your default browser. Check that one is set.",
+} as const;
+
+/** Returns main's answers when it listens for the browser's return, and `wait` answers what became of the wait. */
+const buildListeningReturn = (wait: Bridge["signInReturn"]["wait"]): Bridge["signInReturn"] => ({
   listen: () =>
     Promise.resolve({
       _tag: "listening",
       listenerId: "specimen",
       redirectUri: "http://127.0.0.1:4937/callback",
     }),
-  wait: () => new Promise(() => undefined),
+  wait,
   cancel: () => Promise.resolve(undefined),
+});
+
+/** The browser never comes back, or main gives up waiting for it. */
+const SIGN_IN_RETURNS: Record<"listens" | "times-out", Bridge["signInReturn"]> = {
+  listens: buildListeningReturn(() => new Promise(() => undefined)),
+  "times-out": buildListeningReturn(() => Promise.resolve({ _tag: "timed-out" })),
 };
 
 /**

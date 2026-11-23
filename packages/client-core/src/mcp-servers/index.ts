@@ -13,13 +13,13 @@ export {
   type SignInEntry,
 } from "./add-by-url";
 export { type RefusalAction, type RefusalDescription } from "./add-refusal";
+export { type BrowserSignInPort } from "./browser-sign-in";
+export { type McpServerQueries } from "./reconcile";
 export {
   createAttemptSlot,
   openUrlServerAttempt,
   type AddFields,
   type AttemptTarget,
-  type BrowserSignInPort,
-  type McpServerQueries,
   type UrlServerAttempt,
   type UrlServerAttemptState,
 } from "./url-server-attempt";
@@ -46,55 +46,35 @@ export {
   type WarningFix,
 } from "./fix";
 export { hasMcpServerBlock, hasMcpServerLine } from "./mcp-line-presence";
-export { MCP_SERVER_STATUS_FACTS, type McpServerDisplayStatus } from "./status";
+export { type McpServerDisplayStatus } from "./status";
 export {
   buildMcpListQuery,
-  createMcpListEdits,
-  decideMcpListChoice,
   describeMcpListProblem,
   findOrCreateMcpListEdits,
   type McpListCache,
   type McpListChoice,
-  type McpListDecision,
-  type McpListQuery,
   type McpListEdits,
   type McpListTarget,
 } from "./list-edits";
-export { type McpListEditState, type McpListRefusal, type McpListUnread } from "./edit-guard";
+export { type McpListEditState, type McpListRefusal } from "./edit-guard";
 export {
   buildOfferSwitchTarget,
   buildServerSwitchTarget,
-  createMcpServerSwitches,
   decideServerPageSwitch,
   findOrCreateMcpServerSwitches,
-  type ServerPageSwitch,
-  type McpServerSwitchCache,
   type McpServerSwitchPress,
   type McpServerSwitches,
   type McpServerSwitchTarget,
 } from "./server-switch";
-export {
-  type ReplaceChoice,
-  type ReplaceDialogView,
-  type ReplaceLine,
-  type ReplaceNotice,
-} from "./replace";
-export { chooseNamedServer, findOtherOccupant, type NamedServer } from "./named-lists";
-export {
-  describeOfferAddress,
-  joinOfferedServers,
-  readMcpServerOffers,
-  type OfferedServer,
-} from "./offers";
+export { type ReplaceDialogView } from "./replace";
+export { joinOfferedServers, readMcpServerOffers, type OfferedServer } from "./offers";
 export {
   buildProjectBoxes,
-  decideProjectBoxWrite,
   describeProjectRefusal,
   describeServerRemoval,
   describeTickedBoxes,
   type ProjectBox,
   type ProjectBoxAction,
-  type ServerRemovalWording,
   type TextPart,
 } from "./project-boxes";
 export {
@@ -109,15 +89,12 @@ export { resolveDraftMcpServerIds } from "./draft-pick";
 export { decideDraftServersPick } from "./draft-servers-pick";
 export { buildStartRecord } from "./start-record";
 export {
-  canResetToStart,
   decideThreadStart,
-  decideThreadStartSource,
   describeThreadStartFoot,
   listKnownServerIds,
   type StartProjectRecord,
   type StartRecord,
   type ThreadStartDecision,
-  type ThreadStartList,
 } from "./start-list";
 export {
   buildServerPicker,
@@ -126,17 +103,14 @@ export {
   type RememberedAccounts,
   type ServerMenuRow,
   type ServerPickerRow,
-  type ThreadServerMenu,
 } from "./thread-menu";
 export {
   decideThreadServersDemand,
   describeThreadServers,
-  type ThreadServersDemand,
   type ThreadServersDescription,
   type ThreadServersRecords,
-  type ThreadServersSubject,
 } from "./thread-servers";
-export { describeThreadServersRow, type ThreadServersRow } from "./thread-servers-row";
+export { type ThreadServersRow } from "./thread-servers-row";
 export {
   buildMcpServerViews,
   describeConnectionRowProblem,
@@ -149,5 +123,4 @@ export {
   type McpServerView,
   type ServerPageFields,
   type SignInAction,
-  type SignInRow,
 } from "./views";

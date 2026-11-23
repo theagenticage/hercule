@@ -27,12 +27,12 @@ import {
   settingsQuery,
 } from "../../../../../app/queries";
 import { LazyConnectionSetupDialog } from "../../../../../screens/settings/connections/lazy-connection-setup-dialog";
+import { LazyTokenDialog } from "../../../../../screens/settings/mcp-servers/lazy-token-dialog";
 import {
   ServerHead,
   ServerSection,
   ToolsSection,
 } from "../../../../../screens/settings/mcp-servers/server-page";
-import { TokenDialog } from "../../../../../screens/settings/mcp-servers/token-dialog";
 import { SettingsHeaderTitle } from "../../../../../screens/settings/settings-frame";
 import { ProjectBoxes } from "./-project-boxes";
 import { RemoveSection } from "./-remove-section";
@@ -176,7 +176,7 @@ function McpServerPage(): JSX.Element {
       <RemoveSection view={view} />
       {signingIn !== null && (
         <Suspense fallback={null}>
-          <TokenDialog
+          <LazyTokenDialog
             mcpServerId={query.data.id}
             openedOn="server-page"
             entry={signingIn}

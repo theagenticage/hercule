@@ -26,14 +26,14 @@
  * The module has no React in it. An app passes its cache's shapes in a
  * `McpServerSwitchCache` and subscribes its controls to `readState`.
  */
-import { matchQuery, type QueryClient, type QueryKey } from "@tanstack/query-core";
+import { matchQuery, type QueryClient } from "@tanstack/query-core";
 import { ConflictDetails, type McpServer } from "@hercule/contract";
 import { Schema } from "effect";
 import type { HerculeClient } from "../client";
 import { ApiError, ConnectionError, readErrorMessage } from "../errors";
 import { createEditGuard, type McpListEditState, type McpListRefusal } from "./edit-guard";
 import type { OfferedServer } from "./offers";
-import { readBaseAfterWrite, type McpListQuery } from "./reconcile";
+import { readBaseAfterWrite, type McpServerQueries } from "./reconcile";
 import {
   buildReplaceDialogView,
   findReplaceCandidates,
@@ -77,7 +77,7 @@ export const buildServerSwitchTarget = (server: McpServer): McpServerSwitchTarge
     : { kind: "url", serverId: server.id };
 
 /** What the switch on a server's page shows. */
-export interface ServerPageSwitch {
+interface ServerPageSwitch {
   /** Whether the switch is on: the server's record in the list of servers, else the page's own read. */
   readonly on: boolean;
   /**
@@ -128,24 +128,19 @@ export const decideServerPageSwitch = ({
   };
 };
 
-/** How an app's cache holds what a switch reads. The module decides everything else. */
-export interface McpServerSwitchCache {
-  /** Returns the servers the cache holds now, or `undefined` while the list is not cached. */
-  readServers(): readonly McpServer[] | undefined;
-  /**
-   * Returns the query that reads the list of servers. After a write the
-   * module reads it again, and keeps the target blocked until that read
-   * succeeds.
-   */
-  readCatalogue(): McpListQuery;
+/**
+ * How an app's cache holds what a switch reads: the app's one definition of
+ * its server queries, and the offers. After a write the switch reads
+ * `readCatalogue()` again, and keeps the target blocked until that read
+ * succeeds. The module decides everything else.
+ */
+export interface McpServerSwitchCache extends McpServerQueries {
   /**
    * Returns the address a plugin's server is reached at (the offer's `origin`),
    * or `undefined` when no plugin offers `contributionId`. A press that would
    * create the server looks for a server added by URL on that origin first.
    */
   readOfferOrigin(contributionId: string): string | undefined;
-  /** Returns the key of the read of one server's page. After a write to that server it is marked stale and read again if somebody observes it. */
-  readPageKey(serverId: string): QueryKey;
 }
 
 /** What a press on the switch did. */
@@ -490,7 +485,10 @@ export const createMcpServerSwitches = ({
       }
     }
     for (const id of pageIds) {
-      void queryClient.invalidateQueries({ queryKey: cache.readPageKey(id), exact: true });
+      void queryClient.invalidateQueries({
+        queryKey: cache.readServerQuery(id).queryKey,
+        exact: true,
+      });
     }
     // A refusal can mean the cache was out of date, such as the `conflict` of a second server for one Connection.
     const read = await readBaseAfterWrite(queryClient, cache.readCatalogue());

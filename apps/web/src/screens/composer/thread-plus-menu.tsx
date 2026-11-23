@@ -1,10 +1,10 @@
-import { useEffect, useState, type JSX } from "react";
+import { Suspense, useEffect, useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Thread, ThreadChoice } from "@hercule/client-core";
 import type { McpServer } from "@hercule/contract";
 import { decideDraftServersPick, type McpListChoice } from "@hercule/client-core/mcp-servers";
 import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
-import { TokenDialog } from "../mcp-url-server/token-dialog";
+import { LazyTokenDialog } from "../mcp-url-server/lazy-dialogs";
 import { useThreadServers } from "../thread-servers";
 import { PlusMenu } from "./plus-menu";
 import { ThreadServerPicker } from "./thread-server-picker";
@@ -161,15 +161,17 @@ export function ThreadPlusMenu({
         }
       />
       {signingInServer === null ? null : (
-        <TokenDialog
-          client={client}
-          server={signingInServer}
-          openedOn="elsewhere"
-          entry="sign-in"
-          onClose={() => {
-            setSigningIn(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LazyTokenDialog
+            client={client}
+            server={signingInServer}
+            openedOn="elsewhere"
+            entry="sign-in"
+            onClose={() => {
+              setSigningIn(null);
+            }}
+          />
+        </Suspense>
       )}
       {picking && views !== undefined && plugins !== undefined && start !== undefined ? (
         <ThreadServerPicker

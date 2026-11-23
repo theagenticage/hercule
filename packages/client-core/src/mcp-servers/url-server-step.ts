@@ -19,7 +19,8 @@ import {
   describePluginOriginRefusal,
   type RefusalDescription,
 } from "./add-refusal";
-import type { SignInStep, UrlServerAttemptState, WrittenMethod } from "./url-server-attempt";
+import type { SignInStep } from "./browser-sign-in";
+import type { UrlServerAttemptState, WrittenMethod } from "./url-server-attempt";
 
 /** The dialog an attempt belongs to, as far as its words depend on it. */
 export type UrlServerDialog =

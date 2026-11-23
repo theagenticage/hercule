@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import type { RuntimeNote } from "@hercule/client-core";
 import {
@@ -8,7 +8,7 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
 import { buildButtonClassName, Button } from "@hercule/ui";
-import { TokenDialog } from "../mcp-url-server/token-dialog";
+import { LazyTokenDialog } from "../mcp-url-server/lazy-dialogs";
 import { useThreadViews } from "../thread-servers";
 import { RuntimeNoteLine } from "./runtime-note-line";
 
@@ -53,15 +53,18 @@ function McpNoteLine({
   const [signingIn, setSigningIn] = useState<McpServer | null>(null);
   const dialog =
     signingIn === null ? null : (
-      <TokenDialog
-        client={client}
-        server={views?.find((view) => view.server.id === signingIn.id)?.server ?? signingIn}
-        openedOn="elsewhere"
-        entry="sign-in"
-        onClose={() => {
-          setSigningIn(null);
-        }}
-      />
+      // Without its own boundary, the dialog's load would suspend the whole transcript.
+      <Suspense fallback={null}>
+        <LazyTokenDialog
+          client={client}
+          server={views?.find((view) => view.server.id === signingIn.id)?.server ?? signingIn}
+          openedOn="elsewhere"
+          entry="sign-in"
+          onClose={() => {
+            setSigningIn(null);
+          }}
+        />
+      </Suspense>
     );
   if (views === undefined) {
     return (

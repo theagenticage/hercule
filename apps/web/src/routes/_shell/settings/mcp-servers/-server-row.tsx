@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { Suspense, useState, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { HerculeClient } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
@@ -9,7 +9,7 @@ import {
 import { Switch } from "@hercule/ui";
 import { useMcpServerSwitch } from "../../../../app/mcp-server-switch";
 import { McpServerStatusWord } from "../../../../screens/mcp-server-status";
-import { ReplaceDialog } from "../../../../screens/mcp-url-server/replace-dialog";
+import { LazyReplaceDialog } from "../../../../screens/mcp-url-server/lazy-dialogs";
 import { ProviderMark } from "../../../../screens/provider-mark";
 import { NamingProjectsCell } from "./-naming-projects-cell";
 
@@ -102,13 +102,15 @@ export function ServerRow({
         </p>
       )}
       {replacing ? (
-        <ReplaceDialog
-          client={client}
-          target={offerTarget}
-          onClose={() => {
-            setReplacing(false);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LazyReplaceDialog
+            client={client}
+            target={offerTarget}
+            onClose={() => {
+              setReplacing(false);
+            }}
+          />
+        </Suspense>
       ) : null}
     </li>
   );

@@ -263,7 +263,7 @@ export const describeRemoveEffect = (view: McpServerView): string => {
 };
 
 /** The Sign-in row on the page of a server added by URL. */
-export interface SignInRow {
+interface SignInRow {
   /**
    * What the server holds: "None needed", "Not signed in" (the server needs a
    * sign-in it does not hold yet), "A token" or "OAuth".

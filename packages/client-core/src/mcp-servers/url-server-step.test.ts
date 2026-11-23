@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { McpServer } from "@hercule/contract";
 import { buildServer, OFFERING_PLUGINS, CONNECTIONS } from "./testing";
-import type { ServerOutcome, SignInStep, UrlServerAttemptState } from "./url-server-attempt";
+import type { SignInStep } from "./browser-sign-in";
+import type { ServerOutcome, UrlServerAttemptState } from "./url-server-attempt";
 import {
   describeUrlServerDialogTitle,
   describeUrlServerStep,

@@ -65,6 +65,8 @@ export interface ProductionPageOptions {
    * cannot listen, so a sign-in that starts on the page shows its paste step.
    */
   readonly signInReturn?: Bridge["signInReturn"];
+  /** How main answers a request to open a link in the browser. By default it opens it. */
+  readonly linkOpen?: Bridge["link"]["open"];
 }
 
 const refuse = (call: string) => (): Promise<never> =>
@@ -87,6 +89,7 @@ const buildBridge = (
   username: string,
   appearance: Appearance,
   signInReturn: Bridge["signInReturn"],
+  linkOpen: Bridge["link"]["open"],
 ): Bridge => ({
   platform: "mac",
   hiddenWindowDraws: true,
@@ -109,8 +112,7 @@ const buildBridge = (
   skillArchive: { build: refuse("skillArchive.build") },
   firstRunProgress: { read: () => Promise.resolve(null), save: refuse("firstRunProgress.save") },
   appearance: { read: () => appearance, save: refuse("appearance.save") },
-  // A specimen has no browser to open.
-  link: { open: () => Promise.resolve({ _tag: "Opened" }) },
+  link: { open: linkOpen },
   signInReturn,
   menu: { onCommand: () => () => undefined },
   destination: { onOpen: () => () => undefined },
@@ -130,6 +132,8 @@ export async function mountProductionApp(options: ProductionPageOptions): Promis
     appearance,
     prepare,
     signInReturn = NO_SIGN_IN_RETURN,
+    // A specimen has no browser to open, so a link counts as opened.
+    linkOpen = () => Promise.resolve({ _tag: "Opened" }),
   } = options;
   const { fetch, calls } = createApiStub(handlers);
   globalThis.fetch = fetch as typeof globalThis.fetch;
@@ -140,7 +144,9 @@ export async function mountProductionApp(options: ProductionPageOptions): Promis
     return dial(url);
   } as unknown as typeof WebSocket;
 
-  const context = await buildRouterContext(buildBridge(username, appearance, signInReturn));
+  const context = await buildRouterContext(
+    buildBridge(username, appearance, signInReturn, linkOpen),
+  );
   prepare?.(context);
   const router = createAppRouter(context);
   router.history.replace(path);

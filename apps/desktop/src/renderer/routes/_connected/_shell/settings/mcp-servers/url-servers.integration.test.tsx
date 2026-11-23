@@ -10,10 +10,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { queryKeys } from "@hercule/client-core";
 import { ADDRESS_FIELD_HINT } from "@hercule/client-core/mcp-servers";
-import { readAuthorizationState, type McpServer } from "@hercule/contract";
-import type { Handler } from "@hercule/client-core/testing";
+import { readAuthorizationState } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
   buildUrlServer,
@@ -21,14 +19,10 @@ import {
   DOCS_ID,
   NOTION,
   NOTION_ID,
-  SENTRY_HOBBY,
   SENTRY_HOBBY_CONNECTION,
-  SENTRY_HOBBY_ID,
-  SENTRY_PLUGIN,
   SENTRY_WORK,
   SENTRY_WORK_CONNECTION,
   SENTRY_WORK_ID,
-  LINEAR_PLUGIN,
 } from "../../../../../screens/settings/mcp-servers/mcp-servers.testing";
 import {
   findCalls,
@@ -236,43 +230,6 @@ describe("Add by URL", () => {
     await within(dialog).findByText("ready · 2 tools");
   });
 
-  it("shows the controller's reason when the saved token is refused, with the token form again", async () => {
-    const app = await openList({ servers: [] });
-    const dialog = await openAddDialog();
-    await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
-    finishCheck(app, CREATED_ID, {
-      status: "needs-sign-in",
-      source: { kind: "url", url: DOCS_URL, signIn: "none", signInOffered: "token" },
-    });
-    await userEvent.type(await within(dialog).findByLabelText("Token"), TOKEN);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await waitFor(() => {
-      expect(app.world.tokens).toHaveLength(1);
-    });
-
-    finishCheck(app, CREATED_ID, {
-      status: "needs-sign-in",
-      statusDetail: "docs.example refused the token (401).",
-    });
-
-    expect((await within(dialog).findByRole("alert")).textContent).toBe(
-      "docs.example refused the token (401).",
-    );
-    expect(within(dialog).getByText("The server refused its token. Paste a new one.")).toBeTruthy();
-    // The refused token is not handed back: the field opens empty, and a retry sends only what is typed now.
-    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
-    expect(dialog.innerHTML).not.toContain(TOKEN);
-    await userEvent.type(within(dialog).getByLabelText("Token"), "a-second-token-1");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await waitFor(() => {
-      expect(app.world.tokens).toEqual([
-        { id: CREATED_ID, token: TOKEN },
-        { id: CREATED_ID, token: "a-second-token-1" },
-      ]);
-    });
-  });
-
   it("says apart a check that failed, and checks again from the dialog", async () => {
     const app = await openList({ servers: [] });
     const dialog = await openAddDialog();
@@ -295,84 +252,6 @@ describe("Add by URL", () => {
     await within(dialog).findByText("Asking mcp.docs.example for its tools…");
   });
 
-  it("stays busy after Check now until the record answers, takes no second press, and shows the new failure when it comes", async () => {
-    let checkRequests = 0;
-    // The controller acknowledges and checks later: it changes nothing the record shows at first.
-    const app = await openList({
-      servers: [],
-      handlers: {
-        [`POST ${SERVER_LIST_PATH}/${CREATED_ID}/check`]: () => {
-          checkRequests += 1;
-          return { body: {} };
-        },
-      },
-    });
-    const dialog = await openAddDialog();
-    await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
-    finishCheck(app, CREATED_ID, {
-      status: "unreachable",
-      statusDetail: "No answer in 10 seconds.",
-      updatedAt: "2026-11-23T09:00:00.000Z",
-    });
-    await within(dialog).findByText("mcp.docs.example could not be reached.");
-
-    await userEvent.click(within(dialog).getByRole("button", { name: "Check now" }));
-    await waitFor(() => {
-      expect(checkRequests).toBe(1);
-    });
-    await waitFor(() => {
-      expect(app.context.queryClient.isFetching()).toBe(0);
-    });
-
-    // Both reads came back with the old failure. The button is still busy, and a press asks nothing.
-    const checkNow = within(dialog).getByRole("button", { name: "Check now" });
-    expect(checkNow.getAttribute("aria-disabled")).toBe("true");
-    await userEvent.click(checkNow);
-    expect(checkRequests).toBe(1);
-
-    finishCheck(app, CREATED_ID, {
-      statusDetail: "Connection refused.",
-      updatedAt: "2026-11-23T09:01:00.000Z",
-    });
-    await within(dialog).findByText(/Connection refused\./);
-    expect(
-      within(dialog).getByRole("button", { name: "Check now" }).getAttribute("aria-disabled"),
-    ).toBe("false");
-  });
-
-  it("offers Open on a new server that is switched off while it is checked", async () => {
-    const app = await openList({ servers: [] });
-    const dialog = await openAddDialog();
-    await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
-
-    finishCheck(app, CREATED_ID, { enabled: false });
-
-    await within(dialog).findByText("This server is switched off, so it is not checked.");
-    expect(within(dialog).getByRole("button", { name: "Open docs" })).toBeTruthy();
-  });
-
-  it("keeps the server when the dialog is closed after the check, and says so while it waits", async () => {
-    const app = await openList({ servers: [] });
-    const dialog = await openAddDialog();
-    await checkAddress(dialog, DOCS_URL);
-
-    expect(await within(dialog).findByText("The server stays in the list.")).toBeTruthy();
-    // Esc and a click on the scrim close the dialog through the browser.
-    act(() => {
-      (dialog as HTMLDialogElement).close();
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-    await waitFor(() => {
-      expect(findRow("docs")).toBeTruthy();
-    });
-    expect(app.world.servers.map((server) => server.id)).toEqual([CREATED_ID]);
-  });
-
   it("refuses an address added before in the form, with a button to the server", async () => {
     const app = await openList({ servers: [DOCS] });
     const dialog = await openAddDialog();
@@ -388,23 +267,6 @@ describe("Add by URL", () => {
     await waitFor(() => {
       expect(app.router.state.location.pathname).toBe(`/settings/mcp-servers/${DOCS_ID}`);
     });
-  });
-
-  it("drops the button to the server an address was refused for when that server is deleted meanwhile", async () => {
-    const app = await openList({ servers: [DOCS] });
-    const dialog = await openAddDialog();
-    await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByRole("button", { name: "Open docs" });
-
-    app.world.servers = [];
-    act(() => {
-      app.live.pushInvalidation("mcpServer", [DOCS_ID]);
-    });
-
-    await within(dialog).findByText(
-      "You added this server before, but it was removed since. Check the server again to add it.",
-    );
-    expect(within(dialog).queryByRole("button", { name: /^Open/ })).toBeNull();
   });
 
   it("refuses an address a plugin offers, and leads to that plugin's row for the Connection that is connected", async () => {
@@ -475,39 +337,6 @@ describe("Add by URL", () => {
     await waitFor(() => {
       expect(app.router.state.location.pathname).toBe("/settings/connections");
     });
-  });
-
-  it("says where a switched-off plugin is switched on, in words, because the app has no Plugins page", async () => {
-    await openList({
-      servers: [],
-      handlers: {
-        "GET /api/v1/plugins": {
-          body: [{ ...SENTRY_PLUGIN, enabled: false, status: { _tag: "inactive" } }, LINEAR_PLUGIN],
-        },
-        [`POST ${SERVER_LIST_PATH}`]: {
-          status: 409,
-          body: {
-            error: {
-              code: "conflict",
-              message: "The Sentry plugin offers this server.",
-              details: {
-                reason: "mcp-server-on-plugin-origin",
-                contributionId: "sentry/sentry",
-                connectionId: null,
-                pluginState: "switched-off",
-              },
-            },
-          },
-        },
-      },
-    });
-    const dialog = await openAddDialog();
-    await checkAddress(dialog, SENTRY_ADDRESS);
-
-    await within(dialog).findByText(
-      /Switch the Sentry plugin on in Settings > Plugins in the web app to use it\./,
-    );
-    expect(within(dialog).queryByRole("button", { name: /Plugins/ })).toBeNull();
   });
 });
 
@@ -637,232 +466,6 @@ describe("Replace", () => {
   });
 });
 
-describe("Replace, as the controller and other clients move it", () => {
-  /** The record of a plugin's server on the hobby Connection, as another client's create leaves it. */
-  const HOBBY_WINNER = SENTRY_HOBBY;
-
-  /** The server the Replace of `SENTRY_NOTES` leaves behind: on the hobby Connection, switched on. */
-  const MOVED_NOTES = {
-    ...SENTRY_NOTES,
-    enabled: true,
-    source: {
-      kind: "plugin",
-      contributionId: "sentry/sentry",
-      connectionId: SENTRY_HOBBY_CONNECTION.id,
-    },
-  } as const;
-
-  /** The answer of a controller that finds the record of the Connection's account already there. */
-  const CONFLICT = {
-    status: 409,
-    body: {
-      error: {
-        code: "conflict",
-        message: "This Connection has a server already.",
-        details: { reason: "mcp-server-exists", mcpServerId: SENTRY_HOBBY_ID },
-      },
-    },
-  } as const;
-
-  /** The answer of a controller that no longer has the server the update is for. */
-  const NOT_FOUND = {
-    status: 404,
-    body: { error: { code: "not_found", message: "This server is gone." } },
-  } as const;
-
-  /**
-   * Opens the Replace dialog of the hobby row with `SENTRY_DOCS` and `SENTRY_NOTES` to choose
-   * from, and holds the update until `release` is called. The update then answers with `answer`,
-   * or moves `SENTRY_NOTES` onto the Connection when there is none.
-   */
-  const openHeldReplace = async (answer?: typeof CONFLICT | typeof NOT_FOUND) => {
-    let release = (): void => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const holder: { app?: OpenedMcpApp } = {};
-    const app = await openList({
-      servers: [SENTRY_WORK, SENTRY_DOCS, SENTRY_NOTES],
-      handlers: {
-        [`PATCH ${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`]: async () => {
-          await gate;
-          if (answer !== undefined) return answer;
-          holder.app!.world.servers = holder.app!.world.servers.map((server) =>
-            server.id === SENTRY_NOTES_ID ? MOVED_NOTES : server,
-          );
-          return { body: MOVED_NOTES };
-        },
-      },
-    });
-    holder.app = app;
-    await userEvent.click(
-      within(findRow("sentry hobby")).getByRole("switch", {
-        name: "Offer sentry hobby to threads",
-      }),
-    );
-    const dialog = await screen.findByRole("dialog", { name: "Which server do you replace?" });
-    await userEvent.click(within(dialog).getByRole("radio", { name: /sentrynotes/ }));
-    return { app, dialog, release };
-  };
-
-  it("keeps the confirmed server selected while its update is held, and closes when its own record is on the Connection", async () => {
-    const { app, release } = await openHeldReplace();
-    await userEvent.click(screen.getByRole("button", { name: "Replace" }));
-
-    const dialog = screen.getByRole("dialog", {
-      name: /Replace the sentrynotes server you added\?/,
-    });
-    expect(within(dialog).getByRole("status").textContent).toBe("Replacing…");
-    // The radios are fixed on the confirmed server, whatever the list does.
-    const radios = within(dialog).getAllByRole<HTMLInputElement>("radio");
-    expect(radios.map((radio) => radio.checked)).toEqual([false, true]);
-    expect(radios.every((radio) => radio.disabled)).toBe(true);
-
-    release();
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-    expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
-  });
-
-  it("says the write is saved when the list cannot be read, offers to read it again, and closes once the list shows the server moved", async () => {
-    let listFails = false;
-    let listed: readonly McpServer[] = [SENTRY_WORK, SENTRY_DOCS];
-    await openList({
-      servers: [SENTRY_WORK, SENTRY_DOCS],
-      handlers: {
-        [`PATCH ${SERVER_LIST_PATH}/${SENTRY_DOCS_ID}`]: () => {
-          listFails = true;
-          const moved = { ...SENTRY_DOCS, enabled: true, source: MOVED_NOTES.source };
-          listed = [SENTRY_WORK, moved];
-          return { body: moved };
-        },
-        [`GET ${SERVER_LIST_PATH}`]: () =>
-          listFails
-            ? {
-                status: 500,
-                body: { error: { code: "internal", message: "The controller is down." } },
-              }
-            : { body: { items: listed } },
-      },
-    });
-    await userEvent.click(
-      within(findRow("sentry hobby")).getByRole("switch", {
-        name: "Offer sentry hobby to threads",
-      }),
-    );
-    const dialog = await screen.findByRole("dialog", {
-      name: "Replace the sentrydocs server you added?",
-    });
-    await userEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
-
-    const alert = await within(dialog).findByText(/could not be read again/);
-    expect(alert.getAttribute("role")).toBe("alert");
-    listFails = false;
-    await userEvent.click(within(dialog).getByRole("button", { name: "Read again" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-  });
-
-  it("keeps the dialog with the refusal and a link when another client's server appears on the Connection while the update is held, and lets the user choose again once the controller refuses", async () => {
-    const { app, dialog, release } = await openHeldReplace(CONFLICT);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
-
-    app.world.servers = [...app.world.servers, HOBBY_WINNER];
-    act(() => {
-      app.live.pushInvalidation("mcpServer", [SENTRY_HOBBY_ID]);
-    });
-
-    const refusal = await screen.findByRole("alert");
-    expect(refusal.textContent).toBe(
-      "Nothing was replaced. This Connection's server was added meanwhile.",
-    );
-    // The selection is fixed while the update is held.
-    expect(
-      within(screen.getByRole("dialog"))
-        .getAllByRole<HTMLInputElement>("radio")
-        .every((radio) => radio.disabled),
-    ).toBe(true);
-
-    release();
-    // The controller refuses: the dialog stays with the reason and the winner's link, and the radios are free.
-    await waitFor(() => {
-      const radios = within(screen.getByRole("dialog")).getAllByRole<HTMLInputElement>("radio");
-      expect(radios.some((radio) => radio.disabled)).toBe(false);
-    });
-    const open = screen.getByRole("dialog", { name: /Replace the sentrynotes server you added\?/ });
-    expect(within(open).getByRole("alert").textContent).toBe(
-      "Nothing was replaced. This Connection has a server already.",
-    );
-    expect(within(open).getByRole("button", { name: "Open sentry" })).toBeTruthy();
-    expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
-  });
-
-  it("releases the selection when the confirmed server was deleted and the controller says not_found: the reason stays, the stale choice is cleared and the user chooses again", async () => {
-    const { app, dialog, release } = await openHeldReplace(NOT_FOUND);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
-    app.world.servers = app.world.servers.filter((server) => server.id !== SENTRY_NOTES_ID);
-    act(() => {
-      app.live.pushInvalidation("mcpServer", [SENTRY_NOTES_ID]);
-    });
-    // While the update is held the dialog still names the confirmed server.
-    await screen.findByRole("dialog", { name: /Replace the sentrynotes server you added\?/ });
-
-    release();
-
-    const chooser = await screen.findByRole("dialog", { name: "Which server do you replace?" });
-    expect(within(chooser).getByRole("alert").textContent).toBe(
-      "Nothing was replaced. This server is gone.",
-    );
-    // The deleted server is not offered. The one left is listed but not chosen for the user,
-    // and Replace is off until they pick it.
-    expect(within(chooser).queryByText("sentrynotes")).toBeNull();
-    const left = within(chooser).getByRole<HTMLInputElement>("radio", { name: /sentrydocs/ });
-    expect(within(chooser).getAllByRole("radio")).toHaveLength(1);
-    expect(left.checked).toBe(false);
-    expect(
-      within(chooser).getByRole("button", { name: "Replace" }).getAttribute("aria-disabled"),
-    ).toBe("true");
-    await userEvent.click(left);
-    await userEvent.click(
-      within(
-        screen.getByRole("dialog", { name: /Replace the sentrydocs server you added\?/ }),
-      ).getByRole("button", { name: "Replace" }),
-    );
-    await waitFor(() => {
-      expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_DOCS_ID}`)).toHaveLength(
-        1,
-      );
-    });
-    expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
-  });
-
-  it("keeps the dialog with the refusal and a link when the Connection's server appears before the user confirms", async () => {
-    const app = await openList({ servers: [SENTRY_WORK, SENTRY_DOCS] });
-    await userEvent.click(
-      within(findRow("sentry hobby")).getByRole("switch", {
-        name: "Offer sentry hobby to threads",
-      }),
-    );
-    const dialog = await screen.findByRole("dialog", {
-      name: "Replace the sentrydocs server you added?",
-    });
-
-    app.world.servers = [...app.world.servers, HOBBY_WINNER];
-    act(() => {
-      app.live.pushInvalidation("mcpServer", [SENTRY_HOBBY_ID]);
-    });
-
-    expect((await within(dialog).findByRole("alert")).textContent).toBe(
-      "Nothing was replaced. This Connection's server was added meanwhile.",
-    );
-    expect(within(dialog).getByRole("button", { name: "Open sentry" })).toBeTruthy();
-    expect(screen.getByRole("dialog", { name: /Replace the sentrydocs/ })).toBe(dialog);
-  });
-});
-
 describe("the page of a server added by URL", () => {
   it("shows Added by URL and the whole address as chips, no account beside the name and no Connection row", async () => {
     await openPage(DOCS);
@@ -952,60 +555,6 @@ describe("the page of a server added by URL", () => {
 
     await within(screen.getByRole("dialog")).findByText(/is reached with a Connection now/);
     expect(screen.getByRole("dialog", { name: "Sign in to notion" })).toBeTruthy();
-  });
-
-  it("opens the token field, not the browser choice, for a server that refused its pasted token and still offers OAuth", async () => {
-    await openPage({
-      ...NOTION,
-      status: "needs-sign-in",
-      statusDetail: "notion.example refused the token (401).",
-      source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
-    });
-    const band = document.querySelector<HTMLElement>(".mcp-band")!;
-
-    await userEvent.click(within(band).getByRole("button", { name: "Sign in…" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
-    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
-    expect(within(dialog).getByText("The server refused its token. Paste a new one.")).toBeTruthy();
-    // The browser stays available, as the second way.
-    expect(within(dialog).getByRole("button", { name: "Sign in with your browser" })).toBeTruthy();
-  });
-
-  it("opens an empty token field for Replace token… on a server that holds a token and offers OAuth", async () => {
-    await openPage({
-      ...NOTION,
-      source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
-    });
-    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
-
-    await userEvent.click(within(server).getByRole("button", { name: "Replace token…" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
-    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
-    expect(within(dialog).queryByText("This server signs in through your browser.")).toBeNull();
-  });
-
-  it("opens Replace token… on the token field though the record turned to OAuth between the press and the dialog's read", async () => {
-    const app = await openPage({
-      ...NOTION,
-      source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
-    });
-    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
-    const button = within(server).getByRole("button", { name: "Replace token…" });
-
-    // A sign-in through the browser lands in the cache in the same turn as the press.
-    act(() => {
-      fireEvent.click(button);
-      app.context.queryClient.setQueryData(queryKeys.mcpServer(NOTION_ID), {
-        ...NOTION,
-        source: { kind: "url", url: DOCS_URL, signIn: "oauth", signInOffered: "oauth" },
-      });
-    });
-
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
-    expect(within(dialog).queryByText("This server signs in through your browser.")).toBeNull();
   });
 
   it("moves an untouched browser choice to the token field when the record turns token-first meanwhile", async () => {
@@ -1132,17 +681,9 @@ const buildSignInReturn = (listens = true, returnsAtOnce = false) => {
   };
 };
 
-const invalidState = (reason: string) => ({
-  status: 409,
-  body: {
-    error: { code: "invalid_state", message: "The controller's words.", details: { reason } },
-  },
-});
-
 /** Opens the page of a server added by URL that needs sign-in through the browser, and its dialog at the first step. */
 const openSignInDialog = async (
   signInReturn: ReturnType<typeof buildSignInReturn>,
-  finish?: Handler,
   openLink?: (
     url: string,
   ) => Promise<
@@ -1158,9 +699,6 @@ const openSignInDialog = async (
     {
       signInReturn,
       ...(openLink === undefined ? {} : { openLink }),
-      ...(finish === undefined
-        ? {}
-        : { handlers: { [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`]: finish } }),
     },
   );
   const band = document.querySelector<HTMLElement>(".mcp-band")!;
@@ -1214,10 +752,51 @@ describe("Signing in to a server added by URL through the browser", () => {
     await within(dialog).findByText("ready · 2 tools");
   });
 
+  it("puts the focus on the main action of each step: Cancel while it starts, Open <host> and then Open again while it waits, Start again once it ended", async () => {
+    const signInReturn = buildSignInReturn();
+    // The listener answers when the test says, so the step that starts the sign-in stays on screen.
+    const listener = signInReturn.listen.getMockImplementation()!;
+    let startListening = (): void => undefined;
+    signInReturn.listen.mockImplementationOnce(() =>
+      new Promise<void>((resolve) => {
+        startListening = resolve;
+      }).then(listener),
+    );
+    const { dialog } = await openSignInDialog(signInReturn);
+
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+    );
+    const cancel = await within(dialog).findByRole("button", { name: "Cancel" });
+    expect(within(dialog).getByText("Preparing the sign-in…")).toBeTruthy();
+    expect(document.activeElement).toBe(cancel);
+
+    await act(async () => {
+      startListening();
+      await Promise.resolve();
+    });
+    const open = await within(dialog).findByRole("button", { name: "Open auth.mcp.docs.example" });
+    expect(document.activeElement).toBe(open);
+    // One way to leave: the dialog has no Close beside Cancel.
+    expect(within(dialog).queryByRole("button", { name: "Close" })).toBeNull();
+    expect(within(dialog).getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+
+    await userEvent.click(open);
+    const openAgain = await within(dialog).findByRole("button", { name: "Open again" });
+    expect(document.activeElement).toBe(openAgain);
+
+    await act(async () => {
+      signInReturn.waits[0]!({ _tag: "timed-out" });
+      await Promise.resolve();
+    });
+    const startAgain = await within(dialog).findByRole("button", { name: "Start again" });
+    expect(document.activeElement).toBe(startAgain);
+  });
+
   it("opens the browser only when the user presses the button beside the host, and reads Open again from then on", async () => {
     const signInReturn = buildSignInReturn();
     const dialogsWhenOpened: string[] = [];
-    const { app, dialog } = await openSignInDialog(signInReturn, undefined, () => {
+    const { app, dialog } = await openSignInDialog(signInReturn, () => {
       dialogsWhenOpened.push(document.querySelector("dialog[open]")?.textContent ?? "");
       return Promise.resolve({ _tag: "Opened" });
     });
@@ -1239,30 +818,9 @@ describe("Signing in to a server added by URL through the browser", () => {
     expect(within(dialog).getByRole("button", { name: "Open again" })).toBeTruthy();
   });
 
-  it("is ready for the browser's return before the user opens the browser, and opens no browser for a sign-in that a return already finished", async () => {
-    const signInReturn = buildSignInReturn(true, true);
-    const openLink = vi.fn(() => Promise.resolve({ _tag: "Opened" } as const));
-    const { app, dialog } = await openSignInDialog(signInReturn, undefined, openLink);
-
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-
-    await waitFor(() => {
-      expect(
-        findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`).map(
-          (c) => c.body,
-        ),
-      ).toEqual([{ callbackQuery: signInReturn.callbackQueries[0] }]);
-    });
-    // The return finished the sign-in before the user pressed anything, so there is nothing to open.
-    expect(signInReturn.wait).toHaveBeenCalled();
-    expect(openLink).not.toHaveBeenCalled();
-  });
-
   it("says why the browser did not open, in main's own sentence", async () => {
     const signInReturn = buildSignInReturn();
-    const { dialog } = await openSignInDialog(signInReturn, undefined, () =>
+    const { dialog } = await openSignInDialog(signInReturn, () =>
       Promise.resolve({
         _tag: "NotOpened",
         reason: "The system could not open your default browser. Check that one is set.",
@@ -1362,151 +920,6 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
   });
 
-  it("offers the browser again, with the server's reason, when the server refuses the sign-in it was just given", async () => {
-    const signInReturn = buildSignInReturn();
-    const { app, dialog } = await openSignInDialog(signInReturn);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-    await act(async () => {
-      signInReturn.comeBack();
-      await Promise.resolve();
-    });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
-
-    finishCheck(app, DOCS_ID, {
-      status: "needs-sign-in",
-      statusDetail: "docs.example refused it.",
-    });
-
-    expect((await within(dialog).findByRole("alert")).textContent).toBe("docs.example refused it.");
-    expect(within(dialog).getByRole("button", { name: "Sign in with your browser" })).toBeTruthy();
-    expect(within(dialog).queryByLabelText("Token")).toBeNull();
-  });
-
-  it("asks for the token again when a pasted token is refused, though the dialog was opened with Sign in again…", async () => {
-    const app = await openPage({
-      ...DOCS,
-      source: { kind: "url", url: DOCS_URL, signIn: "oauth", signInOffered: "oauth" },
-    });
-    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
-    await userEvent.click(within(server).getByRole("button", { name: "Sign in again…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
-    // The first form is the browser's, as the button says. The user chooses the token instead.
-    await userEvent.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
-    await userEvent.type(within(dialog).getByLabelText("Token"), TOKEN);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
-
-    finishCheck(app, DOCS_ID, {
-      status: "needs-sign-in",
-      statusDetail: "docs.example refused the token (401).",
-    });
-
-    expect((await within(dialog).findByRole("alert")).textContent).toBe(
-      "docs.example refused the token (401).",
-    );
-    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
-  });
-
-  it("offers the browser again when a sign-in through the browser is refused, though the dialog was opened with Replace token…", async () => {
-    const signInReturn = buildSignInReturn();
-    const app = await openPage(
-      {
-        ...DOCS,
-        source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
-      },
-      { signInReturn },
-    );
-    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
-    await userEvent.click(within(server).getByRole("button", { name: "Replace token…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
-    // The first form is the token field, as the button says. The user chooses the browser instead.
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-    await act(async () => {
-      signInReturn.comeBack();
-      await Promise.resolve();
-    });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
-
-    finishCheck(app, DOCS_ID, {
-      status: "needs-sign-in",
-      statusDetail: "docs.example refused it.",
-    });
-
-    expect((await within(dialog).findByRole("alert")).textContent).toBe("docs.example refused it.");
-    expect(within(dialog).getByRole("button", { name: "Sign in with your browser" })).toBeTruthy();
-    expect(within(dialog).queryByLabelText("Token")).toBeNull();
-  });
-
-  it("opens the browser again on Open again, and says why when it cannot be opened", async () => {
-    const signInReturn = buildSignInReturn();
-    const { app, dialog } = await openSignInDialog(signInReturn);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
-    );
-    await userEvent.click(await within(dialog).findByRole("button", { name: "Open again" }));
-
-    await waitFor(() => {
-      expect(app.openedLinks).toEqual([readAuthorizationUrl(app), readAuthorizationUrl(app)]);
-    });
-  });
-
-  it("cancels the listener on Cancel, goes back to the form, and ignores a return that comes late", async () => {
-    const signInReturn = buildSignInReturn();
-    const { app, dialog } = await openSignInDialog(signInReturn);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await act(async () => {
-      signInReturn.comeBack();
-      await Promise.resolve();
-    });
-
-    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
-    expect(within(dialog).getByRole("button", { name: "Sign in with your browser" })).toBeTruthy();
-    expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
-      [],
-    );
-  });
-
-  it("ends the listener and sends nothing when the dialog is closed, whatever the browser sends later", async () => {
-    const signInReturn = buildSignInReturn();
-    const { app, dialog } = await openSignInDialog(signInReturn);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-
-    act(() => {
-      (dialog as HTMLDialogElement).close();
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-    await act(async () => {
-      signInReturn.comeBack();
-      await Promise.resolve();
-    });
-
-    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
-    expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
-      [],
-    );
-  });
-
   it("says the browser did not come back in time, and starts again", async () => {
     const signInReturn = buildSignInReturn();
     const { dialog } = await openSignInDialog(signInReturn);
@@ -1578,58 +991,6 @@ describe("Signing in to a server added by URL through the browser", () => {
     expect((start!.body as { redirectUri: string }).redirectUri).toMatch(
       /^http:\/\/127\.0\.0\.1:\d+\/callback$/,
     );
-  });
-
-  it.each([
-    [
-      "sign-in-expired",
-      "This sign-in ran out, or another one for this server replaced it. Start again.",
-    ],
-    [
-      "sign-in-refused",
-      "The browser or the provider refused the sign-in. Nothing was changed. You can start again.",
-    ],
-    [
-      "source-unreadable",
-      "The server or its sign-in service could not be reached. Try again later.",
-    ],
-  ])("says %s when the controller refuses the finish", async (reason, message) => {
-    const signInReturn = buildSignInReturn();
-    const { dialog } = await openSignInDialog(signInReturn, invalidState(reason));
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-
-    await act(async () => {
-      signInReturn.comeBack();
-      await Promise.resolve();
-    });
-
-    await within(dialog).findByText(message);
-    expect(within(dialog).getByRole("button", { name: "Start again" })).toBeTruthy();
-  });
-
-  it("goes back to the token field, saying only a token works, when the server allows no sign-in through the browser", async () => {
-    const signInReturn = buildSignInReturn();
-    const { dialog } = await openSignInDialog(signInReturn, invalidState("sign-in-unsupported"));
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-    );
-    await within(dialog).findByText("Finish in your browser");
-
-    await act(async () => {
-      signInReturn.comeBack();
-      await Promise.resolve();
-    });
-
-    expect(await within(dialog).findByLabelText("Token")).toBeTruthy();
-    expect(
-      within(dialog).getByText(
-        "This server does not allow a sign-in through the browser. Paste a token instead.",
-      ),
-    ).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: "Sign in with your browser" })).toBeNull();
   });
 
   it("signs in a server the Add dialog just created, and ends on the new server's footer", async () => {

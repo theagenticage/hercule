@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type {
   OpenServerAction,
@@ -54,6 +54,7 @@ export function StepView({
             <Footer note={note}>
               <Button
                 type="button"
+                autoFocus
                 onClick={step.button.kind === "close" ? onClose : attempt.cancelSignIn}
               >
                 {step.button.label}
@@ -245,6 +246,11 @@ function WaitingStep({
   readonly attempt: UrlServerAttempt;
 }): JSX.Element {
   const [pasted, setPasted] = useState("");
+  // React focuses only fields and buttons for `autoFocus`, not a link, so the link is focused here.
+  const openRef = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    openRef.current?.focus();
+  }, []);
   return (
     <form
       className="flex flex-col gap-3"
@@ -254,16 +260,20 @@ function WaitingStep({
       }}
     >
       <p className="text-row font-emph text-ink">{step.heading}</p>
-      <p className="text-row text-ink">{step.approval}</p>
+      {/* A host with no hyphen has no place to break, so it breaks anywhere: its end names who asks. */}
+      <p className="text-row break-words text-ink">{step.approval}</p>
       <p className="text-row text-muted">{step.instruction}</p>
       <div>
         <a
           href={step.open.url}
           target="_blank"
           rel="noopener noreferrer"
-          autoFocus
+          ref={openRef}
           onClick={() => void attempt.openSignInPage()}
-          className={buildButtonClassName("form", "")}
+          className={buildButtonClassName(
+            "form",
+            "max-w-full text-left leading-tight whitespace-normal break-words",
+          )}
         >
           {step.open.label}
         </a>

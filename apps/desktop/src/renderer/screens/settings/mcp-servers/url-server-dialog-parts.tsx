@@ -389,6 +389,7 @@ export function StepView({
               <button
                 type="button"
                 className="btn btn--quiet"
+                autoFocus
                 onClick={step.button.kind === "close" ? onClose : attempt.cancelSignIn}
               >
                 {step.button.label}
@@ -522,11 +523,15 @@ export function StepView({
 }
 
 /**
- * Renders the waiting step of a sign-in as a card: the heading, who asks for
- * the approval, what to do in the browser, the button that opens the sign-in
- * page and Cancel, and the paste. The browser opens only when the user presses
- * that button, after reading the host. It reads "Open again" once it was
- * pressed.
+ * Renders the waiting step of a sign-in: a card with the heading, who asks
+ * for the approval, what to do in the browser and the paste, and under it the
+ * way to leave and the button that opens the sign-in page. The browser opens
+ * only when the user presses that button, after reading the host. It reads
+ * "Open again" once it was pressed.
+ *
+ * The buttons sit under the card, not beside the text: a host can be long, and
+ * its button then needs the whole width, so that the approval sentence never
+ * runs under it. The button takes the focus, so Enter opens the page.
  */
 function WaitingView({
   step,
@@ -546,26 +551,7 @@ function WaitingView({
           mark={<ToolsIcon size={18} />}
           name={step.heading}
           detail={step.approval}
-          end={
-            <span className="setup-row-acts">
-              <button
-                type="button"
-                className="btn btn--sm btn--accent"
-                autoFocus
-                onClick={() => void attempt.openSignInPage()}
-              >
-                <ExternalIcon size={14} />
-                {step.open.label}
-              </button>
-              <button
-                type="button"
-                className="btn btn--sm btn--quiet"
-                onClick={attempt.cancelSignIn}
-              >
-                {step.cancel.label}
-              </button>
-            </span>
-          }
+          end={null}
         >
           <WaitLine text={step.instruction} />
           {step.openError !== null && (
@@ -617,6 +603,20 @@ function WaitingView({
         </p>
       )}
       {step.closingNote !== null && <p className="url-note">{step.closingNote}</p>}
+      <div className="setup-acts">
+        <button type="button" className="btn btn--quiet" onClick={attempt.cancelSignIn}>
+          {step.cancel.label}
+        </button>
+        <button
+          type="button"
+          className="btn btn--accent url-open"
+          autoFocus
+          onClick={() => void attempt.openSignInPage()}
+        >
+          <ExternalIcon size={14} />
+          {step.open.label}
+        </button>
+      </div>
     </div>
   );
 }

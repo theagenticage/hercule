@@ -266,6 +266,86 @@ export const MCP_OAUTH_RECORDS: McpServersRecords = {
   defaultServerIds: MCP_URL_RECORDS.defaultServerIds,
 };
 
+/**
+ * Returns the records of `MCP_URL_RECORDS` with `extra` servers added, sorted
+ * by name as the controller lists them. Each scene that needs one more server
+ * adds it here, so the scenes that exist keep their records.
+ */
+const addUrlServers = (...extra: ReadonlyArray<McpServer>): McpServersRecords => ({
+  ...MCP_URL_RECORDS,
+  servers: [...MCP_URL_RECORDS.servers, ...extra].toSorted((a, b) => a.name.localeCompare(b.name)),
+});
+
+/** A ready server added by URL that holds a pasted token: its page offers "Replace token…". */
+const LEDGER_SERVER = buildUrlServer(
+  "s-ledger",
+  "ledger",
+  "https://mcp.ledger.example/mcp",
+  "token",
+  "token",
+  { tools: GITHUB_TOOLS.slice(0, 5), checkedAt: minutesAgo(6), createdAt: minutesAgo(8 * 24 * 60) },
+);
+
+/** A ready server added by URL that holds a sign-in through the browser: its page offers "Sign in again…". */
+const RELAY_SERVER = buildUrlServer(
+  "s-relay",
+  "relay",
+  "https://mcp.relay.example/mcp",
+  "oauth",
+  "oauth",
+  { tools: LINEAR_TOOLS.slice(0, 4), checkedAt: minutesAgo(9), createdAt: minutesAgo(7 * 24 * 60) },
+);
+
+/**
+ * A server added by URL whose address is far longer than a row: the list and
+ * the page must show it whole or cut it at its end, never lose where it ends.
+ */
+const ARCHIVE_SERVER = buildUrlServer(
+  "s-archive",
+  "archive",
+  "https://mcp.knowledge-archive.internal.acme-corporation.example/organizations/acme-corporation/workspaces/engineering-platform/mcp",
+  "none",
+  null,
+  { tools: GRAFANA_TOOLS, checkedAt: minutesAgo(14), createdAt: minutesAgo(9 * 24 * 60) },
+);
+
+/** A second server added by URL on PostHog's address, so Replace has two to choose from. */
+const POSTHOG_EU_SERVER = buildUrlServer(
+  "s-posthogeu",
+  "posthogeu",
+  "https://mcp.posthog.com/mcp?region=eu",
+  "token",
+  "token",
+  {
+    tools: GITHUB_TOOLS.slice(0, 3),
+    checkedAt: minutesAgo(30),
+    createdAt: minutesAgo(2 * 24 * 60),
+  },
+);
+
+/** The server the Add by URL dialog creates in the scene that ends on ready: it answers with its tools. */
+export const MCP_READY_NEW_URL_SERVER: McpServer = buildUrlServer(
+  "s-knowledge",
+  "knowledge",
+  "https://mcp.knowledge.example/mcp",
+  "none",
+  null,
+  { tools: GRAFANA_TOOLS, checkedAt: minutesAgo(0), createdAt: minutesAgo(0) },
+);
+
+/** The records of the scenes that draw the page of a ready server added by URL. */
+export const MCP_READY_URL_RECORDS: McpServersRecords = addUrlServers(LEDGER_SERVER, RELAY_SERVER);
+
+/** The records of the scene that draws a very long address in the list. */
+export const MCP_LONG_ADDRESS_RECORDS: McpServersRecords = addUrlServers(ARCHIVE_SERVER);
+
+/** The records of the scene whose Replace dialog has two servers to choose from. */
+export const MCP_REPLACE_SEVERAL_RECORDS: McpServersRecords = addUrlServers(POSTHOG_EU_SERVER);
+
+/** The ids of the ready servers whose pages offer "Replace token…" and "Sign in again…". */
+export const MCP_LEDGER_SERVER_ID = LEDGER_SERVER.id;
+export const MCP_RELAY_SERVER_ID = RELAY_SERVER.id;
+
 /** The id of the server that signs in through the browser. */
 export const MCP_ATLAS_SERVER_ID = ATLAS_ID;
 
