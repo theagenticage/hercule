@@ -18,7 +18,12 @@ import type {
 } from "@hercule/contract";
 import { decideGroupProjectId } from "./groups";
 import { findOldestOpenRequest } from "./oldest-request";
-import type { Pose, ThreadRowStatus } from "./pose";
+import {
+  describeThreadRowState,
+  type Pose,
+  type ThreadRowState,
+  type ThreadRowStatus,
+} from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
 import { buildGroupKey, buildWorkspaceGroupKey, type SessionGroup } from "./session-groups";
@@ -139,8 +144,6 @@ export interface GroupRow {
   readonly activityAt: string;
   /** What waits on the user, or `null` when no counted session waits and the row's second line shows the place. */
   readonly ask: GroupAsk | null;
-  /** The harness whose mark leads the second line: the asking session's while one asks, otherwise the lead's. */
-  readonly harnessId: string | null;
   /** Where the lead works, as the second line shows it when nothing asks. */
   readonly placeLabel: WorkspaceLabel;
   /** Where the lead works, in words, for the row's accessible description. */
@@ -346,7 +349,6 @@ export const describeGroupRows = ({
               askerLabel: asker.member.askerLabel,
               question: asker.question,
             },
-      harnessId: (asker?.member ?? lead).harnessId,
       placeLabel: buildThreadPlaceLabel({ workspace, branch, machine, resources, runners }),
       placeDescription: describeThreadPlace({
         projectName,
@@ -406,4 +408,42 @@ export const findWorkspaceGroupRow = (
 ): GroupRow | undefined => {
   const key = buildWorkspaceGroupKey(workspaceId);
   return groupRows.find((row) => row.key === key);
+};
+
+/**
+ * One part of a sidebar row's second line. The row draws the parts in the
+ * order `buildRowSecondLine` returns them, with " · " between them:
+ *
+ * - `state`: the status in words, such as "Working", in the status's colour;
+ * - `ask`: what waits on the user, see `GroupAsk`;
+ * - `place`: where the lead works, see `GroupRow.placeLabel`;
+ * - `age`: how long ago `at` was, which the row formats with its own clock.
+ */
+export type RowLinePart =
+  | { readonly kind: "state"; readonly state: ThreadRowState; readonly word: string }
+  | { readonly kind: "ask"; readonly ask: GroupAsk }
+  | { readonly kind: "place"; readonly label: WorkspaceLabel }
+  | { readonly kind: "age"; readonly at: string };
+
+/**
+ * Returns the parts of the second line of `row`, in the order the sidebar
+ * draws them:
+ *
+ * 1. the state word, when the row has a state (every status but `age`);
+ * 2. the detail: the question while a counted session waits, else where the
+ *    lead works;
+ * 3. the age, only when the row has no state. The age of a working or
+ *    waiting row says nothing the state word does not.
+ *
+ * So a working row reads "Working · studio-mac", a waiting row "Question ·
+ * Keep the old Grafana folder?" and an idle row "studio-mac · 1h".
+ */
+export const buildRowSecondLine = (
+  row: Pick<GroupRow, "status" | "activityAt" | "ask" | "placeLabel">,
+): readonly RowLinePart[] => {
+  const detail: RowLinePart =
+    row.ask === null ? { kind: "place", label: row.placeLabel } : { kind: "ask", ask: row.ask };
+  return row.status === "age"
+    ? [detail, { kind: "age", at: row.activityAt }]
+    : [{ kind: "state", state: row.status, word: describeThreadRowState(row.status) }, detail];
 };

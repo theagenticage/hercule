@@ -692,7 +692,7 @@ describe("the composer", () => {
     expect(calls).toHaveLength(sent);
   });
 
-  it("draws the fixed access mode as text, and the model and its options as menus", async () => {
+  it("draws the fixed access mode as text, and the model and its options as menus of plain text", async () => {
     await renderComposer(IDLE);
 
     // The thread has started, so its access mode is fixed, and the tooltip
@@ -705,6 +705,10 @@ describe("the composer", () => {
       ["Claude Sonnet 5", "Model"],
     ] as const) {
       const trigger = screen.getByRole("button", { name });
+      // Every pick is drawn alike, as its icon and its words: no chevron
+      // follows them, and the model's has no chip of its own.
+      expect(trigger.className).not.toContain("pill");
+      expect(trigger.querySelectorAll("svg")).toHaveLength(1);
       expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
       expect(trigger.getAttribute("aria-expanded")).toBe("false");
       // A closed menu is hidden, and a hidden element has no accessible
@@ -719,8 +723,8 @@ describe("the composer", () => {
   it("adds a quiet 'in pi' after the model's name when the thread runs in a harness that is not the account's default", async () => {
     await renderComposer(changeSession(IDLE, { harnessId: "pi/pi" }));
 
-    const pill = document.querySelector(".pick--pill")!;
-    const harness = within(pill as HTMLElement).getByText("in pi");
+    const pick = document.querySelector(".pick--model")!;
+    const harness = within(pick as HTMLElement).getByText("in pi");
     expect(harness.className).toBe("faint");
     // It follows the name, and only the name truncates.
     expect(harness.previousElementSibling?.className).toBe("pick-name");

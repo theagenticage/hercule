@@ -40,14 +40,10 @@
 
 /* The face switch, Threads | Work: its two segments share the sidebar's
    width. Two classes, as in the book, so the grid wins over `.seg`'s
-   `inline-flex` whichever style sheet loads first. Its track keeps the quiet
-   chrome divider rather than `--control-edge`: the switch is on screen all
-   the time, and a 3:1 edge made it the loudest thing in the sidebar. The
-   selected segment's fill already tells the two apart. */
+   `inline-flex` whichever style sheet loads first. */
 .seg.seg--side {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  box-shadow: inset 0 0 0 1px var(--divider);
 }
 
 /* The face switch and the failed-run dot that sits over its right end. */
@@ -210,7 +206,7 @@
 /* Not in the book: a row whose composer holds unsent work, and the draft's
    row, take a light wash of the accent, lighter than a selected row's
    background, so unsent work is found again. Hover and selection draw over
-   it; a selected row keeps only its pencil. */
+   it; a selected row keeps only its pencil, and the draft's row its "Draft". */
 .side-row.is-unsent {
   background: color-mix(in oklab, var(--accent) 6%, transparent);
 }
@@ -287,21 +283,20 @@
   flex: 1;
   min-width: 0;
 }
-/* The status slot is as wide as its widest word, "Approval", so the title
-   is cut at the same place whatever the status, and the Done button that
-   takes its place never moves the title. */
-.side-line .side-end {
-  min-width: 48px;
+/* The title takes the whole first line. While the Done button shows at its
+   end, the title is cut short before it: the 48px the button needs and the
+   line's 8px gap. A Done shelf row makes room for Reopen and Archive beside
+   it. Only the row under the pointer or the focus is laid out again. */
+.side-thread:has(> .side-act):is(:hover, :has(:focus-visible)) .side-line {
+  padding-right: 56px;
 }
-/* A done row's slot is empty, and wide enough for Reopen, the wider word,
-   and Archive beside it. */
-.side-thread.is-done .side-line .side-end {
-  min-width: 82px;
+.side-thread:has(> .side-acts):is(:hover, :has(:focus-visible)) .side-line {
+  padding-right: 90px;
 }
 /* A working thread steps back so the threads that need the user stand out,
    unless it is the open thread (`receded` in sidebar-items.ts), and so does
    a Done thread. Only the title steps back, from the ink to the muted ink.
-   The second line is already faint, and the status word keeps its own
+   The second line is already faint, and the state word keeps its own
    colour. The title comes back while the pointer is on the row or focus is
    in it. */
 .side-thread.is-receded .side-name,
@@ -312,9 +307,12 @@
 .side-thread:focus-within .side-name {
   color: var(--ink);
 }
-/* A row's second line: the harness's mark, then where the thread works.
-   The first part ellipsizes; the part kept after it, the end of a branch
-   or a machine's name, never does. */
+/* A row's second line: the state word, then the question or where the
+   thread works, then the age of a row with no state, with " · " between
+   them. It starts under the title. The state word, the separators and the
+   age never shrink. The question and the first part of the place ellipsize
+   first; only then is the kept part, the end of a branch or a machine's
+   name, cut, and then in its middle (`.side-detail-keep`). */
 .side-detail {
   display: flex;
   align-items: center;
@@ -325,30 +323,23 @@
   line-height: var(--line-16);
   white-space: nowrap;
 }
-/* The glyph's slot keeps its width when the harness is unknown, so every
-   second line starts at the same place. */
-.side-glyph {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 12px;
-  height: 12px;
-  margin-right: 6px;
-}
+/* A flex item shrinks by its shrink factor times its width, so this factor
+   is high enough that the kept part after it gives up nothing while this
+   part can still shrink. */
 .side-detail-clip {
+  flex: 0 100000 auto;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The kept part takes the width it needs, but never more than the line has
-   after the harness's mark (12px and its 6px margin), so a long machine
-   name in a narrow sidebar cannot run past the row. When it is cut, its head
-   ends in an ellipsis and its tail stays whole, which cuts it in the middle.
-   `pre` keeps the space that starts the machine's part, which a flex item
-   would otherwise drop. */
+/* The kept part shrinks only once the part before it is gone, so a long
+   machine name in a narrow sidebar cannot run past the row. When it is cut,
+   its head ends in an ellipsis and its tail stays whole, which cuts it in
+   the middle. `pre` keeps the space that starts the machine's part, which a
+   flex item would otherwise drop. */
 .side-detail-keep {
   display: flex;
-  flex: none;
-  max-width: calc(100% - 18px);
+  min-width: 0;
+  overflow: hidden;
   white-space: pre;
 }
 .side-detail-keep-head {
@@ -359,14 +350,12 @@
 .side-detail-keep-tail {
   flex: none;
 }
-/* Done, or Reopen on the Done shelf: drawn over the status slot, on the
-   first line's centre, and shown in the slot's place while the pointer is
-   on the row or the keyboard's focus is in it. A click also leaves the
-   focus in the row, but `:focus-visible` does not match then, so the row
-   the user clicked shows its status, not the button. The two crossfade; neither moves. The
-   button sits 4px further right than the slot, so its word, inside its 4px
-   padding, ends where the slot's word ends. A row with no such button, the
-   draft's, keeps its status in view. */
+/* Done, or Reopen on the Done shelf: drawn at the end of the first line, on
+   its centre, and shown while the pointer is on the row or the keyboard's
+   focus is in it. A click also leaves the focus in the row, but
+   `:focus-visible` does not match then, so the row the user clicked keeps
+   its whole title, not the button. The button sits 4px further right than
+   the line, so its word, inside its 4px padding, ends where the line ends. */
 .side-act {
   position: absolute;
   top: 6px;
@@ -413,36 +402,46 @@
 .side-acts > .side-act {
   position: static;
 }
-.side-thread .side-end {
-  transition: opacity var(--dur-1);
-}
 .side-thread:hover .side-act,
 .side-thread:has(:focus-visible) .side-act {
   opacity: 1;
 }
-/* The status fades only where a button takes its place. The draft's row, and
-   a group with no Thread left to mark Done, have none and keep their status
-   in view. */
-.side-thread:has(> :is(.side-act, .side-acts)):hover .side-end,
-.side-thread:has(> :is(.side-act, .side-acts)):has(:focus-visible) .side-end {
-  opacity: 0;
-}
 
+/* The state word that starts a row's second line, in the colours of the
+   status words: Working in the accent's ink; Approval and Question in the
+   colour of a question to the user, bold; Queued and Offline in the line's
+   faint ink. The draft's "Draft" is in the muted ink: a thread that has not
+   started must not take the colour of one at work. */
+.side-state,
+.side-sep,
+.side-age {
+  flex: none;
+}
+.side-state--working {
+  color: var(--accent-ink);
+}
+.side-state--draft {
+  color: var(--muted);
+}
+.side-state--approval,
+.side-state--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.side-age {
+  font-variant-numeric: tabular-nums;
+}
+/* `pre` keeps the spaces around the dot, which a flex item would drop. */
+.side-sep {
+  white-space: pre;
+}
 /* A group's second line while a session of it asks something: the question
    in the colour of a question to the user, with the asker's name in bold. */
-.side-detail--ask .side-detail-clip {
+.side-detail-ask {
   color: var(--you-ink);
 }
 .side-asker {
   font-weight: var(--w-bold);
-}
-/* A finished group's second line starts with a green check, where a thread's
-   starts with its harness's mark. */
-.side-glyph--done {
-  color: var(--ok);
-}
-.side-glyph--done .ic {
-  stroke-width: 2;
 }
 
 /* The dots of a group: what each of its sessions is doing, in the colours of

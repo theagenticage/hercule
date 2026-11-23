@@ -11,14 +11,14 @@
  *
  * The start cards are three Tasks, most urgent first. The book draws the first
  * two as Proposals, which the app no longer has. The app draws a card's source
- * as the GitHub mark or, for any other source, the tasks glyph, and always
- * draws the priority's bars:
+ * as the GitHub mark or, for any other source, the tasks glyph, and names the
+ * priority in words, where the book draws bars:
  *
  * - the book's Sentry card came from a GitHub issue here, and is urgent, the
  *   book's four bars;
  * - the book's Stripe card came from a Stripe event, and is normal, the
  *   book's two bars;
- * - the book's Task has no source and no bars, and is low here, one bar.
+ * - the book's Task has no source and no bars, and is low here.
  *
  * The book's page has two more states, for a fresh install whose Intake is
  * still empty, and the specimen is opened with the same `?state=`:

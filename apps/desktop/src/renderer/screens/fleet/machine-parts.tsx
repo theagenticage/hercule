@@ -10,23 +10,11 @@ import "./machine-parts.css";
 /**
  * Renders the dot before a machine's status: green while it is online, a red
  * ring while it is offline or unreachable, a grey ring while it takes no new
- * work. The dot is decoration, hidden from assistive technology, because a
- * label is drawn beside it. Set `namesState` where none is (a card of an online
- * machine), and the dot then names its state itself, such as "Online".
+ * sessions. The dot is decoration, hidden from assistive technology, because
+ * the status's words are drawn beside it.
  */
-export function StatusDot({
-  status,
-  namesState,
-}: {
-  readonly status: MachineStatus;
-  readonly namesState?: boolean;
-}): JSX.Element {
-  const className = `fleet-dot fleet-dot--${status.tone}`;
-  return namesState === true ? (
-    <i className={className} role="img" aria-label={status.label} />
-  ) : (
-    <i className={className} aria-hidden="true" />
-  );
+export function StatusDot({ status }: { readonly status: MachineStatus }): JSX.Element {
+  return <i className={`fleet-dot fleet-dot--${status.tone}`} aria-hidden="true" />;
 }
 
 /**

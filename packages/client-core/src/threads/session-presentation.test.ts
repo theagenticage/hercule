@@ -234,7 +234,6 @@ describe("a group's row", () => {
       status: "working",
       activityAt: at(5),
       ask: null,
-      harnessId: "claude-code/claude-code",
       branch: "main",
       machine: "moss",
       summary: null,
@@ -359,21 +358,19 @@ describe("a group's row", () => {
     const reviewer = (over: Partial<Session> = {}): Session =>
       agent("s-review", { role: "review", ...ON_CODEX, ...over });
 
-    it("names the asking session by its role, and leads with its harness", () => {
+    it("names the asking session by its role", () => {
       const row = describeOnly([thread("s-1"), reviewer({ openRequests: [ask("r-1")] })]);
 
       expect(row.ask).toEqual({ askerLabel: "review", question: "Run git push?" });
-      expect(row.harnessId).toBe("codex/codex");
     });
 
-    it("asks the question alone, with the lead's harness, when the lead asks", () => {
+    it("asks the question alone when the lead asks", () => {
       const row = describeOnly([
         thread("s-1", { openRequests: [ask("r-1")] }),
         reviewer({ openRequests: [ask("r-2", "ls")], lastActivityAt: at(9) }),
       ]);
 
       expect(row.ask).toEqual({ askerLabel: null, question: "Run git push?" });
-      expect(row.harnessId).toBe("claude-code/claude-code");
     });
   });
 
