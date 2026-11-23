@@ -618,18 +618,23 @@ describe("Settings > MCP servers > Add by URL", () => {
       expect(document.activeElement).toBe(startAgain);
     });
 
-    it("says a start the controller refused, and offers Start again", async () => {
+    it("says why the controller refused a start, in its own words, and offers Start again", async () => {
       const user = userEvent.setup();
       const world = buildWorld([S_WIKI]);
       await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
-        [`POST ${WIKI_PATH}/sign-in`]: invalidState("source-unreadable", "unreachable"),
+        [`POST ${WIKI_PATH}/sign-in`]: invalidState(
+          "source-unreadable",
+          "The sign-in of wiki could not start: the protected resource metadata is not valid. Try again later.",
+        ),
       });
       await user.click(await screen.findByRole("button", { name: "Sign in…" }));
       const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
 
       await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
 
-      expect((await within(dialog).findByRole("alert")).textContent).toContain("Try again later.");
+      expect((await within(dialog).findByRole("alert")).textContent).toBe(
+        "The sign-in of wiki could not start: the protected resource metadata is not valid. Try again later.",
+      );
       expect(within(dialog).getByRole("button", { name: "Start again" })).toBeTruthy();
     });
 

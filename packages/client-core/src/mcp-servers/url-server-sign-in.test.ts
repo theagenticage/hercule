@@ -537,10 +537,7 @@ describe("a sign-in the controller refuses", () => {
       "sign-in-expired",
       "This sign-in ran out, or another one for this server replaced it. Start again.",
     ],
-    [
-      "source-unreadable",
-      "The server or its sign-in service could not be reached. Try again later.",
-    ],
+    ["source-unreadable", "The controller's words."],
   ])("says %s when the start is refused, and starts again on request", async (reason, message) => {
     const { open, port, refuse, waitForStep } = await setupUrlServers({
       servers: [oauthServer()],
@@ -565,10 +562,7 @@ describe("a sign-in the controller refuses", () => {
       "sign-in-refused",
       "The browser or the provider refused the sign-in. Nothing was changed. You can start again.",
     ],
-    [
-      "source-unreadable",
-      "The server or its sign-in service could not be reached. Try again later.",
-    ],
+    ["source-unreadable", "The controller's words."],
   ])("says %s when the finish is refused", async (reason, message) => {
     const context = await setupUrlServers({ servers: [oauthServer()] });
     const { port, refuse, waitForStep } = context;
