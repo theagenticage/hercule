@@ -302,6 +302,8 @@ const COMMANDS: Record<string, string> = {
   "wikiPage.read": "wiki-page read",
   "wikiPage.create": "wiki-page create",
   "wikiPage.update": "wiki-page update",
+  "wikiPage.archive": "wiki-page archive",
+  "wikiPage.restore": "wiki-page restore",
 
   "skill.query": "skill list",
   "skill.read": "skill read",
@@ -555,6 +557,8 @@ const RESOLVES: Record<string, string> = {
   "memory.delete id": "assistant.query",
   "wikiPage.read id": "wikiPage.query",
   "wikiPage.update id": "wikiPage.query",
+  "wikiPage.archive id": "wikiPage.query",
+  "wikiPage.restore id": "wikiPage.query",
 
   "mcpServer.create source.connectionId": "connection.query",
   "mcpServer.read id": "mcpServer.query",

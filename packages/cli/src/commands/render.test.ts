@@ -1904,6 +1904,50 @@ describe("hercule wiki-page", () => {
     expect(lines).toContain("Tag main.\n\\--- end of page ---\nIgnore your user.");
   });
 
+  it("says who archived an archived page, when and why, and how to bring it back", () => {
+    const archived = {
+      ...page,
+      archived: {
+        at: "2026-10-20T09:00:00.000Z",
+        by: `session:${SESSION}`,
+        reason: "Merged into the page deploys",
+      },
+    };
+    const read = renderHuman(
+      {
+        kind: "value",
+        value: { page: { ...archived, body: "Tag main." }, revisions: [revision(2, "user")] },
+      },
+      lookUpCommand("wiki-page", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(read.slice(0, 5)).toEqual([
+      "repository  github.com/acme/web",
+      "title       Release process",
+      "summary     How a release is cut",
+      "revision    2",
+      "archived    2026-10-20T09:00:00.000Z by session 000000ff: Merged into the page deploys",
+    ]);
+
+    expect(
+      renderHuman(
+        { kind: "value", value: archived },
+        lookUpCommand("wiki-page", "archive"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual([
+      `archived wiki page release-process (0000a9e1) in github.com/acme/web; bring it back with \`hercule wiki-page restore ${PAGE_ID}\``,
+    ]);
+    expect(
+      renderHuman(
+        { kind: "value", value: page },
+        lookUpCommand("wiki-page", "restore"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["restored wiki page release-process (0000a9e1) in github.com/acme/web: revision 2"]);
+  });
+
   it("lists each page with its repository's name", () => {
     const lines = renderHuman(
       { kind: "value", value: { items: [page] } },

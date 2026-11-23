@@ -11,6 +11,8 @@
  * - a create or a listing naming a Resource that is not a repo is refused, and
  *   a listing naming no Resource matches nothing;
  * - a taken slug and a full Wiki are refused;
+ * - an archived page leaves the listing and the page count, takes no update,
+ *   keeps its slug, stays readable, and comes back when it is restored;
  * - a session needs `wiki.read` to read and `wiki.write` to write, and the
  *   grant is checked before the input;
  * - a deleted repository's pages stay readable;
@@ -69,6 +71,14 @@ const createPage = async (
 /** Sends `wikiPage.update` and returns the raw response. */
 const requestUpdate = (arranged: Arranged, id: string, body: unknown, token = arranged.token) =>
   send("PATCH", arranged.harness.base, `/api/v1/wiki-pages/${id}`, { body, token });
+
+/** Sends `wikiPage.archive` and returns the raw response. */
+const requestArchive = (arranged: Arranged, id: string, body: unknown, token = arranged.token) =>
+  post(arranged.harness.base, `/api/v1/wiki-pages/${id}/archive`, body, token);
+
+/** Sends `wikiPage.restore` and returns the raw response. */
+const requestRestore = (arranged: Arranged, id: string, token = arranged.token) =>
+  post(arranged.harness.base, `/api/v1/wiki-pages/${id}/restore`, undefined, token);
 
 /** Reads a page, optionally as of `search` such as `?revision=1`, and returns the raw response. */
 const requestRead = (arranged: Arranged, id: string, search = "", token = arranged.token) =>
@@ -281,11 +291,142 @@ describe("the Wiki over HTTP", () => {
       );
       const full = await requestCreate(arranged, { ...PAGE, slug: "one-too-many", resourceId });
       expect(full.status).toBe(422);
-      expect((await readErrorBody(full)).code).toBe("cap_exceeded");
+      expect(await readErrorBody(full)).toMatchObject({
+        code: "cap_exceeded",
+        message:
+          "This wiki has 500 pages, the most it can hold. Update an existing page instead, or archive one that no longer helps with `hercule wiki-page archive`.",
+      });
+
+      // An archived page is not counted, so archiving one makes room for one
+      // more page, and then the archived page has no room to come back to.
+      const archived = await requestArchive(arranged, existing.id, {
+        expectedRevision: 1,
+        reason: "Out of date",
+      });
+      expect(archived.status, await archived.clone().text()).toBe(200);
+      await createPage(arranged, { slug: "one-too-many", resourceId });
+      const noRoom = await requestRestore(arranged, existing.id);
+      expect(noRoom.status).toBe(422);
+      expect(await readErrorBody(noRoom)).toMatchObject({
+        code: "cap_exceeded",
+        message:
+          "This wiki has 500 pages, the most it can hold. Archive a page that no longer helps with `hercule wiki-page archive` before restoring this one.",
+      });
 
       // Another repository's Wiki has room of its own.
       const other = await createRepo(arranged, API_REMOTE);
       await createPage(arranged, { slug: "one-too-many", resourceId: other });
+    });
+  });
+
+  it("archives a page out of the listing without deleting it, and restores it", async () => {
+    await withFleet(async (arranged) => {
+      const resourceId = await createRepo(arranged, WEB_REMOTE);
+      const page = await createPage(arranged, { resourceId });
+      await createPage(arranged, { resourceId, slug: "deploys", title: "Deploys" });
+      const updated = await requestUpdate(arranged, page.id, {
+        expectedRevision: 1,
+        body: "Tag main, run the release workflow, then announce it.",
+      });
+      expect(updated.status, await updated.clone().text()).toBe(200);
+
+      // The archiver read revision 1, and the page says something else now.
+      const stale = await requestArchive(arranged, page.id, {
+        expectedRevision: 1,
+        reason: "Merged into the page deploys",
+      });
+      expect(stale.status).toBe(409);
+      expect(await readErrorBody(stale)).toMatchObject({
+        code: "conflict",
+        message:
+          "The page changed since you read it (now revision 2). Read it again, and archive it with `--expected-revision 2` if it should still go.",
+      });
+      const withoutReason = await requestArchive(arranged, page.id, { expectedRevision: 2 });
+      expect(withoutReason.status).toBe(400);
+
+      const archived = await requestArchive(arranged, page.id, {
+        expectedRevision: 2,
+        reason: "Merged into the page deploys",
+      });
+      expect(archived.status, await archived.clone().text()).toBe(200);
+      const mark = { by: "user", reason: "Merged into the page deploys" };
+      expect((await archived.json()) as WikiPageSummary).toMatchObject({
+        id: page.id,
+        revision: 2,
+        archived: mark,
+      });
+
+      expect(await listSlugs(arranged)).toEqual(["deploys"]);
+      expect(await listSlugs(arranged, `?resourceId=${resourceId}&archived=only`)).toEqual([
+        PAGE.slug,
+      ]);
+      // Every page, in the order they were created, as the CLI reads them to
+      // find the page an id tail names.
+      expect(await listSlugs(arranged, "?archived=include&sort=createdAt")).toEqual([
+        PAGE.slug,
+        "deploys",
+      ]);
+
+      // Nothing was deleted: the page and both its revisions are still read.
+      const read = await readPage(arranged, page.id);
+      expect(read.page).toMatchObject({ revision: 2, archived: mark });
+      expect(read.revisions.map((one) => one.revision)).toEqual([2, 1]);
+      expect((await readPage(arranged, page.id, "?revision=1")).page.body).toBe(PAGE.body);
+
+      const again = await requestArchive(arranged, page.id, {
+        expectedRevision: 2,
+        reason: "Again",
+      });
+      expect(await readErrorBody(again)).toMatchObject({
+        code: "invalid_state",
+        message: "This page is already archived (by user: Merged into the page deploys).",
+      });
+      // A stale revision is refused before the page's state is looked at.
+      const staleToo = await requestUpdate(arranged, page.id, { expectedRevision: 1, body: "x" });
+      expect((await readErrorBody(staleToo)).code).toBe("conflict");
+      const changed = await requestUpdate(arranged, page.id, { expectedRevision: 2, body: "x" });
+      expect(await readErrorBody(changed)).toMatchObject({
+        code: "invalid_state",
+        message: `This page is archived, and an archived page takes no update. Bring it back first with \`hercule wiki-page restore ${page.id}\`.`,
+      });
+      // The slug stays the archived page's.
+      const taken = await requestCreate(arranged, { ...PAGE, resourceId });
+      expect(await readErrorBody(taken)).toMatchObject({
+        code: "conflict",
+        message: `A page with this slug already exists and is archived: ${page.id}. Read it with \`hercule wiki-page read ${page.id}\`, then bring it back with \`hercule wiki-page restore ${page.id}\`, or choose another slug.`,
+      });
+
+      const restored = await requestRestore(arranged, page.id);
+      expect(restored.status, await restored.clone().text()).toBe(200);
+      const restoredPage = (await restored.json()) as WikiPageSummary;
+      expect(restoredPage).toMatchObject({ id: page.id, revision: 2 });
+      expect(restoredPage.archived).toBeUndefined();
+      expect(new Set(await listSlugs(arranged))).toEqual(new Set([PAGE.slug, "deploys"]));
+      expect(await listSlugs(arranged, "?archived=only")).toEqual([]);
+      expect((await readPage(arranged, page.id)).page.archived).toBeUndefined();
+      const afterRestore = await requestUpdate(arranged, page.id, {
+        expectedRevision: 2,
+        body: "Back in use.",
+      });
+      expect(afterRestore.status, await afterRestore.clone().text()).toBe(200);
+
+      const notArchived = await requestRestore(arranged, page.id);
+      expect(await readErrorBody(notArchived)).toMatchObject({
+        code: "invalid_state",
+        message: "This page is not archived, so there is nothing to restore.",
+      });
+      expect((await requestRestore(arranged, UNKNOWN_ID)).status).toBe(404);
+
+      // The log holds ids only, never the reason: every actor holding
+      // event.read reads it.
+      const entries = [
+        ...(await arranged.harness.audit("wikiPage.archived")),
+        ...(await arranged.harness.audit("wikiPage.restored")),
+      ];
+      expect(entries.map(({ kind, actor, payload }) => ({ kind, actor, payload }))).toEqual([
+        { kind: "wikiPage.archived", actor: "user", payload: { pageId: page.id, resourceId } },
+        { kind: "wikiPage.restored", actor: "user", payload: { pageId: page.id, resourceId } },
+      ]);
     });
   });
 
@@ -314,6 +455,21 @@ describe("the Wiki over HTTP", () => {
         code: "forbidden",
         grant: "wiki.write",
       });
+      const archived = await requestArchive(
+        arranged,
+        page.id,
+        { expectedRevision: 1, reason: "Out of date" },
+        reader.token,
+      );
+      expect(await readErrorBody(archived)).toMatchObject({
+        code: "forbidden",
+        grant: "wiki.write",
+      });
+      const restored = await requestRestore(arranged, page.id, reader.token);
+      expect(await readErrorBody(restored)).toMatchObject({
+        code: "forbidden",
+        grant: "wiki.write",
+      });
 
       // The grant is checked before the input, so an invalid create is still forbidden.
       const invalid = await requestCreate(arranged, { slug: "" }, reader.token);
@@ -331,6 +487,34 @@ describe("the Wiki over HTTP", () => {
       expect(await readErrorBody(read)).toMatchObject({ code: "forbidden", grant: "wiki.read" });
       const listed = await get(arranged.harness.base, "/api/v1/wiki-pages", writer.token);
       expect(await readErrorBody(listed)).toMatchObject({ code: "forbidden", grant: "wiki.read" });
+
+      // Writing needs no wiki.read: the writer archives and restores the page,
+      // is answered with the page it changed, and is the actor on the mark
+      // and in the log.
+      const writerStamp = `session:${writer.session.id}`;
+      const writerArchived = await requestArchive(
+        arranged,
+        page.id,
+        { expectedRevision: 1, reason: "Out of date" },
+        writer.token,
+      );
+      expect(writerArchived.status, await writerArchived.clone().text()).toBe(200);
+      expect((await writerArchived.json()) as WikiPageSummary).toMatchObject({
+        title: PAGE.title,
+        archived: { by: writerStamp, reason: "Out of date" },
+      });
+      const writerRestored = await requestRestore(arranged, page.id, writer.token);
+      expect(writerRestored.status, await writerRestored.clone().text()).toBe(200);
+      // The answer is the page's summary: what it is called, never its body.
+      const restoredSummary = (await writerRestored.json()) as Record<string, unknown>;
+      expect(restoredSummary).toMatchObject({ title: PAGE.title, summary: PAGE.summary });
+      expect(restoredSummary).not.toHaveProperty("archived");
+      expect(restoredSummary).not.toHaveProperty("body");
+      const actors = [
+        ...(await arranged.harness.audit("wikiPage.archived")),
+        ...(await arranged.harness.audit("wikiPage.restored")),
+      ].map((entry) => entry.actor);
+      expect(actors).toEqual([writerStamp, writerStamp]);
 
       expect((await readPage(arranged, page.id)).page.revision).toBe(1);
     });

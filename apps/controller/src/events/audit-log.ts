@@ -107,6 +107,8 @@ export const AUDIT_KINDS = [
   "memory.appended",
   "memory.deleted",
   "wikiPage.written",
+  "wikiPage.archived",
+  "wikiPage.restored",
   "skill.imported",
   "skill.proposed",
   "skill.applied",
@@ -267,6 +269,10 @@ const RECORD_KINDS = {
   // One kind for a create and an update: either way the page's newest
   // revision is new, and a client reads the page again.
   "wikiPage.written": "updated",
+  // An archived or restored page is a changed page: a client reads the
+  // listing again and finds the page gone from it, or back in it.
+  "wikiPage.archived": "updated",
+  "wikiPage.restored": "updated",
   // A Skill is named by its name. An import that creates a Skill is recorded
   // as updated too: either way a client reads the Skill again.
   "skill.imported": "updated",

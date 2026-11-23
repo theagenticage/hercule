@@ -360,11 +360,11 @@ The Queued Input, with the source `discussion`, that the controller sends to tel
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:
-The set of Wiki Pages of one repository, which agents keep for the agents after them. The repository's own docs win over it. The Wiki is not a record of its own.
-_Avoid_: knowledge base, memory (an assistant's), docs
+The set of Wiki Pages of one repository, which agents keep for the agents after them: lasting knowledge about the repository, one page per subject. It is not a worklog of tickets. The repository's own docs win over it. The Wiki is not a record of its own.
+_Avoid_: knowledge base, memory (an assistant's), docs, worklog
 
 **Wiki Page**:
-One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused.
+One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused. A page is never deleted. One that no longer helps is **archived**, with who archived it, when and why: it leaves the listing and takes no update, is still read by its id, and can be restored.
 _Avoid_: note (an assistant's memory has notes), article, document
 
 ### Infrastructure

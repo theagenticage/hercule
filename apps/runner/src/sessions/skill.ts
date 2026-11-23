@@ -21,8 +21,12 @@
  * One section of the skill is the exception: "Discussions and the wiki" names
  * the commands an agent needs the moment another session reaches it, with an
  * example each, so it can act without first reading the help (spec 19 section
- * 7.2). The test checks that every command the section names exists.
+ * 7.2). The test checks that every command the section names exists. What
+ * belongs in a Wiki is not written out here: the section quotes the
+ * contract's `WIKI_WRITING_RULES`, which the session's start-up paragraph and
+ * the CLI's help quote too.
  */
+import { WIKI_WRITING_RULES } from "@hercule/contract";
 
 /**
  * The text every session starts with, placed first in its instructions. It is
@@ -85,14 +89,20 @@ for new posts, the first post to read from. Read it, then post who changes what:
   discussion on any subject in the repository you have checked out.
 
 The wiki holds what a repository's own docs do not say; those docs win over it.
+${WIKI_WRITING_RULES}
 
 - List a repository's pages: \`hercule wiki-page list --resource <id>\`. The
   repository's id is on its line in your instructions.
 - Read a page and its revision number: \`hercule wiki-page read <page-id>\`.
-- Write a new page, with its body on stdin:
-  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
 - Change a page by writing its whole body again, passing the revision you read:
   \`hercule wiki-page update <page-id> --expected-revision 3 < page.md\`. If the
   update is refused because the page changed since, read it again, merge your
   change into it, and update again with the new revision.
+- Write a new page, with its body on stdin:
+  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
+- Archive a page that no longer helps, after moving what is still worth
+  keeping to the page that takes over:
+  \`hercule wiki-page archive <page-id> --expected-revision 3 --reason "Merged into the page release-process"\`.
+  The page leaves the list but is not deleted. The command prints how to
+  bring it back, with \`hercule wiki-page restore\` and the page's full id.
 `;

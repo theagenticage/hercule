@@ -4,7 +4,7 @@
  * CLI has.
  */
 import { describe, expect, it } from "vitest";
-import { ALL_GRANTS, CLI, type Grant } from "@hercule/contract";
+import { ALL_GRANTS, CLI, WIKI_WRITING_RULES, type Grant } from "@hercule/contract";
 import { buildWikiDescription } from "./session-description";
 
 const OVERVIEWS = new Map([
@@ -20,10 +20,11 @@ describe("buildWikiDescription", () => {
     expect(describeFor(["wiki.write", "task.read"])).toBeUndefined();
   });
 
-  it("asks a session that may also write to record what it learns", () => {
-    expect(describeFor(["wiki.read"])?.text).not.toContain("write it down");
-    expect(describeFor(["wiki.read", "wiki.write"])?.text).toMatch(
-      /hercule wiki-page list --resource <id>`\. When you learn .* write it down\./,
+  it("tells only a session that may also write what belongs in the wiki and what does not", () => {
+    const readOnly = describeFor(["wiki.read"])!.text;
+    expect(readOnly).not.toContain(WIKI_WRITING_RULES);
+    expect(describeFor(["wiki.read", "wiki.write"])?.text).toBe(
+      `${readOnly} ${WIKI_WRITING_RULES}`,
     );
   });
 
