@@ -103,17 +103,17 @@ export interface SignInWaitingStep extends StepBase {
   readonly approval: string;
   /** What to do in the browser, and how the sign-in comes back. */
   readonly instruction: string;
-  /** The button that opens the sign-in page: "Open auth.example.com", and "Open again" once it was pressed. `url` is the page, an http or https address without credentials. */
+  /** The button that opens the sign-in page: "Open the browser", and "Open again" once it was pressed. The host is not in the label, because a long host would not fit a button. `approval` names it. `url` is the page, an http or https address without credentials. */
   readonly open: StepButton & { readonly url: string };
-  /** Why the browser could not be opened, or `null`. */
+  /** Why the browser could not be opened, as two sentences, or `null`. */
   readonly openError: string | null;
   readonly cancel: StepButton;
   readonly paste: {
     /** True when the paste field is shown whatever the user pressed: it is the only way back, or the last address was refused. */
     readonly alwaysShown: boolean;
-    /** The question over the button that shows the paste field, or `null` when the field is always shown. */
+    /** The question over the button that shows the paste field, or `null` when the field is always shown or the sign-in page was not opened yet (the browser cannot have come back before it was opened). */
     readonly question: string | null;
-    /** The button that shows the paste field, or `null`. */
+    /** The button that shows the paste field, or `null` when `question` is. */
     readonly toggle: string | null;
     readonly label: string;
     readonly submit: string;
@@ -367,18 +367,19 @@ const describeSignIn = (
           ? "Approve the sign-in in your browser. This window finishes by itself when the browser comes back."
           : "Approve the sign-in in your browser. The browser then shows an error page for an address that starts with http://127.0.0.1. Copy that address from the address bar and paste it here.",
         open: {
-          label: step.opened ? "Open again" : `Open ${step.approvalHost}`,
+          label: step.opened ? "Open again" : "Open the browser",
           url: step.authorizationUrl,
         },
         openError:
           step.openError === null
             ? null
-            : `The browser did not open the sign-in page: ${step.openError}`,
+            : `The browser did not open the sign-in page. ${step.openError}`,
         cancel: { label: "Cancel" },
         paste: {
           alwaysShown: !listener || step.pasteProblem !== null,
-          question: listener ? "Approved, and the browser did not come back here?" : null,
-          toggle: listener ? "Paste the browser's address…" : null,
+          question:
+            listener && step.opened ? "Approved, and the browser did not come back here?" : null,
+          toggle: listener && step.opened ? "Paste the browser's address…" : null,
           label: "Address the browser ended on",
           submit: "Finish sign-in",
           problem: step.pasteProblem,

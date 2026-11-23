@@ -410,7 +410,9 @@ describe("Replace", () => {
 
     // Nothing is chosen for the user: Replace waits for the choice.
     const replace = within(dialog).getByRole("button", { name: "Replace" });
+    // It is off, and drawn off: `data-unready` is what the app's button style dims.
     expect(replace.getAttribute("aria-disabled")).toBe("true");
+    expect(replace.hasAttribute("data-unready")).toBe(true);
     await userEvent.click(replace);
     expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toEqual([]);
     expect(
@@ -463,6 +465,10 @@ describe("Replace", () => {
       "Nothing was replaced. This Connection has a server already.",
     );
     expect(within(dialog).getByRole("button", { name: "Open sentry" })).toBeTruthy();
+    // The Connection holds a server, so Replace is off, and drawn off.
+    const replace = within(dialog).getByRole("button", { name: "Replace" });
+    expect(replace.getAttribute("aria-disabled")).toBe("true");
+    expect(replace.hasAttribute("data-unready")).toBe(true);
   });
 });
 
@@ -726,11 +732,9 @@ describe("Signing in to a server added by URL through the browser", () => {
       listenerId: "l-1",
       authorizationUrl: readAuthorizationUrl(app),
     });
-    // The step waits for the user: nothing opens until the button beside the host is pressed.
+    // The step waits for the user: nothing opens until the button under the host is pressed.
     expect(app.openedLinks).toEqual([]);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
-    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Open the browser" }));
     await waitFor(() => {
       expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
@@ -752,7 +756,27 @@ describe("Signing in to a server added by URL through the browser", () => {
     await within(dialog).findByText("ready · 2 tools");
   });
 
-  it("puts the focus on the main action of each step: Cancel while it starts, Open <host> and then Open again while it waits, Start again once it ended", async () => {
+  it("offers the token as a link under the sentence, and keeps the footer to Cancel and the browser", async () => {
+    const { dialog } = await openSignInDialog(buildSignInReturn());
+
+    const footer = dialog.querySelector(".setup-acts")!;
+    expect([...footer.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      "Cancel",
+      "Sign in with your browser",
+    ]);
+    const token = within(dialog).getByRole("button", { name: "Paste a token instead" });
+    expect(footer.contains(token)).toBe(false);
+    expect(token.className).toBe("link");
+    // The focus starts on the main action, not on the first control in the page.
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+    );
+
+    await userEvent.click(token);
+    expect(within(dialog).getByLabelText("Token")).toBeTruthy();
+  });
+
+  it("puts the focus on the main action of each step: Cancel while it starts, Open the browser and then Open again while it waits, Start again once it ended", async () => {
     const signInReturn = buildSignInReturn();
     // The listener answers when the test says, so the step that starts the sign-in stays on screen.
     const listener = signInReturn.listen.getMockImplementation()!;
@@ -775,7 +799,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       startListening();
       await Promise.resolve();
     });
-    const open = await within(dialog).findByRole("button", { name: "Open auth.mcp.docs.example" });
+    const open = await within(dialog).findByRole("button", { name: "Open the browser" });
     expect(document.activeElement).toBe(open);
     // One way to leave: the dialog has no Close beside Cancel.
     expect(within(dialog).queryByRole("button", { name: "Close" })).toBeNull();
@@ -793,7 +817,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     expect(document.activeElement).toBe(startAgain);
   });
 
-  it("opens the browser only when the user presses the button beside the host, and reads Open again from then on", async () => {
+  it("opens the browser only when the user presses the button under the host, and reads Open again from then on", async () => {
     const signInReturn = buildSignInReturn();
     const dialogsWhenOpened: string[] = [];
     const { app, dialog } = await openSignInDialog(signInReturn, () => {
@@ -806,9 +830,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
     await within(dialog).findByText("Finish in your browser");
     expect(app.openedLinks).toEqual([]);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
-    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Open the browser" }));
 
     await waitFor(() => {
       expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
@@ -830,15 +852,15 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
-    await userEvent.click(
-      await within(dialog).findByRole("button", { name: "Open auth.mcp.docs.example" }),
-    );
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Open the browser" }));
 
     expect((await within(dialog).findByRole("alert")).textContent).toBe(
-      "The browser did not open the sign-in page: The system could not open your default browser. Check that one is set.",
+      "The browser did not open the sign-in page. The system could not open your default browser. Check that one is set.",
     );
-    // The sign-in still waits, and Open again tries once more.
+    // The sign-in still waits, and Open again tries once more. Nothing is being waited for while
+    // the page is not open, so no spinner turns.
     expect(within(dialog).getByRole("button", { name: "Open again" })).toBeTruthy();
+    expect(dialog.querySelector(".wait .spin")).toBeNull();
   });
 
   it.each([
@@ -947,11 +969,29 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
+    await within(dialog).findByText("Finish in your browser");
+    // The browser cannot have failed to come back before it was opened.
+    expect(
+      within(dialog).queryByText("Approved, and the browser did not come back here?"),
+    ).toBeNull();
+    expect(
+      within(dialog).queryByRole("button", { name: "Paste the browser's address…" }),
+    ).toBeNull();
+    const open = within(dialog).getByRole("button", { name: "Open the browser" });
+    expect(open.className).toContain("btn--accent");
+    await userEvent.click(open);
     await within(dialog).findByText("Approved, and the browser did not come back here?");
     expect(within(dialog).queryByLabelText("Address the browser ended on")).toBeNull();
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Paste the browser's address…" }),
+    );
+    // With the paste field open, "Finish sign-in" is the one primary button.
+    expect(within(dialog).getByRole("button", { name: "Open again" }).className).not.toContain(
+      "btn--accent",
+    );
+    expect(within(dialog).getByRole("button", { name: "Finish sign-in" }).className).toContain(
+      "btn--accent",
     );
     const pasted = `http://127.0.0.1:4937/callback?${buildCallbackQuery(app)}`;
     await userEvent.type(within(dialog).getByLabelText("Address the browser ended on"), pasted);
@@ -981,9 +1021,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     ).toBeNull();
     expect(signInReturn.wait).not.toHaveBeenCalled();
     expect(app.openedLinks).toEqual([]);
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
-    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Open the browser" }));
     await waitFor(() => {
       expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });

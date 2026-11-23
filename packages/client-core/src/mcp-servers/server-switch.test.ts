@@ -832,6 +832,23 @@ describe("the Replace dialog", () => {
       });
     });
 
+    it("keeps Replace off after a refusal that names the server holding the Connection, even when the list does not show that server", async () => {
+      const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
+      world.updateFails = new ApiError("conflict", "This Connection has a server already.", {
+        reason: "mcp-server-exists",
+        mcpServerId: WINNER_ID,
+      });
+
+      switches.confirmReplace(WORK);
+      await settle(WORK);
+
+      expect(view()).toMatchObject({
+        selectedId: "s-a",
+        canReplace: false,
+        notice: { kind: "refused" },
+      });
+    });
+
     it("chooses nothing after a refusal that left the confirmed server out of the candidates, even with one candidate left", async () => {
       const { world, queryClient, switches, settle, view } = await openDialog([
         docsByUrl("s-a"),

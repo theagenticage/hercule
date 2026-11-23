@@ -49,6 +49,24 @@ p.setup-lead.url-note {
   font-size: inherit;
 }
 
+/* The server the token form is about, above its sentence. A gap under the card keeps the
+   sentence off its edge, and the card has no gap above it, as in the dialog's other steps. */
+.url-subject {
+  margin-bottom: 12px;
+}
+.url-subject > .hx {
+  margin-top: 0;
+}
+/* "Paste a token instead", the quieter second choice, as a link on a line under the sentence of
+   the browser choice. Its padding makes the target tall enough to press, and the negative margin
+   takes that padding back from the gap to the sentence. */
+.url-token-choice {
+  margin: -4px 0 12px;
+}
+.url-token-choice > .link {
+  padding-block: 4px;
+}
+
 /* The waiting card says who asks for the approval in a whole sentence, which wraps instead of
    being cut short as a record's address is. A host with no hyphen has no place to break, so it
    breaks anywhere: the end of the host names who asks, and it must stay in view. */
@@ -61,19 +79,10 @@ p.setup-lead.url-note {
   text-overflow: clip;
   white-space: normal;
 }
-/* The button that opens the sign-in page names the host, which can be as wide as the dialog.
-   It wraps, with the host's end in view, and grows taller. */
-.url-open {
-  min-width: 0;
-  height: auto;
-  min-height: 30px;
-  padding-block: 6px;
-  overflow-wrap: anywhere;
-  text-align: left;
-  white-space: normal;
-}
-.url-open > svg {
-  flex: none;
+/* A paragraph inside the waiting card has no margin of its own: the card's rows are one gap
+   apart, and the browser's default paragraph margin would add an empty band to it. */
+.url-waiting .hx-more > p {
+  margin: 0;
 }
 /* The paste field of the waiting card: the field under the card's text, and its button at the end. */
 .url-paste {

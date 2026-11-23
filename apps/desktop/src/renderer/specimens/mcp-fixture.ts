@@ -298,7 +298,7 @@ const RELAY_SERVER = buildUrlServer(
 
 /**
  * A server added by URL whose address is far longer than a row: the list and
- * the page must show it whole or cut it at its end, never lose where it ends.
+ * the page show it whole, wrapped, and the tool count after it stays in view.
  */
 const ARCHIVE_SERVER = buildUrlServer(
   "s-archive",

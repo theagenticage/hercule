@@ -48,7 +48,8 @@ export function ReplaceDialog({
       actionClass="accent"
       className="url-replace-dialog"
       initialFocus="close"
-      pending={!view.canReplace}
+      pending={notice?.kind === "working"}
+      unready={!view.canReplace && notice?.kind !== "working"}
       refusal={notice?.kind === "empty" ? notice.message : null}
       onConfirm={confirm}
       onClose={() => {

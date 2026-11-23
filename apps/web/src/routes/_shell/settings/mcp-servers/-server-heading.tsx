@@ -8,7 +8,9 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import { McpServerMark } from "../../../../screens/mcp-server-mark";
 
-const CHIP_CLASS = "rounded-full border border-line px-2 py-0.5 text-fine text-muted";
+// A long address wraps inside its chip, breaking anywhere, so the chip never runs past the window.
+const CHIP_CLASS =
+  "max-w-full min-w-0 rounded-2xl border border-line px-2 py-0.5 text-fine wrap-anywhere text-muted";
 
 /**
  * The top of a server's page: the link back to the list, the server's mark

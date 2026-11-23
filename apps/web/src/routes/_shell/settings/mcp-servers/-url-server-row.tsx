@@ -47,7 +47,8 @@ export function UrlServerRow({
           <McpServerMark view={view} plugins={plugins} />
           <span className="min-w-0 flex-1">
             <b className="block truncate font-emph text-ink">{server.name}</b>
-            <small className="block truncate text-fine text-muted">{view.secondLine}</small>
+            {/* An address is shown whole: it wraps, breaking anywhere, and the tool count after it stays in view. */}
+            <small className="block text-fine wrap-anywhere text-muted">{view.secondLine}</small>
           </span>
           <span className="w-[92px] shrink-0">
             <McpServerStatusWord view={view} />

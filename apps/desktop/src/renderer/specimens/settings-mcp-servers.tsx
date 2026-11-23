@@ -381,11 +381,11 @@ if (
       ? "dialog[open] .warn"
       : state === "sign-in-paste"
         ? "dialog[open] .url-paste"
-        : "dialog[open] .url-open",
+        : "dialog[open] .url-waiting > .setup-acts > .btn:last-child",
   );
 }
 if (state === "sign-in-open-failed") {
-  await pressPart("dialog[open] .url-open");
+  await pressPart("dialog[open] .url-waiting > .setup-acts > .btn:last-child");
   await waitForPart("dialog[open] .url-waiting .fl-err");
 }
 if (state === "replace" || state === "replace-several" || state === "replace-stale") {

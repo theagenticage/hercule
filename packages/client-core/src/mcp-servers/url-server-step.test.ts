@@ -321,7 +321,7 @@ describe("the waits", () => {
 });
 
 describe("the sign-in that waits for the browser", () => {
-  it("names the host before the browser opens, and offers the button that opens it, then Open again", () => {
+  it("names the host in the approval sentence, not on the button: Open the browser, then Open again", () => {
     const before = describeUrlServerStep(signingIn(waiting()), ADD);
     const after = describeUrlServerStep(signingIn(waiting({ opened: true })), ADD);
 
@@ -329,13 +329,14 @@ describe("the sign-in that waits for the browser", () => {
       kind: "sign-in-waiting",
       heading: "Finish in your browser",
       approval: "You will approve on auth.docs.example.",
-      open: { label: "Open auth.docs.example", url: "https://auth.docs.example/authorize?state=x" },
+      open: { label: "Open the browser", url: "https://auth.docs.example/authorize?state=x" },
     });
     expect(after).toMatchObject({ open: { label: "Open again" } });
   });
 
-  it("says the desktop app finishes by itself and keeps the paste behind a question, while the web app asks for the paste at once", () => {
-    const listener = describeUrlServerStep(signingIn(waiting()), ADD);
+  it("says the desktop app finishes by itself and keeps the paste behind a question, asked only once the browser was opened, while the web app asks for the paste at once", () => {
+    const listener = describeUrlServerStep(signingIn(waiting({ opened: true })), ADD);
+    const unopened = describeUrlServerStep(signingIn(waiting()), ADD);
     const paste = describeUrlServerStep(signingIn(waiting({ returnBy: "paste" })), ADD);
 
     expect(listener).toMatchObject({
@@ -345,6 +346,9 @@ describe("the sign-in that waits for the browser", () => {
         question: "Approved, and the browser did not come back here?",
         toggle: "Paste the browser's address…",
       },
+    });
+    expect(unopened).toMatchObject({
+      paste: { alwaysShown: false, question: null, toggle: null },
     });
     expect(paste).toMatchObject({
       instruction: expect.stringContaining("paste it here") as string,
@@ -364,7 +368,7 @@ describe("the sign-in that waits for the browser", () => {
     );
 
     expect(step).toMatchObject({
-      openError: "The browser did not open the sign-in page: no browser",
+      openError: "The browser did not open the sign-in page. no browser",
       paste: { alwaysShown: true, problem: "That is not it." },
     });
   });

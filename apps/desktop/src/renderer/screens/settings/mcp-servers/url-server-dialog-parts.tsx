@@ -8,7 +8,14 @@
  * (`-add-server-dialog.tsx` of the route, and `token-dialog.tsx`) hold the
  * attempt and the fields.
  */
-import { useState, type FormEvent, type JSX, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+  type JSX,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   ADDRESS_FIELD_HINT,
   describeToolNamePreview,
@@ -49,6 +56,13 @@ export function UrlServerDialogFrame({
   readonly onCloseRequest?: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
+  // The dialog opens in its own effect, which runs before this one, and a closed dialog cannot
+  // take the focus. So a button that asks for the first focus (`data-initial-focus`), such as the
+  // browser choice's primary, gets it here, after the dialog is open. Otherwise the browser
+  // focuses the first control, which is Cancel or a quiet choice.
+  useEffect(() => {
+    dialogRef.current?.querySelector<HTMLElement>("[data-initial-focus]")?.focus();
+  }, [dialogRef]);
   return (
     <GlassDialog
       dialogRef={dialogRef}
@@ -171,7 +185,8 @@ export function AddForm({
 /**
  * Renders the sign-in form of a server added by URL, opened as the step's
  * `words.method` says: the browser choice (`words.browser`), with the token
- * field behind "Paste a token instead", or the token field. The token part is
+ * field behind "Paste a token instead", a link under the sentence, or the token
+ * field. The token part is
  * the sentence `words.intro`, the masked Token field with `words.note` under
  * it, and Save token. `refusedReason` is the controller's reason when the
  * token or the sign-in this dialog wrote was refused, and the field shows
@@ -203,13 +218,26 @@ function TokenForm({
   const { browser } = words;
   const subjectCard =
     subject === null ? null : (
-      <ServerCard name={subject.name} address={subject.address} end={null} />
+      <div className="url-subject">
+        <ServerCard name={subject.name} address={subject.address} end={null} />
+      </div>
     );
   if (browser !== null && !showsToken) {
     return (
       <>
         {subjectCard}
         <p className="setup-lead">{browser.intro}</p>
+        <p className="setup-lead url-token-choice">
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              setChoseToken(true);
+            }}
+          >
+            {browser.pasteToggle}
+          </button>
+        </p>
         {refusedReason !== null && (
           <p className="fl-err setup-error" role="alert">
             {refusedReason}
@@ -223,14 +251,11 @@ function TokenForm({
           </button>
           <button
             type="button"
-            className="btn"
-            onClick={() => {
-              setChoseToken(true);
-            }}
+            className="btn btn--accent"
+            autoFocus
+            data-initial-focus=""
+            onClick={onSignIn}
           >
-            {browser.pasteToggle}
-          </button>
-          <button type="button" className="btn btn--accent" autoFocus onClick={onSignIn}>
             {browser.label}
           </button>
         </div>
@@ -526,12 +551,14 @@ export function StepView({
  * Renders the waiting step of a sign-in: a card with the heading, who asks
  * for the approval, what to do in the browser and the paste, and under it the
  * way to leave and the button that opens the sign-in page. The browser opens
- * only when the user presses that button, after reading the host. It reads
- * "Open again" once it was pressed.
+ * only when the user presses that button, after reading the host in the card.
+ * It reads "Open again" once it was pressed.
  *
- * The buttons sit under the card, not beside the text: a host can be long, and
- * its button then needs the whole width, so that the approval sentence never
- * runs under it. The button takes the focus, so Enter opens the page.
+ * The open button takes the focus, so Enter opens the page. It is the primary
+ * button, except while the paste field is open: then "Finish sign-in" is the
+ * one primary button, and opening the page again is the second choice.
+ * While the page failed to open the wait line has no spinner, because nothing
+ * is being waited for.
  */
 function WaitingView({
   step,
@@ -553,7 +580,7 @@ function WaitingView({
           detail={step.approval}
           end={null}
         >
-          <WaitLine text={step.instruction} />
+          <WaitLine text={step.instruction} spinning={step.openError === null} />
           {step.openError !== null && (
             <p className="fl-err" role="alert">
               {step.openError}
@@ -609,7 +636,7 @@ function WaitingView({
         </button>
         <button
           type="button"
-          className="btn btn--accent url-open"
+          className={pasteShown ? "btn" : "btn btn--accent"}
           autoFocus
           onClick={() => void attempt.openSignInPage()}
         >

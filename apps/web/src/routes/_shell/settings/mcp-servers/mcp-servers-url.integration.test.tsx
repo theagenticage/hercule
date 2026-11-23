@@ -474,6 +474,16 @@ describe("Settings > MCP servers > Add by URL", () => {
     expect(readPageText(dialog)).toContain("This server signs in through your browser.");
     expect(within(dialog).getByRole("button", { name: "Sign in with your browser" })).toBeTruthy();
     expect(within(dialog).queryByLabelText("Token")).toBeNull();
+    // The token is the quieter choice: a button under the sentence, not in the footer, which
+    // holds Cancel and the browser only.
+    const footer = within(dialog).getByRole("button", { name: "Cancel" }).parentElement!;
+    expect([...footer.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      "Cancel",
+      "Sign in with your browser",
+    ]);
+    expect(
+      footer.contains(within(dialog).getByRole("button", { name: "Paste a token instead" })),
+    ).toBe(false);
     await user.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
     expect(readPageText(dialog)).toContain("Paste a token, if the service gives you one.");
     expect(within(dialog).getByLabelText("Token")).toBeTruthy();
@@ -512,7 +522,7 @@ describe("Settings > MCP servers > Add by URL", () => {
         /^http:\/\/127\.0\.0\.1:\d+\/callback$/,
       );
       expect(readPageText(dialog)).toContain("You will approve on auth.mcp.wiki.example.");
-      const link = within(dialog).getByRole("link", { name: "Open auth.mcp.wiki.example" });
+      const link = within(dialog).getByRole("link", { name: "Open the browser" });
       // The link takes the focus, so Enter opens the sign-in page.
       expect(document.activeElement).toBe(link);
       expect(link.getAttribute("href")).toBe(world.signIns.get(S_WIKI.id)!.authorizationUrl);
@@ -569,7 +579,7 @@ describe("Settings > MCP servers > Add by URL", () => {
       });
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
       await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
-      await within(dialog).findByRole("link", { name: "Open auth.mcp.wiki.example" });
+      await within(dialog).findByRole("link", { name: "Open the browser" });
       observer.disconnect();
 
       expect(seen.some((each) => each.link)).toBe(true);

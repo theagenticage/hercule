@@ -236,7 +236,8 @@ function OpenServerLink({
  * Draws the waiting step: the host that asks for the approval, the link that
  * opens the sign-in page, and the field for the address the browser ended on.
  * The web app has no listener, so the paste is the only way back and its field
- * is always shown.
+ * is always shown. That makes "Finish sign-in" the one boxed button, and the
+ * link that opens the page the second choice, without a box.
  */
 function WaitingStep({
   step,
@@ -270,10 +271,7 @@ function WaitingStep({
           rel="noopener noreferrer"
           ref={openRef}
           onClick={() => void attempt.openSignInPage()}
-          className={buildButtonClassName(
-            "form",
-            "max-w-full text-left leading-tight whitespace-normal break-words",
-          )}
+          className={buildButtonClassName("primary", "-ml-2")}
         >
           {step.open.label}
         </a>

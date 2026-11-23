@@ -93,6 +93,16 @@ Not design questions. The constraint is stated where one exists.
   Recorded in 11 §2 `skill.check`.
 - *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* ~~21 §3.5: the size cap on an answer from an MCP server that the gateway passes back. [#1208](https://github.com/theagenticage/hercule/issues/1208) chooses it and writes it in 21.~~ **Resolved 2026-11-20 ([#1208](https://github.com/theagenticage/hercule/issues/1208)):** 4 MiB per message from a server, written in 21 §3.5.
 - *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* ~~21 §5.3: the backoff schedule for checking an `unreachable` MCP Server again. [#1208](https://github.com/theagenticage/hercule/issues/1208) chooses it and writes it in 21.~~ **Resolved 2026-11-20 ([#1208](https://github.com/theagenticage/hercule/issues/1208)):** 1 minute, 5 minutes, 15 minutes, 1 hour, then hourly, written in 21 §5.3.
+- *(Added 2026-11-23, [#1211](https://github.com/theagenticage/hercule/issues/1211).)* 17 §Settings > MCP servers, 14: **the choices of the Add by URL, sign-in and Replace screens, built by #1211, Rogier to confirm.** Built as listed; each is a small change if Rogier decides otherwise:
+  - Closing the Add dialog after "Check server" keeps the created server; the list shows it with its status and its fix.
+  - A server that offers OAuth offers the browser first and "Paste a token instead" as the quieter choice: some services hand out a token, the controller accepts one on any server added by URL, and a refused browser sign-in (`sign-in-unsupported`) already leads to the token field. So such a server can hold a pasted token instead of an OAuth sign-in.
+  - The browser opens when the user presses "Open the browser" under "You will approve on `<host>`", never by itself, so the host is read before the browser takes the screen.
+  - The desktop app has no Settings > Plugins page, so a refusal for a switched-off or failed plugin names "Settings > Plugins in the web app" in words, with no button.
+  - "Open `<name>`" shows in a dialog's outcome only where it leads somewhere else: after a failed check, a move onto a Connection, a server switched off, or a ready server the dialog just created; never on the server's own page.
+  - Replace with one server added by URL asks about that server; with several, none is chosen until the user picks; after a refusal, none is chosen again.
+  - The Sign-in row reads "Not signed in" for a server that needs a sign-in it does not hold yet.
+  - "Check now" stays busy until the record changes, or for at most 30 seconds, because the controller marks no check that fails the same way again ([#1247](https://github.com/theagenticage/hercule/issues/1247)).
+  - Wording the spec does not give: the Add dialog's title "Add an MCP server", the token step naming the server and its address, the error band's sentence, the Replace title for several candidates, and the address field's hint that a key goes in the token field.
 
 ## C. Verify at build time
 

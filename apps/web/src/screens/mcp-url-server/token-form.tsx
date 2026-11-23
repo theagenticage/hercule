@@ -10,8 +10,9 @@ import { Button, Field, Input } from "@hercule/ui";
  * thread line and of the band all draw it from the same step.
  *
  * For a server that offers the browser, the token field is the quieter second
- * choice: it shows after "Paste a token instead", or at once when the step's
- * words say the form opens with `token`.
+ * choice: it shows after "Paste a token instead", a quiet button under the
+ * sentence that leaves the footer to Cancel and the browser, or at once when
+ * the step's words say the form opens with `token`.
  *
  * The token lives in this form's state alone, so it is gone when the form
  * leaves the screen, whether the write was acknowledged or refused.
@@ -45,6 +46,15 @@ export function TokenForm({
       <div className="flex flex-col gap-3">
         {subjectLine}
         <p className="text-row text-muted">{browser.intro}</p>
+        <Button
+          type="button"
+          className="-mt-1 -ml-2 self-start"
+          onClick={() => {
+            setChoseToken(true);
+          }}
+        >
+          {browser.pasteToggle}
+        </Button>
         {refusal === null ? null : (
           <p className="text-fine text-fail" role="alert">
             {refusal}
@@ -55,14 +65,6 @@ export function TokenForm({
         <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
           <Button type="button" onClick={onCancel}>
             Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={() => {
-              setChoseToken(true);
-            }}
-          >
-            {browser.pasteToggle}
           </Button>
           <Button type="button" variant="form" autoFocus onClick={onSignIn}>
             {browser.label}

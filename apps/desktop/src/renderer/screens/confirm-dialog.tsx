@@ -10,8 +10,11 @@ import { GlassDialog } from "./glass-dialog";
  * - The action button reads `actionLabel` and is drawn as `actionClass`,
  *   `danger` for something that cannot be undone and `accent` otherwise.
  * - Pressing the action calls `onConfirm`, unless `pending` is true because
- *   an earlier press is still running. The dialog stays open, so the caller
- *   closes it through `dialogRef` once it is done.
+ *   an earlier press is still running, or `unready` is true because the
+ *   dialog has nothing to act on yet (no choice made). A pending action keeps
+ *   its full colour and its label says what is happening. An unready one is
+ *   drawn half dimmed, as every button that cannot act is. The dialog stays
+ *   open, so the caller closes it through `dialogRef` once it is done.
  * - Enter in a field of `children`, such as a radio, presses the action too,
  *   as Enter presses the default button of a macOS dialog. Enter on the
  *   closing button presses the closing button.
@@ -41,6 +44,7 @@ export function ConfirmDialog({
   className = "",
   initialFocus,
   pending = false,
+  unready = false,
   error = null,
   refusal = null,
   onConfirm,
@@ -55,6 +59,7 @@ export function ConfirmDialog({
   readonly className?: string;
   readonly initialFocus?: "close" | "action" | undefined;
   readonly pending?: boolean;
+  readonly unready?: boolean;
   readonly error?: string | null;
   readonly refusal?: string | null;
   readonly onConfirm: () => void;
@@ -86,7 +91,7 @@ export function ConfirmDialog({
         className="pop-sec confirm-dialog-body"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!pending && refusal === null) onConfirm();
+          if (!pending && !unready && refusal === null) onConfirm();
         }}
       >
         {children}
@@ -109,7 +114,8 @@ export function ConfirmDialog({
               ref={actionRef}
               type="submit"
               className={`btn btn--${actionClass}`}
-              aria-disabled={pending}
+              aria-disabled={pending || unready}
+              data-unready={unready || undefined}
             >
               {actionLabel}
             </button>

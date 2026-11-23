@@ -140,7 +140,8 @@ const describeReplaceDialog = ({
  *   confirmation stay, whatever the list does, until the attempt ends in a
  *   refusal.
  * - `occupied` tells that the Connection has a server already, so Replace is
- *   off. `offerBlocked` tells that a write of the offer runs, and
+ *   off. So is it after a refusal that names the server which holds the
+ *   Connection. `offerBlocked` tells that a write of the offer runs, and
  *   `isServerBlocked` that a write of one candidate does.
  *
  * The notice follows the outcome first. Only while nothing was confirmed does
@@ -170,6 +171,9 @@ export const buildReplaceDialogView = ({
   readonly isServerBlocked: (serverId: string) => boolean;
 }): ReplaceDialogView => {
   const locked = confirmed !== null && (offerBlocked || outcome.kind === "replaced");
+  // A refusal that names the server holding the Connection proves the Connection is taken, even
+  // while the list the app holds has not shown that server yet. Asking again would be refused.
+  const namesWinner = outcome.kind === "refused" && outcome.winnerServerId !== null;
   const listed = locked ? confirmed.shown : live;
   const selectedId = locked
     ? confirmed.serverId
@@ -243,7 +247,12 @@ export const buildReplaceDialogView = ({
     locked,
     notice,
     canReplace:
-      !locked && !offerBlocked && !occupied && selectedId !== null && !isServerBlocked(selectedId),
+      !locked &&
+      !offerBlocked &&
+      !occupied &&
+      !namesWinner &&
+      selectedId !== null &&
+      !isServerBlocked(selectedId),
     done: outcome.kind === "replaced",
   };
 };
