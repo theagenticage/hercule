@@ -19,6 +19,7 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import type { AgentState } from "./agent-state";
 import { readFetchedUrl, readToolCallName, summarizeTodoList } from "./item-detail";
 import { findFirstMessageItemId, splitSendingTexts } from "./first-message";
@@ -199,6 +200,13 @@ export interface WarningBlock {
   /** The warning's text, as the runner wrote it. */
   readonly message: string;
   readonly at: string;
+  /**
+   * The MCP Servers the warning is about and why, as the controller wrote
+   * them. Absent for a warning that is not about MCP Servers. Kept as the
+   * event has them, so a screen decides each button from the servers as they
+   * are now (`decideWarningFix`).
+   */
+  readonly mcpServers?: readonly McpServerWarningEntry[];
 }
 
 /**
@@ -679,6 +687,7 @@ export const buildThreadBlocks = (
           key: `warning:${String(row.position)}`,
           message: event.message,
           at: event.at,
+          ...(event.mcpServers === undefined ? {} : { mcpServers: event.mcpServers }),
         });
         break;
       }

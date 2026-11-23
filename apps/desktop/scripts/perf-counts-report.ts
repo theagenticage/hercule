@@ -160,6 +160,7 @@ export function formatCountsReport(
       [
         formatTable("Inbox", "screens/inbox/", current, against),
         formatTable("Work", "screens/work/", current, against),
+        formatTable("MCP servers", "screens/mcp/", current, against),
         "Pending once the screen has been quiet for a second:",
         formatTable("Idle", "idle/", current, against),
         formatTable("Controller read", "controller/", current, against),

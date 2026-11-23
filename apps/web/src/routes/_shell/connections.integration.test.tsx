@@ -260,6 +260,8 @@ const buildController = (
   },
   "GET /api/v1/plugins": { body: CATALOG },
   "GET /api/v1/connections": () => ({ body: { items: connections() } }),
+  // No plugin of the catalog offers an MCP server, so no row has agent tools.
+  "GET /api/v1/mcp-servers": { body: { items: [] } },
   ...extra,
 });
 
@@ -1741,5 +1743,270 @@ describe("Connections' search params", () => {
 
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("opens the Reconnect panel of a working connection named by `reconnect`, then removes the parameter", async () => {
+    const { router } = await openApp([PAPER, SKY], {}, `/connections?reconnect=${PAPER.id}`);
+
+    await screen.findByText(PAPER.displayName);
+    // The connection is connected, so its row has no Reconnect button: the
+    // panel is open because the address asked for it.
+    expect(
+      within(await findConnectionRow(PAPER)).queryByRole("button", { name: "Reconnect" }),
+    ).toBeNull();
+    expect(readPageText(await findConnectionRow(PAPER))).toContain("Reconnect Paper Trail");
+    expect(readPageText(await findConnectionRow(SKY))).not.toContain("Reconnect Skyline");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+    expect(router.state.location.pathname).toBe("/connections");
+    // The panel stays open after the parameter is gone.
+    expect(readPageText(await findConnectionRow(PAPER))).toContain("Reconnect Paper Trail");
+  });
+
+  it("says so when the connection named by `reconnect` no longer exists", async () => {
+    const { router } = await openApp([PAPER], {}, `/connections?reconnect=${SKY.id}`);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "That connection no longer exists, so there is nothing to reconnect.",
+    );
+    expect(readPageText()).not.toContain("Reconnect Paper Trail");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+  });
+
+  it("says a target is gone when the list the screen held from an earlier visit still names it", async () => {
+    const { hold, router } = await openApp([PAPER, SKY]);
+    await findConnectionRow(SKY);
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+    // The connection was deleted while the user was elsewhere.
+    hold([PAPER]);
+
+    await act(() => router.navigate({ to: "/connections", search: { reconnect: SKY.id } }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "That connection no longer exists, so there is nothing to reconnect.",
+    );
+    expect(readPageText()).not.toContain("Reconnect Skyline");
+  });
+
+  it("opens the Reconnect panel of a target the list held from an earlier visit does not name yet", async () => {
+    const { hold, router } = await openApp([PAPER]);
+    await findConnectionRow(PAPER);
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+    // The connection was made while the user was elsewhere.
+    hold([PAPER, SKY]);
+
+    await act(() => router.navigate({ to: "/connections", search: { reconnect: SKY.id } }));
+
+    expect(readPageText(await findConnectionRow(SKY))).toContain("Reconnect Skyline");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+  });
+
+  it("says so when the plugin of the connection named by `reconnect` is gone", async () => {
+    const orphan: Connection = {
+      ...PAPER,
+      id: "0199c0ff-ffff-7000-8000-000000000009",
+      type: "vanished/type",
+    };
+    await openApp([orphan], {}, `/connections?reconnect=${orphan.id}`);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The plugin for that connection is no longer installed, so it cannot be reconnected.",
+    );
+  });
+});
+
+describe("Connections > the agent tools note", () => {
+  const PALLET_PLUGIN: Plugin = {
+    ...buildPlugin("pallet", { type: "pallet/pallet", displayName: "Pallet" }),
+    capabilities: ["connections", "mcp-servers"],
+    contributions: [
+      {
+        extensionPoint: "connection-type",
+        id: "pallet/pallet",
+        definition: { type: "pallet/pallet", displayName: "Pallet", setup: [] },
+      },
+      {
+        extensionPoint: "mcp-server",
+        id: "pallet/pallet",
+        definition: {
+          displayName: "Pallet",
+          description: "The Pallet MCP server.",
+          connectionType: "pallet/pallet",
+          origin: "https://mcp.pallet.example",
+        },
+      },
+    ],
+  };
+  const PALLET: Connection = {
+    ...PAPER,
+    id: "0199c0ff-9999-7000-8000-000000000008",
+    type: "pallet/pallet",
+    label: "depot",
+    displayName: "acct:pallet-depot",
+    labels: [],
+  };
+  const SERVER_ID = "0199c0ff-5555-7000-8000-000000000001";
+  const buildPalletServer = (overrides: Record<string, unknown> = {}) => ({
+    id: SERVER_ID,
+    name: "pallet",
+    source: { kind: "plugin", contributionId: "pallet/pallet", connectionId: PALLET.id },
+    enabled: true,
+    status: "ready",
+    statusDetail: null,
+    tools: [],
+    checkedAt: "2026-11-20T09:00:00.000Z",
+    createdAt: "2026-11-20T09:00:00.000Z",
+    updatedAt: "2026-11-20T09:00:00.000Z",
+    ...overrides,
+  });
+
+  /** Opens the screen with the Pallet plugin, whose server `servers()` returns. */
+  const openWithServers = (servers: () => readonly unknown[]) =>
+    openApp([PAPER, PALLET], {
+      "GET /api/v1/plugins": { body: [...CATALOG, PALLET_PLUGIN] },
+      "GET /api/v1/mcp-servers": () => ({ body: { items: servers() } }),
+    });
+
+  const findNote = async (): Promise<HTMLElement> => {
+    const row = await findConnectionRow(PALLET);
+    // The note reads the servers itself, after the row has drawn.
+    return within(row).findByRole("link", { name: /agent tools/ });
+  };
+
+  it("says agent tools are off, and leads to the list, while no server exists", async () => {
+    await openWithServers(() => []);
+
+    const note = await findNote();
+    expect(note.textContent).toBe("agent tools off");
+    expect(note.getAttribute("href")).toBe("/settings/mcp-servers");
+    expect(note.getAttribute("title")).toBe(
+      "Agent tools are switched on and off in Settings > MCP servers",
+    );
+    // The Connection has no switch of its own.
+    expect(within(await findConnectionRow(PALLET)).queryByRole("switch")).toBeNull();
+  });
+
+  it("says one note for each server the plugin offers on a Connection, when it offers two", async () => {
+    const offersTwo: Plugin = {
+      ...PALLET_PLUGIN,
+      contributions: [
+        ...PALLET_PLUGIN.contributions,
+        {
+          extensionPoint: "mcp-server",
+          id: "pallet/pallet-docs",
+          definition: {
+            displayName: "Pallet docs",
+            description: "The Pallet documentation server.",
+            connectionType: "pallet/pallet",
+            origin: "https://docs.pallet.example",
+          },
+        },
+      ],
+    };
+    await openApp([PAPER, PALLET], {
+      "GET /api/v1/plugins": { body: [...CATALOG, offersTwo] },
+      "GET /api/v1/mcp-servers": () => ({ body: { items: [buildPalletServer()] } }),
+    });
+
+    const row = await findConnectionRow(PALLET);
+    await waitFor(() => {
+      expect(within(row).getAllByRole("link", { name: /agent tools/ })).toHaveLength(2);
+    });
+    // The first offer has a record and is on. The docs offer has none, so it leads to the list.
+    const notes = within(row).getAllByRole("link", { name: /agent tools/ });
+    expect(notes.map((note) => note.textContent)).toEqual(["agent tools on", "agent tools off"]);
+    expect(notes.map((note) => note.getAttribute("href"))).toEqual([
+      `/settings/mcp-servers/${SERVER_ID}`,
+      "/settings/mcp-servers",
+    ]);
+  });
+
+  it("says agent tools are on for a ready server, and leads to its page", async () => {
+    await openWithServers(() => [buildPalletServer()]);
+
+    const note = await findNote();
+    expect(note.textContent).toBe("agent tools on");
+    expect(note.getAttribute("href")).toBe(`/settings/mcp-servers/${SERVER_ID}`);
+    expect(note.className).not.toContain("text-fail");
+  });
+
+  it("says agent tools are off for a server that is switched off, and still leads to its page", async () => {
+    await openWithServers(() => [buildPalletServer({ enabled: false })]);
+
+    const note = await findNote();
+    expect(note.textContent).toBe("agent tools off");
+    expect(note.getAttribute("href")).toBe(`/settings/mcp-servers/${SERVER_ID}`);
+  });
+
+  it("says a server that needs attention in the failure colour", async () => {
+    for (const status of ["needs-sign-in", "unreachable", "error"]) {
+      const { unmount } = await openWithServers(() => [
+        buildPalletServer({ status, statusDetail: "the reason" }),
+      ]);
+
+      const note = await findNote();
+      expect(note.textContent).toBe(
+        `agent tools: ${status.replace("needs-sign-in", "needs sign-in")}`,
+      );
+      expect(note.className).toContain("text-fail");
+      unmount();
+    }
+  });
+
+  it("says agent tools are not available when the servers cannot be read, and keeps the Connection's own actions", async () => {
+    await openApp([PAPER, PALLET], {
+      "GET /api/v1/plugins": { body: [...CATALOG, PALLET_PLUGIN] },
+      "GET /api/v1/mcp-servers": {
+        status: 500,
+        body: buildErrorBody("internal", "The servers could not be read."),
+      },
+    });
+
+    const row = await findConnectionRow(PALLET);
+    const note = await within(row).findByText("agent tools: not available");
+    expect(note.className).toContain("text-muted");
+    expect(note.className).not.toContain("text-fail");
+    expect(within(row).queryByRole("link")).toBeNull();
+    // The note's failure does not take the row or the screen away.
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeDefined();
+    expect(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Delete" }),
+    ).toBeDefined();
+    expect(within(await findConnectionRow(PAPER)).queryByText(/agent tools/)).toBeNull();
+  });
+
+  it("says nothing on a connection whose plugin offers no server", async () => {
+    await openWithServers(() => [buildPalletServer()]);
+
+    await findNote();
+    expect(within(await findConnectionRow(PAPER)).queryByText(/agent tools/)).toBeNull();
+  });
+
+  it("shows a status that changes elsewhere, and holds the mcpServer topic only while open", async () => {
+    let held = [buildPalletServer({ status: "checking" })];
+    const { live, router } = await openWithServers(() => held);
+    expect((await findNote()).textContent).toBe("agent tools: checking");
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+
+    held = [buildPalletServer()];
+    act(() => {
+      live.push("mcpServer", { _tag: "invalidate", ids: [SERVER_ID], kind: "updated" });
+    });
+    await waitFor(async () => {
+      expect((await findNote()).textContent).toBe("agent tools on");
+    });
+
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
   });
 });

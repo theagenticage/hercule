@@ -6,8 +6,13 @@ import "./connections.css";
 
 /**
  * Renders a Connection row's ⋯ button and the menu it opens, with
- * Reconnect…, Configure… and Delete…. Each item closes the menu and calls
- * its callback. Each ends in an ellipsis because it opens a dialog.
+ * Reconnect…, Configure…, Agent tools… and Delete…. Each item closes the menu
+ * and calls its callback. Each ends in an ellipsis because it opens a dialog
+ * or a screen.
+ *
+ * Agent tools… leads to the Connection's MCP server in Settings > MCP
+ * servers. It is left out when `onOpenAgentTools` is `undefined`, because the
+ * Connection's plugin offers no server.
  *
  * Reconnect… sets the Connection up again through its type's setup, so it
  * is disabled, with a tooltip that says why, when `onReconnect` is
@@ -21,11 +26,13 @@ export function ConnectionRowMenu({
   name,
   onReconnect,
   onConfigure,
+  onOpenAgentTools,
   onDelete,
 }: {
   readonly name: string;
   readonly onReconnect: (() => void) | undefined;
   readonly onConfigure: () => void;
+  readonly onOpenAgentTools: (() => void) | undefined;
   readonly onDelete: () => void;
 }): JSX.Element {
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
@@ -75,6 +82,18 @@ export function ConnectionRowMenu({
         >
           Configure…
         </button>
+        {onOpenAgentTools !== undefined && (
+          <button
+            type="button"
+            {...buildItemProps("agent-tools")}
+            onClick={() => {
+              close();
+              onOpenAgentTools();
+            }}
+          >
+            Agent tools…
+          </button>
+        )}
         <button
           type="button"
           {...buildItemProps("delete")}

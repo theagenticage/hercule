@@ -515,16 +515,32 @@ describe("skill pushes", () => {
 
 describe("MCP server pushes", () => {
   it("invalidates the list and the named servers' pages, never another server's", () => {
-    const keys = buildQueryKeys("mcpServer", ["a"]);
+    const keys = buildQueryKeys("mcpServer", ["a"], undefined, undefined, "updated");
     assert.deepStrictEqual(keys, [queryKeys.mcpServers(), queryKeys.mcpServer("a")]);
     assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.mcpServer("b"))));
   });
 
   it("invalidates every server's page after reconnect", () => {
-    assert.deepStrictEqual(buildQueryKeys("mcpServer", []), [
+    assert.deepStrictEqual(buildQueryKeys("mcpServer", [], undefined, undefined, "updated"), [
       queryKeys.mcpServers(),
       queryKeys.mcpServer(),
     ]);
+  });
+
+  it("leaves the projects and the settings alone on a status change, a creation and the first push", () => {
+    for (const kind of ["updated", "created", undefined] as const) {
+      for (const ids of [["a"], []]) {
+        const keys = buildQueryKeys("mcpServer", ids, undefined, undefined, kind);
+        assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+        assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
+      }
+    }
+  });
+
+  it("reads the projects and the settings again on a delete, since the server leaves their lists", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"], undefined, undefined, "deleted");
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
   });
 });
 

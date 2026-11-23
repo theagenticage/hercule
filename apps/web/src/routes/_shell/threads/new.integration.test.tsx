@@ -30,6 +30,7 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
+import { queryKeys } from "@hercule/client-core";
 import { HARNESSES } from "@hercule/client-core/testing";
 import { buildRunner, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
@@ -40,8 +41,25 @@ import {
   readPageText,
   renderApp,
   stubApi,
+  type Call,
   type Handler,
 } from "../../../app/testing";
+import {
+  MCP_CONNECTIONS,
+  MCP_SERVERS,
+  S_DATADOG,
+  S_FIGMA,
+  S_GITHUB,
+  S_LINEAR,
+  S_NOTION,
+  S_SENTRY_HOBBY,
+  S_SENTRY_WORK,
+  buildMcpServerRoutes,
+  findServerConnection,
+  openPlusMenu,
+  openServersSubmenu,
+  readSubmenuSwitches,
+} from "../../../app/testing-mcp-servers";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -296,8 +314,10 @@ describe("Composer: draft defaults", () => {
 
     expect(screen.getByRole("textbox")).toBeDefined();
 
-    const attach = screen.getByRole<HTMLButtonElement>("button", { name: "Attach images" });
-    expect(attach.disabled).toBe(false);
+    // The `+` opens a menu whose first row attaches an image.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Add to thread" }));
+    const menu = await screen.findByRole("dialog", { name: "Add to thread" });
+    expect(within(menu).getByRole("button", { name: "Attach an image" })).toBeDefined();
 
     const voice = screen.getByTitle<HTMLButtonElement>("Dictation is not built yet");
     expect(voice.disabled).toBe(true);
@@ -2911,11 +2931,13 @@ describe("Composer: images", () => {
   it("refuses images for a model that does not accept them, and says why", async () => {
     const { api } = await openApp([ACCOUNT_TEXT_ONLY]);
 
-    const attach = await screen.findByRole<HTMLButtonElement>("button", { name: "Attach images" });
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Add to thread" }));
+    const menu = await screen.findByRole("dialog", { name: "Add to thread" });
     await waitFor(() => {
-      expect(attach.title).toBe("GLM 5.3 does not accept images");
+      expect(within(menu).getByText("GLM 5.3 does not accept images")).toBeDefined();
     });
-    expect(attach.disabled).toBe(true);
+    // The row is not a button while no image can be attached.
+    expect(within(menu).queryByRole("button", { name: "Attach an image" })).toBeNull();
 
     fireEvent.paste(screen.getByRole("textbox"), {
       clipboardData: { files: [buildImage("pasted.png")] },
@@ -3112,5 +3134,336 @@ describe("Composer: the model menu as an accordion of profiles", () => {
     expect(
       api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
     ).toBe(false);
+  });
+});
+
+describe("Composer: the MCP servers of a Draft Thread", () => {
+  const WEBSHOP_SERVERS: Project = {
+    ...WEBSHOP,
+    mcpServerIds: [S_SENTRY_WORK.id, S_NOTION.id],
+  };
+  const PROJECT_ROUTES: Record<string, Handler> = {
+    "GET /api/v1/projects": { body: { items: [WEBSHOP_SERVERS, OPS, EDGE, SANDBOX] } },
+    [`GET /api/v1/projects/${WEBSHOP.id}`]: { body: WEBSHOP_SERVERS },
+  };
+
+  const openServersDraft = (
+    path: string,
+    user: Record<string, unknown> = { "thread.workspace": "primary" },
+    extra: Readonly<Record<string, Handler>> = {},
+  ) =>
+    openDraftAt(path, user, {
+      ...buildMcpServerRoutes(),
+      ...PROJECT_ROUTES,
+      "POST /api/v1/sessions": { body: NEW_SESSION },
+      ...extra,
+    });
+
+  const readServerReads = (api: { readonly calls: readonly { readonly path: string }[] }) =>
+    api.calls.filter((call) => call.path === "/api/v1/mcp-servers").length;
+
+  const readSpawn = async (api: { readonly calls: readonly Call[] }) => {
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    return api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/sessions")!
+      .body as Record<string, unknown>;
+  };
+
+  const send = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+  };
+
+  it("has the two rows, says 'none' for a draft with no servers, and reads nothing until the MCP row opens", async () => {
+    const user = userEvent.setup();
+    const { api, live } = await openServersDraft("/threads/new");
+    await screen.findByRole("textbox");
+
+    expect(readServerReads(api)).toBe(0);
+    expect(live.topics()).not.toContain("mcpServer");
+
+    // The `+` menu is also how an image is attached: opening it reads nothing.
+    const menu = await openPlusMenu(user);
+    expect(within(menu).getByRole("button", { name: "Attach an image" })).toBeDefined();
+    const row = within(menu).getByRole("button", { name: /MCP servers/ });
+    expect(row.textContent).toContain("none");
+    expect(readServerReads(api)).toBe(0);
+    expect(live.topics()).not.toContain("mcpServer");
+
+    await user.click(row);
+    await screen.findByRole("dialog", { name: "Servers of this thread" });
+    await waitFor(() => {
+      expect(readServerReads(api)).toBeGreaterThanOrEqual(1);
+    });
+    expect(live.topics()).toContain("mcpServer");
+
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
+    expect(readServerReads(api)).toBe(2);
+  });
+
+  it("starts from the project's list, says so, and reads the servers as soon as the draft opens", async () => {
+    const user = userEvent.setup();
+    const { api, live } = await openServersDraft(buildProjectDraftPath(WEBSHOP.id));
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+    await waitFor(() => {
+      expect(readServerReads(api)).toBeGreaterThanOrEqual(1);
+    });
+
+    const menu = await openPlusMenu(user);
+    expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain("2");
+    await user.click(within(menu).getByRole("button", { name: /MCP servers/ }));
+    const submenu = await screen.findByRole("dialog", { name: "Servers of this thread" });
+    await within(submenu).findByText("Servers of this thread");
+
+    expect(readPageText(submenu)).toContain(
+      "Starts from webshop's list. Changes are for this thread only.",
+    );
+    expect(
+      readSubmenuSwitches(submenu)
+        .filter((row) => row.on)
+        .map((row) => row.name),
+    ).toEqual(["sentry", "notion"]);
+  });
+
+  it("starts from the default list for a draft in no project", async () => {
+    const user = userEvent.setup();
+    await openServersDraft("/threads/new", { "thread.mcpServerIds": [S_GITHUB.id] });
+
+    const submenu = await openServersSubmenu(user);
+
+    expect(readPageText(submenu)).toContain(
+      "Starts from the default list. Changes are for this thread only.",
+    );
+    expect(readSubmenuSwitches(submenu)[0]).toEqual({ name: "github", on: true });
+  });
+
+  it("shows '1 needs sign-in' and a red dot while a server of the draft's list needs sign-in", async () => {
+    const user = userEvent.setup();
+    await openServersDraft("/threads/new", {
+      "thread.mcpServerIds": [S_LINEAR.id, S_NOTION.id],
+    });
+
+    await screen.findByRole("button", { name: "Add to thread, a server needs sign-in" });
+    const submenu = await openServersSubmenu(user);
+    expect(
+      within(screen.getByRole("dialog", { name: "Add to thread" })).getByText("1 needs sign-in"),
+    ).toBeDefined();
+    // The server stays on and offers the Connection's Reconnect.
+    expect(
+      within(submenu).getByRole("link", { name: "Reconnect Linear · acme" }).getAttribute("href"),
+    ).toBe(`/connections?reconnect=${findServerConnection(S_LINEAR).id}`);
+  });
+
+  it("sends no list for an untouched draft", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersDraft(buildProjectDraftPath(WEBSHOP.id));
+
+    await send(user);
+
+    expect(await readSpawn(api)).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("sends the list the user chose with the first message, and an empty list when every server is off", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersDraft("/threads/new", {
+      "thread.mcpServerIds": [S_NOTION.id],
+    });
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "datadog in this thread" }));
+    await user.click(within(submenu).getByRole("switch", { name: "notion in this thread" }));
+    // Nothing is written to the controller until the draft is sent.
+    expect(
+      api.calls.filter((call) => call.method !== "GET" && !call.path.includes("ws-ticket")),
+    ).toEqual([]);
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_DATADOG.id] });
+  });
+
+  it("takes a choice from the servers the cache holds, with no Connection records to join them with", async () => {
+    const user = userEvent.setup();
+    let connectionsFail = false;
+    const { api, queryClient } = await openServersDraft(
+      "/threads/new",
+      { "thread.mcpServerIds": [S_NOTION.id] },
+      {
+        "GET /api/v1/connections": () =>
+          connectionsFail
+            ? { status: 500, body: buildErrorBody("internal", "The controller fell over.") }
+            : { body: { items: MCP_CONNECTIONS } },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    const datadog = within(submenu).getByRole("switch", { name: "datadog in this thread" });
+    // The menu is drawn. Its Connection records leave the cache, and cannot be read again.
+    connectionsFail = true;
+    queryClient.removeQueries({ queryKey: queryKeys.connections() });
+
+    fireEvent.click(datadog);
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_NOTION.id, S_DATADOG.id] });
+  });
+
+  it("does not send a picked server that was deleted while the draft was open", async () => {
+    const user = userEvent.setup();
+    let held = MCP_SERVERS;
+    const { api, live } = await openServersDraft(
+      "/threads/new",
+      { "thread.mcpServerIds": [S_GITHUB.id] },
+      buildMcpServerRoutes(() => held),
+    );
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "notion in this thread" }));
+    held = MCP_SERVERS.filter((server) => server.id !== S_NOTION.id);
+    act(() => {
+      live.push("mcpServer", { _tag: "invalidate", ids: [S_NOTION.id], kind: "deleted" });
+    });
+    await waitFor(() => {
+      expect(within(submenu).queryByRole("switch", { name: "notion in this thread" })).toBeNull();
+    });
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_GITHUB.id] });
+  });
+
+  it("keeps the topic of a draft whose list names only a server that was deleted, which then counts none", async () => {
+    const user = userEvent.setup();
+    let held = MCP_SERVERS;
+    const { live } = await openServersDraft(
+      "/threads/new",
+      { "thread.mcpServerIds": [S_NOTION.id] },
+      buildMcpServerRoutes(() => held),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+
+    held = MCP_SERVERS.filter((server) => server.id !== S_NOTION.id);
+    act(() => {
+      live.push("mcpServer", { _tag: "invalidate", ids: [S_NOTION.id], kind: "deleted" });
+    });
+
+    const menu = await openPlusMenu(user);
+    await waitFor(() => {
+      expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain(
+        "none",
+      );
+    });
+    // The stored list still names the server, so the draft keeps asking for the servers.
+    expect(live.topics()).toContain("mcpServer");
+  });
+
+  it("sends an empty list when the user switched every server off", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersDraft("/threads/new", {
+      "thread.mcpServerIds": [S_NOTION.id],
+    });
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "notion in this thread" }));
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [] });
+  });
+
+  it("does not carry a list chosen in one project to a draft in another", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await openServersDraft(buildProjectDraftPath(WEBSHOP.id));
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "notion in this thread" }));
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    // Another project's draft is the same composer, so only the pick's own project keeps it apart.
+    await act(async () => {
+      await router.navigate({ to: "/threads/new", search: { project: OPS.id } });
+    });
+
+    // The draft shows its new project's list: OPS names no server.
+    const menu = await openPlusMenu(user);
+    expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain("none");
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("goes back to the list the draft started from", async () => {
+    const user = userEvent.setup();
+    await openServersDraft(buildProjectDraftPath(WEBSHOP.id));
+
+    const submenu = await openServersSubmenu(user);
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await user.click(within(submenu).getByRole("switch", { name: "notion in this thread" }));
+    await user.click(
+      await within(submenu).findByRole("button", { name: "Back to webshop's list" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        readSubmenuSwitches(submenu)
+          .filter((row) => row.on)
+          .map((row) => row.name),
+      ).toEqual(["sentry", "notion"]);
+    });
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+  });
+
+  it("swaps the account of a name in the draft's list, in the old account's place", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersDraft(buildProjectDraftPath(WEBSHOP.id));
+
+    const submenu = await openServersSubmenu(user);
+    await user.selectOptions(
+      within(submenu).getByRole("combobox", { name: "Account of sentry" }),
+      S_SENTRY_HOBBY.id,
+    );
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_SENTRY_HOBBY.id, S_NOTION.id] });
+  });
+
+  it("picks from every server in the picker, those switched off in Settings too, and sends the pick", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersDraft("/threads/new", {
+      "thread.mcpServerIds": [S_GITHUB.id],
+    });
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("button", { name: "1 more server…" }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    expect(readPageText(picker)).toContain("1 chosen");
+    expect(readPageText(picker)).toContain(
+      "Starts from the default list. Changes are for this thread only.",
+    );
+    await user.click(within(picker).getByRole("checkbox", { name: "figma" }));
+    await user.click(within(picker).getByRole("button", { name: "Done" }));
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_GITHUB.id, S_FIGMA.id] });
   });
 });

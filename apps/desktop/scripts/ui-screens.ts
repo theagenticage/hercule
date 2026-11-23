@@ -334,6 +334,138 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".skill-record .skill-rev",
     nonTextParts: [],
   },
+  // Settings > MCP servers: the list with a server in each state, a server that needs sign-in, a
+  // server's Projects section with its refusal open, and the picker of the default list; then a
+  // server's page while it is checking, switched off, unreachable and in error, the list with no
+  // Connection that offers a server, and the list when the read of the servers fails.
+  {
+    name: "settings-mcp-servers",
+    path: "settings-mcp-servers.html",
+    contentSelector: ".mcp-list .mcp-row",
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+      { selector: ".mcp-status--fail .dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server",
+    path: "settings-mcp-servers.html?state=page",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-projects",
+    path: "settings-mcp-servers.html?state=projects",
+    contentSelector: ".mcp-proj-row .mcp-clash",
+    nonTextParts: [{ selector: ".mcp-proj-row .choice-box", kind: "boundary" }],
+  },
+  {
+    name: "settings-mcp-picker",
+    path: "settings-mcp-servers.html?state=picker",
+    contentSelector: "dialog.mcp-picker .mcp-pick-row",
+    nonTextParts: [
+      { selector: ".mcp-pick-row .choice-box", kind: "boundary" },
+      { selector: ".mcp-pick-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-checking",
+    path: "settings-mcp-servers.html?state=checking",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-off",
+    path: "settings-mcp-servers.html?state=off",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-unreachable",
+    path: "settings-mcp-servers.html?state=unreachable",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-error",
+    path: "settings-mcp-servers.html?state=error",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-servers-empty",
+    path: "settings-mcp-servers.html?state=empty",
+    contentSelector: ".mcp-group .set-empty",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-servers-failed",
+    path: "settings-mcp-servers.html?state=failed",
+    contentSelector: ".render-failure-headline",
+    nonTextParts: [],
+  },
+  // The "agent tools" note of each Connection whose plugin offers an MCP server: on, off, and needs sign-in.
+  {
+    name: "settings-connections",
+    path: "settings-connections.html",
+    contentSelector: ".conn-tools",
+    nonTextParts: [
+      { selector: ".conn-tools.is-on .dot", kind: "mark" },
+      { selector: ".conn-tools.is-fail .dot", kind: "mark" },
+    ],
+  },
+  // The composer's `+` menu with the thread's MCP servers, on a started thread and on a Draft Thread, and the thread's
+  // lines about a server left out at the start and a refused call.
+  {
+    name: "thread-mcp-menu",
+    path: "thread-mcp.html",
+    contentSelector: ".plus-sub .plus-row",
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: ".plus-sub .toggle", kind: "boundary" },
+      { selector: ".plus-sub .field--select", kind: "boundary" },
+      { selector: ".plus-sub .plus-row-mark svg", kind: "mark" },
+      { selector: ".plus-dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "draft-mcp-menu",
+    path: "draft-mcp.html",
+    contentSelector: ".plus-sub .plus-row",
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: ".plus-sub .toggle", kind: "boundary" },
+      { selector: ".plus-sub .field--select", kind: "boundary" },
+      { selector: ".plus-sub .plus-row-mark svg", kind: "mark" },
+      { selector: ".plus-dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "thread-mcp-lines",
+    path: "thread-mcp.html?state=lines",
+    contentSelector: ".error-note button",
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: ".error-note .dot", kind: "mark" },
+      { selector: ".plus-dot", kind: "mark" },
+    ],
+  },
 ];
 
 /**

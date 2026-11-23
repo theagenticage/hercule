@@ -6,10 +6,10 @@
  * screen. It still runs against the real client and the stubbed controller of
  * `app/testing`, whose cleanup runs after each test.
  */
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { vi } from "vitest";
 import { act, render } from "@testing-library/react";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
   createMemoryHistory,
@@ -21,7 +21,7 @@ import {
 } from "@tanstack/react-router";
 import { DoneMovesProvider } from "../../app/done-moves";
 import type { PendingSubmissions } from "../../app/pending-submissions";
-import { ensureShellData, ensureThreadData } from "../../app/queries";
+import { ensureShellData, ensureThreadData, sessionQuery } from "../../app/queries";
 import { useKeepRequestDrafts } from "../../app/request-drafts";
 import { SessionPresentationProvider } from "../../app/session-presentation";
 import {
@@ -38,6 +38,29 @@ import {
   type LiveStub,
   type ThreadRecords,
 } from "../../app/testing";
+import { ThreadServersProvider } from "./thread-servers";
+
+/**
+ * Renders `children` inside the servers of the thread `sessionId`, as the
+ * thread's page does. It reads the session itself, so `children` keep their
+ * identity and are not drawn again when the session changes.
+ */
+function ProvideThreadServers({
+  sessionId,
+  client,
+  children,
+}: {
+  readonly sessionId: string;
+  readonly client: HerculeClient;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
+  return (
+    <ThreadServersProvider thread={{ kind: "started", session, hasMcpLine: false }}>
+      {children}
+    </ThreadServersProvider>
+  );
+}
 
 /** A part of the thread screen, drawn for the thread `sessionId`. */
 export type ThreadPart = (props: { readonly sessionId: string }) => JSX.Element;
@@ -84,7 +107,16 @@ export const renderThreadPart = async (
   {
     thread,
     handlers = {},
-  }: { readonly thread: ThreadRecords; readonly handlers?: Readonly<Record<string, Handler>> },
+    withoutServers = false,
+  }: {
+    readonly thread: ThreadRecords;
+    readonly handlers?: Readonly<Record<string, Handler>>;
+    /**
+     * Leaves out the thread's servers, as where a transcript is drawn outside the thread's page,
+     * such as the first moments of a thread in the Inbox.
+     */
+    readonly withoutServers?: boolean;
+  },
 ): Promise<RenderedThreadPart> => {
   const sessionId = thread.session.id;
   const calls = stubApi({
@@ -133,7 +165,14 @@ export const renderThreadPart = async (
       ]),
     component: function ThreadRoute() {
       useKeepRequestDrafts(sessionId);
-      return <Part sessionId={sessionId} />;
+      // The thread's page shares its servers with the composer's `+` and its lines.
+      return withoutServers ? (
+        <Part sessionId={sessionId} />
+      ) : (
+        <ProvideThreadServers sessionId={sessionId} client={client}>
+          <Part sessionId={sessionId} />
+        </ProvideThreadServers>
+      );
     },
   });
   const router = createRouter({

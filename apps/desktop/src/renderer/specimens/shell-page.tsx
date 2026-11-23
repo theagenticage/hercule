@@ -11,7 +11,6 @@
  * - settings-assistants.tsx, which opens Settings > Assistants;
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page;
- * - settings-connections.tsx, which opens Settings > Connections;
  * - settings-providers.tsx, which opens Settings > Providers;
  * - workflows.tsx, which opens Workflows;
  * - fleet.tsx, which opens the Fleet page or a machine's page;
@@ -111,7 +110,6 @@ import {
   discussionQuery,
   discussionsQuery,
   fleetSessionsQuery,
-  eventCountsQuery,
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
@@ -397,7 +395,6 @@ interface OpenScreens {
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly skillsSettings?: SkillsSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
-  readonly connectionsSettings?: ConnectionsSettingsRecords;
   readonly providersSettings?: ProvidersSettingsRecords;
   readonly workflows?: WorkflowsRecords;
   readonly fleet?: FleetRecords;
@@ -571,7 +568,6 @@ const seedQueryCache = (
     permissionProfilesSettings,
     skillsSettings,
     appearanceSettings,
-    connectionsSettings,
     providersSettings,
     workflows,
     fleet,
@@ -679,11 +675,6 @@ const seedQueryCache = (
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
-  }
-  if (connectionsSettings !== undefined) {
-    queryClient.setQueryData(connectionsQuery(client).queryKey, connectionsSettings.connections);
-    queryClient.setQueryData(pluginsQuery(client).queryKey, connectionsSettings.plugins);
-    queryClient.setQueryData(eventCountsQuery(client).queryKey, connectionsSettings.counts);
   }
   if (providersSettings !== undefined) {
     queryClient.setQueryData(
@@ -1343,11 +1334,6 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
     );
   }
-  if (screens.connectionsSettings !== undefined && document.querySelector(".conn") === null) {
-    throw new Error(
-      "Settings > Connections drew no Connection's row. Check the page's console for the error.",
-    );
-  }
   if (
     screens.providersSettings !== undefined &&
     document.querySelector(".pa-card, .pa-empty") === null
@@ -1712,21 +1698,6 @@ export async function mountAppearanceSettingsSpecimen(
   settings: AppearanceSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, "/settings/appearance", { appearanceSettings: settings });
-}
-
-/**
- * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Settings > Connections open: the main pane shows the app's real
- * Settings frame and Connections section, with the Connections and the
- * plugins of `settings`. Returns once the Connections' rows are in the
- * document. Fails when the page has no `#root`, draws no sidebar row or no
- * Connection's row, or tries to read a record the cache does not hold.
- */
-export async function mountConnectionsSettingsSpecimen(
-  records: SidebarRecords,
-  settings: ConnectionsSettingsRecords,
-): Promise<void> {
-  await mountShellSpecimen(records, "/settings/connections", { connectionsSettings: settings });
 }
 
 /**

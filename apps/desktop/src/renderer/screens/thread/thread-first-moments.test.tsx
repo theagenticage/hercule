@@ -15,6 +15,13 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../app/testing";
+import { connectionsQuery, mcpServersQuery, pluginsQuery } from "../../app/queries";
+import { buildMcpWorld } from "../settings/mcp-servers/mcp-world.testing";
+import {
+  OFFERING_PLUGINS,
+  SENTRY_WORK,
+  SENTRY_WORK_ID,
+} from "../settings/mcp-servers/mcp-servers.testing";
 import { ThreadFirstMoments } from "./thread-first-moments";
 import { holdAnimationFrames, renderThreadPart, type HeldFrames } from "./testing";
 
@@ -45,15 +52,19 @@ function ConnectedFirstMoments({ sessionId }: { readonly sessionId: string }): J
 }
 
 /** Mounts the first moments of `thread` under Suspense, as the dialog does, once its live topics are subscribed. */
-const openFirstMoments = async (thread: (typeof THREAD_FIXTURES)["running"]) => {
+const openFirstMoments = async (
+  thread: (typeof THREAD_FIXTURES)["running"],
+  handlers: Parameters<typeof renderThreadPart>[1]["handlers"] = {},
+) => {
   const sessionId = thread.session.id;
+  // The Inbox draws these first moments outside any thread's page, so there is no thread's servers.
   const rendered = await renderThreadPart(
     ({ sessionId: id }) => (
       <Suspense fallback={null}>
         <ConnectedFirstMoments key={id} sessionId={id} />
       </Suspense>
     ),
-    { thread },
+    { thread, handlers, withoutServers: true },
   );
   await waitFor(() => {
     expect(rendered.live.readTopics()).toEqual(
@@ -129,5 +140,38 @@ describe("the Thread's first moments", () => {
       frames.run();
       expect(transcript.querySelector(".streaming")?.textContent).toBe("Reading the issue first.");
     });
+  });
+
+  it("draws the fix buttons of a start warning from the servers the cache holds, and reads none itself", async () => {
+    const thread = THREAD_FIXTURES.running;
+    const { session } = thread;
+    const transcript = [
+      ...thread.transcript,
+      ...buildNextRows(session.id, thread.transcript, {
+        _tag: "runtime.warning",
+        message: "Sentry needs you to sign in.",
+        mcpServers: [{ mcpServerId: SENTRY_WORK_ID, reason: "needs-sign-in" }],
+      }),
+    ];
+    const { handlers } = buildMcpWorld({ servers: [{ ...SENTRY_WORK, status: "needs-sign-in" }] });
+    const { queryClient, client, calls } = await openFirstMoments(
+      { ...thread, transcript },
+      { ...handlers, "GET /api/v1/plugins": { body: OFFERING_PLUGINS } },
+    );
+    const note = await screen.findByText("Sentry needs you to sign in.");
+    expect(within(note.closest("div")!).queryByRole("button")).toBeNull();
+
+    // The catalogue is warm now, as it is when the user has been in Settings.
+    await act(async () => {
+      await Promise.all([
+        queryClient.fetchQuery(mcpServersQuery(client)),
+        queryClient.fetchQuery(connectionsQuery(client)),
+        queryClient.fetchQuery(pluginsQuery(client)),
+      ]);
+    });
+
+    expect(await screen.findByRole("button", { name: "Reconnect Sentry · work" })).toBeTruthy();
+    // Only the fetches above: the transcript read the servers from the cache.
+    expect(calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(1);
   });
 });

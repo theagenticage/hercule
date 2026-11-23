@@ -9,6 +9,7 @@ import {
   type PluginIdentity,
 } from "@hercule/client-core";
 import type { Connection, EventCountsByConnection } from "@hercule/contract";
+import { AgentToolsButton, type AgentTools } from "./agent-tools";
 import { ConnectionTypeMark } from "./connection-type-mark";
 import { ConnectionRowMenu } from "./connection-row-menu";
 import "./connections.css";
@@ -48,14 +49,19 @@ const UNKNOWN_COUNT = (
  * - under it, the account the Connection acts as, unless the label already
  *   is that account's name (`showsAccountBesideLabel`). The line is then
  *   left out rather than repeat the name;
+ * - on that line, for a Connection in `agentTools`, a small button for each
+ *   MCP server its plugins offer, with what the server is doing, which calls
+ *   `onOpenAgentTools`, or, when the servers could not be read, a muted note
+ *   saying so;
  * - one bar per hour of the last 24, the busiest hour's the tallest, and
  *   the events of those 24 hours. Without `counts`, the bars are left out
  *   and every count reads "–", never 0, because the events are unknown;
  * - its health in words. A failing Connection reads its status detail in
  *   the fail colour, with a dot, on a tinted row. The detail wraps rather
  *   than end in an ellipsis, because the user needs all of it;
- * - the ⋯ menu, whose items call `onReconnect`, `onConfigure` and
- *   `onDelete` with the Connection.
+ * - the ⋯ menu, whose items call `onReconnect`, `onConfigure`,
+ *   `onOpenAgentTools` and `onDelete` with the Connection. Agent tools… leads
+ *   to the first of the Connection's servers.
  *
  * With no Connection, a quiet note takes the place of the strip and the
  * table, as Settings > Assistants draws one with no assistant. It points to
@@ -67,8 +73,10 @@ export function ConnectionTable({
   counts,
   types,
   plugins,
+  agentTools,
   onReconnect,
   onConfigure,
+  onOpenAgentTools,
   onDelete,
 }: {
   readonly connections: ReadonlyArray<Connection>;
@@ -79,9 +87,17 @@ export function ConnectionTable({
   readonly counts: EventCountsByConnection | undefined;
   readonly types: ReadonlyArray<ConnectionType>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
+  /**
+   * What each Connection says about its plugins' MCP servers, one note for
+   * each, by the Connection's id. A Connection with no entry has no such
+   * server and shows nothing about it, and so does every Connection while
+   * this is undefined, because the servers are still being read.
+   */
+  readonly agentTools: ReadonlyMap<string, readonly AgentTools[]> | undefined;
   /** Reconnect is offered only while the Connection's type is in the binary. */
   readonly onReconnect: (connection: Connection, type: ConnectionType) => void;
   readonly onConfigure: (connection: Connection) => void;
+  readonly onOpenAgentTools: (tools: AgentTools) => void;
   readonly onDelete: (connection: Connection) => void;
 }): JSX.Element {
   if (connections.length === 0) {
@@ -148,6 +164,7 @@ export function ConnectionTable({
           const health = describeConnectionHealth(connection);
           // `summarizeConnections` returns an entry for every Connection it is given.
           const activity = summary.activity.get(connection.id)!;
+          const tools = agentTools?.get(connection.id);
           return (
             <div key={connection.id} className={health.failing ? "conn is-fail" : "conn"}>
               <span className="mk">
@@ -155,7 +172,23 @@ export function ConnectionTable({
               </span>
               <span className="nm">
                 <b title={name}>{name}</b>
-                {showsAccountBesideLabel(connection) && <span>{connection.displayName}</span>}
+                {tools === undefined ? (
+                  showsAccountBesideLabel(connection) && <span>{connection.displayName}</span>
+                ) : (
+                  <span className="conn-line">
+                    {showsAccountBesideLabel(connection) && <span>{connection.displayName}</span>}
+                    {tools.map((note, index) => (
+                      <AgentToolsButton
+                        // The notes are listed in the order of the offers, which never changes while the row is drawn.
+                        key={index}
+                        tools={note}
+                        onOpen={() => {
+                          onOpenAgentTools(note);
+                        }}
+                      />
+                    ))}
+                  </span>
+                )}
               </span>
               {counts === undefined ? <span /> : <HourlyBars activity={activity} />}
               <span className="n">
@@ -181,6 +214,13 @@ export function ConnectionTable({
                 onConfigure={() => {
                   onConfigure(connection);
                 }}
+                onOpenAgentTools={
+                  tools === undefined
+                    ? undefined
+                    : () => {
+                        onOpenAgentTools(tools[0]!);
+                      }
+                }
                 onDelete={() => {
                   onDelete(connection);
                 }}

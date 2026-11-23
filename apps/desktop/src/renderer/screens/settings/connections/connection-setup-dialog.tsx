@@ -16,12 +16,9 @@ import {
   type SetupFlow,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
-import { useDeviceSignIn, type DeviceSignInProgress } from "../../../../app/device-sign-in";
-import { connectionsQuery, pluginsQuery } from "../../../../app/queries";
-import {
-  ConnectionSetup,
-  type ConnectionSetupState,
-} from "../../../../screens/settings/connections";
+import { useDeviceSignIn, type DeviceSignInProgress } from "../../../app/device-sign-in";
+import { connectionsQuery, pluginsQuery } from "../../../app/queries";
+import { ConnectionSetup, type ConnectionSetupState } from "./connection-setup";
 
 /**
  * An OAuth sign-in that is finishing in the browser: the provider's page at

@@ -426,6 +426,34 @@ export const skillsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads every MCP Server, sorted by name. Settings > MCP servers and
+ * Settings > Connections hold the `mcpServer` topic while they are open,
+ * which keeps the list current.
+ */
+export const mcpServersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.mcpServers(),
+    queryFn: async () => (await client.mcpServer.query()).items,
+    // A refusal, such as a token without `mcp.read`, never changes on a second
+    // try, and Settings > Connections leaves its notes out at once.
+    retry: isWorthRetrying,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads the MCP Server `id`, for its page. A read that fails is not tried
+ * again: an id that names no server is an answer, not a fault, and the page
+ * goes back to the list.
+ */
+export const mcpServerQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.mcpServer(id),
+    queryFn: () => client.mcpServer.read({ params: { id } }),
+    retry: false,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
  * How long skills the composer has read count as current. Opening a list
  * reads the skills again only when they are older than this. Without the
  * window, typing a path such as `look at /src/foo` opens the commands list

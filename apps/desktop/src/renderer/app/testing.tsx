@@ -1325,6 +1325,12 @@ export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): reado
 export interface LiveStub {
   /** Returns the topics the app is subscribed to on its current socket, oldest first. */
   readonly readTopics: () => readonly string[];
+  /**
+   * Returns how many times the app has subscribed to `topic` on its current
+   * socket, including subscriptions it has ended since. A subscription that
+   * was dropped and made again counts twice, which `readTopics` cannot show.
+   */
+  readonly countSubscriptions: (topic: string) => number;
   /** Checks whether the app's current socket is open. `false` before the app opens one. */
   readonly isConnected: () => boolean;
   /**
@@ -1444,6 +1450,12 @@ export const buildTestContext = async (
         .at(-1)
         ?.subscriptions()
         .map((each) => each.topic) ?? [],
+    countSubscriptions: (topic) =>
+      sockets
+        .at(-1)
+        ?.calls("subscribe")
+        .filter((frame) => (frame.payload as { readonly topic: string }).topic === topic).length ??
+      0,
     isConnected: () => sockets.at(-1)?.readyState === 1,
     pushInvalidation: (
       topic,

@@ -1,0 +1,508 @@
+/* Settings > MCP servers, as the approved prototype draws it (#1211). The
+   book has no such page, so the section is built from the book's Settings
+   pieces, as Skills is: the list is a `.set-table-row` table (settings.css)
+   with Permission profiles' row parts (permission-profiles.css), and a
+   server's page is a `.set-record` of `set-sec` sections. Values are the
+   book's tokens unless a comment says otherwise. */
+
+/* ---------- A server's name and status ---------- */
+
+/* One way to write a server on every screen: its name, then the label of its
+   Connection in muted type. A long name ends in an ellipsis, as a row's name
+   does. */
+.mcp-name {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.mcp-name > b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+}
+.mcp-name > .mcp-account {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  text-overflow: ellipsis;
+}
+/* A table row draws every `span` inside its name cell as the muted second
+   line (permission-profiles.css), so the name takes back the row's own ink
+   and size. */
+.profile-name > .mcp-name {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+
+/* The Connections table's `.health`: quiet when fine, red with a dot when not. */
+.mcp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.mcp-status--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.mcp-status--off {
+  color: var(--faint);
+}
+.mcp-status .spin {
+  width: 11px;
+  height: 11px;
+}
+
+/* A switch whose write runs keeps its place and its focus. A press on it is
+   ignored by the component, and must never reach the row's link. */
+.mcp-switch {
+  position: relative;
+  z-index: 1;
+}
+/* While its write runs, a switch is drawn at half opacity like the app's other
+   controls that cannot act. It stays focusable, so it is `aria-disabled`. */
+.mcp-switch[aria-disabled="true"] {
+  opacity: 0.5;
+}
+
+/* ---------- The list ---------- */
+
+/* As wide as Connections, whose table it resembles, and starting 22px under
+   the header as Skills and Permission profiles do. */
+.set-col:has(> .mcp-list) {
+  width: min(900px, 100%);
+}
+.set-body:has(> .set-col > .mcp-list),
+.set-body:has(> .set-col > .mcp-record) {
+  padding-top: 22px;
+}
+.mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+.mcp-list code {
+  font-size: var(--t-12);
+}
+
+/* A group: the Connections page's heading and line, on one line. */
+.mcp-group-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 10px;
+  min-height: 26px;
+  margin-bottom: 12px;
+}
+.mcp-group-top h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.mcp-group-top > span:not(.spacer) {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.mcp-group > .set-empty {
+  padding-block: 28px;
+}
+
+/* The head shares the rows' grid, so each heading starts where its cells do. */
+.mcp-row-grid {
+  grid-template-columns: 34px minmax(0, 1fr) 132px 200px 36px 16px;
+}
+/* "Offered" is wider than the switch's 36px column. It ends at the column's
+   right edge, where the switch ends, and runs out to the left. */
+.mcp-head-offered {
+  justify-self: end;
+  white-space: nowrap;
+}
+.mcp-projects {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.mcp-projects.is-none {
+  color: var(--faint);
+}
+
+/* A row with a page: its name is a link that covers the whole row, and the
+   switch sits above it. The row lights up as a link row does, and its
+   hairlines give way to the highlight. */
+.mcp-row-link {
+  color: inherit;
+  text-decoration: none;
+}
+.mcp-row-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-md);
+}
+.mcp-row-link:focus-visible {
+  outline: none;
+}
+.mcp-row-link:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.mcp-row:has(.mcp-row-link):hover {
+  background: var(--hover);
+}
+.mcp-row:has(.mcp-row-link):hover::before,
+.mcp-row:has(.mcp-row-link):hover + .set-table-row::before {
+  border-top-color: transparent;
+}
+/* A row that needs sign-in or cannot be reached is tinted from its start,
+   as a Skill whose check failed is, and its hairlines give way to the tint. */
+.mcp-row.is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 70%);
+}
+.mcp-row.is-fail::before,
+.mcp-row.is-fail + .set-table-row::before {
+  border-top-color: transparent;
+}
+/* The controller's reason for a refused switch, under its row. */
+.mcp-row-refusal {
+  margin: 0;
+  padding: 0 8px 8px 48px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* What a thread with no project starts with, as chips. */
+.mcp-default-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--divider);
+}
+.mcp-chip {
+  color: var(--ink);
+}
+
+/* A narrow body drops the Projects column, which a server's page shows in
+   full. */
+@container (width < 640px) {
+  .mcp-row-grid {
+    grid-template-columns: 34px minmax(0, 1fr) 110px 36px 16px;
+  }
+  .mcp-row-grid > :nth-child(4) {
+    display: none;
+  }
+}
+
+/* ---------- A server's page ---------- */
+
+.mcp-lead {
+  display: grid;
+  gap: 12px;
+}
+.mcp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* The mark beside the server's name at the top of its page. */
+.mcp-head-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-md);
+  color: var(--ink);
+}
+/* The band over a server that is not ready: Skills' update band, on the
+   sunken fill for a state that waits on nobody, and on the fail tint with a
+   button for one the user must fix. */
+.mcp-band {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 9px 9px 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: var(--line-18);
+}
+.mcp-band > span:not(.spin) {
+  flex: 1;
+  min-width: 0;
+}
+.mcp-band b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.mcp-band--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.mcp-band--fail b {
+  color: var(--fail-ink);
+}
+/* The controller's own words for what went wrong, on a smaller line under
+   what to do about it. It keeps the band's full ink: at 12px, a lighter red
+   is too faint on the tint to read. */
+.mcp-band small {
+  display: block;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+.mcp-record .set-sec > h2 + * {
+  margin-top: 12px;
+}
+/* settings.css gives a row that follows a heading 10px with a rule of the same
+   weight as the one above, so the two tie and the load order of the
+   stylesheets decided: the first row sat 2px higher whenever settings.css
+   loaded last. A third class on this rule settles it. */
+.mcp-record .set-sec > h2 + .set-row {
+  margin-top: 12px;
+}
+.mcp-record .set-sec > p {
+  margin: 3px 0 12px;
+}
+.mcp-record .set-row {
+  min-height: 50px;
+}
+.mcp-record code {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-11);
+  color: var(--ink);
+}
+.mcp-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.mcp-value--mono {
+  font-size: var(--t-12);
+}
+/* The Connection's name with its account under it. */
+.mcp-connection {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.mcp-value-fine {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* What is wrong with the sign-in, where its healthy value is otherwise shown. */
+.mcp-value-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.mcp-tool {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 36px;
+  padding: 4px 0;
+  border-top: 1px solid var(--divider);
+}
+.mcp-tool code {
+  overflow: hidden;
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-tool span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.mcp-tool--none {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* The Projects section's rows. */
+.mcp-proj-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 40px;
+  padding: 6px 0;
+  border-top: 1px solid var(--divider);
+}
+.mcp-proj-row .proj {
+  color: var(--ink);
+}
+.mcp-proj-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+/* A box the user pressed whose project must first answer the refusal under
+   it: a short dash in place of the tick, on the unticked box. It is neither
+   ticked nor empty until the user answers. */
+.choice-box.mcp-box-waiting::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 1.5px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  pointer-events: none;
+}
+/* The other server of this name that a project names, beside the project. */
+.mcp-proj-other {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* Why a project cannot take this server: under the project, from its name. */
+.mcp-clash {
+  flex-basis: 100%;
+  margin: 2px 0 6px 24px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.mcp-clash code {
+  color: var(--fail-ink);
+}
+.mcp-clash-acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.mcp-clash-acts code {
+  color: inherit;
+}
+
+/* ---------- The picker ---------- */
+
+.mcp-picker {
+  width: 520px;
+}
+.pop-sec.mcp-picker-filter {
+  padding: 8px;
+}
+.pop-sec.mcp-picker-list {
+  overflow: auto;
+  padding: 6px;
+}
+/* The picker's list shows whole rows of 48px, eight at most and fewer in a
+   low window, and then 6px of the next row, which is that row's empty
+   padding. */
+.mcp-picker-list {
+  max-height: calc(12px + round(down, min(384px, 46vh - 12px), 48px));
+}
+.mcp-pick-row {
+  display: grid;
+  grid-template-columns: 14px 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  /* A minimum, not a fixed height: at a larger text size the name and its
+     second line wrap and need more room, and a fixed row let the second line
+     run over the next row's name. */
+  min-height: 48px;
+  padding: 5px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.mcp-pick-row:hover {
+  background: var(--hover);
+}
+.mcp-pick-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+}
+.mcp-pick-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.mcp-pick-name b {
+  font-weight: var(--w-medium);
+}
+.mcp-pick-name small {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+/* The word that says what the choice beside it picks. */
+.mcp-pick-account {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.mcp-account-select {
+  width: 138px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-12);
+}
+/* A choice that cannot be changed yet, or while its write runs, is drawn at
+   half opacity like a disabled button and the other disabled controls. The
+   browser also dims a disabled select by itself, so the select is reset to
+   full opacity and the field carries the dimming once. */
+.mcp-account-select:has(> select:disabled),
+.mcp-account-select:has(> select[aria-disabled="true"]) {
+  opacity: 0.5;
+}
+.mcp-account-select > select:disabled {
+  opacity: 1;
+}
+/* The buttons of the default list and the picker, while a write of the list runs. */
+.mcp-group-top > .btn[aria-disabled="true"],
+.mcp-picker-foot > .btn[aria-disabled="true"] {
+  opacity: 0.5;
+}
+.mcp-account-select > select {
+  margin: 0 -23px 0 -8px;
+  padding: 0 23px 0 8px;
+}
+.mcp-picker .menu-note {
+  margin: 0;
+  padding: 14px 8px;
+}
+.mcp-picker-error {
+  margin: 0;
+  padding: 8px 14px 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.mcp-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--divider);
+}
+.mcp-picker-foot > .time {
+  flex: 1;
+  min-width: 0;
+  margin-right: auto;
+  line-height: 1.4;
+  text-wrap: pretty;
+}

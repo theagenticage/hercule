@@ -565,6 +565,7 @@ export const buildQueryKeys = (
   ids: ReadonlyArray<string>,
   conversationIds?: Invalidate["conversationIds"],
   derived?: Invalidate["derived"],
+  kind?: Invalidate["kind"],
 ): ReadonlyArray<LiveQueryKey> => {
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
@@ -777,10 +778,16 @@ export const buildQueryKeys = (
   }
   // Any MCP Server change refetches the list. A server's own read is
   // refetched only when the push lists its id, or when the push lists no ids.
+  // The projects and the settings are refetched only when a server is
+  // deleted: that takes it out of every project's list, and a box that still
+  // named it would send it and be refused. A status change, a creation or the
+  // push that opens a subscription leaves them alone.
   if (topic === "mcpServer") {
-    return ids.length === 0
-      ? [queryKeys.mcpServers(), queryKeys.mcpServer()]
-      : [queryKeys.mcpServers(), ...ids.map((id) => queryKeys.mcpServer(id))];
+    const own =
+      ids.length === 0 ? [queryKeys.mcpServer()] : ids.map((id) => queryKeys.mcpServer(id));
+    return kind === "deleted"
+      ? [queryKeys.mcpServers(), ...own, queryKeys.projects(), queryKeys.settings()]
+      : [queryKeys.mcpServers(), ...own];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is

@@ -51,7 +51,19 @@ export interface ThreadConfig extends ThreadDefaults {
  * harness than the menu showed. A harness named for one account is never
  * carried to another: only the pick that names the account names its harness.
  */
-export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
+export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">> & {
+  /**
+   * The Draft Thread's own list of MCP Servers, once the user has changed it.
+   * It holds the project the pick was made under, and applies only while the
+   * draft is still in that project: a list chosen for one project must not
+   * decide the servers of a thread started in another. Absent while the list
+   * is untouched, so the draft sends none and the controller picks the list.
+   */
+  readonly mcpServers?: {
+    readonly projectId: string | null;
+    readonly mcpServerIds: readonly string[];
+  };
+};
 
 /**
  * The unsent content the composer holds for one thread: its text and the

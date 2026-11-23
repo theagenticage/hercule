@@ -2,10 +2,11 @@
  * Reads a Draft Thread, for the draft screen and for the sidebar's draft row.
  */
 import { useSyncExternalStore } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildDraftView,
+  type HerculeClient,
   type DraftAddress,
   type DraftReads,
   type DraftView,
@@ -14,6 +15,7 @@ import { buildDraftKey } from "./pending-submissions";
 import { readRecentModels } from "./recent-models";
 import {
   harnessesQuery,
+  mcpServersQuery,
   localRunnerQuery,
   modelProfilesQuery,
   profilesQuery,
@@ -26,6 +28,20 @@ import {
   threadsQuery,
   workspacesQuery,
 } from "./queries";
+
+/**
+ * Returns the ids of the MCP servers the cache holds, or `undefined` while
+ * the list of servers has not been read. Reads nothing. A Draft Thread's pick
+ * is checked against them when it is sent (see `buildSubmission`), so the draft
+ * holds no observer of the list.
+ */
+export const readCachedMcpServerIds = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): ReadonlySet<string> | undefined => {
+  const servers = queryClient.getQueryData(mcpServersQuery(client).queryKey);
+  return servers === undefined ? undefined : new Set(servers.map((server) => server.id));
+};
 
 /**
  * Reads every record a Draft Thread is built from, for `buildDraftView`, and
@@ -59,7 +75,12 @@ export function useDraftReads(isOpen: boolean): DraftReads | null {
     sessions: useSuspenseQuery(threadsQuery(client)).data,
   };
   if (!isOpen || settings === undefined || profiles === undefined) return null;
-  return { ...lists, settings, profiles, recent: readRecentModels(controller.url) };
+  return {
+    ...lists,
+    settings,
+    profiles,
+    recent: readRecentModels(controller.url),
+  };
 }
 
 /**
