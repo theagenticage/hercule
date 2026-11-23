@@ -13,8 +13,17 @@ import type { McpServerView } from "./views";
 
 /** Why a write was not made. */
 export type McpListRefusal =
-  /** The controller refused the write, or the write could not start: `message` says why. */
-  | { readonly kind: "refused"; readonly message: string }
+  /**
+   * The controller refused the write, or the write could not start: `message`
+   * says why. `existingServerId` is set when the controller named the server
+   * that holds what the write wanted (`mcp-server-exists`), so a control can
+   * lead to it.
+   */
+  | {
+      readonly kind: "refused";
+      readonly message: string;
+      readonly existingServerId?: string;
+    }
   /** The list names `occupant`, another server of the name, and not the one the user saw. `serverId` is the server the user asked for. */
   | { readonly kind: "taken"; readonly occupant: McpServerView; readonly serverId: string };
 

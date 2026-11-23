@@ -6,6 +6,19 @@ import { buildMcpServerViews } from "./views";
 
 const VIEWS = buildViews([SENTRY_WORK]);
 
+/** A server added by URL, which has no Connection to reconnect. */
+const DOCS = buildServer("s-docs", "docs", "", {
+  source: {
+    kind: "url",
+    url: "https://docs.example.com/mcp",
+    signIn: "token",
+    signInOffered: "token",
+  },
+  status: "needs-sign-in",
+  statusDetail: "The server refused the token.",
+});
+const URL_VIEWS = buildViews([DOCS]);
+
 const warn = (reason: McpServerWarningEntry["reason"], mcpServerId = "s-work") => ({
   mcpServerId,
   reason,
@@ -40,6 +53,22 @@ describe("decideWarningFix", () => {
     "timed-out",
   ] as const)("gives %s no button, because the line's text says what to do", (reason) => {
     expect(decideWarningFix(warn(reason), VIEWS)).toBeNull();
+  });
+
+  it("opens the sign-in of a server added by URL, which has no Connection", () => {
+    expect(decideWarningFix(warn("needs-sign-in", "s-docs"), URL_VIEWS)).toEqual({
+      kind: "sign-in",
+      mcpServerId: "s-docs",
+      label: "Sign in…",
+    });
+  });
+
+  it("opens the page of a server added by URL for the reasons a Connection's server opens it for", () => {
+    expect(decideWarningFix(warn("unreachable", "s-docs"), URL_VIEWS)).toEqual({
+      kind: "open-server",
+      mcpServerId: "s-docs",
+      label: "Open server",
+    });
   });
 
   it("gives no button for a server deleted since the line was written", () => {
@@ -110,6 +139,35 @@ describe("decideStatusBand", () => {
       tone: "fail",
       detail: "revoked 09:12",
       action: { kind: "reconnect", connectionId: "c-work", label: "Reconnect Sentry · work" },
+    });
+  });
+
+  it("offers Sign in… for a server added by URL that needs sign-in, with the server's reason", () => {
+    expect(decideStatusBand(URL_VIEWS[0]!)).toEqual({
+      tone: "fail",
+      heading: "Needs sign-in.",
+      text: "Paste a new token, and this server comes back with it.",
+      detail: "The server refused the token.",
+      action: { kind: "sign-in", mcpServerId: "s-docs", label: "Sign in…" },
+    });
+  });
+
+  it("names the browser first for a server that asks for OAuth, and the pasted token as the other way", () => {
+    const [view] = buildViews([
+      buildServer("s-docs", "docs", "", {
+        source: {
+          kind: "url",
+          url: "https://docs.example.com/mcp",
+          signIn: "none",
+          signInOffered: "oauth",
+        },
+        status: "needs-sign-in",
+      }),
+    ]);
+
+    expect(decideStatusBand(view!)).toMatchObject({
+      text: "Sign in through your browser, or paste a token, and this server comes back with it.",
+      action: { kind: "sign-in", mcpServerId: "s-docs", label: "Sign in…" },
     });
   });
 

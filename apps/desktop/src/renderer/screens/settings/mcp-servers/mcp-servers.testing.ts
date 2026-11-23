@@ -68,3 +68,34 @@ export const LINEAR_ID = "01a06d02-8200-7000-8000-000000000003";
 export const SENTRY_WORK = buildServer(SENTRY_WORK_ID, "sentry", SENTRY_WORK_CONNECTION);
 export const SENTRY_HOBBY = buildServer(SENTRY_HOBBY_ID, "sentry", SENTRY_HOBBY_CONNECTION);
 export const LINEAR = buildServer(LINEAR_ID, "linear", LINEAR_CONNECTION);
+
+/**
+ * Returns a ready server added by URL, named `name`, at the address `url`,
+ * with two tools listed at the last check, that holds no sign-in and was told
+ * of none. `overrides` change any field, such as `source` for a token.
+ */
+export const buildUrlServer = (
+  id: string,
+  name: string,
+  url: string,
+  overrides: Partial<McpServer> = {},
+): McpServer =>
+  buildServer(id, name, SENTRY_WORK_CONNECTION, {
+    source: { kind: "url", url, signIn: "none", signInOffered: null },
+    ...overrides,
+  });
+
+export const DOCS_ID = "01a06d02-8200-7000-8000-000000000011";
+export const NOTION_ID = "01a06d02-8200-7000-8000-000000000012";
+
+/** A server added by URL, ready, with no sign-in. */
+export const DOCS = buildUrlServer(DOCS_ID, "docs", "https://mcp.docs.example/mcp");
+/** A server added by URL that holds a pasted token. */
+export const NOTION = buildUrlServer(NOTION_ID, "notion", "https://mcp.notion.example/mcp", {
+  source: {
+    kind: "url",
+    url: "https://mcp.notion.example/mcp",
+    signIn: "token",
+    signInOffered: "token",
+  },
+});

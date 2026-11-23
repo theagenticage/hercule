@@ -31,6 +31,7 @@ import {
   ServerSection,
   ToolsSection,
 } from "../../../../../screens/settings/mcp-servers/server-page";
+import { TokenDialog } from "../../../../../screens/settings/mcp-servers/token-dialog";
 import { SettingsHeaderTitle } from "../../../../../screens/settings/settings-frame";
 import { ProjectBoxes } from "./-project-boxes";
 import { RemoveSection } from "./-remove-section";
@@ -45,7 +46,7 @@ const namesNoServer = (error: unknown): boolean =>
 
 /**
  * Settings > MCP servers, the page of one server (spec 17 §Settings, MCP
- * servers): its heading with the plugin and the address, the status band
+ * servers): its heading with the source (the plugin, or "Added by URL") and the address, the status band
  * with its one button, the Server section, Tools, Projects and Remove. The
  * header reads "Settings / MCP servers / <name>", with the list linked, and
  * has nothing on the right.
@@ -106,6 +107,13 @@ function McpServerPage(): JSX.Element {
     source.kind === "plugin"
       ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
       : undefined;
+  // A server added by URL shows its whole address, a plugin's server the address its plugin offers.
+  const address =
+    source.kind === "url"
+      ? source.url
+      : offer === undefined
+        ? null
+        : describeOfferAddress(offer.origin);
   const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data), query.data.id);
   // The switch shows the server's record in the list of servers, the value a
   // press is decided on. While this page's own read shows another value, it
@@ -130,6 +138,8 @@ function McpServerPage(): JSX.Element {
     },
   });
   const [reconnecting, setReconnecting] = useState(false);
+  // The token dialog is the page's one sign-in for a server added by URL: the band's button and "Replace token…" open it.
+  const [signingIn, setSigningIn] = useState(false);
   const connectionType = listConnectionTypes(plugins).find(
     (type) => type.type === view.connection?.type,
   );
@@ -146,11 +156,12 @@ function McpServerPage(): JSX.Element {
       <ServerHead
         view={view}
         plugins={plugins}
-        address={offer === undefined ? null : describeOfferAddress(offer.origin)}
+        address={address}
         band={band}
         busy={check.isPending}
         onBandAction={(action) => {
           if (action.kind === "check") startCheck();
+          else if (action.kind === "sign-in") setSigningIn(true);
           else setReconnecting(true);
         }}
       />
@@ -166,10 +177,16 @@ function McpServerPage(): JSX.Element {
           flip.press(!pageSwitch.on);
         }}
         onCheck={startCheck}
+        onOpenSignIn={() => setSigningIn(true)}
       />
       <ToolsSection view={view} />
       <ProjectBoxes view={view} />
       <RemoveSection view={view} />
+      {signingIn && (
+        <Suspense fallback={null}>
+          <TokenDialog mcpServerId={query.data.id} onClose={() => setSigningIn(false)} />
+        </Suspense>
+      )}
       {reconnecting && view.connection !== undefined && connectionType !== undefined && (
         <Suspense fallback={null}>
           <LazyConnectionSetupDialog

@@ -24,7 +24,7 @@ export function ProviderMark({
   /** The id of the plugin that registered the Provider, as `findProviderPluginId` returns it. */
   readonly pluginId: string | null;
   readonly plugins: ReadonlyArray<PluginIdentity>;
-  readonly className?: string;
+  readonly className?: string | undefined;
 }): JSX.Element | null {
   if (pluginId === null) return null;
   const drawing = decidePluginMark(pluginId, plugins);

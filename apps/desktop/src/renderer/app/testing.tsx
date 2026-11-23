@@ -133,6 +133,9 @@ export interface FakeBridge {
  * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
  * recorded either way.
  *
+ * `signInReturn` answers the browser's return from an MCP server's sign-in. By
+ * default main cannot listen (`unavailable`), so a sign-in asks for the paste.
+ *
  * `platform` is the platform the app says it runs on: a Mac unless a test
  * passes another.
  */
@@ -150,6 +153,11 @@ export const createFakeBridge = ({
   firstRun = null,
   appearance = DEFAULT_APPEARANCE,
   saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
+  signInReturn = {
+    listen: () => Promise.resolve({ _tag: "unavailable" }),
+    wait: () => Promise.resolve({ _tag: "cancelled" }),
+    cancel: () => Promise.resolve(undefined),
+  },
   platform = "mac",
 }: {
   readonly controllerUrl?: string | null;
@@ -165,6 +173,7 @@ export const createFakeBridge = ({
   readonly firstRun?: FirstRunProgress | null;
   readonly appearance?: Appearance;
   readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
+  readonly signInReturn?: Bridge["signInReturn"];
   readonly platform?: DesktopPlatform;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
@@ -278,12 +287,7 @@ export const createFakeBridge = ({
           return Promise.resolve(undefined);
         },
       },
-      // No test signs in to an MCP server yet, so the listener is never available.
-      signInReturn: {
-        listen: () => Promise.resolve({ _tag: "unavailable" }),
-        wait: () => Promise.resolve({ _tag: "cancelled" }),
-        cancel: () => Promise.resolve(undefined),
-      },
+      signInReturn,
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);

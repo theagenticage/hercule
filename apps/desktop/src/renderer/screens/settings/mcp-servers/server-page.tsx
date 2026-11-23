@@ -9,6 +9,8 @@ import { Link } from "@tanstack/react-router";
 import { showsAccountBesideLabel, type PluginIdentity } from "@hercule/client-core";
 import {
   describeConnectionRowProblem,
+  describeSignInRow,
+  describeSourceChip,
   isCheckDisabled,
   type McpServerView,
   type StatusBand,
@@ -16,7 +18,7 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import { useAgeWords } from "../../../app/age-clock";
 import { PluginMark } from "../../../marks/plugin-mark";
-import { ServerName, ServerSwitch } from "./server-parts";
+import { readNameAccount, ServerName, ServerSwitch } from "./server-parts";
 // The head's mark is the list's `.profile-mark`. A page opened on its own, from a thread's "Open
 // server", does not load the list's code, so the page loads this file itself.
 import "../permission-profiles/permission-profiles.css";
@@ -28,7 +30,8 @@ import "./mcp-servers.css";
  * server comes from and its `address`, and then the status `band`, when the
  * server has one.
  *
- * `address` is `null` when no plugin offers the server any more. While
+ * `address` is the server's address, `null` when no plugin offers a plugin's
+ * server any more. A server added by URL has its whole address. While
  * `busy`, the band's button is already running its action.
  */
 export function ServerHead({
@@ -55,11 +58,11 @@ export function ServerHead({
           <PluginMark pluginId={view.pluginId} plugins={plugins} size={20} />
         </span>
         <h2>
-          <ServerName name={view.server.name} account={view.account} />
+          <ServerName name={view.server.name} account={readNameAccount(view)} />
         </h2>
       </div>
       <div className="mcp-chips">
-        <span className="chip">{`From the ${view.typeName} plugin`}</span>
+        <span className="chip">{describeSourceChip(view)}</span>
         {address !== null && <span className="chip">{address}</span>}
       </div>
       {band !== null && (
@@ -96,8 +99,8 @@ function CheckedAge({ at }: { readonly at: string }): JSX.Element {
 
 /**
  * Renders the Server section of a page: whether the server is offered to
- * threads, its name, the Connection it is reached with, and when it was last
- * checked, with Check now.
+ * threads, its name, the Connection it is reached with or, for a server added
+ * by URL, its Sign-in, and when it was last checked, with Check now.
  *
  * - The switch shows `switchOn`, the server's `enabled` in the list of servers.
  *   While `switchBusy`, it is unavailable: its write runs, or this page's own
@@ -106,6 +109,10 @@ function CheckedAge({ at }: { readonly at: string }): JSX.Element {
  *   Settings > Connections. While the server needs sign-in it shows what is
  *   wrong instead, in `--fail`, and no button: the band holds the page's one
  *   button.
+ * - The Sign-in row, for a server added by URL, says what the server holds
+ *   ("None needed", "A token" or "OAuth"). Its button, "Replace token…" calls
+ *   `onOpenSignIn`, and is drawn only while the server does not need
+ *   sign-in: the band holds the one button then.
  * - Check now is off while the server is checking or switched off, and while
  *   `checkBusy`.
  * - `switchError` and `checkError` are the controller's reasons for a write it
@@ -121,6 +128,7 @@ export function ServerSection({
   checkError,
   onFlipSwitch,
   onCheck,
+  onOpenSignIn,
 }: {
   readonly view: McpServerView;
   readonly plugins: readonly PluginIdentity[];
@@ -131,8 +139,10 @@ export function ServerSection({
   readonly checkError: string | null;
   readonly onFlipSwitch: () => void;
   readonly onCheck: () => void;
+  readonly onOpenSignIn: () => void;
 }): JSX.Element {
   const { connection, server } = view;
+  const signIn = describeSignInRow(view);
   const cannotCheck = checkBusy || isCheckDisabled(view);
   const connectionProblem = describeConnectionRowProblem(view);
   return (
@@ -187,6 +197,20 @@ export function ServerSection({
             <Link to="/settings/connections" className="btn btn--sm">
               Open
             </Link>
+          )}
+        </div>
+      )}
+      {signIn !== null && (
+        <div className="set-row">
+          <div className="set-label">
+            <b>Sign-in</b>
+            <span>Kept on the controller. It never reaches a runner.</span>
+          </div>
+          <span className="mcp-value">{signIn.value}</span>
+          {signIn.action !== null && (
+            <button type="button" className="btn btn--sm" onClick={onOpenSignIn}>
+              {signIn.action.label}
+            </button>
           )}
         </div>
       )}

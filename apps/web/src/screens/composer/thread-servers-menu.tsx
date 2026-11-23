@@ -12,7 +12,7 @@ import {
   type ThreadStartDecision,
 } from "@hercule/client-core/mcp-servers";
 import { Button, buildButtonClassName, Select, Switch } from "@hercule/ui";
-import { ProviderMark } from "../provider-mark";
+import { McpServerMark } from "../mcp-server-mark";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 
 /**
@@ -28,7 +28,7 @@ import { MenuFoot, MenuHeader, MenuRow } from "./menu";
  * - Two accounts of one name are one row. Its select is disabled while the
  *   name is off, and choosing another account swaps them in one write.
  * - A server that needs sign-in stays on. Its row says so and offers the
- *   Connection's Reconnect.
+ *   Connection's Reconnect, or "Sign in…" for a server added by URL.
  * - While `writing` the switches and selects ignore clicks, so one list never
  *   has two writes in flight. A refusal shows under the rows.
  *
@@ -44,6 +44,7 @@ export function ThreadServersMenu({
   refusal,
   onChoose,
   onOpenPicker,
+  onSignIn,
 }: {
   readonly views: readonly McpServerView[];
   readonly plugins: readonly PluginDetail[];
@@ -57,6 +58,8 @@ export function ThreadServersMenu({
   /** The user chose: a switch, a swap of account, or going back to the start list. */
   readonly onChoose: (choice: McpListChoice) => void;
   readonly onOpenPicker: () => void;
+  /** The user pressed "Sign in…" of a server added by URL: the caller opens its token dialog. */
+  readonly onSignIn: (mcpServerId: string) => void;
 }): JSX.Element {
   const [order] = useState(() => orderMenuNames(views, mcpServerIds));
   // The account each name last showed, so a name switched off offers the account the user chose.
@@ -81,30 +84,37 @@ export function ThreadServersMenu({
       <ul className="flex flex-col">
         {menu.rows.map((row) => (
           <li key={row.name} className="flex items-center gap-2 rounded-[6px] px-2 py-1.5">
-            <ProviderMark
-              pluginId={row.shown.pluginId}
-              plugins={plugins}
-              className="size-[14px] text-muted"
-            />
+            <McpServerMark view={row.shown} plugins={plugins} className="size-[14px] text-muted" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-ink">
                 <b className="font-emph">{row.name}</b>
-                {/* A row with a choice of account shows the name alone: the choice names the account. */}
-                {row.accounts.length === 1 && row.shown.account !== undefined ? (
+                {/* A row with a choice of account shows the name alone: the choice names the account. A server added by URL shows its name alone too: its account is its address. */}
+                {row.accounts.length === 1 &&
+                row.shown.account !== undefined &&
+                row.shown.server.source.kind === "plugin" ? (
                   <span className="ml-1.5 text-[11px] text-faint">{row.shown.account}</span>
                 ) : null}
               </span>
               {row.note === null ? null : (
                 <span className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-fail">
                   {row.note}
-                  {row.reconnect === null ? null : (
+                  {row.signIn === null ? null : row.signIn.kind === "reconnect" ? (
                     <Link
                       to="/connections"
-                      search={{ reconnect: row.reconnect.connectionId }}
+                      search={{ reconnect: row.signIn.connectionId }}
                       className={buildButtonClassName("quiet", "px-1 py-0.5 text-[11px]")}
                     >
-                      {row.reconnect.label}
+                      {row.signIn.label}
                     </Link>
+                  ) : (
+                    <Button
+                      className="px-1 py-0.5 text-[11px]"
+                      onClick={() => {
+                        onSignIn(row.shown.server.id);
+                      }}
+                    >
+                      {row.signIn.label}
+                    </Button>
                   )}
                 </span>
               )}

@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Thread, ThreadChoice } from "@hercule/client-core";
 import { decideDraftServersPick, type McpListChoice } from "@hercule/client-core/mcp-servers";
 import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
+import { TokenDialog } from "../mcp-url-server/token-dialog";
 import { useThreadServers } from "../thread-servers";
 import { PlusMenu } from "./plus-menu";
 import { ThreadServerPicker } from "./thread-server-picker";
@@ -75,8 +76,10 @@ export function ThreadPlusMenu({
     if (next) setServersPressed(false);
     onOpenChange(next);
   };
+  // The server added by URL whose token dialog is open. It opens from the submenu, which closes.
+  const [signingInId, setSigningInId] = useState<string | null>(null);
   // One state for the submenu and the picker, so the handoff from one to the other never drops it.
-  const editing = showsServers || picking;
+  const editing = showsServers || picking || signingInId !== null;
   useEffect(() => {
     setEditing(editing);
     return () => {
@@ -106,6 +109,7 @@ export function ThreadPlusMenu({
     if (picked !== undefined) recordThreadChoice(picked);
   };
   const apply = session === null ? applyToDraft : edit.apply;
+  const signingInServer = views?.find((view) => view.server.id === signingInId);
   const refusal = edit.problem();
 
   return (
@@ -133,6 +137,10 @@ export function ThreadPlusMenu({
                 setPicking(true);
                 onOpenChange(false);
               }}
+              onSignIn={(mcpServerId) => {
+                setSigningInId(mcpServerId);
+                onOpenChange(false);
+              }}
             />
           ) : (
             <p
@@ -144,6 +152,15 @@ export function ThreadPlusMenu({
           )
         }
       />
+      {signingInServer === undefined ? null : (
+        <TokenDialog
+          client={client}
+          server={signingInServer.server}
+          onClose={() => {
+            setSigningInId(null);
+          }}
+        />
+      )}
       {picking && views !== undefined && plugins !== undefined && start !== undefined ? (
         <ThreadServerPicker
           views={views}

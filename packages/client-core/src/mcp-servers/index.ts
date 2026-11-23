@@ -6,6 +6,56 @@
  * no room for them.
  */
 export {
+  describeSignInHeading,
+  describeTokenForm,
+  describeToolNamePreview,
+  readAddForm,
+  readFieldIssues,
+  readTokenField,
+  suggestServerName,
+  type AddFormReading,
+  type FieldIssues,
+  type TokenFieldReading,
+  type TokenFormWords,
+} from "./add-by-url";
+export {
+  describeExistsRefusal,
+  describePluginOriginRefusal,
+  type ExistingServer,
+  type PluginOriginRefusal,
+  type RefusalAction,
+  type RefusalDescription,
+} from "./add-refusal";
+export {
+  NEW_SERVER_NOTE,
+  createMcpUrlServerFlows,
+  decideFollowing,
+  describeClosing,
+  describeOffOutcome,
+  describeReadyTools,
+  findOrCreateMcpUrlServerFlows,
+  type BrowserSignInPort,
+  type EndReason,
+  type FlowProblem,
+  type FollowOrigin,
+  type McpUrlServerFlowCache,
+  type McpUrlServerFlows,
+  type RecordReading,
+  type ServerOutcome,
+  type SignInStep,
+  type UrlServerFlowState,
+} from "./url-server-flows";
+export {
+  BROWSER_SIGN_IN_LABEL,
+  BROWSER_SIGN_IN_UNSUPPORTED,
+  describePasteRefusal,
+  describeSignInRefusal,
+  describeSignInWaiting,
+  offersBrowserSignIn,
+  type SignInRefusalReason,
+  type SignInWaitingWords,
+} from "./sign-in-words";
+export {
   describeAgentToolsNote,
   describeUnavailableAgentToolsNote,
   type AgentToolsNote,
@@ -43,9 +93,21 @@ export {
   findOrCreateMcpServerSwitches,
   type ServerPageSwitch,
   type McpServerSwitchCache,
+  type McpServerSwitchPress,
   type McpServerSwitches,
   type McpServerSwitchTarget,
 } from "./server-switch";
+export {
+  decideReplaceChoice,
+  describeReplaceDialog,
+  describeReplaceRefusal,
+  describeReplaceTitle,
+  findReplaceCandidates,
+  type ReplaceChoice,
+  type ReplaceDialog,
+  type ReplaceLine,
+  type ReplaceRefusal,
+} from "./replace";
 export { chooseNamedServer, findOtherOccupant, type NamedServer } from "./named-lists";
 export {
   describeOfferAddress,
@@ -66,9 +128,11 @@ export {
 } from "./project-boxes";
 export {
   buildMcpServerSettingsRows,
+  buildUrlServerSettingsRows,
   describeNamingProjects,
   type McpServerSettingsRow,
   type NamingProjects,
+  type UrlServerSettingsRow,
 } from "./settings-list";
 export { resolveDraftMcpServerIds } from "./draft-pick";
 export { decideDraftServersPick } from "./draft-servers-pick";
@@ -105,6 +169,12 @@ export { describeThreadServersRow, type ThreadServersRow } from "./thread-server
 export {
   buildMcpServerViews,
   describeConnectionRowProblem,
+  describeRemoveEffect,
+  describeSignInAction,
+  describeSignInRow,
+  describeSourceChip,
   isCheckDisabled,
   type McpServerView,
+  type SignInAction,
+  type SignInRow,
 } from "./views";

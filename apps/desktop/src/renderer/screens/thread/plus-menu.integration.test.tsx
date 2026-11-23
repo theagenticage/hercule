@@ -28,6 +28,7 @@ import {
   SENTRY_HOBBY_ID,
   SENTRY_WORK,
   SENTRY_WORK_ID,
+  NOTION,
 } from "../settings/mcp-servers/mcp-servers.testing";
 import {
   findCalls,
@@ -575,6 +576,27 @@ describe("the + menu on a started thread", () => {
     );
 
     expect(await screen.findByRole("dialog", { name: "Reconnect Sentry · work" })).toBeTruthy();
+  });
+
+  it("offers Sign in… for a server added by URL that needs a token, which opens its token dialog", async () => {
+    const signedOut = { ...NOTION, status: "needs-sign-in" } as const;
+    const thread = threadWith([signedOut]);
+    const { world } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [signedOut],
+    });
+    const popover = await openServersSubmenu();
+
+    // A server added by URL is written by its name alone, never with its address beside it.
+    expect(readSubmenuRows(popover)).toEqual(["notion"]);
+    fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+    await userEvent.type(within(dialog).getByLabelText("Token"), "abcd1234efgh5678");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await waitFor(() => {
+      expect(world.tokens).toEqual([{ id: NOTION.id, token: "abcd1234efgh5678" }]);
+    });
   });
 
   it("says why Reconnect cannot go on when its Connection is deleted while the dialog is open, and closes with Close", async () => {

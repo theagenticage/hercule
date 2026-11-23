@@ -14,6 +14,7 @@ import {
 } from "@hercule/client-core/mcp-servers/testing";
 import type { Call, Handler } from "@hercule/client-core/testing";
 import type { Connection, McpServer, Project } from "@hercule/contract";
+import type { Bridge } from "../../../../ipc/bridge";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
@@ -48,6 +49,8 @@ export interface OpenWorldOptions {
   readonly defaultIds?: readonly string[];
   /** Handlers that answer in place of the world's. */
   readonly handlers?: Readonly<Record<string, Handler>>;
+  /** How main answers the browser's return from a sign-in (see `createFakeBridge`). */
+  readonly signInReturn?: Bridge["signInReturn"];
 }
 
 /**
@@ -80,6 +83,8 @@ export const buildMcpWorld = (
 export interface OpenedMcpApp extends RenderedApp {
   readonly world: McpWorld;
   readonly calls: readonly Call[];
+  /** The addresses the app asked main to open in the browser, oldest first. */
+  readonly openedLinks: readonly string[];
 }
 
 /**
@@ -97,13 +102,17 @@ export const openAt = async (
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, plugins: OFFERING_PLUGINS }),
     ...handlers,
   });
-  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const fake = createFakeBridge({
+    controllerUrl: CONTROLLER_URL,
+    token: "bearer",
+    ...(options.signInReturn === undefined ? {} : { signInReturn: options.signInReturn }),
+  });
   const app = await renderApp(fake, { path });
   await app.live.waitForFirstPushes();
   if (path.startsWith("/settings/mcp-servers") || path === "/settings/connections") {
     await waitForTopicReads(app);
   }
-  return { ...app, world, calls };
+  return { ...app, world, calls, openedLinks: fake.openedLinks };
 };
 
 /**

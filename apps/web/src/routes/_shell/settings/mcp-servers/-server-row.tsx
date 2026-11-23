@@ -1,16 +1,21 @@
-import type { JSX, ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { HerculeClient } from "@hercule/client-core";
-import type { PluginDetail } from "@hercule/contract";
+import type { McpServer, PluginDetail } from "@hercule/contract";
 import {
   buildOfferSwitchTarget,
-  describeNamingProjects,
   type McpServerSettingsRow,
 } from "@hercule/client-core/mcp-servers";
 import { Switch } from "@hercule/ui";
 import { useMcpServerSwitch } from "../../../../app/mcp-server-switch";
 import { McpServerStatusWord } from "../../../../screens/mcp-server-status";
+import { ReplaceDialog } from "../../../../screens/mcp-url-server/replace-dialog";
 import { ProviderMark } from "../../../../screens/provider-mark";
+import { NamingProjectsCell } from "./-naming-projects-cell";
+
+/** Returns the element id of the row of an offer on a Connection, which the Add dialog's refusal leads to. */
+export const buildOfferRowId = (contributionId: string, connectionId: string): string =>
+  `mcp-offer-${contributionId}-${connectionId}`;
 
 /**
  * One row of "From your Connections": the server a Connection's plugin offers,
@@ -23,6 +28,9 @@ import { ProviderMark } from "../../../../screens/provider-mark";
  * - The switch ignores clicks while its write runs, even if the row was drawn
  *   again meanwhile, and a refusal shows under the row. Whether a press creates
  *   the server or updates its record is decided when it is pressed.
+ * - Switching the server on while the user added the same server by URL does
+ *   not create it. The row opens the Replace dialog, which moves the server the
+ *   user added onto the Connection. The dialog goes once the row has a record.
  */
 export function ServerRow({
   client,
@@ -36,8 +44,14 @@ export function ServerRow({
   const { view } = row;
 
   const switchServer = useMcpServerSwitch(client, buildOfferSwitchTarget(row));
+  // The servers added by URL the switch would replace, while the user chooses.
+  const [replacing, setReplacing] = useState<readonly McpServer[] | null>(null);
+  if (replacing !== null && view !== null) setReplacing(null);
+  const press = (on: boolean): void => {
+    const pressed = switchServer.press(on);
+    if (pressed.kind === "replace") setReplacing(pressed.candidates);
+  };
 
-  const naming = describeNamingProjects(row.projects);
   const content: ReactNode = (
     <>
       <ProviderMark pluginId={row.offer.pluginId} plugins={plugins} />
@@ -51,28 +65,13 @@ export function ServerRow({
       <span className="w-[92px] shrink-0">
         <McpServerStatusWord view={view} />
       </span>
-      <span
-        title={naming.kind === "count" ? naming.tooltip : "Projects that name this server"}
-        className="w-[104px] shrink-0 text-fine"
-      >
-        {naming.kind === "tiles" ? (
-          naming.projects.map((project) => (
-            <span key={project.id} className="block truncate text-muted">
-              {project.name}
-            </span>
-          ))
-        ) : (
-          <span className={naming.kind === "none" ? "text-faint" : "text-muted"}>
-            {naming.text}
-          </span>
-        )}
-      </span>
+      <NamingProjectsCell projects={row.projects} />
     </>
   );
   const contentClass = "flex min-w-0 flex-1 items-center gap-3 rounded-control px-2.5 py-[7px]";
 
   return (
-    <li className="flex flex-col">
+    <li id={buildOfferRowId(row.offer.contributionId, row.connection.id)} className="flex flex-col">
       <div className="flex items-center">
         {view === null ? (
           <div className={contentClass}>{content}</div>
@@ -90,14 +89,27 @@ export function ServerRow({
             aria-label={`Offer ${row.name} ${row.connection.label} to threads`}
             aria-disabled={switchServer.blocked}
             checked={view?.server.enabled ?? false}
-            onCheckedChange={switchServer.press}
+            onCheckedChange={press}
           />
         </span>
       </div>
-      {switchServer.problem === null ? null : (
+      {switchServer.problem === null || replacing !== null ? null : (
         <p className="px-2.5 pb-1.5 text-fine text-fail" role="alert">
           {switchServer.problem}
         </p>
+      )}
+      {replacing === null ? null : (
+        <ReplaceDialog
+          client={client}
+          candidates={replacing}
+          offer={row.offer}
+          connection={row.connection}
+          typeName={row.typeName}
+          switchServer={switchServer}
+          onClose={() => {
+            setReplacing(null);
+          }}
+        />
       )}
     </li>
   );

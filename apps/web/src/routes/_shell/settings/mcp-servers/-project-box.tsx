@@ -5,27 +5,10 @@ import {
   type McpServerView,
   type ProjectBox,
   type ProjectBoxAction,
-  type TextPart,
 } from "@hercule/client-core/mcp-servers";
 import { Button, ChoiceInput } from "@hercule/ui";
 import { useMcpListEdit } from "../../../../app/mcp-list-edits";
-
-/** Draws the parts of a sentence, the code spans in mono. */
-function Parts({ parts }: { readonly parts: readonly TextPart[] }): JSX.Element {
-  return (
-    <>
-      {parts.map((part, index) =>
-        part.code ? (
-          <code key={index} className="font-mono">
-            {part.text}
-          </code>
-        ) : (
-          part.text
-        ),
-      )}
-    </>
-  );
-}
+import { TextParts as Parts } from "../../../../screens/text-parts";
 
 /**
  * One box of the Projects card: a checkbox that names or un-names the page's

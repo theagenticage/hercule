@@ -36,3 +36,18 @@ export async function waitForParts(selector: string, count: number): Promise<HTM
 export async function pressPart(selector: string): Promise<void> {
   (await waitForPart(selector)).click();
 }
+
+/**
+ * Waits for the text field `selector` names and types `text` into it, as the
+ * user would: React reads the field through its `input` event, so the value is
+ * set the way the browser sets it before that event is sent.
+ */
+export async function typeInto(selector: string, text: string): Promise<void> {
+  const field = (await waitForPart(selector)) as HTMLInputElement;
+  // The setter is called with `.call` on the field, so it never needs its own `this`.
+  // oxlint-disable-next-line typescript/unbound-method
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (setValue === undefined) throw new Error("The page's text fields have no value setter.");
+  setValue.call(field, text);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}

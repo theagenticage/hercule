@@ -17,7 +17,7 @@ import {
 import { CheckIcon } from "../../../icons/check";
 import { PluginMark } from "../../../marks/plugin-mark";
 import { GlassDialog } from "../../glass-dialog";
-import { ServerName, ServerStatus } from "./server-parts";
+import { readNameAccount, ServerName, ServerStatus } from "./server-parts";
 import "./mcp-servers.css";
 
 /**
@@ -122,7 +122,7 @@ export function ServerPickerDialog({
               {/* A name with a choice of account shows the name alone: the choice names the account. */}
               <ServerName
                 name={row.name}
-                account={row.accounts.length > 1 ? undefined : row.shown.account}
+                account={row.accounts.length > 1 ? undefined : readNameAccount(row.shown)}
               />
               <small>{row.secondLine}</small>
             </span>

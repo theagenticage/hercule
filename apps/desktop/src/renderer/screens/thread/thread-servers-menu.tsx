@@ -13,11 +13,12 @@ import {
   type McpServerView,
   type RememberedAccounts,
   type ServerMenuRow,
+  type SignInAction,
 } from "@hercule/client-core/mcp-servers";
 import type { PluginDetail } from "@hercule/contract";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { PluginMark } from "../../marks/plugin-mark";
-import { ServerName, ServerSwitch } from "../settings/mcp-servers/server-parts";
+import { readNameAccount, ServerName, ServerSwitch } from "../settings/mcp-servers/server-parts";
 import { useThreadServers, useThreadViews } from "./thread-servers";
 import { WithThreadServerEdits, type ThreadServersTarget } from "./thread-server-edits";
 import type { ThreadServerEdits } from "./use-thread-edits";
@@ -27,19 +28,19 @@ import "./thread-servers.css";
  * Renders the submenu "Servers of this thread" for the open thread's servers:
  * they are read when it opens (the cache first), and while it is open the
  * `mcpServer` topic is held (see `ThreadServersProvider`). Changes are made
- * through the edits of `target`. `onOpenPicker` and `onReconnect` are called with
+ * through the edits of `target`. `onOpenPicker` and `onSignIn` are called with
  * the menu still open: the caller closes it and opens the dialog. `onClose`
  * closes the menu, for the link to Settings.
  */
 export default function ThreadServersMenu({
   target,
   onOpenPicker,
-  onReconnect,
+  onSignIn,
   onClose,
 }: {
   readonly target: ThreadServersTarget;
   readonly onOpenPicker: () => void;
-  readonly onReconnect: (connectionId: string) => void;
+  readonly onSignIn: (action: SignInAction) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   return (
@@ -48,7 +49,7 @@ export default function ThreadServersMenu({
         <ThreadServersPanel
           edits={edits}
           onOpenPicker={onOpenPicker}
-          onReconnect={onReconnect}
+          onSignIn={onSignIn}
           onClose={onClose}
         />
       )}
@@ -60,12 +61,12 @@ export default function ThreadServersMenu({
 function ThreadServersPanel({
   edits,
   onOpenPicker,
-  onReconnect,
+  onSignIn,
   onClose,
 }: {
   readonly edits: ThreadServerEdits;
   readonly onOpenPicker: () => void;
-  readonly onReconnect: (connectionId: string) => void;
+  readonly onSignIn: (action: SignInAction) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const views = useThreadViews();
@@ -88,7 +89,7 @@ function ThreadServersPanel({
       plugins={plugins}
       edits={edits}
       onOpenPicker={onOpenPicker}
-      onReconnect={onReconnect}
+      onSignIn={onSignIn}
       onClose={onClose}
     />
   );
@@ -105,14 +106,14 @@ function SubmenuRows({
   plugins,
   edits,
   onOpenPicker,
-  onReconnect,
+  onSignIn,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
   readonly plugins: readonly PluginDetail[];
   readonly edits: ThreadServerEdits;
   readonly onOpenPicker: () => void;
-  readonly onReconnect: (connectionId: string) => void;
+  readonly onSignIn: (action: SignInAction) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
@@ -153,20 +154,20 @@ function SubmenuRows({
               {/* A name with a choice of account shows the name alone: the choice names the account. */}
               <ServerName
                 name={row.name}
-                account={row.accounts.length > 1 ? undefined : row.shown.account}
+                account={row.accounts.length > 1 ? undefined : readNameAccount(row.shown)}
               />
               {row.note !== null && (
                 <small>
                   {row.note}
-                  {row.reconnect !== null && (
+                  {row.signIn !== null && (
                     <button
                       type="button"
                       className="link"
                       onClick={() => {
-                        onReconnect(row.reconnect!.connectionId);
+                        onSignIn(row.signIn!);
                       }}
                     >
-                      {row.reconnect.label}
+                      {row.signIn.label}
                     </button>
                   )}
                 </small>

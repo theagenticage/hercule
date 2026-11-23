@@ -1,12 +1,14 @@
-import type { JSX } from "react";
-import { Link } from "@tanstack/react-router";
+import { useState, type JSX } from "react";
+import { Link, useRouteContext } from "@tanstack/react-router";
 import type { RuntimeNote } from "@hercule/client-core";
 import {
   buildMcpWarningLine,
   type McpServerWarningEntry,
   type WarningFix,
 } from "@hercule/client-core/mcp-servers";
-import { buildButtonClassName } from "@hercule/ui";
+import type { McpServer } from "@hercule/contract";
+import { buildButtonClassName, Button } from "@hercule/ui";
+import { TokenDialog } from "../mcp-url-server/token-dialog";
 import { useThreadViews } from "../thread-servers";
 import { RuntimeNoteLine } from "./runtime-note-line";
 
@@ -57,9 +59,9 @@ function McpNoteLine({
               <FixButton
                 key={key}
                 fix={fix}
-                serverName={
-                  fix.kind === "open-server"
-                    ? views.find((view) => view.server.id === fix.mcpServerId)?.server.name
+                server={
+                  fix.kind === "open-server" || fix.kind === "sign-in"
+                    ? views.find((view) => view.server.id === fix.mcpServerId)?.server
                     : undefined
                 }
               />
@@ -71,16 +73,18 @@ function McpNoteLine({
 
 /**
  * Draws the button of one fix: Reconnect leads to the Connection's reconnect
- * panel, and "Open server" to the server's page. `serverName` tells apart two
- * "Open server" buttons on one line for screen readers.
+ * panel, "Open server" to the server's page, and "Sign in…" opens the token
+ * dialog of a server added by URL. `server` tells apart two buttons of one
+ * kind on one line for screen readers, and is the record the token dialog
+ * starts from.
  */
 function FixButton({
   fix,
-  serverName,
+  server,
 }: {
   readonly fix: WarningFix;
-  readonly serverName: string | undefined;
-}): JSX.Element {
+  readonly server: McpServer | undefined;
+}): JSX.Element | null {
   const className = buildButtonClassName("primary", "px-1.5 py-0.5 text-meta");
   switch (fix.kind) {
     case "reconnect":
@@ -94,11 +98,51 @@ function FixButton({
         <Link
           to="/settings/mcp-servers/$id"
           params={{ id: fix.mcpServerId }}
-          aria-label={serverName === undefined ? fix.label : `${fix.label}: ${serverName}`}
+          aria-label={server === undefined ? fix.label : `${fix.label}: ${server.name}`}
           className={className}
         >
           {fix.label}
         </Link>
       );
+    case "sign-in":
+      return server === undefined ? null : <SignInButton fix={fix} server={server} />;
   }
+}
+
+/**
+ * Draws the "Sign in…" button of a server added by URL. It opens the token
+ * dialog over the thread, and closing the dialog leaves the thread as it was.
+ */
+function SignInButton({
+  fix,
+  server,
+}: {
+  readonly fix: Extract<WarningFix, { kind: "sign-in" }>;
+  readonly server: McpServer;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_shell" });
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        variant="primary"
+        className="px-1.5 py-0.5 text-meta"
+        aria-label={`${fix.label}: ${server.name}`}
+        onClick={() => {
+          setOpen(true);
+        }}
+      >
+        {fix.label}
+      </Button>
+      {open ? (
+        <TokenDialog
+          client={client}
+          server={server}
+          onClose={() => {
+            setOpen(false);
+          }}
+        />
+      ) : null}
+    </>
+  );
 }

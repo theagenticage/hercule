@@ -12,6 +12,11 @@
  *   the press runs, from the servers the cache holds then. A record that
  *   another client created, or that a read brought in while a create runs,
  *   turns the next press into an update.
+ * - Switching an offer on, when it has no record and a server added by URL sits
+ *   on its origin, writes nothing: it returns the candidates, and the app asks
+ *   which one to replace (`replace`). Replace is one write that moves the chosen
+ *   server onto the Connection and switches it on, under the guard of both the
+ *   offer and the chosen server.
  * - A write's response is never put in the cache. The list of servers is read
  *   again after every write, and only that read fills the cache.
  *
@@ -21,10 +26,11 @@
 import type { QueryClient, QueryKey } from "@tanstack/query-core";
 import type { McpServer } from "@hercule/contract";
 import type { HerculeClient } from "../client";
-import { readErrorMessage } from "../errors";
-import { createEditGuard, type McpListEditState } from "./edit-guard";
+import { ApiError, readErrorMessage } from "../errors";
+import { createEditGuard, type McpListEditState, type McpListRefusal } from "./edit-guard";
 import type { OfferedServer } from "./offers";
 import { readBaseAfterWrite, type McpListQuery } from "./reconcile";
+import { findReplaceCandidates } from "./replace";
 
 /** The server a switch turns on and off. */
 export type McpServerSwitchTarget =
@@ -123,9 +129,26 @@ export interface McpServerSwitchCache {
    * succeeds.
    */
   readCatalogue(): McpListQuery;
+  /**
+   * Returns the address a plugin's server is reached at (the offer's `origin`),
+   * or `undefined` when no plugin offers `contributionId`. A press that would
+   * create the server looks for a server added by URL on that origin first.
+   */
+  readOfferOrigin(contributionId: string): string | undefined;
   /** Returns the key of the read of one server's page. After a write to that server it is marked stale and read again if somebody observes it. */
   readPageKey(serverId: string): QueryKey;
 }
+
+/** What a press on the switch did. */
+export type McpServerSwitchPress =
+  /** The press ran, was refused (`readState` says why) or had nothing to do. */
+  | { readonly kind: "handled" }
+  /**
+   * Nothing was written. The press would have created the plugin's server, but
+   * servers added by URL sit on its origin, `candidates` in the order of the
+   * list. The app asks which one to replace, and `replace` writes the answer.
+   */
+  | { readonly kind: "replace"; readonly candidates: readonly McpServer[] };
 
 /** The switches of MCP servers. */
 export interface McpServerSwitches {
@@ -135,13 +158,39 @@ export interface McpServerSwitches {
    * target is blocked, and for an off of a server with no record. The guard is
    * taken before this returns, so a second call in the same tick does nothing.
    *
+   * A press that switches a plugin's server on while the cache holds no record
+   * of it, and a server added by URL sits on the offer's origin, writes
+   * nothing and returns `replace` with the candidates, resolved from the
+   * cache at this moment.
+   *
    * A control that shows an existing record, such as a server's page, passes
    * that record's id as `existingRecordId`. The press then only ever updates
    * that record: when the cache no longer holds it (it was deleted, or it was
    * deleted and created again under a new id), the press is refused with a
    * reason and writes nothing, so it can never create a server.
    */
-  readonly apply: (target: McpServerSwitchTarget, on: boolean, existingRecordId?: string) => void;
+  readonly apply: (
+    target: McpServerSwitchTarget,
+    on: boolean,
+    existingRecordId?: string,
+  ) => McpServerSwitchPress;
+  /**
+   * Moves the server added by URL `serverId` onto the plugin target, and
+   * switches it on, in one `mcpServer.update` (`source` and `enabled: true`:
+   * the user pressed On). The write is bound to the server the user chose: it
+   * is never changed to another candidate meanwhile, and a candidate the user
+   * did not confirm is never used.
+   *
+   * Does nothing while the offer or the chosen server is blocked. It is
+   * refused, with a reason and no write, when the cache holds no list, no
+   * longer holds the chosen server as a server added by URL on the offer's
+   * origin, or already holds a record for the target. A write the controller
+   * refuses (`not_found`, `invalid_state`, `validation`, or `mcp-server-exists`
+   * for the target's external account) leaves the refusal on the plugin
+   * target, the list read again, and the chosen server's page marked stale. For
+   * `mcp-server-exists` the refusal names the server that won.
+   */
+  readonly replace: (target: McpServerSwitchTarget, serverId: string) => void;
   /** Returns what a control shows of the target. */
   readonly readState: (target: McpServerSwitchTarget) => McpListEditState;
   /** Forgets the target's refusal, when the user dismisses it. */
@@ -155,6 +204,25 @@ export interface McpServerSwitches {
   /** Calls `listener` whenever the state of any target changes. Returns the function that stops it. */
   readonly subscribe: (listener: () => void) => () => void;
 }
+
+/** Returns the id of the server a refusal names as the holder of what the write wanted (`mcp-server-exists`), as a field to spread into a refusal. */
+const readExistingServerId = (failure: unknown): { readonly existingServerId?: string } => {
+  if (!(failure instanceof ApiError) || failure.code !== "conflict") return {};
+  const { details } = failure;
+  return typeof details === "object" &&
+    details !== null &&
+    "reason" in details &&
+    details.reason === "mcp-server-exists" &&
+    "mcpServerId" in details &&
+    typeof details.mcpServerId === "string"
+    ? { existingServerId: details.mcpServerId }
+    : {};
+};
+
+/** A refusal made against this value is shown whatever record the target has later: it points at a record that appeared. */
+const KEEP_REFUSAL = Symbol("keep refusal");
+
+const HANDLED: McpServerSwitchPress = { kind: "handled" };
 
 const buildTargetKey = (target: McpServerSwitchTarget): string =>
   target.kind === "plugin"
@@ -193,7 +261,7 @@ export const createMcpServerSwitches = ({
    * state its refusal was made from. An entry lives as long as the refusal it
    * belongs to, so it is dropped when the guard drops the refusal.
    */
-  const pressedAgainst = new Map<string, string | null>();
+  const pressedAgainst = new Map<string, string | null | typeof KEEP_REFUSAL>();
   guard.subscribe(() => {
     for (const key of pressedAgainst.keys()) {
       const { refusal, blocked } = guard.readState(key);
@@ -204,16 +272,25 @@ export const createMcpServerSwitches = ({
 
   /**
    * Runs the write, then reads the list of servers again, on its own
-   * (`readBaseAfterWrite`), and releases the target when that read succeeded.
+   * (`readBaseAfterWrite`), and releases the keys when that read succeeded.
    * The cache still lacks the change until then, and a press built on it would
-   * undo it. The server's page is marked stale and read again if somebody
-   * shows it, without holding the target.
+   * undo it. The pages of the servers the write touched are marked stale and
+   * read again if somebody shows them, without holding the keys.
+   *
+   * `keys` are the targets the write holds, the first one carries the
+   * refusal. `pageIds` are the servers whose pages the write may have changed.
    */
-  const run = async (
-    key: string,
-    record: McpServer | undefined,
-    write: () => Promise<unknown>,
-  ): Promise<void> => {
+  const run = async ({
+    keys,
+    pageIds,
+    write,
+    failurePrefix = "",
+  }: {
+    readonly keys: readonly [string, ...string[]];
+    readonly pageIds: readonly string[];
+    readonly write: () => Promise<unknown>;
+    readonly failurePrefix?: string;
+  }): Promise<void> => {
     let saved = false;
     let failure: unknown = undefined;
     try {
@@ -222,49 +299,59 @@ export const createMcpServerSwitches = ({
     } catch (error) {
       failure = error;
     }
-    if (record !== undefined) {
-      void queryClient.invalidateQueries({ queryKey: cache.readPageKey(record.id), exact: true });
+    for (const id of pageIds) {
+      void queryClient.invalidateQueries({ queryKey: cache.readPageKey(id), exact: true });
     }
     // A refusal can mean the cache was out of date, such as the `conflict` of a second server for one Connection.
     const read = await readBaseAfterWrite(queryClient, cache.readCatalogue());
     const wasRead = read.hasSucceeded();
     if (wasRead) read.stop();
-    guard.finish(key, {
-      refusal: saved ? null : { kind: "refused", message: readErrorMessage(failure) },
-      unread: wasRead ? null : { saved, read },
-    });
+    const refusal: McpListRefusal | null = saved
+      ? null
+      : {
+          kind: "refused",
+          message: `${failurePrefix}${readErrorMessage(failure)}`,
+          ...readExistingServerId(failure),
+        };
+    for (const [index, key] of keys.entries()) {
+      guard.finish(key, {
+        refusal: index === 0 ? refusal : null,
+        unread: wasRead ? null : { saved, read },
+      });
+    }
   };
 
   return {
     apply: (target, on, existingRecordId) => {
       const key = buildTargetKey(target);
-      if (guard.isBlocked(key)) return;
+      if (guard.isBlocked(key)) return HANDLED;
       const servers = cache.readServers();
       const record = servers === undefined ? undefined : findRecord(servers, target);
       /** Records what the press was made against, just before it leaves a refusal or starts a write. */
-      const refuse = (message: string): void => {
+      const refuse = (message: string): McpServerSwitchPress => {
         pressedAgainst.set(key, record?.id ?? null);
         guard.refuse(key, { kind: "refused", message });
+        return HANDLED;
       };
       if (servers === undefined) {
-        refuse("The servers are not read yet, so nothing was changed. Try again.");
-        return;
+        return refuse("The servers are not read yet, so nothing was changed. Try again.");
       }
       let write: () => Promise<unknown>;
       if (existingRecordId !== undefined && record?.id !== existingRecordId) {
-        refuse("This server no longer exists, so nothing was changed.");
-        return;
+        return refuse("This server no longer exists, so nothing was changed.");
       } else if (record !== undefined) {
         write = () =>
           client.mcpServer.update({ params: { id: record.id }, payload: { enabled: on } });
       } else if (target.kind === "url") {
-        refuse("This server no longer exists, so nothing was changed.");
-        return;
+        return refuse("This server no longer exists, so nothing was changed.");
       } else if (!on) {
         // A server that was never switched on has nothing to switch off.
-        return;
+        return HANDLED;
       } else {
         const { contributionId, connectionId } = target;
+        const origin = cache.readOfferOrigin(contributionId);
+        const candidates = origin === undefined ? [] : findReplaceCandidates({ origin }, servers);
+        if (candidates.length > 0) return { kind: "replace", candidates };
         write = () =>
           client.mcpServer.create({
             payload: { source: { kind: "plugin", contributionId, connectionId } },
@@ -272,7 +359,55 @@ export const createMcpServerSwitches = ({
       }
       pressedAgainst.set(key, record?.id ?? null);
       guard.start(key);
-      void run(key, record, write);
+      void run({ keys: [key], pageIds: record === undefined ? [] : [record.id], write });
+      return HANDLED;
+    },
+    replace: (target, serverId) => {
+      if (target.kind !== "plugin") return;
+      const offerKey = buildTargetKey(target);
+      const chosenKey = buildTargetKey({ kind: "url", serverId });
+      if (guard.isBlocked(offerKey) || guard.isBlocked(chosenKey)) return;
+      /** The refusal stays whatever the cache shows of the target later: a winner that appears is what it points at. */
+      const refuse = (message: string, existingServerId?: string): void => {
+        pressedAgainst.set(offerKey, KEEP_REFUSAL);
+        guard.refuse(offerKey, {
+          kind: "refused",
+          message: `Nothing was replaced. ${message}`,
+          ...(existingServerId === undefined ? {} : { existingServerId }),
+        });
+      };
+      const servers = cache.readServers();
+      if (servers === undefined) {
+        refuse("The servers are not read yet. Try again.");
+        return;
+      }
+      const winner = findRecord(servers, target);
+      if (winner !== undefined) {
+        refuse("This Connection's server was added meanwhile.", winner.id);
+        return;
+      }
+      const origin = cache.readOfferOrigin(target.contributionId);
+      const candidates = origin === undefined ? [] : findReplaceCandidates({ origin }, servers);
+      if (!candidates.some((candidate) => candidate.id === serverId)) {
+        refuse(
+          "The server you chose is gone, or is no longer added by URL on this address. Choose again.",
+        );
+        return;
+      }
+      pressedAgainst.set(offerKey, KEEP_REFUSAL);
+      guard.start(offerKey);
+      guard.start(chosenKey);
+      const { contributionId, connectionId } = target;
+      void run({
+        keys: [offerKey, chosenKey],
+        pageIds: [serverId],
+        write: () =>
+          client.mcpServer.update({
+            params: { id: serverId },
+            payload: { source: { kind: "plugin", contributionId, connectionId }, enabled: true },
+          }),
+        failurePrefix: "Nothing was replaced. ",
+      });
     },
     readState: (target) => {
       const key = buildTargetKey(target);
@@ -281,7 +416,8 @@ export const createMcpServerSwitches = ({
       // A refusal describes the row as it was pressed. Once the cache shows another record for the
       // target, such as a server that another client created, the refusal no longer describes it.
       const now = findRecord(cache.readServers() ?? [], target)?.id ?? null;
-      if (pressedAgainst.get(key) === now) return state;
+      const pressed = pressedAgainst.get(key);
+      if (pressed === KEEP_REFUSAL || pressed === now) return state;
       let without = stateWithoutRefusal.get(state);
       if (without === undefined) {
         without = { ...state, refusal: null };

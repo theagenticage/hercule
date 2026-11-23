@@ -17,12 +17,17 @@ import {
 import { joinOfferedServers } from "./offers";
 import { CONNECTIONS, OFFERING_PLUGINS, SENTRY_WORK, buildServer } from "./testing";
 
+// A conflict's details are decoded, so the id must be a real one.
+const WINNER_ID = "01a1fbc5-06ef-74bd-8d5f-998d787ac50e";
+
 const WORK: McpServerSwitchTarget = {
   kind: "plugin",
   contributionId: "sentry/sentry",
   connectionId: "c-work",
 };
 const SERVERS_KEY = ["mcp-servers"];
+const OFFER_ORIGIN = (contributionId: string) =>
+  contributionId === "sentry/sentry" ? "https://mcp.sentry.example" : undefined;
 const PAGE_KEY = (id: string) => ["mcp-server", id];
 
 /** A controller that holds a list of servers, with a stub client that creates and updates them. */
@@ -30,6 +35,8 @@ const setup = async (initial: readonly McpServer[] = []) => {
   const world = {
     servers: [...initial],
     readsFail: false,
+    /** The error the next update fails with, or `null`. */
+    updateFails: null as Error | null,
     /** Resolves the create that is running, or `null` while none waits. */
     finishCreate: null as ((error?: Error) => void) | null,
   };
@@ -51,14 +58,25 @@ const setup = async (initial: readonly McpServer[] = []) => {
             };
           }),
       ),
-      update: vi.fn((request: { params: { id: string }; payload: { enabled: boolean } }) => {
-        world.servers = world.servers.map((server) =>
-          server.id === request.params.id
-            ? { ...server, enabled: request.payload.enabled }
-            : server,
-        );
-        return Promise.resolve({ answeredWith: "not a record" });
-      }),
+      update: vi.fn(
+        (request: {
+          params: { id: string };
+          payload: { enabled?: boolean; source?: McpServer["source"] };
+        }) => {
+          if (world.updateFails !== null) return Promise.reject(world.updateFails);
+          const { enabled, source } = request.payload;
+          world.servers = world.servers.map((server) =>
+            server.id === request.params.id
+              ? {
+                  ...server,
+                  ...(enabled === undefined ? {} : { enabled }),
+                  ...(source === undefined ? {} : { source }),
+                }
+              : server,
+          );
+          return Promise.resolve({ answeredWith: "not a record" });
+        },
+      ),
     },
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -70,6 +88,7 @@ const setup = async (initial: readonly McpServer[] = []) => {
   const cache: McpServerSwitchCache = {
     readServers: () => queryClient.getQueryData<McpServer[]>(SERVERS_KEY),
     readCatalogue: () => catalogue,
+    readOfferOrigin: OFFER_ORIGIN,
     readPageKey: PAGE_KEY,
   };
   const switches = createMcpServerSwitches({
@@ -297,6 +316,7 @@ describe("a press on the switch", () => {
       cache: {
         readServers: () => undefined,
         readCatalogue: () => catalogue,
+        readOfferOrigin: OFFER_ORIGIN,
         readPageKey: PAGE_KEY,
       },
     });
@@ -353,11 +373,225 @@ describe("a press on the switch", () => {
         readServers: () => [],
         readCatalogue: () =>
           buildMcpListQuery(queryClient, { queryKey: SERVERS_KEY, queryFn: () => [] }),
+        readOfferOrigin: OFFER_ORIGIN,
         readPageKey: PAGE_KEY,
       },
     };
 
     expect(findOrCreateMcpServerSwitches(options)).toBe(findOrCreateMcpServerSwitches(options));
+  });
+});
+
+/** A server added by URL on the Sentry plugin's origin. */
+const docsByUrl = (id: string, path = "/mcp", overrides: Partial<McpServer> = {}): McpServer =>
+  buildServer(id, "docs", "", {
+    source: {
+      kind: "url",
+      url: `https://mcp.sentry.example${path}`,
+      signIn: "token",
+      signInOffered: "token",
+    },
+    enabled: false,
+    ...overrides,
+  });
+
+const URL_TARGET = (serverId: string): McpServerSwitchTarget => ({ kind: "url", serverId });
+
+describe("switching an offer on while a server added by URL sits on its origin", () => {
+  it("writes nothing and returns the candidates, resolved from the list at this moment", async () => {
+    const { client, switches } = await setup([docsByUrl("s-a"), docsByUrl("s-b", "/sse")]);
+
+    const press = switches.apply(WORK, true);
+
+    expect(press).toEqual({
+      kind: "replace",
+      candidates: [docsByUrl("s-a"), docsByUrl("s-b", "/sse")],
+    });
+    expect(client.mcpServer.create).not.toHaveBeenCalled();
+    expect(switches.readState(WORK).blocked).toBe(false);
+  });
+
+  it("creates the server as usual when no server added by URL sits on the origin, or on another one", async () => {
+    const { client, switches } = await setup([
+      buildServer("s-other", "other", "", {
+        source: {
+          kind: "url",
+          url: "https://other.example/mcp",
+          signIn: "none",
+          signInOffered: null,
+        },
+      }),
+    ]);
+
+    expect(switches.apply(WORK, true)).toEqual({ kind: "handled" });
+    expect(client.mcpServer.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("only updates the record of the offer when it has one, whatever sits on the origin", async () => {
+    const { client, switches, settle } = await setup([
+      { ...SENTRY_WORK, enabled: false },
+      docsByUrl("s-a"),
+    ]);
+
+    expect(switches.apply(WORK, true)).toEqual({ kind: "handled" });
+    await settle(WORK);
+
+    expect(client.mcpServer.update).toHaveBeenCalledExactlyOnceWith({
+      params: { id: "s-work" },
+      payload: { enabled: true },
+    });
+  });
+
+  it("does not ask for Replace to switch the offer off", async () => {
+    const { client, switches } = await setup([docsByUrl("s-a")]);
+
+    expect(switches.apply(WORK, false)).toEqual({ kind: "handled" });
+    expect(client.mcpServer.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("Replace", () => {
+  it("moves the chosen server onto the Connection and switches it on, in one write", async () => {
+    const { world, client, queryClient, switches, settle } = await setup([
+      docsByUrl("s-a"),
+      docsByUrl("s-b", "/sse"),
+    ]);
+    queryClient.setQueryData(PAGE_KEY("s-b"), docsByUrl("s-b", "/sse"));
+
+    switches.replace(WORK, "s-b");
+
+    expect(switches.readState(WORK).blocked).toBe(true);
+    expect(switches.readState(URL_TARGET("s-b")).blocked).toBe(true);
+    expect(client.mcpServer.update).toHaveBeenCalledExactlyOnceWith({
+      params: { id: "s-b" },
+      payload: {
+        source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: "c-work" },
+        enabled: true,
+      },
+    });
+    await settle(WORK);
+    await settle(URL_TARGET("s-b"));
+    // The list is read again, the chosen page is marked stale, and the other candidate is left alone.
+    expect(world.servers.find(({ id }) => id === "s-b")).toMatchObject({
+      enabled: true,
+      source: { kind: "plugin", connectionId: "c-work" },
+    });
+    expect(queryClient.getQueryState(PAGE_KEY("s-b"))?.isInvalidated).toBe(true);
+    expect(world.servers.find(({ id }) => id === "s-a")?.source.kind).toBe("url");
+    expect(client.mcpServer.create).not.toHaveBeenCalled();
+  });
+
+  it("is ignored while the offer or the chosen server has a write, and by a second press in the same tick", async () => {
+    const { client, switches, settle } = await setup([docsByUrl("s-a"), docsByUrl("s-b", "/sse")]);
+
+    switches.replace(WORK, "s-a");
+    switches.replace(WORK, "s-b");
+    switches.apply(WORK, true);
+    switches.apply(URL_TARGET("s-a"), true);
+
+    expect(client.mcpServer.update).toHaveBeenCalledTimes(1);
+    expect(client.mcpServer.create).not.toHaveBeenCalled();
+    await settle(WORK);
+  });
+
+  it("blocks the offer's own switch while a plain press on the chosen server's switch runs", async () => {
+    const { client, switches, settle } = await setup([docsByUrl("s-a")]);
+
+    switches.apply(URL_TARGET("s-a"), true);
+    switches.replace(WORK, "s-a");
+
+    expect(client.mcpServer.update).toHaveBeenCalledTimes(1);
+    expect(client.mcpServer.update).toHaveBeenCalledWith({
+      params: { id: "s-a" },
+      payload: { enabled: true },
+    });
+    await settle(URL_TARGET("s-a"));
+  });
+
+  it("is refused with no write when the chosen server is gone, or no longer sits on the origin", async () => {
+    const { client, switches } = await setup([
+      buildServer("s-else", "else", "", {
+        source: {
+          kind: "url",
+          url: "https://else.example/mcp",
+          signIn: "none",
+          signInOffered: null,
+        },
+      }),
+    ]);
+
+    switches.replace(WORK, "s-gone");
+    expect(switches.readState(WORK).refusal).toEqual({
+      kind: "refused",
+      message:
+        "Nothing was replaced. The server you chose is gone, or is no longer added by URL on this address. Choose again.",
+    });
+    switches.replace(WORK, "s-else");
+
+    expect(client.mcpServer.update).not.toHaveBeenCalled();
+    expect(switches.readState(WORK).blocked).toBe(false);
+  });
+
+  it("is refused, naming the winner, when the offer got a record meanwhile, and keeps the refusal while that record shows", async () => {
+    const { client, switches } = await setup([docsByUrl("s-a"), SENTRY_WORK]);
+
+    switches.replace(WORK, "s-a");
+
+    expect(switches.readState(WORK).refusal).toEqual({
+      kind: "refused",
+      message: "Nothing was replaced. This Connection's server was added meanwhile.",
+      existingServerId: "s-work",
+    });
+    expect(client.mcpServer.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["not_found", "gone."],
+    ["invalid_state", "It is reached with a Connection."],
+    ["validation", "Not a URL server."],
+  ] as const)(
+    "shows a %s from the controller as the refusal, reads the list again and marks the chosen page stale",
+    async (code, message) => {
+      const { world, queryClient, switches, settle } = await setup([docsByUrl("s-a")]);
+      queryClient.setQueryData(PAGE_KEY("s-a"), docsByUrl("s-a"));
+      world.updateFails = new ApiError(code, message);
+
+      switches.replace(WORK, "s-a");
+      await settle(WORK);
+
+      expect(switches.readState(WORK).refusal).toEqual({
+        kind: "refused",
+        message: `Nothing was replaced. ${message}`,
+      });
+      expect(switches.readState(URL_TARGET("s-a")).blocked).toBe(false);
+      expect(queryClient.getQueryState(PAGE_KEY("s-a"))?.isInvalidated).toBe(true);
+    },
+  );
+
+  it("shows the winner of a lost race for the external account, and keeps showing it once its record is in the list", async () => {
+    const { world, queryClient, switches, settle } = await setup([docsByUrl("s-a")]);
+    world.updateFails = new ApiError("conflict", "A server of this account exists.", {
+      reason: "mcp-server-exists",
+      mcpServerId: WINNER_ID,
+    });
+
+    switches.replace(WORK, "s-a");
+    await settle(WORK);
+    // Another client's create arrives with the next read of the list.
+    queryClient.setQueryData(SERVERS_KEY, [docsByUrl("s-a"), { ...SENTRY_WORK, id: WINNER_ID }]);
+
+    expect(switches.readState(WORK).refusal).toEqual({
+      kind: "refused",
+      message: "Nothing was replaced. A server of this account exists.",
+      existingServerId: WINNER_ID,
+    });
+    // A new confirmation resolves the candidates from the list as it is now.
+    switches.replace(WORK, "s-a");
+    expect(switches.readState(WORK).refusal).toEqual({
+      kind: "refused",
+      message: "Nothing was replaced. This Connection's server was added meanwhile.",
+      existingServerId: WINNER_ID,
+    });
   });
 });
 

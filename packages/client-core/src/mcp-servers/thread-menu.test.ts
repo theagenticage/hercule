@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { McpServer } from "@hercule/contract";
 import { buildServerPicker, buildThreadServerMenu, orderMenuNames } from "./thread-menu";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
 
@@ -50,7 +51,7 @@ describe("buildThreadServerMenu", () => {
     const { rows } = buildMenu(VIEWS, ["s-work"]);
 
     expect(rows.map((row) => row.name)).toEqual(["sentry", "linear"]);
-    expect(rows[0]).toMatchObject({ on: true, note: null, reconnect: null });
+    expect(rows[0]).toMatchObject({ on: true, note: null, signIn: null });
     expect(rows[0]?.shown.server.id).toBe("s-work");
     expect(rows[0]?.accounts.map((view) => view.server.id)).toEqual(["s-hobby", "s-work"]);
   });
@@ -72,7 +73,7 @@ describe("buildThreadServerMenu", () => {
     expect(buildMenu(views, ["s-work"]).rows[0]).toMatchObject({
       on: true,
       note: "on, joins once you sign in",
-      reconnect: { connectionId: "c-work", label: "Reconnect Sentry · work" },
+      signIn: { kind: "reconnect", connectionId: "c-work", label: "Reconnect Sentry · work" },
     });
     expect(buildMenu(views, []).rows[0]).toMatchObject({ on: false, note: "needs sign-in" });
   });
@@ -180,6 +181,47 @@ describe("buildThreadServerMenu", () => {
   });
 });
 
+/** A server added by URL, named `docs`, at `url`. */
+const buildUrlServer = (id: string, url: string, overrides: Partial<McpServer> = {}) =>
+  buildServer(id, "docs", "", {
+    source: { kind: "url", url, signIn: "token", signInOffered: "token" },
+    ...overrides,
+  });
+
+describe("a server added by URL in the submenu", () => {
+  it("offers the token form as the button of a server that needs sign-in, and never says Connection", () => {
+    const views = buildViews([
+      buildUrlServer("s-docs", "https://docs.example.com/mcp", { status: "needs-sign-in" }),
+    ]);
+
+    expect(buildMenu(views, ["s-docs"]).rows[0]).toMatchObject({
+      on: true,
+      note: "on, joins once you sign in",
+      signIn: { kind: "sign-in", mcpServerId: "s-docs", label: "Sign in…" },
+    });
+  });
+
+  it("offers the same sign-in button for a server that asks for OAuth, which the dialog answers with the browser first", () => {
+    const views = buildViews([
+      buildUrlServer("s-docs", "https://docs.example.com/mcp", {
+        status: "needs-sign-in",
+        source: {
+          kind: "url",
+          url: "https://docs.example.com/mcp",
+          signIn: "none",
+          signInOffered: "oauth",
+        },
+      }),
+    ]);
+
+    expect(buildMenu(views, []).rows[0]?.signIn).toEqual({
+      kind: "sign-in",
+      mcpServerId: "s-docs",
+      label: "Sign in…",
+    });
+  });
+});
+
 describe("buildServerPicker", () => {
   const VIEWS = buildViews([
     LINEAR,
@@ -213,6 +255,48 @@ describe("buildServerPicker", () => {
       ["sentry", "Sentry Connection · 2 accounts", null],
       ["alpha", "Linear Connection", "off"],
     ]);
+  });
+
+  it("names a server added by URL by its whole address, so two of one name on one host differ", () => {
+    const views = buildViews([
+      buildUrlServer("s-a", "https://mcp.example.com/team-a"),
+      buildUrlServer("s-b", "https://mcp.example.com/team-b"),
+    ]);
+    const { rows } = build({ views, rememberedAccounts: { docs: "s-b" } });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.secondLine).toBe("https://mcp.example.com/team-b · 2 accounts");
+    expect(rows[0]?.accounts.map((view) => view.account)).toEqual([
+      "https://mcp.example.com/team-a",
+      "https://mcp.example.com/team-b",
+    ]);
+    expect(build({ views, filter: "team-b" }).rows).toHaveLength(1);
+  });
+
+  it("writes the address of a lone server added by URL, and the type of a Connection's server beside it", () => {
+    const views = buildViews([
+      buildUrlServer("s-docs", "https://docs.example.com/mcp"),
+      buildServer("s-work", "sentry", "c-work"),
+    ]);
+
+    expect(build({ views }).rows.map((row) => [row.name, row.secondLine])).toEqual([
+      ["docs", "https://docs.example.com/mcp"],
+      ["sentry", "Sentry Connection"],
+    ]);
+  });
+
+  it("writes a group of a Connection's server and a server added by URL from the account shown", () => {
+    const views = buildViews([
+      buildServer("s-work", "docs", "c-work"),
+      buildUrlServer("s-docs", "https://docs.example.com/mcp"),
+    ]);
+
+    expect(build({ views, mcpServerIds: ["s-docs"] }).rows[0]?.secondLine).toBe(
+      "https://docs.example.com/mcp · 2 accounts",
+    );
+    expect(build({ views, mcpServerIds: ["s-work"] }).rows[0]?.secondLine).toBe(
+      "Sentry Connection · 2 accounts",
+    );
   });
 
   it.each([

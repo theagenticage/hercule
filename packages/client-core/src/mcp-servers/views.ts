@@ -26,13 +26,18 @@ export interface McpServerView {
   readonly connection: Connection | undefined;
   /**
    * The label that tells two servers of one name apart: the Connection's label
-   * for a plugin server (`undefined` without a Connection), the address's host
-   * for a server added by URL.
+   * for a plugin server (`undefined` without a Connection), the whole address
+   * for a server added by URL. The host alone would not tell apart two
+   * addresses on one host.
    */
   readonly account: string | undefined;
   /** The display name of the Connection's type, such as "Sentry". */
   readonly typeName: string;
-  /** The line under the server's name, such as "Sentry Connection · 13 tools". */
+  /**
+   * The line under the server's name: "Sentry Connection · 13 tools" for a
+   * plugin server, "https://mcp.example.com/mcp · 13 tools" for a server
+   * added by URL, whose address is written whole.
+   */
   readonly secondLine: string;
   readonly displayStatus: McpServerDisplayStatus;
   /** `displayStatus` as the one word a screen shows. */
@@ -117,15 +122,16 @@ export const buildMcpServerView = (
   const displayStatus = decideDisplayStatus(server);
   const { word: statusWord, failing } = MCP_SERVER_STATUS_FACTS[displayStatus];
   if (source.kind === "url") {
-    const host = new URL(source.url).host;
     return {
       server,
       pluginId: null,
       connection: undefined,
-      account: host,
+      account: source.url,
       typeName: "",
       secondLine:
-        server.checkedAt === null ? host : `${host} · ${formatCount(server.tools.length, "tool")}`,
+        server.checkedAt === null
+          ? source.url
+          : `${source.url} · ${formatCount(server.tools.length, "tool")}`,
       displayStatus,
       statusWord,
       failing,
@@ -176,6 +182,93 @@ export const describeReconnect = (view: McpServerView): ReconnectTarget | null =
         connectionId: view.connection.id,
         label: `Reconnect ${view.typeName} · ${view.connection.label}`,
       };
+
+/** What opens the sign-in of a server that needs one, and the label of the button that does it. */
+export type SignInAction =
+  /** A plugin's server: the Connection's own Reconnect dialog. */
+  | ({ readonly kind: "reconnect" } & ReconnectTarget)
+  /**
+   * A server added by URL, which has no Connection: the sign-in dialog of
+   * that server, with the browser first for a server that offers it and the
+   * pasted token for every server.
+   */
+  | { readonly kind: "sign-in"; readonly mcpServerId: string; readonly label: "Sign in…" };
+
+/**
+ * Returns the button that fixes a server that needs sign-in, or `null` when
+ * there is none (a plugin's server whose Connection is not in the list read).
+ * The submenu's row, a thread's warning line and the page's band all read
+ * this one function, so they offer the same button.
+ *
+ * A server added by URL gets the sign-in dialog, whatever it accepts.
+ */
+export const describeSignInAction = (view: McpServerView): SignInAction | null => {
+  const { source } = view.server;
+  if (source.kind === "plugin") {
+    const reconnect = describeReconnect(view);
+    return reconnect === null ? null : { kind: "reconnect", ...reconnect };
+  }
+  return { kind: "sign-in", mcpServerId: view.server.id, label: "Sign in…" };
+};
+
+/**
+ * Returns the first chip of a server's page: "Added by URL", or "From the
+ * Sentry plugin" for a plugin's server, whose plugin is named `pluginName`
+ * (the view's Connection type when the caller has no plugin name).
+ */
+export const describeSourceChip = (view: McpServerView, pluginName?: string): string =>
+  view.server.source.kind === "url"
+    ? "Added by URL"
+    : `From the ${pluginName ?? view.typeName} plugin`;
+
+/**
+ * Returns the sentence under "Remove server" on a server's page: what
+ * deleting it takes with it. A server added by URL takes its sign-in too,
+ * and a plugin's server leaves its Connection in place.
+ */
+export const describeRemoveEffect = (view: McpServerView): string => {
+  const base = "Deletes the server";
+  const projects = "Projects that name it stop naming it.";
+  if (view.server.source.kind === "url") return `${base} and its sign-in. ${projects}`;
+  return view.connection === undefined
+    ? `${base}. ${projects}`
+    : `${base}. ${projects} The Connection ${view.typeName} · ${view.connection.label} stays.`;
+};
+
+/** The Sign-in row on the page of a server added by URL. */
+export interface SignInRow {
+  /** What the server holds: "None needed", "A token" or "OAuth". */
+  readonly value: "None needed" | "A token" | "OAuth";
+  /**
+   * The row's button, or `null` for none: "Replace token…" while the server
+   * holds a pasted token and does not need sign-in. A server that needs sign-in
+   * has the status band's button instead, so the page draws one button only.
+   * "Sign in again…" while the server holds an OAuth sign-in and does not need
+   * sign-in. Both open the same dialog.
+   */
+  readonly action:
+    | { readonly kind: "replace-token"; readonly label: "Replace token…" }
+    | { readonly kind: "sign-in-again"; readonly label: "Sign in again…" }
+    | null;
+}
+
+/** Returns the Sign-in row of a server added by URL, or `null` for a plugin's server, which has the Connection row instead. */
+export const describeSignInRow = (view: McpServerView): SignInRow | null => {
+  const { source } = view.server;
+  if (source.kind === "plugin") return null;
+  if (source.signIn === "none") return { value: "None needed", action: null };
+  const needsSignIn = MCP_SERVER_STATUS_FACTS[view.displayStatus].needsSignIn;
+  if (source.signIn === "oauth") {
+    return {
+      value: "OAuth",
+      action: needsSignIn ? null : { kind: "sign-in-again", label: "Sign in again…" },
+    };
+  }
+  return {
+    value: "A token",
+    action: needsSignIn ? null : { kind: "replace-token", label: "Replace token…" },
+  };
+};
 
 /**
  * Checks whether "Check now" on the server's page is off: the server is being

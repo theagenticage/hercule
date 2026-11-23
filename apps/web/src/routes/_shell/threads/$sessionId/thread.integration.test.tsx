@@ -64,6 +64,7 @@ import {
 import {
   MCP_SERVERS,
   S_DATADOG,
+  S_DOCS_URL,
   S_FIGMA,
   S_GITHUB,
   S_GRAFANA,
@@ -6240,6 +6241,25 @@ describe("Thread: the MCP servers of the + menu", () => {
         .getAttribute("aria-checked"),
     ).toBe("true");
   });
+
+  it("offers 'Sign in…' for a server added by URL that needs sign-in, which opens its token dialog, and names it by its name alone", async () => {
+    const user = userEvent.setup();
+    await openServersThread(
+      [S_DOCS_URL],
+      buildMcpServerRoutes(() => [S_DOCS_URL]),
+    );
+
+    const submenu = await openServersSubmenu(user);
+
+    // No Reconnect: a server added by URL has no Connection. Its address is its account, so it is not printed beside the name.
+    expect(within(submenu).queryByRole("link", { name: /Reconnect/ })).toBeNull();
+    expect(readPageText(submenu)).not.toContain("https://docs.acme.example/mcp");
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+
+    expect(await screen.findByRole("dialog", { name: "Sign in to docs" })).toBeTruthy();
+    // The menu closed to make room for the dialog.
+    expect(screen.queryByRole("dialog", { name: "Servers of this thread" })).toBeNull();
+  });
 });
 
 describe("Thread: the lines about MCP servers", () => {
@@ -6298,6 +6318,49 @@ describe("Thread: the lines about MCP servers", () => {
     const quiet = await findLine("Retrying the request.");
     expect(quiet.className).toContain("text-muted");
     expect(within(quiet).getByText("Warning:")).toBeDefined();
+  });
+
+  it("opens the token dialog from the 'Sign in…' of a server added by URL, and saves the token", async () => {
+    const user = userEvent.setup();
+    let server = S_DOCS_URL;
+    const { api } = await openApp(
+      buildSession({ status: "idle" }),
+      buildWarningRows([{ mcpServerId: S_DOCS_URL.id, reason: "needs-sign-in" }]),
+      {
+        ...buildMcpServerRoutes(() => [server]),
+        [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+        [`POST /api/v1/mcp-servers/${S_DOCS_URL.id}/token`]: () => {
+          server = { ...server, status: "checking", statusDetail: null };
+          return { body: server };
+        },
+      },
+    );
+
+    // A server with no Connection has no Reconnect: its button opens the dialog.
+    const signIn = await screen.findByRole("button", { name: "Sign in…: docs" });
+    const line = await findLine("MCP servers were left out.");
+    expect(within(line).queryByRole("link")).toBeNull();
+    expect(line.className).toContain("text-fail");
+    await user.click(signIn);
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    expect(readPageText(dialog)).toContain("The server refused its token. Paste a new one.");
+    await user.type(within(dialog).getByLabelText("Token"), "abc12345-xyz");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/token")),
+      ).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.path.endsWith("/token"))!.body).toEqual({
+      token: "abc12345-xyz",
+    });
+    await within(dialog).findByText("Checking: asking the server for its tools.");
+    // Closing leaves the thread as it was.
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Sign in to docs" })).toBeNull();
+    expect(readPageText()).not.toContain("abc12345-xyz");
   });
 
   it("gives each server it names its own button, 'Open server' for an unreachable one, and none for a reason without a fix", async () => {

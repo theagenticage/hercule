@@ -1,0 +1,76 @@
+/* The dialogs that write a server added by URL: Add by URL, the token form
+   and Replace (#1211). Built from the Connection setup dialog's parts
+   (connection-setup.css); only what those do not draw is here. */
+
+.url-dialog {
+  width: 480px;
+}
+/* The Address, the refusal under it and the Name, one gap apart. */
+.url-form {
+  display: grid;
+  gap: 16px;
+}
+.url-dialog .field > input {
+  width: 100%;
+}
+.url-wait {
+  padding: 6px 2px;
+}
+/* The refusal sits between the two fields, and the form's gap spaces it. */
+.url-form > .warn {
+  margin-top: 0;
+}
+/* A note under a step, such as what closing the dialog does. */
+.url-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.url-wait > .url-note {
+  margin-top: 10px;
+}
+p.setup-lead.url-note {
+  font-size: inherit;
+}
+
+/* What Replace keeps, changes and deletes: three labelled lines. */
+.url-replace {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.url-replace > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 10px;
+}
+.url-replace span {
+  color: var(--faint);
+}
+.url-replace b {
+  font-weight: var(--w-medium);
+}
+/* The servers a Replace can move: one radio each, the address under the name. */
+.url-choice {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.url-choice label {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: baseline;
+  cursor: pointer;
+}
+.url-choice label > span {
+  grid-column: 2;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--t-12);
+}

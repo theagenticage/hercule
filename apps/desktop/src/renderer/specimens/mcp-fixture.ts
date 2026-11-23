@@ -155,6 +155,124 @@ export const MCP_SERVERS: ReadonlyArray<McpServer> = [
   }),
 ];
 
+const DOCS_URL_ID = "s-docs";
+const NOTION_URL_ID = "s-notion";
+const RUNBOOKS_ID = "s-runbooks";
+const POSTHOG_DOCS_ID = "s-posthogdocs";
+const WIKI_ID = "s-wiki";
+const ATLAS_ID = "s-atlas";
+
+/**
+ * Returns a server added by URL, named `name`, at the address `url`, that
+ * holds `signIn` and was told the server accepts `signInOffered`. It is on a
+ * fixture Connection id no row reads, because a server added by URL has none.
+ */
+const buildUrlServer = (
+  id: string,
+  name: string,
+  url: string,
+  signIn: "none" | "token" | "oauth",
+  signInOffered: "oauth" | "token" | null,
+  overrides: Partial<McpServer> = {},
+): McpServer =>
+  buildServer(id, name, "c-none", {
+    source: { kind: "url", url, signIn, signInOffered },
+    ...overrides,
+  });
+
+/**
+ * The servers added by URL: Docs (ready, no sign-in), Notion (a pasted token
+ * the server refused, so it needs sign-in), Runbooks (unreachable), and a
+ * server on PostHog's address, which the PostHog Connection's row offers
+ * Replace for. PostHog's Connection has no server of its own in this world.
+ */
+export const MCP_URL_SERVERS: ReadonlyArray<McpServer> = [
+  buildUrlServer(DOCS_URL_ID, "docs", "https://mcp.docs.example/mcp", "none", null, {
+    tools: GRAFANA_TOOLS,
+    checkedAt: minutesAgo(8),
+    createdAt: minutesAgo(4 * 24 * 60),
+  }),
+  buildUrlServer(NOTION_URL_ID, "notion", "https://mcp.notion.example/mcp", "token", "token", {
+    status: "needs-sign-in",
+    statusDetail: "mcp.notion.example refused the saved token at 09:12 (401, token revoked).",
+    tools: LINEAR_TOOLS.slice(0, 6),
+    checkedAt: minutesAgo(70),
+    createdAt: minutesAgo(6 * 24 * 60),
+  }),
+  buildUrlServer(RUNBOOKS_ID, "runbooks", "https://runbooks.acme.example/mcp", "none", null, {
+    status: "unreachable",
+    statusDetail: "runbooks.acme.example did not answer within 10 seconds, last tried at 09:35.",
+    tools: GRAFANA_TOOLS.slice(0, 3),
+    checkedAt: minutesAgo(180),
+    createdAt: minutesAgo(2 * 24 * 60),
+  }),
+  buildUrlServer(POSTHOG_DOCS_ID, "posthogdocs", "https://mcp.posthog.com/mcp", "token", "token", {
+    tools: GITHUB_TOOLS.slice(0, 5),
+    checkedAt: minutesAgo(12),
+    enabled: false,
+  }),
+];
+
+/** The server the Add by URL dialog creates in the scenes that add one: it asks for a token. */
+export const MCP_NEW_URL_SERVER: McpServer = buildUrlServer(
+  WIKI_ID,
+  "wiki",
+  "https://mcp.wiki.example/mcp",
+  "none",
+  "token",
+  {
+    status: "needs-sign-in",
+    statusDetail: "mcp.wiki.example answered 401.",
+    tools: [],
+    checkedAt: null,
+    createdAt: minutesAgo(0),
+  },
+);
+
+/**
+ * A server added by URL that signs in through the browser and needs sign-in:
+ * the scenes of the sign-in dialog open its page.
+ */
+export const MCP_OAUTH_SERVER: McpServer = buildUrlServer(
+  ATLAS_ID,
+  "atlas",
+  "https://mcp.atlas.example/mcp",
+  "none",
+  "oauth",
+  {
+    status: "needs-sign-in",
+    statusDetail: "mcp.atlas.example answered 401.",
+    tools: [],
+    checkedAt: minutesAgo(30),
+    createdAt: minutesAgo(3 * 24 * 60),
+  },
+);
+
+/**
+ * The servers of the scenes that draw servers added by URL: the world's
+ * servers and `MCP_URL_SERVERS`, and the default list. Other scenes keep
+ * `MCP_RECORDS`, so their pickers and menus stay as they were.
+ */
+export const MCP_URL_RECORDS: McpServersRecords = {
+  servers: [...MCP_SERVERS, ...MCP_URL_SERVERS].toSorted((a, b) => a.name.localeCompare(b.name)),
+  defaultServerIds: [GITHUB_ID, STRIPE_ID],
+};
+
+/** The records of the sign-in dialog's scenes: those of `MCP_URL_RECORDS` and the server that signs in through the browser. */
+export const MCP_OAUTH_RECORDS: McpServersRecords = {
+  servers: [...MCP_URL_RECORDS.servers, MCP_OAUTH_SERVER].toSorted((a, b) =>
+    a.name.localeCompare(b.name),
+  ),
+  defaultServerIds: MCP_URL_RECORDS.defaultServerIds,
+};
+
+/** The id of the server that signs in through the browser. */
+export const MCP_ATLAS_SERVER_ID = ATLAS_ID;
+
+/** The id of the Notion server, which needs sign-in, and of the Docs server, which the duplicate refusal points at. */
+export const MCP_NOTION_SERVER_ID = NOTION_URL_ID;
+export const MCP_DOCS_SERVER_ID = DOCS_URL_ID;
+
 /**
  * The sidebar's three projects, naming the servers their threads start with.
  * The sidebar draws the tile of each, tinted by its place in the list.

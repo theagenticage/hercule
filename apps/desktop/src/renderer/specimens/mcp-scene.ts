@@ -10,7 +10,7 @@
  * `listUnknownRequests` and fails the scene.
  */
 import type { Handler } from "@hercule/client-core/testing";
-import type { EventCountsByConnection } from "@hercule/contract";
+import type { EventCountsByConnection, McpServer } from "@hercule/contract";
 import { BOOT_HANDLERS, buildSidebarHandlers } from "../app/fake-controller";
 import type { SidebarRecords as ControllerRecords } from "../app/fake-controller";
 import { buildDraftKey } from "../app/pending-submissions";
@@ -30,6 +30,17 @@ export interface McpScene {
   readonly mcp: McpServersRecords;
   /** What Settings > Connections reads of the events each Connection received. None when the scene reads none. */
   readonly eventCounts?: EventCountsByConnection;
+  /**
+   * What `mcpServer.create` answers, for a scene whose Add by URL dialog is
+   * used. An answer with status 200 holds the new server: it is listed and
+   * readable from then on. The ids in it follow the scene's id conversion.
+   */
+  readonly create?: { readonly status: number; readonly body: unknown };
+  /**
+   * What `mcpServer.startSignIn` answers, for a scene whose sign-in dialog is
+   * used, on every server of the scene.
+   */
+  readonly signIn?: { readonly status: number; readonly body: unknown };
   /** The thread the scene opens. */
   readonly thread?: ThreadScreenRecords;
   /** The Draft Thread the scene opens. */
@@ -58,7 +69,18 @@ const buildControllerRecords = (records: SidebarRecords): ControllerRecords => (
 
 /** Returns the handlers that answer every read of `scene`. */
 export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> {
-  const { records, mcp, eventCounts, thread, draft, handlers: replacements } = scene;
+  const {
+    records,
+    mcp,
+    eventCounts,
+    thread,
+    draft,
+    create,
+    signIn,
+    handlers: replacements,
+  } = scene;
+  // The server `mcpServer.create` made, once it has been called.
+  let created: McpServer | undefined;
   const handlers: Record<string, Handler> = {
     ...BOOT_HANDLERS,
     ...buildSidebarHandlers(buildControllerRecords(records)),
@@ -70,12 +92,31 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
         user: { timezone: "UTC", "thread.mcpServerIds": mcp.defaultServerIds },
       },
     },
-    "GET /api/v1/mcp-servers": { body: { items: mcp.servers } },
+    "GET /api/v1/mcp-servers": () => ({
+      body: { items: created === undefined ? mcp.servers : [...mcp.servers, created] },
+    }),
     ...Object.fromEntries(
       mcp.servers.map((server) => [`GET /api/v1/mcp-servers/${server.id}`, { body: server }]),
     ),
     "GET /api/v1/events/counts": { body: eventCounts ?? { connections: [] } },
   };
+  if (create !== undefined) {
+    handlers["POST /api/v1/mcp-servers"] = () => {
+      if (create.status === 200) {
+        created = create.body as McpServer;
+        handlers[`GET /api/v1/mcp-servers/${created.id}`] = { body: created };
+      }
+      return { status: create.status, body: create.body };
+    };
+  }
+  if (signIn !== undefined) {
+    for (const { id } of mcp.servers) {
+      handlers[`POST /api/v1/mcp-servers/${id}/sign-in`] = {
+        status: signIn.status,
+        body: signIn.body,
+      };
+    }
+  }
   if (thread !== undefined) {
     const path = `/api/v1/sessions/${thread.session.id}`;
     handlers[`GET ${path}`] = { body: thread.session };

@@ -93,11 +93,12 @@ const buildBridge = (username: string, appearance: Appearance): Bridge => ({
   skillArchive: { build: refuse("skillArchive.build") },
   firstRunProgress: { read: () => Promise.resolve(null), save: refuse("firstRunProgress.save") },
   appearance: { read: () => appearance, save: refuse("appearance.save") },
-  link: { open: refuse("link.open") },
+  // A specimen has no browser to open and nothing to listen on: a sign-in that starts here shows its paste step.
+  link: { open: () => Promise.resolve(undefined) },
   signInReturn: {
-    listen: refuse("signInReturn.listen"),
+    listen: () => Promise.resolve({ _tag: "unavailable" }),
     wait: refuse("signInReturn.wait"),
-    cancel: refuse("signInReturn.cancel"),
+    cancel: () => Promise.resolve(undefined),
   },
   menu: { onCommand: () => () => undefined },
   destination: { onOpen: () => () => undefined },

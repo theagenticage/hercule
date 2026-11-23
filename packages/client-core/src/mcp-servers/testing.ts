@@ -122,6 +122,8 @@ export interface McpWorld<P extends FakeMcpProject = Project> {
   defaultIds: string[];
   /** The ids `mcpServer.check` was called on, in order. */
   checked: string[];
+  /** The tokens `mcpServer.setToken` was called with, in order. */
+  tokens: { readonly id: string; readonly token: string }[];
 }
 
 export interface McpWorldOptions<P extends FakeMcpProject = Project> {
@@ -138,6 +140,7 @@ export const buildMcpWorld = <P extends FakeMcpProject = Project>(
   projects: [...options.projects],
   defaultIds: [...(options.defaultIds ?? [])],
   checked: [],
+  tokens: [],
 });
 
 export interface McpControllerOptions {
@@ -164,8 +167,13 @@ const notFound = (what: string): Answer => ({
  * world calls this after.
  *
  * - `mcpServer.create` refuses `conflict` for a second server of one
- *   contribution and Connection, and otherwise adds a server that is
- *   `checking` with no tools, under the next of `createdIds`.
+ *   contribution and Connection, or of one address (`mcp-server-exists`), and
+ *   otherwise adds a server that is `checking` with no tools, under the next
+ *   of `createdIds`. A server added by URL has no sign-in until a token is set.
+ * - `mcpServer.update` takes `enabled`, and `source` (Replace), which moves a
+ *   server added by URL onto the plugin's Connection.
+ * - `mcpServer.setToken` records the token, and marks the server `checking`
+ *   with a pasted token as its sign-in.
  * - `mcpServer.delete` drops the server from every project's list. It leaves
  *   the default list as stored, and reading the settings drops the ids of
  *   deleted servers, as the controller does.
@@ -207,8 +215,43 @@ export const buildMcpControllerHandlers = <P extends FakeMcpProject>(
     }),
     "POST /api/v1/mcp-servers": (call) => {
       const { source } = call.body as {
-        source: { contributionId: string; connectionId: string };
+        source: {
+          kind: string;
+          url?: string;
+          name?: string;
+          contributionId: string;
+          connectionId: string;
+        };
       };
+      const id = createdIds[world.servers.filter((each) => createdIds.includes(each.id)).length]!;
+      const checking = { status: "checking", tools: [], checkedAt: null } as const;
+      if (source.kind === "url") {
+        const url = source.url!;
+        const holder = world.servers.find(
+          (each) => each.source.kind === "url" && each.source.url === url,
+        );
+        if (holder !== undefined) {
+          return {
+            status: 409,
+            body: {
+              error: {
+                code: "conflict",
+                message: "This address is added already.",
+                details: { reason: "mcp-server-exists", mcpServerId: holder.id },
+              },
+            },
+          };
+        }
+        const host = new URL(url).hostname.split(".");
+        const name =
+          source.name ?? host.find((label) => !["mcp", "www", "api"].includes(label)) ?? "server";
+        const created = buildServer(id, name, "unused", {
+          ...checking,
+          source: { kind: "url", url, signIn: "none", signInOffered: null },
+        });
+        world.servers = [...world.servers, created];
+        return { body: created };
+      }
       if (
         world.servers.some(
           (each) =>
@@ -225,12 +268,12 @@ export const buildMcpControllerHandlers = <P extends FakeMcpProject>(
           ),
         };
       }
-      const id = createdIds[world.servers.filter((each) => createdIds.includes(each.id)).length]!;
-      const created = buildServer(id, source.contributionId.split("/")[1]!, source.connectionId, {
-        status: "checking",
-        tools: [],
-        checkedAt: null,
-      });
+      const created = buildServer(
+        id,
+        source.contributionId.split("/")[1]!,
+        source.connectionId,
+        checking,
+      );
       world.servers = [...world.servers, created];
       return { body: created };
     },
@@ -241,9 +284,32 @@ export const buildMcpControllerHandlers = <P extends FakeMcpProject>(
       return found === undefined ? notFound("server") : { body: found };
     };
     handlers[`PATCH /api/v1/mcp-servers/${id}`] = (call) => {
-      const { enabled } = call.body as { enabled: boolean };
-      const next = replaceServer(id, { enabled });
+      const { enabled, source } = call.body as {
+        enabled?: boolean;
+        source?: { kind: "plugin"; contributionId: string; connectionId: string };
+      };
+      const next = replaceServer(id, {
+        ...(enabled === undefined ? {} : { enabled }),
+        ...(source === undefined ? {} : { source }),
+      });
       return next === undefined ? notFound("server") : { body: next };
+    };
+    handlers[`POST /api/v1/mcp-servers/${id}/token`] = (call) => {
+      const { token } = call.body as { token: string };
+      const current = world.servers.find((each) => each.id === id);
+      if (current === undefined) return notFound("server");
+      if (current.source.kind !== "url") {
+        return {
+          status: 409,
+          body: buildErrorBody("invalid_state", "This server is reached with a Connection."),
+        };
+      }
+      world.tokens.push({ id, token });
+      const next = replaceServer(id, {
+        status: "checking",
+        source: { ...current.source, signIn: "token" },
+      });
+      return { body: next };
     };
     handlers[`DELETE /api/v1/mcp-servers/${id}`] = () => {
       world.servers = world.servers.filter((each) => each.id !== id);

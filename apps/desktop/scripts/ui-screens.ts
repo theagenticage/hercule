@@ -420,6 +420,57 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".render-failure-headline",
     nonTextParts: [],
   },
+  // Servers added by URL: the list with its group, the Add by URL dialog at its token step, the dialog's
+  // refusal of an address added before, the Replace dialog, and the page of a server that needs sign-in.
+  {
+    name: "settings-mcp-urls",
+    path: "settings-mcp-servers.html?state=urls",
+    contentSelector: '.mcp-group[aria-label="Added by URL"] .mcp-row',
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+      { selector: ".mcp-status--fail .dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-add-token",
+    path: "settings-mcp-servers.html?state=add-token",
+    contentSelector: 'dialog.url-dialog input[type="password"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-duplicate",
+    path: "settings-mcp-servers.html?state=add-duplicate",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-replace",
+    path: "settings-mcp-servers.html?state=replace",
+    contentSelector: "dialog.confirm-dialog .url-replace",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-waiting",
+    path: "settings-mcp-servers.html?state=sign-in-waiting",
+    contentSelector: "dialog.url-dialog .setup-lead",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-refused",
+    path: "settings-mcp-servers.html?state=sign-in-refused",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-url-page",
+    path: "settings-mcp-servers.html?state=url-page",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
   // The "agent tools" note of each Connection whose plugin offers an MCP server: on, off, and needs sign-in.
   {
     name: "settings-connections",

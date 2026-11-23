@@ -4,7 +4,11 @@
  * holds code spans.
  */
 import { Fragment, type JSX } from "react";
-import type { McpServerDisplayStatus, TextPart } from "@hercule/client-core/mcp-servers";
+import type {
+  McpServerDisplayStatus,
+  McpServerView,
+  TextPart,
+} from "@hercule/client-core/mcp-servers";
 import "./mcp-servers.css";
 
 /**
@@ -31,6 +35,15 @@ export function ServerName({
     </span>
   );
 }
+
+/**
+ * Returns the account to write beside the name of the server of `view`: the
+ * label of its Connection. A server added by URL has none, because its
+ * account is its whole address, which the rows of the list and a page's
+ * second line already show: it is written by its name alone.
+ */
+export const readNameAccount = (view: McpServerView): string | undefined =>
+  view.server.source.kind === "url" ? undefined : view.account;
 
 /** What `ServerStatus` needs of a server: the fields of `McpServerView` that tell its status. */
 interface ServerStatusProps {

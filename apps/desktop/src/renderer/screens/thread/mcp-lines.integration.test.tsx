@@ -7,11 +7,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { McpServer } from "@hercule/contract";
 import { buildNextRows, THREAD_FIXTURES, type ThreadRecords } from "../../app/testing";
 import {
   LINEAR,
   LINEAR_ID,
+  NOTION,
   SENTRY_HOBBY,
   SENTRY_WORK,
   SENTRY_WORK_ID,
@@ -83,6 +85,27 @@ describe("a thread's line about MCP servers", () => {
     fireEvent.click(button);
 
     expect(await screen.findByRole("dialog", { name: "Reconnect Sentry · work" })).toBeTruthy();
+  });
+
+  it("has a Sign in… button for a server added by URL that needs a token, which opens its token dialog", async () => {
+    const signedOut: McpServer = { ...NOTION, status: "needs-sign-in" };
+    const { readNote, world } = await openLine(
+      [{ mcpServerId: NOTION.id, reason: "needs-sign-in" }],
+      [signedOut],
+    );
+
+    const button = await waitFor(() =>
+      within(readNote()).getByRole("button", { name: "Sign in…" }),
+    );
+    expect(readNote().className).toBe("error-note");
+    fireEvent.click(button);
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+    await userEvent.type(within(dialog).getByLabelText("Token"), "abcd1234efgh5678");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await waitFor(() => {
+      expect(world.tokens).toEqual([{ id: NOTION.id, token: "abcd1234efgh5678" }]);
+    });
   });
 
   it.each(["unreachable", "error", "switched-off"] as const)(

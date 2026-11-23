@@ -10,15 +10,31 @@ import { useRouteContext } from "@tanstack/react-router";
 import {
   buildMcpListQuery,
   describeMcpListProblem,
+  describeReplaceRefusal,
   findOrCreateMcpServerSwitches,
+  readMcpServerOffers,
+  type McpServerSwitchPress,
   type McpServerSwitchTarget,
+  type ReplaceRefusal,
 } from "@hercule/client-core/mcp-servers";
-import { mcpServerQuery, mcpServersQuery } from "./queries";
+import { mcpServerQuery, mcpServersQuery, pluginsQuery } from "./queries";
 
 /** What a switch control gets from `useMcpServerSwitch`. */
 export interface McpServerSwitch {
-  /** Switches the server on or off, creating it when it has no record yet. Does nothing while `blocked`. */
-  readonly press: (on: boolean) => void;
+  /**
+   * Switches the server on or off, creating it when it has no record yet.
+   * Does nothing while `blocked`. Returns `replace` with the servers added by
+   * URL on the offer's address when switching it on would create a second
+   * server for it: nothing was written, and the control asks which one to
+   * replace.
+   */
+  readonly press: (on: boolean) => McpServerSwitchPress;
+  /** Moves the server added by URL `serverId` onto this plugin target, switched on, with one write. Does nothing for a target that is not a plugin's. */
+  readonly replace: (serverId: string) => void;
+  /** What Replace was refused for, or `null`. A refusal names the server that won, when there is one. */
+  readonly replaceRefusal: ReplaceRefusal | null;
+  /** Forgets the refusal, when the user dismisses it. */
+  readonly clearRefusal: () => void;
   /** Whether a write of the switch runs, started by any control, or the list could not be read again after one. */
   readonly blocked: boolean;
   /** Returns why the last press made no change, or that a saved change could not be read again, or `null`. */
@@ -46,6 +62,10 @@ export function useMcpServerSwitch(
     cache: {
       readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey),
       readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
+      readOfferOrigin: (contributionId) =>
+        readMcpServerOffers(queryClient.getQueryData(pluginsQuery(client).queryKey) ?? []).find(
+          (offer) => offer.contributionId === contributionId,
+        )?.origin,
       readPageKey: (serverId) => mcpServerQuery(client, serverId).queryKey,
     },
   });
@@ -57,8 +77,13 @@ export function useMcpServerSwitch(
     return switches.attach(mine);
   }, [switches, key]);
   return {
-    press: (on) => {
-      switches.apply(target, on, existingRecordId);
+    press: (on) => switches.apply(target, on, existingRecordId),
+    replace: (serverId) => {
+      switches.replace(target, serverId);
+    },
+    replaceRefusal: describeReplaceRefusal(state),
+    clearRefusal: () => {
+      switches.clearRefusal(target);
     },
     blocked: state.blocked,
     problem: describeMcpListProblem(state),

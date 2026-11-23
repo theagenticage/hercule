@@ -1,6 +1,7 @@
 /**
- * The rows of Settings > MCP servers, group "From your Connections": one for
- * each Connection whose plugin offers a server, switched on or off.
+ * The rows of Settings > MCP servers: the group "From your Connections", one
+ * for each Connection whose plugin offers a server, switched on or off, and
+ * the group "Added by URL", one for each server added by an address.
  */
 import type { Connection, McpServer, PluginDetail, Project } from "@hercule/contract";
 import { describeConnectionTypeName } from "../connection-settings";
@@ -80,6 +81,44 @@ export const buildMcpServerSettingsRows = ({
         a.offer.contributionId.localeCompare(b.offer.contributionId),
     );
 };
+
+/** One row of the group "Added by URL". */
+export interface UrlServerSettingsRow {
+  /** The server's view. Its `secondLine` is the address and the tool count. */
+  readonly view: McpServerView;
+  /** The projects whose lists name the server. */
+  readonly projects: readonly Project[];
+}
+
+/** Returns the address of a server added by URL, and the empty text for any other server. */
+const urlOf = (server: McpServer): string =>
+  server.source.kind === "url" ? server.source.url : "";
+
+/**
+ * Returns the rows of "Added by URL": one for each server whose source is an
+ * address, ordered by name, then by address, so the order never depends on
+ * the order the controller listed the servers in. A server added by URL is
+ * its own row, with no Connection to pair it with, so its row has a page from
+ * the start. A plugin's server is not in this group.
+ */
+export const buildUrlServerSettingsRows = ({
+  servers,
+  projects,
+}: {
+  readonly servers: readonly McpServer[];
+  readonly projects: readonly Project[];
+}): UrlServerSettingsRow[] =>
+  servers
+    .filter((server) => server.source.kind === "url")
+    .map((server) => ({
+      view: buildMcpServerView(server, { connection: undefined, type: undefined }),
+      projects: projects.filter((project) => project.mcpServerIds.includes(server.id)),
+    }))
+    .toSorted(
+      (a, b) =>
+        a.view.server.name.localeCompare(b.view.server.name) ||
+        urlOf(a.view.server).localeCompare(urlOf(b.view.server)),
+    );
 
 /** What the "Projects" cell of a row shows. */
 export type NamingProjects =

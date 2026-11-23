@@ -17,23 +17,47 @@
  * - `error`: the page of GitHub's server, which answered a check with an error;
  * - `empty`: the list when no Connection has a plugin that offers a server;
  * - `failed`: the list when the read of the servers fails.
+ *
+ * Five more draw servers added by URL, from a world that holds some (see
+ * `MCP_URL_RECORDS`):
+ * - `urls`: the list with its group "Added by URL";
+ * - `add-token`: the Add by URL dialog at its token step, after "Check server"
+ *   created a server the controller found to need a token;
+ * - `add-duplicate`: the dialog with the refusal of an address added before;
+ * - `replace`: the Replace dialog, opened by switching on PostHog's row while
+ *   a server added by URL sits on PostHog's address;
+ * - `url-page`: the page of Notion, a server added by URL that needs sign-in.
+ *
+ * Two more draw the sign-in through the browser, on the page of Atlas, a
+ * server added by URL that signs in through the browser. The specimen has no
+ * listener, so the dialog shows the paste step:
+ * - `sign-in-waiting`: the dialog after "Sign in with your browser", at "Finish
+ *   in your browser";
+ * - `sign-in-refused`: the dialog after the controller refused to start the
+ *   sign-in.
  */
 // The fixed clock comes first: a page places a time against the moment the
 // server was checked, and the sidebar's age clock reads the time when it loads.
 import "./fixed-clock";
 import {
+  MCP_ATLAS_SERVER_ID,
+  MCP_DOCS_SERVER_ID,
   MCP_GITHUB_SERVER_ID,
   MCP_GRAFANA_SERVER_ID,
   MCP_HOBBY_SERVER_ID,
   MCP_LINEAR_SERVER_ID,
+  MCP_NEW_URL_SERVER,
   MCP_NO_OFFERS,
+  MCP_OAUTH_RECORDS,
+  MCP_NOTION_SERVER_ID,
   MCP_RECORDS,
   MCP_RECORDS_GITHUB_ERROR,
   MCP_RECORDS_GRAFANA_UNREACHABLE,
   MCP_SETTINGS_PAGE_RECORDS,
   MCP_STRIPE_SERVER_ID,
+  MCP_URL_RECORDS,
 } from "./mcp-fixture";
-import { pressPart, waitForPart } from "./mcp-script";
+import { pressPart, typeInto, waitForPart } from "./mcp-script";
 import { markMcpSceneReady, mountMcpScene, type McpScene } from "./mcp-scene";
 import { buildErrorBody } from "@hercule/client-core/testing";
 
@@ -46,7 +70,16 @@ function chooseAddress(name: string): string {
     case "picker":
     case "empty":
     case "failed":
+    case "urls":
+    case "add-token":
+    case "add-duplicate":
+    case "replace":
       return "/settings/mcp-servers";
+    case "url-page":
+      return `/settings/mcp-servers/${MCP_NOTION_SERVER_ID}`;
+    case "sign-in-waiting":
+    case "sign-in-refused":
+      return `/settings/mcp-servers/${MCP_ATLAS_SERVER_ID}`;
     case "page":
       return `/settings/mcp-servers/${MCP_LINEAR_SERVER_ID}`;
     case "projects":
@@ -81,7 +114,55 @@ function muteReadFailureLog(): void {
 /** The records and answers the scene of `name` is drawn from. */
 function chooseScene(name: string): McpScene {
   const scene = { records: MCP_SETTINGS_PAGE_RECORDS, mcp: MCP_RECORDS };
+  const urlScene = { ...scene, mcp: MCP_URL_RECORDS };
   switch (name) {
+    case "urls":
+    case "replace":
+    case "url-page":
+      return urlScene;
+    case "add-token":
+      return { ...urlScene, create: { status: 200, body: MCP_NEW_URL_SERVER } };
+    case "sign-in-waiting":
+      return {
+        ...scene,
+        mcp: MCP_OAUTH_RECORDS,
+        signIn: {
+          status: 200,
+          body: {
+            authorizationUrl: "https://auth.atlas.example/authorize?state=abc123",
+            expiresAt: "2026-11-23T10:10:00.000Z",
+          },
+        },
+      };
+    case "sign-in-refused":
+      return {
+        ...scene,
+        mcp: MCP_OAUTH_RECORDS,
+        signIn: {
+          status: 409,
+          body: {
+            error: {
+              code: "invalid_state",
+              message: "The sign-in service could not be reached.",
+              details: { reason: "source-unreadable" },
+            },
+          },
+        },
+      };
+    case "add-duplicate":
+      return {
+        ...urlScene,
+        create: {
+          status: 409,
+          body: {
+            error: {
+              code: "conflict",
+              message: "This address is added already.",
+              details: { reason: "mcp-server-exists", mcpServerId: MCP_DOCS_SERVER_ID },
+            },
+          },
+        },
+      };
     case "unreachable":
       return { ...scene, mcp: MCP_RECORDS_GRAFANA_UNREACHABLE };
     case "error":
@@ -121,5 +202,29 @@ if (state === "projects") {
 if (state === "picker") {
   await pressPart('section[aria-label="Threads without a project"] button');
   await waitForPart("dialog[open].mcp-picker .mcp-pick-row");
+}
+if (state === "add-token" || state === "add-duplicate") {
+  await pressPart('section[aria-label="Added by URL"] .mcp-group-top button');
+  await typeInto(
+    'dialog[open] input[placeholder="https://mcp.example.com/mcp"]',
+    state === "add-token" ? "https://mcp.wiki.example/mcp" : "https://mcp.docs.example/mcp",
+  );
+  await pressPart('dialog[open] button[type="submit"]');
+  await waitForPart(
+    state === "add-token" ? 'dialog[open] input[type="password"]' : "dialog[open] .warn",
+  );
+}
+if (state === "sign-in-waiting" || state === "sign-in-refused") {
+  await pressPart(".mcp-band button");
+  await pressPart("dialog[open] .setup-acts .btn--accent");
+  await waitForPart(
+    state === "sign-in-waiting"
+      ? 'dialog[open] input[placeholder^="http://127.0.0.1"]'
+      : "dialog[open] .warn",
+  );
+}
+if (state === "replace") {
+  await pressPart('[role="switch"][aria-label="Offer posthog webshop to threads"]');
+  await waitForPart("dialog[open] .url-replace");
 }
 await markMcpSceneReady(page);

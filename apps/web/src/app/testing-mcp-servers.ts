@@ -81,6 +81,28 @@ export const S_STRIPE = buildServerAt(8);
 /** Switched off in Settings, so the menu offers it only to a thread that has it. */
 export const S_FIGMA = buildServerAt(9, { enabled: false });
 
+/**
+ * Returns a server added by URL, ready, at `url`, with two tools listed at
+ * the last check. It accepts a pasted token. `overrides` change any field.
+ */
+export const buildUrlServer = (
+  id: string,
+  name: string,
+  url: string,
+  overrides: Partial<McpServer> = {},
+): McpServer => ({
+  ...buildServer(id, name, "unused", {
+    source: { kind: "url", url, signIn: "token", signInOffered: null },
+  }),
+  ...overrides,
+});
+
+/** A server added by URL whose token the server refused: it needs sign-in again. Not in `MCP_SERVERS`, so a test adds it. */
+export const S_DOCS_URL = buildUrlServer(makeId("5", 50), "docs", "https://docs.acme.example/mcp", {
+  status: "needs-sign-in",
+  statusDetail: "The server refused the token",
+});
+
 export const MCP_SERVERS: readonly McpServer[] = [
   S_SENTRY_WORK,
   S_SENTRY_HOBBY,

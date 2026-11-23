@@ -7,6 +7,7 @@ import {
   buildServerSwitchTarget,
   decideServerPageSwitch,
   describeConnectionRowProblem,
+  describeSignInRow,
   isCheckDisabled,
   type McpServerView,
 } from "@hercule/client-core/mcp-servers";
@@ -17,8 +18,8 @@ import { ProviderMark } from "../../../../screens/provider-mark";
 
 /**
  * The "Server" card of a server's page: the switch that offers it to threads,
- * its read-only name, the Connection it is reached with, and when it was last
- * checked. The card owns the switch's write, which changes only this server.
+ * its read-only name, the Connection it is reached with (or the sign-in of a
+ * server added by URL), and when it was last checked. The card owns the switch's write, which changes only this server.
  *
  * The switch shows the server's record in the list of servers, the value a
  * press is decided on. While the page's own read of the server shows another
@@ -34,12 +35,15 @@ export function ServerSection({
   view,
   plugins,
   onCheck,
+  onOpenSignIn,
   checkPending,
 }: {
   readonly client: HerculeClient;
   readonly view: McpServerView;
   readonly plugins: readonly PluginDetail[];
   readonly onCheck: () => void;
+  /** The user pressed the Sign-in row's button ("Replace token…" or "Sign in again…") of a server added by URL. */
+  readonly onOpenSignIn: () => void;
   readonly checkPending: boolean;
 }): JSX.Element {
   const now = useMinuteClock();
@@ -62,6 +66,7 @@ export function ServerSection({
 
   const cannotCheck = checkPending || isCheckDisabled(view);
   const connectionProblem = describeConnectionRowProblem(view);
+  const signIn = describeSignInRow(view);
 
   return (
     <FormCard label="Server">
@@ -94,36 +99,49 @@ export function ServerSection({
         </div>
       </Row>
 
-      <Row label="Connection">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <ProviderMark pluginId={view.pluginId} plugins={plugins} />
-            <span className="min-w-0 truncate text-ink">
-              {connection === undefined ? "Not found" : `${view.typeName} · ${connection.label}`}
-            </span>
-            {connection !== undefined && showsAccountBesideLabel(connection) ? (
-              <span className="min-w-0 truncate text-fine text-muted">
-                {connection.displayName}
+      {signIn === null ? (
+        <Row label="Connection">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <ProviderMark pluginId={view.pluginId} plugins={plugins} />
+              <span className="min-w-0 truncate text-ink">
+                {connection === undefined ? "Not found" : `${view.typeName} · ${connection.label}`}
               </span>
-            ) : null}
-            {/* While the server needs sign-in the band holds the page's one
+              {connection !== undefined && showsAccountBesideLabel(connection) ? (
+                <span className="min-w-0 truncate text-fine text-muted">
+                  {connection.displayName}
+                </span>
+              ) : null}
+              {/* While the server needs sign-in the band holds the page's one
                 button, so this row says only what is wrong. */}
-            {connectionProblem !== null ? (
-              <span className="ml-auto text-fine text-fail">{connectionProblem}</span>
-            ) : (
-              <Link
-                to="/connections"
-                className="ml-auto text-fine text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
-              >
-                Open
-              </Link>
+              {connectionProblem !== null ? (
+                <span className="ml-auto text-fine text-fail">{connectionProblem}</span>
+              ) : (
+                <Link
+                  to="/connections"
+                  className="ml-auto text-fine text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
+                >
+                  Open
+                </Link>
+              )}
+            </div>
+            <p className="text-fine text-faint">
+              The sign-in it acts through. No token leaves the controller.
+            </p>
+          </div>
+        </Row>
+      ) : (
+        <Row label="Sign-in">
+          <div className="flex items-center gap-2">
+            <span className="text-ink">{signIn.value}</span>
+            {signIn.action === null ? null : (
+              <Button variant="form" className="ml-auto" onClick={onOpenSignIn}>
+                {signIn.action.label}
+              </Button>
             )}
           </div>
-          <p className="text-fine text-faint">
-            The sign-in it acts through. No token leaves the controller.
-          </p>
-        </div>
-      </Row>
+        </Row>
+      )}
 
       <Row label="Last checked">
         <div className="flex flex-col gap-1">
