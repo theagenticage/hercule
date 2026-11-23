@@ -135,7 +135,9 @@ export function ServerSection({
               variant="form"
               className="ml-auto"
               aria-disabled={cannotCheck}
-              onClick={onCheck}
+              onClick={() => {
+                if (!cannotCheck) onCheck();
+              }}
             >
               Check now
             </Button>

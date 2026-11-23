@@ -412,7 +412,10 @@
   grid-template-columns: 14px 28px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
-  height: 48px;
+  /* A minimum, not a fixed height: at a larger text size the name and its
+     second line wrap and need more room, and a fixed row let the second line
+     run over the next row's name. */
+  min-height: 48px;
   padding: 5px 8px;
   border-radius: var(--r-md);
   transition: background var(--dur-1);
@@ -457,14 +460,14 @@
   border-radius: var(--r-sm);
   font-size: var(--t-12);
 }
-/* A choice that cannot be changed yet, or while its write runs, drawn in the
-   faint ink and not at half opacity: text dimmed by opacity cannot be
-   measured for contrast, and the faint ink is a colour the app checks. */
+/* A choice that cannot be changed yet, or while its write runs, is drawn at
+   half opacity like a disabled button and the other disabled controls. The
+   browser also dims a disabled select by itself, so the select is reset to
+   full opacity and the field carries the dimming once. */
 .mcp-account-select:has(> select:disabled),
 .mcp-account-select:has(> select[aria-disabled="true"]) {
-  color: var(--faint);
+  opacity: 0.5;
 }
-/* The browser dims a disabled select to 70 % by itself, on top of the faint ink. */
 .mcp-account-select > select:disabled {
   opacity: 1;
 }

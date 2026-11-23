@@ -344,6 +344,7 @@ export const createLive = (options: LiveOptions): Live => {
           message.ids,
           message.conversationIds,
           message.derived,
+          message.kind,
         ),
         { ids: message.ids, kind: message.kind, derived: message.derived === true },
       );

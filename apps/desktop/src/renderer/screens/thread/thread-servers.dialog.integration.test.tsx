@@ -78,8 +78,10 @@ describe("a dialog opened from the thread's page while its servers arrive", () =
     await waitFor(() => {
       expect(app.context.queryClient.isFetching()).toBe(0);
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    // The line about the servers is a plain warning until the join's code has loaded, then it is
+    // drawn as a failure with its button: that is the join arriving.
+    await waitFor(() => {
+      expect(document.querySelector(".error-note")).not.toBeNull();
     });
 
     expect(screen.getByRole("dialog", { name: "Workspace details" })).toBe(dialog);

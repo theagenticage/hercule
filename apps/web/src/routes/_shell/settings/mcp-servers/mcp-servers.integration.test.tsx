@@ -604,15 +604,18 @@ describe("Settings > MCP servers > one server's page", () => {
   });
 
   it("shows the band of a server that is off", async () => {
-    await openPage(S_HOBBY);
+    const user = userEvent.setup();
+    const { api } = await openPage(S_HOBBY);
 
     expect(readPageText(await screen.findByRole("status"))).toBe(
       "Off. No thread gets this server. Its name, its sign-in and the projects that name it are kept.",
     );
     // Check now has nothing to ask while the server is off.
-    expect(screen.getByRole("button", { name: "Check now" }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
+    const checkNow = screen.getByRole("button", { name: "Check now" });
+    expect(checkNow.getAttribute("aria-disabled")).toBe("true");
+    // A press on it asks for nothing.
+    await user.click(checkNow);
+    expect(listWrites(api)).toEqual([]);
   });
 
   it("sends a server that needs sign-in to its Connection's Reconnect", async () => {
@@ -662,7 +665,9 @@ describe("Settings > MCP servers > one server's page", () => {
     const { api } = await openPage(S_GITHUB);
 
     const band = await screen.findByRole("status");
-    expect(readPageText(band)).toContain("Error.");
+    expect(readPageText(band)).toContain(
+      "Error. The server did not return its tools. Check now asks it again.",
+    );
     expect(readPageText(band)).toContain("GitHub's MCP server refused the Connection's token");
 
     const lastChecked = screen.getByText("Last checked").closest("div")!;
@@ -1370,12 +1375,9 @@ describe("Settings > MCP servers > one server's page > a click is decided on the
     });
 
     const webshop = await findBox("webshop");
-    // The page's own subscription reads everything again once, as it joins.
+    // The page's own subscription reads the servers once, as it joins, and not the projects.
     await waitFor(() => {
       expect(live.topics()).toContain("mcpServer");
-    });
-    await waitFor(() => {
-      expect(readCalls(api, "/api/v1/projects")).toBeGreaterThan(1);
     });
     const settled = readCalls(api, "/api/v1/projects");
     // The controller's list changes after the page was drawn, before the click.

@@ -139,12 +139,11 @@ describe("a server's status band", () => {
     expect(band.textContent).toBe("Checking: asking the server for its tools.");
     expect(band.querySelector(".spin")).not.toBeNull();
     expect(within(band as HTMLElement).queryByRole("button")).toBeNull();
-    // Check now waits for the check that runs.
-    expect(
-      within(findSection("Server"))
-        .getByRole("button", { name: "Check now" })
-        .getAttribute("aria-disabled"),
-    ).toBe("true");
+    // Check now waits for the check that runs, and is drawn dimmed like the
+    // other buttons that cannot act yet.
+    const checkNow = within(findSection("Server")).getByRole("button", { name: "Check now" });
+    expect(checkNow.getAttribute("aria-disabled")).toBe("true");
+    expect(checkNow.hasAttribute("data-unready")).toBe(true);
   });
 
   it("says a switched-off server is off, and cannot be checked", async () => {
@@ -153,11 +152,9 @@ describe("a server's status band", () => {
     expect(document.querySelector(".mcp-band")?.textContent).toBe(
       "Off. No thread gets this server. Its name, its sign-in and the projects that name it are kept.",
     );
-    expect(
-      within(findSection("Server"))
-        .getByRole("button", { name: "Check now" })
-        .getAttribute("aria-disabled"),
-    ).toBe("true");
+    const checkNow = within(findSection("Server")).getByRole("button", { name: "Check now" });
+    expect(checkNow.getAttribute("aria-disabled")).toBe("true");
+    expect(checkNow.hasAttribute("data-unready")).toBe(true);
     expect(
       within(findSection("Server"))
         .getByRole("switch", { name: "Offered to threads" })
@@ -200,6 +197,9 @@ describe("a server's status band", () => {
       expect(band.querySelector("small")?.textContent).toBe(
         "Sentry's MCP server refused the Connection's token",
       );
+      // Both bands run the heading on into a sentence of their own, on the
+      // same line, and keep the reason under it.
+      expect(band.textContent).toMatch(/^(Unreachable|Error)\. [A-Z]/);
       await userEvent.click(within(band).getByRole("button", { name: "Check now" }));
 
       await waitFor(() => {

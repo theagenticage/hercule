@@ -22,9 +22,12 @@ import { decideThreadStartSource, type StartProjectRecord, type StartRecord } fr
  *   pressed (no display data is needed).
  * - `project` and `defaultIds` are the start records, so a reset goes back to
  *   the list the draft starts from. A reset while where the list started is
- *   unknown, or incomplete, returns `undefined`.
+ *   unknown (a record pending or failed, or the project gone) returns
+ *   `undefined`.
  * - A reset returns the choice that forgets the pick, so the draft follows
- *   its start list again, later changes to that list included.
+ *   its start list again, later changes to that list included. It does so
+ *   even while the start list holds ids the catalogue does not know yet,
+ *   because nothing is written: the draft draws only the ids it knows.
  */
 export const decideDraftServersPick = ({
   projectId,

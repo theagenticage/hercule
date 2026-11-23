@@ -81,6 +81,17 @@ describe("decideDraftServersPick", () => {
     expect(record(held, choice)).toEqual({ options: { effort: "max" } });
   });
 
+  it("resets even while the start list holds a server the catalogue does not know, since nothing is written", () => {
+    const held: ThreadPicks = { mcpServers: { projectId: "p-shop", mcpServerIds: ["s-linear"] } };
+    const choice = decideDraftServersPick({
+      ...DECIDE,
+      project: { kind: "read", value: { ...WEBSHOP, mcpServerIds: ["s-work", "s-unknown"] } },
+      choice: { kind: "reset" },
+    });
+
+    expect(record(held, choice)).toEqual({});
+  });
+
   it("does not reset while where the list started is not read, or the project is gone", () => {
     expect(
       decideDraftServersPick({

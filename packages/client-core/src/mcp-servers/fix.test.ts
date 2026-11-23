@@ -123,6 +123,8 @@ describe("decideStatusBand", () => {
       decideBandWithOverrides({ status: "error", statusDetail: "refused the token" }),
     ).toMatchObject({
       tone: "fail",
+      heading: "Error.",
+      text: "The server did not return its tools. Check now asks it again.",
       detail: "refused the token",
       action: { kind: "check", label: "Check now" },
     });

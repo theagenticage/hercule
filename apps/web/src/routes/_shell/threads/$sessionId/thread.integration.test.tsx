@@ -6146,7 +6146,7 @@ describe("Thread: the MCP servers of the + menu", () => {
     // The list is empty, so only the open menu or picker holds the topic: a flag that dropped
     // during the handoff would drop the subscription and make it again.
     const user = userEvent.setup();
-    const { api, live } = await openServersThread([]);
+    const { api, live, queryClient } = await openServersThread([]);
     const submenu = await openServersSubmenu(user);
     await waitFor(() => {
       expect(readServerReads(api)).toBe(2);
@@ -6155,7 +6155,10 @@ describe("Thread: the MCP servers of the + menu", () => {
 
     await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
     const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // A read made by the handoff would be under way now, and a second subscription would be made.
+    await waitFor(() => {
+      expect(queryClient.isFetching()).toBe(0);
+    });
 
     expect(live.topics()).toContain("mcpServer");
     expect(live.countSubscriptions("mcpServer")).toBe(1);

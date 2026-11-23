@@ -67,7 +67,7 @@ export function ServerHead({
           {view.displayStatus === "checking" && <span className="spin" />}
           <span>
             {band.heading !== null && <b>{band.heading}</b>}
-            {band.heading !== null && band.text !== null && " "}
+            {band.heading !== null && " "}
             {band.text}
             {band.detail !== null && <small>{band.detail}</small>}
           </span>
@@ -207,6 +207,7 @@ export function ServerSection({
           type="button"
           className="btn btn--sm"
           aria-disabled={cannotCheck}
+          data-unready={cannotCheck || undefined}
           onClick={() => {
             if (!cannotCheck) onCheck();
           }}

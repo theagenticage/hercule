@@ -99,8 +99,8 @@ export interface StatusBand {
   readonly tone: "quiet" | "fail";
   /** The bold first words, such as "Off.", or `null` when the text stands alone. */
   readonly heading: string | null;
-  /** What the status means and what to do, or `null` when the reason in `detail` is all there is. */
-  readonly text: string | null;
+  /** What the status means and what to do. */
+  readonly text: string;
   /** The server's own reason (`statusDetail`), drawn under the text. `null` when it has none. */
   readonly detail: string | null;
   readonly action: StatusBandAction | null;
@@ -155,7 +155,7 @@ export const decideStatusBand = (view: McpServerView): StatusBand | null => {
       return {
         tone: "fail",
         heading: "Error.",
-        text: null,
+        text: "The server did not return its tools. Check now asks it again.",
         detail: view.statusDetail,
         action: { kind: "check", label: "Check now" },
       };
