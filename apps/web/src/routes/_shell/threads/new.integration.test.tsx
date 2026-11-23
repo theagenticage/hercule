@@ -2485,27 +2485,27 @@ describe("Composer: the branch selector", () => {
   it("offers explicit starting sources and updates the lead for a local branch", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id), {});
-    const menu = await openBranchMenu(user, /^remote default$/);
+    const menu = await openBranchMenu(user, /^From remote default$/);
     expect(readPageText(menu)).toContain("Starting revision");
     expect(readPageText(menu)).toContain("Current working copy");
     expect(readPageText(menu)).toContain("Remote sources fetch before creating the new branch");
     await pickRow(user, /^Local branch: release\/2\.4/);
     expect(
-      await screen.findByRole("button", { name: /^local branch release\/2\.4$/ }),
+      await screen.findByRole("button", { name: /^From local branch release\/2\.4$/ }),
     ).toBeDefined();
     expect(readPageText()).toContain("on a new branch from local branch release/2.4.");
   });
 
   it("shows one starting revision per repository without a combined picker", async () => {
     await openDraftAt(buildProjectDraftPath(OPS.id), {});
-    const label = await screen.findByText("remote default · remote default");
+    const label = await screen.findByText("From remote default · remote default");
     expect(label.closest("button")).toBeNull();
   });
 
   it("allows managed remote creation while local sources are unavailable", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(EDGE.id), {});
-    const menu = await openBranchMenu(user, /^remote default$/);
+    const menu = await openBranchMenu(user, /^From remote default$/);
     expect(within(menu).getByRole("button", { name: /^Remote default/ })).toBeDefined();
     expect(within(menu).queryByRole("button", { name: /^Current working copy/ })).toBeNull();
   });

@@ -84,7 +84,6 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [
       { selector: "aside.side .seg--side", kind: "boundary" },
       { selector: "aside.side .icon-btn svg", kind: "mark" },
-      { selector: "aside.side .side-detail--ask .side-glyph", kind: "mark" },
     ],
   },
   {
@@ -166,7 +165,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     name: "discussions",
     path: "discussions.html",
     contentSelector: 'nav[aria-label="Discussion list"] .virtual-list-items > *',
-    nonTextParts: [{ selector: ".overlap-mark svg", kind: "mark" }],
+    nonTextParts: [{ selector: ".kind-mark svg", kind: "mark" }],
   },
   {
     name: "wiki",
@@ -181,7 +180,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [
       { selector: ".fleet-sec-h .seg", kind: "boundary" },
       { selector: ".fleet-dot", kind: "mark" },
-      // The running and waiting blocks and the bar's fill. The free blocks are an empty track.
+      // The sessions bar's full running segments and its waiting ones. A free segment is a track,
+      // drawn at 1.5:1 on purpose, so it is not a mark.
       { selector: ".fleet-sessions i.is-run", kind: "mark" },
       { selector: ".fleet-sessions i.is-wait", kind: "mark" },
       { selector: ".fleet-meter i", kind: "mark" },

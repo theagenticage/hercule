@@ -53,15 +53,15 @@ describe("an urgent signal's notification", () => {
     await arranged.restartController(() => writeDatabase(arranged.home, writeInboxWorld));
     const { app, page } = await openSignedIn(arranged.url);
     // The shell has read the open signals, none of them urgent, once the
-    // Hercule segment counts the Inbox.
+    // Work segment counts the Inbox.
     await expect
       .poll(() =>
         page
           .getByRole("tablist", { name: "Sidebar" })
-          .getByRole("tab", { name: /^Hercule/ })
+          .getByRole("tab", { name: /^Work/ })
           .getAttribute("aria-label"),
       )
-      .toBe(`Hercule, ${String(INBOX_CARDS)} waiting`);
+      .toBe(`Work, ${String(INBOX_CARDS)} waiting`);
     await hideWindow(app);
     expect(await readWaitingNotifications(app)).toEqual([]);
 

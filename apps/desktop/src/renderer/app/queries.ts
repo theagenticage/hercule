@@ -2028,7 +2028,7 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
  * assistants and the current session of each one's main conversation, the
  * Connections, the signed-in user, the open signals, whose urgent ones the
- * app notifies, the Inbox's counts, which the Hercule segment and the Inbox's
+ * app notifies, the Inbox's counts, which the Work segment and the Inbox's
  * row show, whether a run failed on a live Task, for the sidebar's dot, and
  * the plugins that name each signal's source.
  * Resolves once every read is cached,

@@ -115,7 +115,7 @@ const buildEditMenu = (
  *   ⌘W, where macOS users look for it. Closing the window hides it; the app
  *   keeps running. Where closing the window quits the app, the item is
  *   Electron's, labelled Close, and quits it too.
- * - View holds Threads, ⌥⌘1, which calls `showThreadsFace`, and Hercule,
+ * - View holds Threads, ⌥⌘1, which calls `showThreadsFace`, and Work,
  *   ⌥⌘2, which calls `showOrchestrationFace`: they switch the sidebar's
  *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go. Below
  *   a separator, Toggle Sidebar, ⌘B, calls `toggleSidebar`, which hides or
@@ -137,7 +137,7 @@ const buildEditMenu = (
  *   Undo, ⌘Z, and Redo, ⇧⌘Z, call `stepHistory`, for the reason
  *   `buildEditMenu` gives, and that it has no Substitutions and Speech where
  *   `hasMacMenu` is false. Window is Electron's own.
- * - Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar,
+ * - Settings…, Sign Out, New Thread, Threads, Work, Toggle Sidebar,
  *   Office, Inbox and Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
  *   are dimmed then rather than doing nothing. Main knows only whether a
@@ -238,7 +238,7 @@ const buildMenuTemplate = (options: {
           click: options.showThreadsFace,
         },
         {
-          label: "Hercule",
+          label: "Work",
           accelerator: "Alt+CmdOrCtrl+2",
           enabled: options.signedIn,
           click: options.showOrchestrationFace,
@@ -297,7 +297,7 @@ export class MainMenu extends Context.Service<
   MainMenu,
   {
     /**
-     * Enables Settings…, Sign Out, New Thread, View's Threads, Hercule and
+     * Enables Settings…, Sign Out, New Thread, View's Threads, Work and
      * Toggle Sidebar, Office, Inbox and Workflows when `signedIn` is true. Otherwise
      * disables them and removes the Go menu's items, which the app can no
      * longer open.
@@ -319,7 +319,7 @@ export class MainMenu extends Context.Service<
  * Sign Out, start enabled when a login token is stored, and Go lists no
  * item until the page sends its items.
  *
- * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Toggle
+ * Choosing Settings…, Sign Out, New Thread, Threads, Work, Toggle
  * Sidebar, Office, Inbox, Workflows or Send shows the window and sends the
  * page that menu command. Choosing an item in Go shows the window and asks
  * the page to open its destination. Choosing Undo or Redo shows no window,

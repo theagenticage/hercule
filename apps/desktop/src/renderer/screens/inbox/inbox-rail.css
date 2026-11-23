@@ -162,7 +162,7 @@
   fill: currentColor;
 }
 
-/* Browse: a source folds; its facets are quiet labels; values align with the source's name. */
+/* Browse: a source folds; its facets are sub-headings; values align with the source's name. */
 .ib-rail-source + .ib-rail-source {
   margin-top: 1px;
 }
@@ -202,13 +202,17 @@
 .ib-rail-source-body {
   padding-bottom: 8px;
 }
+/* A facet's name ("Repositories") is a sub-heading: the rail's heading, one step quieter (medium,
+   not bold), indented to the source's name at 34px. */
 .ib-rail-facet {
   margin: 8px 0 2px;
-  padding-left: 8px;
+  padding-left: 34px;
   color: var(--faint);
   font-size: var(--t-11);
   font-weight: var(--w-medium);
   line-height: 16px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 .ib-rail-account {
   display: grid;
@@ -223,9 +227,9 @@
   font-weight: var(--w-regular);
   line-height: var(--line-18);
 }
-.ib-rail-value {
-  min-height: calc(28px + var(--text-size-step));
-  padding-block: 4px;
+/* Values sit on the rail's 31px pitch: the 30px row and the 1px a group puts between its rows. */
+.ib-rail-source-body .ib-rail-pair + .ib-rail-pair {
+  margin-top: 1px;
 }
 .ib-rail-value[data-empty] .ib-rail-name {
   color: var(--faint);

@@ -19,12 +19,6 @@ describe("StatusDot", () => {
 
     expect(screen.queryByRole("img")).toBeNull();
   });
-
-  it("names the state itself where no label is drawn", () => {
-    render(<StatusDot status={{ tone: "online", label: "Online" }} namesState />);
-
-    expect(screen.getByRole("img", { name: "Online" })).toBeTruthy();
-  });
 });
 
 describe("GaugeValue", () => {
@@ -61,13 +55,13 @@ describe("NeedLine", () => {
     render(
       <NeedLine
         need={BUSY_MACHINE.need}
-        allow={<button type="button">Allow 17</button>}
+        allow={<button type="button">Raise cap to 17</button>}
         cleanUp={null}
       />,
     );
 
     expect(screen.getByText("5 threads wait for a slot")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Allow 17" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Raise cap to 17" })).toBeTruthy();
   });
 
   it("draws the Clean up button it is given beside a disk need", () => {

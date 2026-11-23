@@ -75,7 +75,7 @@ describe("the menu bar", () => {
     ]);
     expect(await readMenuItems(app, "View")).toEqual([
       { label: "Threads", accelerator: "Alt+CmdOrCtrl+1", enabled: false },
-      { label: "Hercule", accelerator: "Alt+CmdOrCtrl+2", enabled: false },
+      { label: "Work", accelerator: "Alt+CmdOrCtrl+2", enabled: false },
       { label: "Toggle Sidebar", accelerator: "CmdOrCtrl+B", enabled: false },
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([

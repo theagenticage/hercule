@@ -9,6 +9,7 @@ import { inboxCountQuery, userQuery } from "../app/queries";
 import { DiscussionsIcon } from "../icons/discussions";
 import { InboxIcon } from "../icons/inbox";
 import { OfficeIcon } from "../icons/office";
+import { OverviewIcon } from "../icons/overview";
 import { WikiIcon } from "../icons/wiki";
 import { WorkflowsIcon } from "../icons/workflows";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
@@ -33,6 +34,10 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   you instead. The row is also selected on a run's page, because a run
  *   belongs to its workflow, as the book draws it.
  * - Discussions and Wiki, with no count either.
+ *
+ * Each row draws an icon of its own, so no two places look alike: a grid for
+ * Overview, the house for The office (as the shared row's Office button) and
+ * the tray for the Inbox.
  *
  * The shell's loader reads the Inbox's counts and keeps them cached for the
  * life of the window, so nothing here waits in practice.
@@ -72,7 +77,7 @@ export function WorkSection(): JSX.Element {
           void navigate({ to: "/office" });
         }}
       >
-        <OfficeIcon />
+        <OverviewIcon />
         <span>Overview</span>
         {hasFailedRun && <i className="nav-dot" />}
       </Link>

@@ -23,6 +23,7 @@ export {
   buildConversationBlocks,
   collectRunningTurnRows,
   describeOpenReply,
+  hasMessageAfter,
   trimToRunningTurn,
   type ConversationBlock,
   type OpenReplyBlock,
@@ -775,11 +776,13 @@ export {
   decideThreadRowEnd,
   decideThreadRowStatus,
   describePose,
+  describeThreadRowState,
   isAbsentPose,
   POSES,
   type Pose,
   type SessionPose,
   type ThreadRowEnd,
+  type ThreadRowState,
   type ThreadRowStatus,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
@@ -791,7 +794,11 @@ export {
   mergeTranscript,
 } from "./threads/transcript";
 export { isThreadCopy, ThreadCopy } from "./threads/thread-copy";
-export { buildOptionsLabel } from "./threads/options-label";
+export {
+  buildOptionsLabel,
+  describeOptionsLabel,
+  type OptionsLabel,
+} from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
 export { parseOptionChoice } from "./threads/option-choice";
 export {
@@ -868,12 +875,14 @@ export {
   type SessionPresentation,
 } from "./threads/session-presentation";
 export {
+  buildRowSecondLine,
   findGroupRow,
   findWorkspaceGroupRow,
   type GroupAsk,
   type GroupMember,
   type GroupRow,
   type GroupSummary,
+  type RowLinePart,
   type SessionDot,
 } from "./threads/group-row";
 export { indexRowMembers, type RowMember } from "./threads/row-members";

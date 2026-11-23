@@ -25,13 +25,14 @@ const buildTask = (overrides: Partial<Task>): Task => ({
 });
 
 describe("buildStartCards", () => {
-  it("fills one bar for low up to four for urgent", () => {
-    const cards = buildStartCards(
-      (["low", "normal", "high", "urgent"] as const).map((priority) =>
-        buildTask({ id: priority, priority }),
-      ),
-    );
-    expect(cards.map((card) => card.bars)).toEqual([1, 2, 3, 4]);
+  it.each([
+    ["urgent", "Urgent"],
+    ["high", "High"],
+    ["normal", "Normal"],
+    ["low", "Low"],
+  ] as const)("words the %s priority as %s", (priority, word) => {
+    const [card] = buildStartCards([buildTask({ priority })]);
+    expect(card?.priorityText).toBe(word);
   });
 
   it("draws the GitHub mark only when the task's first external ref is a GitHub one", () => {

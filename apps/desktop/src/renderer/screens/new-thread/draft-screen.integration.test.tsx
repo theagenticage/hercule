@@ -112,7 +112,12 @@ describe("the new-thread screen", () => {
     expect(
       screen.getByText("It gets its own worktree of webshop, on a new branch from remote default."),
     ).toBeTruthy();
-    expect(readLip()).toBe("New workspace" + "remote default" + "moss");
+    expect(readLip()).toBe("New workspace" + "From remote default" + "moss");
+    // Each pick in the lip is its icon and its words, with no chevron.
+    for (const pick of document.querySelectorAll(".lip button")) {
+      expect(pick.querySelectorAll("svg")).toHaveLength(1);
+      expect(pick.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    }
     expect(document.activeElement).toBe(field);
   });
 
@@ -491,10 +496,11 @@ describe("the new-thread screen", () => {
     await userEvent.type(field, "Look at checkout");
 
     const cards = screen.getByRole("region", { name: "Start from Work" });
+    // The heading's note says a click adds to the message and starts nothing.
+    expect(within(cards).getByText("Puts the Task in your message")).toBeTruthy();
     const card = await within(cards).findByRole("button", { name: /Cart total rounding/ });
-    expect(card.textContent).toBe("Task" + "Cart total rounding on discounts");
+    expect(card.textContent).toBe("High" + "Cart total rounding on discounts");
     expect(within(cards).getAllByRole("button")).toHaveLength(1);
-    expect(within(card).getByRole("img").getAttribute("aria-label")).toBe("high priority");
     await userEvent.click(card);
 
     expect(readFieldText(field)).toBe(
@@ -510,6 +516,28 @@ describe("the new-thread screen", () => {
     expect(params.get("projectId")).toBe(WEBSHOP.id);
     expect(params.getAll("sort")).toEqual(["priority:desc", "createdAt:desc"]);
     expect(screen.queryByRole("region", { name: "Or start from one of these" })).toBeNull();
+  });
+
+  it("says each start card's priority in words, with Urgent in the failure hue", async () => {
+    const tasks = (["urgent", "high", "normal", "low"] as const).map((priority, index): Task => ({
+      ...CART_TASK,
+      id: `01a06d02-7700-7000-8000-00000000010${String(index)}`,
+      title: `A ${priority} task`,
+      priority,
+    }));
+    await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/tasks": () => ({ body: { items: tasks } }),
+    });
+
+    const cards = screen.getByRole("region", { name: "Start from Work" });
+    const words = await within(cards).findAllByText(/^(Urgent|High|Normal|Low)$/);
+    expect(words.map((word) => word.textContent)).toEqual(["Urgent", "High", "Normal", "Low"]);
+    expect(words.map((word) => word.classList.contains("is-urgent"))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
   });
 
   it("offers code starters while the project has no planned task, and a click fills the message without sending", async () => {

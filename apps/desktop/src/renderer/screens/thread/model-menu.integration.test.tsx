@@ -96,7 +96,7 @@ describe("the composer's model menu", () => {
   it("opens with a head per profile and reads nothing, and a clicked head leaves the model alone", async () => {
     const calls = await openDraft();
     const sent = calls.length;
-    const pill = document.querySelector(".pick--pill")!;
+    const pill = document.querySelector(".pick--model")!;
 
     toggleModelMenu("open");
 
@@ -190,7 +190,7 @@ describe("the New rows of the composer's model menu", () => {
     // The menu is still open and the draft's model is the one it had.
     expect(readHeads()).toEqual([]);
     expect(document.querySelector("[popover][aria-label='Model'] .model-menu-list")).not.toBeNull();
-    expect(document.querySelector(".pick--pill")!.textContent).toContain("Claude Sonnet 5");
+    expect(document.querySelector(".pick--model")!.textContent).toContain("Claude Sonnet 5");
   });
 
   it("dismisses a row with one update that lists the model as dismissed", async () => {

@@ -311,7 +311,7 @@ export function DraftComposer({
                 onSignIn={onSignIn}
               />
             ) : (
-              <OffPick reason={offReason} label="Profile" isPill />
+              <OffPick reason={offReason} label="Profile" />
             )
           }
           fieldRef={fieldRef}
@@ -410,29 +410,21 @@ export function DraftComposer({
 /**
  * Renders a pick that waits for a choice made elsewhere, as faint words with
  * `reason` as its tooltip: the Inbox's start-thread dialog shows "Access",
- * "Effort" and "Profile" this way until a project is picked. `isPill` gives it
- * the pill the model pick has.
+ * "Effort" and "Profile" this way until a project is picked.
  */
 function OffPick({
   reason,
   label,
   glyph,
-  isPill,
 }: {
   readonly reason: string;
   readonly label: string;
   readonly glyph?: ReactNode;
-  readonly isPill?: boolean | undefined;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      className={isPill === true ? "pick pick--pill is-off" : "pick is-off"}
-      aria-disabled="true"
-      title={reason}
-    >
+    <button type="button" className="pick is-off" aria-disabled="true" title={reason}>
       {glyph}
-      {isPill === true ? <span className="pick-name">{label}</span> : label}
+      {label}
     </button>
   );
 }

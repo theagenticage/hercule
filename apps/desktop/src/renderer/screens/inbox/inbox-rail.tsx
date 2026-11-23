@@ -18,6 +18,7 @@ import { ClockIcon } from "../../icons/clock";
 import { ConnectionsIcon } from "../../icons/connections";
 import { EyeIcon } from "../../icons/eye";
 import { InboxIcon } from "../../icons/inbox";
+import { ListIcon } from "../../icons/list";
 import { UserIcon } from "../../icons/user";
 import { PluginMark } from "../../marks/plugin-mark";
 import "./inbox-rail.css";
@@ -505,7 +506,9 @@ function SavedQueryIcon({
       return <EyeIcon />;
     case "agent":
       return <AgentIcon />;
-    case "intake":
+    case "list":
+      return <ListIcon />;
+    case "inbox":
       return <InboxIcon />;
   }
 }

@@ -7,7 +7,7 @@
 .ib {
   /* The three columns. The pane is the user's to resize, from 360 to 640. */
   --rail-w: 240px;
-  --pane-w: 420px;
+  --pane-w: 461px;
   --bar-h: 56px;
 
   /* A row is two lines, 18 and 16, with 2 between and 8 above and below: 52px. Text size steps add

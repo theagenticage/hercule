@@ -29,3 +29,9 @@ apps/android/captures/
 # merges from them and hands to every shard (see `scripts/test-shards.ts`).
 /test-durations.json
 /test-shard-weights.json
+
+# UI council: only the config and results are kept (ui-council skill)
+docs/ui-council/*
+!docs/ui-council/council.json
+!docs/ui-council/results.md
+shots/ui-council/

@@ -5,19 +5,20 @@
  */
 import type { Task, TaskPriority } from "@hercule/contract";
 
-/** How many of four bars a priority fills. Four is urgent, which is drawn in the failure hue. */
-const PRIORITY_BARS: Readonly<Record<TaskPriority, 1 | 2 | 3 | 4>> = {
-  urgent: 4,
-  high: 3,
-  normal: 2,
-  low: 1,
+/** The priority in words, the card's eyebrow. "Urgent" is drawn in the failure hue. */
+const PRIORITY_WORDS: Readonly<Record<TaskPriority, StartCard["priorityText"]>> = {
+  urgent: "Urgent",
+  high: "High",
+  normal: "Normal",
+  low: "Low",
 };
 
 export interface StartCard {
   readonly taskId: string;
-  /** The task's priority, which the bars draw and which a screen reader reads out instead. */
+  /** The task's priority: the card draws the word of an urgent one in the failure hue. */
   readonly priority: TaskPriority;
-  readonly bars: 1 | 2 | 3 | 4;
+  /** The priority in words, which the card shows above its title: "Urgent", "High", "Normal" or "Low". */
+  readonly priorityText: "Urgent" | "High" | "Normal" | "Low";
   /**
    * The system the task came from, when the card can draw its mark: `github`
    * when the task's first external ref is a GitHub one, `null` otherwise.
@@ -61,7 +62,7 @@ export const buildStartCards = (tasks: readonly Task[]): readonly StartCard[] =>
     return {
       taskId: task.id,
       priority: task.priority,
-      bars: PRIORITY_BARS[task.priority],
+      priorityText: PRIORITY_WORDS[task.priority],
       source: ref?.startsWith("github:") === true ? "github" : null,
       title: task.title,
       message: buildStartMessage(task, ref),

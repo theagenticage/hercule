@@ -65,24 +65,28 @@ describe("MachineCard", () => {
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("runner-busy");
   });
 
-  it("draws no status label for an online machine, and names the state on its dot instead", () => {
+  it("draws an online machine's status in words under its name, as every other status", () => {
     const card = renderCard(BUSY_MACHINE);
 
-    expect(within(card).queryByText("Online")).toBeNull();
-    expect(within(card).getByRole("img", { name: "Online" })).toBeTruthy();
+    expect(within(card).getByText("Online").className).toBe("fleet-card-state");
+    expect(card.querySelector(".fleet-card-title")?.firstElementChild?.textContent).toBe("atlas");
   });
 
   it("names a machine told to take no new work once, in its status, and not again as its room", () => {
     const card = renderCard(DRAINING_MACHINE);
 
-    expect(within(card).getAllByText("Takes no new work")).toHaveLength(1);
+    expect(within(card).getAllByText("Takes no new sessions")).toHaveLength(1);
   });
 
-  it("shows no room for a machine whose disk is below its limit, because its need line says so", () => {
+  it("says a machine whose disk is below its limit takes no new sessions in its status, and gives the cause in its need line", () => {
     const card = renderCard(FULL_DISK_MACHINE);
 
-    expect(within(card).queryByText(/^Room for|^Full$|^Takes no new work$/)).toBeNull();
-    expect(within(card).getByText(/^Disk below its limit/)).toBeTruthy();
+    expect(within(card).getAllByText("Takes no new sessions")).toHaveLength(1);
+    expect(card.querySelector(".fleet-dot")?.className).toBe(
+      "fleet-dot fleet-dot--no-new-sessions",
+    );
+    expect(within(card).queryByText(/^Room for|^Full$/)).toBeNull();
+    expect(within(card).getByText("Disk below its limit")).toBeTruthy();
   });
 
   it("shows an offline machine's word and when it was last heard from, with no room and no button but its name", () => {
@@ -90,7 +94,7 @@ describe("MachineCard", () => {
 
     expect(within(card).getAllByText("Offline")).toHaveLength(1);
     expect(within(card).getByText("Offline since 09:12")).toBeTruthy();
-    expect(within(card).queryByText(/^Room for|^Full$|^Takes no new work$/)).toBeNull();
+    expect(within(card).queryByText(/^Room for|^Full$|^Takes no new sessions$/)).toBeNull();
     expect(within(card).getAllByRole("button")).toHaveLength(1);
   });
 

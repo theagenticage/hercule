@@ -19,7 +19,7 @@ export type InboxScope =
   | { readonly kind: "value"; readonly value: InboxBrowseValue };
 
 /** The icons of the core's saved queries. A plugin's saved query draws its plugin's mark instead. */
-export type RailIconName = "clock" | "user" | "eye" | "agent" | "intake";
+export type RailIconName = "clock" | "user" | "eye" | "agent" | "list" | "inbox";
 
 export interface RailSavedQuery {
   readonly id: string;
@@ -101,7 +101,7 @@ const CORE_ICONS: Readonly<Record<string, RailIconName>> = {
   [CORE_SAVED_QUERY_IDS.mine]: "user",
   [CORE_SAVED_QUERY_IDS.updates]: "eye",
   [CORE_SAVED_QUERY_IDS.held]: "agent",
-  [CORE_SAVED_QUERY_IDS.everything]: "intake",
+  [CORE_SAVED_QUERY_IDS.everything]: "list",
 };
 
 /** How many saved queries have a digit key: 1 to 7. */
@@ -193,7 +193,7 @@ export function describeInboxRail(
     name: query.name,
     count: query.count,
     icon:
-      query.source === undefined ? (CORE_ICONS[query.id] ?? "intake") : { pluginId: query.source },
+      query.source === undefined ? (CORE_ICONS[query.id] ?? "inbox") : { pluginId: query.source },
     ...(index < KEYED_SAVED_QUERIES ? { shortcut: String(index + 1) } : {}),
   }));
   // Pins are named in groups of one source, account and facet, as the values they came from are.

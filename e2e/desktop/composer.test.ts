@@ -149,7 +149,7 @@ describe("the composer", () => {
     const composer = locateComposer(page);
     await composer.field.fill("Half a thought");
 
-    expect(await composer.optionsTrigger.textContent()).toBe("Medium");
+    expect(await composer.optionsTrigger.textContent()).toBe("Effort: Medium");
     await composer.optionsTrigger.click();
     // The trigger follows the menu's toggle event, which the browser sends
     // just after it shows or hides the menu.
@@ -164,11 +164,11 @@ describe("the composer", () => {
     await composer.optionsMenu.waitFor({ state: "hidden" });
     await expect.poll(() => composer.optionsTrigger.getAttribute("aria-expanded")).toBe("false");
 
-    expect(await composer.modelPill.textContent()).toBe("Scripted");
-    await composer.modelPill.click();
-    await expect.poll(() => composer.modelPill.getAttribute("aria-expanded")).toBe("true");
+    expect(await composer.modelPick.textContent()).toBe("Scripted");
+    await composer.modelPick.click();
+    await expect.poll(() => composer.modelPick.getAttribute("aria-expanded")).toBe("true");
     // The model menu grows to the left: its right edge is the pill's.
-    const pill = await readBox(composer.modelPill);
+    const pill = await readBox(composer.modelPick);
     const modelMenu = await readBox(composer.modelMenu);
     expect(modelMenu.bottom).toBeCloseTo(pill.top - 6, 1);
     expect(modelMenu.right).toBeCloseTo(pill.right, 1);
@@ -178,7 +178,7 @@ describe("the composer", () => {
     await composer.optionsTrigger.click();
     await composer.optionsMenu.waitFor();
     await composer.modelMenu.waitFor({ state: "hidden" });
-    await expect.poll(() => composer.modelPill.getAttribute("aria-expanded")).toBe("false");
+    await expect.poll(() => composer.modelPick.getAttribute("aria-expanded")).toBe("false");
     await page.keyboard.press("Escape");
     await composer.optionsMenu.waitFor({ state: "hidden" });
 
@@ -200,10 +200,10 @@ describe("the composer", () => {
     const composer = locateComposer(page);
     expect(await composer.note.textContent()).toBe("");
 
-    await composer.modelPill.click();
+    await composer.modelPick.click();
     await composer.modelMenu.getByRole("button", { name: "Scripted Large", exact: true }).click();
     await composer.modelMenu.waitFor({ state: "hidden" });
-    expect(await composer.modelPill.textContent()).toBe("Scripted Large");
+    expect(await composer.modelPick.textContent()).toBe("Scripted Large");
     expect(await composer.note.textContent()).toBe("model change applies on send");
 
     await composer.optionsTrigger.click();
@@ -213,7 +213,7 @@ describe("the composer", () => {
     expect(await effort.getByRole("button", { name: "High" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(await composer.optionsTrigger.textContent()).toBe("High");
+    expect(await composer.optionsTrigger.textContent()).toBe("Effort: High");
     await page.keyboard.press("Escape");
     await composer.optionsMenu.waitFor({ state: "hidden" });
 
@@ -233,8 +233,8 @@ describe("the composer", () => {
       .poll(async () => (await client.session.read({ params: { id: thread.id } })).modelSelection)
       .toEqual({ model: "scripted-large", options: { effort: "high" } });
     await expect.poll(() => composer.note.textContent()).toBe("");
-    expect(await composer.modelPill.textContent()).toBe("Scripted Large");
-    expect(await composer.optionsTrigger.textContent()).toBe("High");
+    expect(await composer.modelPick.textContent()).toBe("Scripted Large");
+    expect(await composer.optionsTrigger.textContent()).toBe("Effort: High");
   });
 
   it("keeps a thread's unsent text and picks while another thread is open", async () => {
@@ -246,18 +246,18 @@ describe("the composer", () => {
     await openThread(page, "Thread 1");
     const composer = locateComposer(page);
     await composer.field.fill("Half a thought");
-    await composer.modelPill.click();
+    await composer.modelPick.click();
     await composer.modelMenu.getByRole("button", { name: "Scripted Large", exact: true }).click();
     await composer.modelMenu.waitFor({ state: "hidden" });
 
     await openThread(page, "Thread 2");
     await expect.poll(() => readFieldText(composer.field)).toBe("");
-    expect(await composer.modelPill.textContent()).toBe("Scripted");
+    expect(await composer.modelPick.textContent()).toBe("Scripted");
     expect(await composer.note.textContent()).toBe("");
 
     await openThread(page, "Thread 1");
     await expect.poll(() => readFieldText(composer.field)).toBe("Half a thought");
-    expect(await composer.modelPill.textContent()).toBe("Scripted Large");
+    expect(await composer.modelPick.textContent()).toBe("Scripted Large");
     expect(await composer.note.textContent()).toBe("model change applies on send");
   });
 });

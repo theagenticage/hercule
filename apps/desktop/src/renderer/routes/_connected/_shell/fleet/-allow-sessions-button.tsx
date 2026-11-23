@@ -10,9 +10,10 @@ import { buildRecordScope, keepSavedRecord } from "../../../../app/saved-record-
 const KEEP_ALLOW_MS = 5 * 60 * 1000;
 
 /**
- * Renders the Allow button of a machine whose sessions wait for a slot. It
- * sets the machine's session cap to `need.allow`, so every waiting session can
- * start (`runner.update`). A failed save leaves the cap as it was and shows the
+ * Renders the Allow button of a machine whose sessions wait for a slot,
+ * "Raise cap to 17", which names the setting it changes. It sets the
+ * machine's session cap to `need.allow`, so every waiting session can start
+ * (`runner.update`). A failed save leaves the cap as it was and shows the
  * controller's message under the machine's need line.
  *
  * - The button and the message are siblings of the need line, for its card or
@@ -79,7 +80,7 @@ export function AllowSessionsButton({
             <span className="spin" aria-hidden="true" /> Saving…
           </>
         ) : (
-          `Allow ${String(need.allow)}`
+          `Raise cap to ${String(need.allow)}`
         )}
       </button>
       {latestAllow?.status === "error" && (

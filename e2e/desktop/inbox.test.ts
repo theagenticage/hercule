@@ -2,7 +2,7 @@
  * Tests the Inbox in the packaged app, signed in to a real controller (spec
  * 17 §Inbox). Three journeys, kept to what only the packaged app proves:
  *
- * - the sidebar's Inbox row, and the Hercule segment in grey, say how many
+ * - the sidebar's Inbox row, and the Work segment in grey, say how many
  *   things someone waits on, and the row opens the Inbox; the rail lists the
  *   saved queries with their counts; the list draws rows, and a virtual list
  *   mounts only some of them; the pane shows the current row; J moves the
@@ -13,7 +13,7 @@
  *   title and the thing leaves the list; "With Hercule" then holds it, and G
  *   on it goes to that Task on Work, where its card is drawn;
  * - E dismisses the current thing and the undo key puts it back, each seen in
- *   the list, in the Hercule segment's count and in the controller's count.
+ *   the list, in the Work segment's count and in the controller's count.
  *
  * GitHub cannot be reached offline, so the things are written into the
  * scratch database while the controller is stopped, in the shape the GitHub
@@ -44,7 +44,7 @@ interface OpenInbox {
   readonly page: Page;
   /** The sidebar's Inbox row. */
   readonly sidebarRow: Locator;
-  /** The Hercule segment of the sidebar's face switch. */
+  /** The Work segment of the sidebar's face switch. */
   readonly segment: Locator;
   /** The mounted rows of the list, top to bottom. */
   readonly rows: Locator;
@@ -81,10 +81,10 @@ async function arrangeInbox(): Promise<OpenInbox> {
   const { page } = await openSignedIn(arranged.url);
   const segment = page
     .getByRole("tablist", { name: "Sidebar" })
-    .getByRole("tab", { name: /^Hercule/ });
+    .getByRole("tab", { name: /^Work/ });
   await segment.click();
   const sidebarRow = page
-    .getByRole("navigation", { name: "Hercule", exact: true })
+    .getByRole("navigation", { name: "Work", exact: true })
     .getByRole("link", { name: /^Inbox/ });
   return {
     arranged,
@@ -96,7 +96,7 @@ async function arrangeInbox(): Promise<OpenInbox> {
   };
 }
 
-/** Returns the accessible name of the Hercule segment, such as "Hercule, 300 waiting". */
+/** Returns the accessible name of the Work segment, such as "Work, 300 waiting". */
 const readSegmentName = (segment: Locator): Promise<string | null> =>
   segment.getAttribute("aria-label");
 
@@ -118,9 +118,9 @@ describe("Inbox", () => {
     const waiting = await readWaitingCount(arranged);
     expect(waiting).toBe(INBOX_CARDS);
 
-    // The Hercule segment counts the same things, in grey: none of them is a
+    // The Work segment counts the same things, in grey: none of them is a
     // thread waiting on the user.
-    await expect.poll(() => readSegmentName(segment)).toBe(`Hercule, ${String(waiting)} waiting`);
+    await expect.poll(() => readSegmentName(segment)).toBe(`Work, ${String(waiting)} waiting`);
     expect(await segment.locator("b").getAttribute("class")).toBe("count");
     expect(await segment.locator("b").textContent()).toBe(String(waiting));
 
@@ -285,9 +285,7 @@ describe("Inbox", () => {
     await page.keyboard.press("e");
     await expect.poll(() => locateRow(page, ref).count()).toBe(0);
     await expect.poll(() => readWaitingCount(arranged)).toBe(waiting - 1);
-    await expect
-      .poll(() => readSegmentName(segment))
-      .toBe(`Hercule, ${String(waiting - 1)} waiting`);
+    await expect.poll(() => readSegmentName(segment)).toBe(`Work, ${String(waiting - 1)} waiting`);
     await page.locator(".undo-line.is-on").waitFor();
     // The line is as wide as its content and centred on the list, not squeezed into half of it.
     const box = await page.locator(".undo-line.is-on").evaluate((line) => {
@@ -306,6 +304,6 @@ describe("Inbox", () => {
     await page.keyboard.press(`${PRIMARY_KEY}+z`);
     await expect.poll(() => locateRow(page, ref).count()).toBe(1);
     await expect.poll(() => readWaitingCount(arranged)).toBe(waiting);
-    await expect.poll(() => readSegmentName(segment)).toBe(`Hercule, ${String(waiting)} waiting`);
+    await expect.poll(() => readSegmentName(segment)).toBe(`Work, ${String(waiting)} waiting`);
   });
 });

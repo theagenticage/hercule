@@ -75,7 +75,7 @@
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   box-shadow:
-    inset 0 0 0 1px var(--glass-rim),
+    inset 0 0 0 1px var(--control-edge),
     var(--glass-shadow);
   color: var(--ink);
   font-size: var(--t-13);
@@ -92,7 +92,7 @@
 /* While its menu is open the button keeps its glass and gains a ring, as every toolbar control does. */
 .ib-narrow[aria-expanded="true"] {
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, var(--ink) 26%, transparent),
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 50%, var(--control-edge)),
     var(--glass-shadow);
 }
 .ib-narrow b {
@@ -112,7 +112,7 @@
   border-radius: var(--r-pill);
   background: var(--raised);
   box-shadow:
-    inset 0 0 0 1px var(--rim),
+    inset 0 0 0 1px var(--control-edge),
     var(--shadow-1);
   color: var(--ink);
   font-size: var(--t-12);

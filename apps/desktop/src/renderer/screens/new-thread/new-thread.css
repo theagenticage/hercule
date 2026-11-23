@@ -132,12 +132,28 @@ button.lip-pick:hover,
   color: var(--faint);
   font-size: var(--t-12);
 }
+/* The priority word of an urgent task, in the failure hue. */
+.start-priority.is-urgent {
+  color: var(--fail-ink);
+}
 .start b {
   font-weight: var(--w-medium);
   line-height: 1.35;
 }
 .starts-h {
   margin: 0 0 10px 2px;
+}
+/* Not in the book. A click on a card adds one line to the message and
+   starts nothing, which a note after the heading says before the user
+   clicks. */
+.starts-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.starts-note {
+  color: var(--muted);
+  font-size: var(--t-12);
 }
 .starters-note {
   display: flex;

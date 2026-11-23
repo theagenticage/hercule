@@ -4,7 +4,6 @@ import { useRouteContext } from "@tanstack/react-router";
 import { buildStartCards } from "@hercule/client-core";
 import { startTasksQuery } from "../../app/queries";
 import { InboxIcon } from "../../icons/inbox";
-import { TasksIcon } from "../../icons/tasks";
 import { GitHubMark } from "../../logos";
 
 // The starters show only while a project has no planned task, so they load the
@@ -16,9 +15,11 @@ const StarterThreads = lazy(() =>
 
 /**
  * Renders the start cards under a Draft Thread's composer, as the Bureau
- * book's `session-empty` page draws them: "Start from Work", then up to
- * three planned tasks of the project, most urgent first. Each card shows where
- * the task came from, its priority as bars, and its title.
+ * book's `session-empty` page draws them: "Start from Work" and a note that
+ * says what a click does, then up to three planned tasks of the project, most
+ * urgent first. Each card shows where the task came from (the GitHub mark, or
+ * else the heading's Inbox icon), its priority in words alone ("Urgent" in the
+ * failure hue), and its title.
  *
  * While the project has no planned task, three starter threads take the cards'
  * place, see `StarterThreads`.
@@ -56,10 +57,13 @@ export function StartCards({
   }
   return (
     <section aria-labelledby={headingId}>
-      <h2 className="starts-h section-h" id={headingId}>
-        <InboxIcon size={14} />
-        Start from Work
-      </h2>
+      <div className="starts-h starts-head">
+        <h2 className="section-h" id={headingId}>
+          <InboxIcon size={14} />
+          Start from Work
+        </h2>
+        <span className="starts-note">Puts the Task in your message</span>
+      </div>
       <div className="starts">
         {cards.map((card) => (
           <button
@@ -71,19 +75,9 @@ export function StartCards({
             }}
           >
             <span className="start-top">
-              {card.source === "github" ? <GitHubMark size={14} /> : <TasksIcon size={14} />}
-              <span>Task</span>
-              <span className="spacer" />
-              <span
-                className="bars"
-                data-p={card.bars}
-                role="img"
-                aria-label={`${card.priority} priority`}
-              >
-                <i />
-                <i />
-                <i />
-                <i />
+              {card.source === "github" ? <GitHubMark size={14} /> : <InboxIcon size={14} />}
+              <span className={card.priority === "urgent" ? "start-priority is-urgent" : undefined}>
+                {card.priorityText}
               </span>
             </span>
             <b>{card.title}</b>
