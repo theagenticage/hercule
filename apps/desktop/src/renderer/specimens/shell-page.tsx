@@ -316,6 +316,12 @@ export interface SidebarRecords {
   readonly yourWorkTasks?: ReadonlyArray<YourWorkTask>;
   /** Whether a run failed on a live Task, which draws the sidebar's failed-run dot. False when left out. */
   readonly hasFailedRun?: boolean;
+  /**
+   * How many things someone waits on the user for, which the sidebar's Inbox
+   * row counts. A specimen that opens the Inbox counts its own list instead.
+   * 0 when left out.
+   */
+  readonly inboxWaiting?: number;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -965,10 +971,13 @@ const seedQueryCache = (
   queryClient.setQueryData(taskAttentionQuery(client).queryKey, {
     anyFailure: records.hasFailedRun ?? false,
   });
-  // The sidebar's Inbox row reads its small counts on every screen: no one waits on the user.
+  // The sidebar's Inbox row reads its small counts on every screen. The Inbox counts its own
+  // list; every other screen counts the workspace's.
   const waiting =
-    inbox?.outline.savedQueries.find((query) => query.id === CORE_SAVED_QUERY_IDS.waits)?.count ??
-    0;
+    inbox === undefined
+      ? (records.inboxWaiting ?? 0)
+      : (inbox.outline.savedQueries.find((query) => query.id === CORE_SAVED_QUERY_IDS.waits)
+          ?.count ?? 0);
   queryClient.setQueryData(inboxCountQuery(client).queryKey, { waiting, newestArrival: 0 });
   // The Inbox screen reads its outline once, and the route's loader waits for it.
   if (inbox !== undefined)
