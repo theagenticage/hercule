@@ -1232,10 +1232,11 @@ const renderWikiPageWritten = (page: WikiPage): ReadonlyArray<string> => [
 
 /**
  * Returns the line printed after `wiki-page archive`: the page, its
- * repository, and how to bring it back.
+ * repository, and how to bring it back. The command to copy carries the full
+ * id, so it needs no listing to resolve and no `wiki.read`.
  */
 const renderWikiPageArchived = (page: WikiPageSummary): ReadonlyArray<string> => [
-  `archived wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}; bring it back with \`hercule wiki-page restore ${formatCell(page.id)}\``,
+  `archived wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}; bring it back with \`hercule wiki-page restore ${page.id}\``,
 ];
 
 /** Returns the line printed after `wiki-page restore`: the page, its repository and its revision. */

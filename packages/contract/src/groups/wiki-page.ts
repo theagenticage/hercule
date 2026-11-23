@@ -4,11 +4,11 @@
  *
  * A Wiki is the set of Wiki Pages of one Resource of kind `repo`; it has no id
  * and no settings of its own. A page is named in its Wiki by a slug that never
- * changes. Every write stores a new revision holding the whole page, stamped
+ * changes. Every write of a page's content stores a new revision holding the whole page, stamped
  * with its actor and time. Nothing is ever deleted: a wrong page is rewritten,
  * and its history shows what it said before. A page that no longer helps is
- * archived: it leaves the listing, and stays readable by its id with its whole
- * history until someone restores it.
+ * archived: it leaves the listing, and it and every one of its revisions
+ * stay readable by its id. Restoring it puts it back in the listing.
  *
  * Every page carries the Resource's canonical remote as `repository`, copied
  * when the page is created. A caller without `resource.read` can still see
@@ -54,6 +54,26 @@ export const MAX_WIKI_PAGES = 500;
 
 /** How many revisions `wikiPage.read` lists, newest first. */
 export const MAX_WIKI_REVISIONS_LISTED = 50;
+
+/**
+ * What belongs in a Wiki and what does not, as every agent that may write
+ * pages is told it. The start-up paragraph of a session, the `hercule` skill
+ * and the help of `wiki-page create` and `wiki-page update` all quote this
+ * one text, so the rule cannot read differently in two places (spec 19
+ * section 7.1).
+ *
+ * It exists because a session sees only its own task and a few page titles.
+ * Told only to write down what it learned, each session wrote a page about
+ * its ticket, and the next session copied it.
+ */
+export const WIKI_WRITING_RULES =
+  "The wiki holds lasting knowledge about the repository, one page per subject: how something is run or checked, a trap in a tool, a fact about a machine or an outside service. " +
+  "Record what an agent doing different work here would need, even if you learned it while working on a ticket. " +
+  "It is not a worklog: leave out ticket, pull request and thread recaps, as well as dated entries. " +
+  "List the pages before you write. Add to the page on the subject, and create a page only when there is none. Name a page for its subject. " +
+  "A decision or a rule belongs in the repository's own docs, not in the wiki. " +
+  "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when. " +
+  "Correct a page that is wrong, and archive one that no longer helps.";
 
 /**
  * A page's stable name in its Wiki: lowercase letters and digits in groups
@@ -130,17 +150,26 @@ export const WikiRevision = Schema.Struct({
 export type WikiRevision = Schema.Schema.Type<typeof WikiRevision>;
 
 /** What a page listing may be sorted by. */
-export const WIKI_PAGE_SORT_FIELDS = ["updatedAt", "title"] as const;
+export const WIKI_PAGE_SORT_FIELDS = ["updatedAt", "title", "createdAt"] as const;
+
+/**
+ * Which pages a listing holds, by whether they are archived: `only` the
+ * archived pages, or `include` them beside the pages that are not archived.
+ */
+export const WikiPageArchivedFilter = Schema.Literals(["only", "include"]);
+
+export type WikiPageArchivedFilter = Schema.Schema.Type<typeof WikiPageArchivedFilter>;
 
 /** The filter of `wikiPage.query`. */
 export const WikiPageFilter = Schema.Struct({
   /** Only this repository's pages. Without it, every repository's pages are listed. */
   resourceId: Schema.optionalKey(Id),
   /**
-   * `true` lists only the archived pages. Left out or `false`, only the pages
-   * that are not archived are listed.
+   * Left out, only the pages that are not archived are listed, which is what
+   * archiving a page is for. `only` lists the archived pages, and `include`
+   * lists every page.
    */
-  archived: Schema.optionalKey(Schema.Boolean),
+  archived: Schema.optionalKey(WikiPageArchivedFilter),
 });
 
 /**

@@ -18,6 +18,20 @@ const stubClient = (handler: Handler) => {
   return { fetch, client };
 };
 
+/** Returns a Wiki Page summary with the id `id`, as `wikiPage.query` lists it. */
+const buildWikiPage = (id: string) => ({
+  id,
+  resourceId: buildId("0000be11"),
+  repository: "github.com/acme/web",
+  slug: "release-process",
+  title: "Release process",
+  summary: "How a release is cut",
+  revision: 3,
+  updatedAt: "2026-10-14T10:05:00.000Z",
+  updatedBy: "user",
+  createdAt: "2026-10-14T10:00:00.000Z",
+});
+
 /** Returns a join token, as `runner join-token list` returns it. */
 const joinToken = (tail: string) => ({
   id: buildId(tail),
@@ -223,6 +237,58 @@ describe("a positional whose row resolves tails", () => {
         expect(fetch.calls.at(-1)!.path).toContain(initiative.id);
       }
     }
+  });
+
+  it("resolves a wiki page tail in one listing of every page, archived or not, in creation order", async () => {
+    const current = buildWikiPage("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
+    const archived = buildWikiPage("0199e0e7-7b21-7000-8000-0000bbbbbbb2");
+    for (const [verb, extra, method] of [
+      ["read", [], "GET"],
+      ["update", ["--expected-revision", "3"], "PATCH"],
+      ["archive", ["--expected-revision", "3", "--reason", "Out of date"], "POST"],
+      ["restore", [], "POST"],
+    ] as const) {
+      for (const page of [current, archived]) {
+        const { fetch, client } = stubClient((request) =>
+          request.path === "/api/v1/wiki-pages" && request.method === "GET"
+            ? { items: [current, archived] }
+            : verb === "read"
+              ? { page: { ...page, body: "Text." }, revisions: [] }
+              : { ...page, body: "Text." },
+        );
+        const command = lookUpCommand("wiki-page", verb);
+        // Only `update` reads stdin: the page's new body is piped in.
+        const args = await parseArguments(command, [page.id.slice(-8), ...extra], () =>
+          Promise.resolve("New text."),
+        );
+
+        await execute(client, command, args);
+
+        // One listing, not one per state: a page archived or restored between
+        // two listings would be in neither.
+        const listed = fetch.calls.filter((call) => call.path === "/api/v1/wiki-pages");
+        expect(listed.map((call) => [...call.query.entries()])).toEqual([
+          [
+            ["archived", "include"],
+            ["sort", "createdAt:asc"],
+          ],
+        ]);
+        expect(fetch.calls.at(-1), `${verb} ${page.id}`).toMatchObject({ method });
+        expect(fetch.calls.at(-1)!.path).toContain(page.id);
+      }
+    }
+  });
+
+  it("refuses a wiki page tail that a current and an archived page share, and writes nothing", async () => {
+    const current = buildWikiPage("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
+    const archivedTwin = buildWikiPage("0199e0e7-7b21-7000-8000-1111aaaaaaa1");
+    const { fetch, client } = stubClient(() => ({ items: [current, archivedTwin] }));
+    const restore = lookUpCommand("wiki-page", "restore");
+
+    await expect(
+      execute(client, restore, await parseArguments(restore, ["aaaaaaa1"], refuseStdinRead)),
+    ).rejects.toThrow(/aaaaaaa1 matches 2 wiki-page ids/);
+    expect(fetch.calls.every((call) => call.method === "GET")).toBe(true);
   });
 
   it("resolves each tail of the sessions that session done and session reopen take", async () => {

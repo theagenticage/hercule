@@ -13,7 +13,13 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
-import type { WikiPage, WikiPageSummary, WikiRevision } from "@hercule/contract";
+import type {
+  WikiPage,
+  WikiPageArchived,
+  WikiPageArchivedFilter,
+  WikiPageSummary,
+  WikiRevision,
+} from "@hercule/contract";
 import {
   buildPage,
   mintUuid,
@@ -27,13 +33,16 @@ import {
 } from "../db";
 
 /** A field a page listing can be sorted by. */
-export type WikiPageSortField = "updatedAt" | "title";
+export type WikiPageSortField = "updatedAt" | "title" | "createdAt";
 
 /** The filter, page size, cursor and sort keys of a page listing. */
 export interface WikiPageListRequest {
   readonly resourceId: string | undefined;
-  /** `true` lists only the archived pages; `false` only the pages that are not archived. */
-  readonly archived: boolean;
+  /**
+   * `only` lists the archived pages and `include` every page. `undefined`
+   * lists the pages that are not archived.
+   */
+  readonly archived: WikiPageArchivedFilter | undefined;
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<WikiPageSortField>>;
@@ -53,13 +62,6 @@ export interface NewWikiPage {
   readonly resourceId: string;
   readonly repository: string;
   readonly slug: string;
-}
-
-/** The mark `wikiPage.archive` puts on a page: when, by whom and why. */
-export interface WikiPageArchiveMark {
-  readonly at: string;
-  readonly by: string;
-  readonly reason: string;
 }
 
 /** What the prompt line of one repository shows about its Wiki. Archived pages are left out. */
@@ -100,6 +102,7 @@ const PAGE_COLUMNS =
 const PAGE_SORT_COLUMNS: Record<WikiPageSortField, SortColumn<WikiPageSummary>> = {
   updatedAt: { column: "updated_at", valueType: "string", readValue: (page) => page.updatedAt },
   title: { column: "title", valueType: "string", readValue: (page) => page.title },
+  createdAt: { column: "created_at", valueType: "string", readValue: (page) => page.createdAt },
 };
 
 const toSummary = (row: WikiPageRow): WikiPageSummary => ({
@@ -113,8 +116,8 @@ const toSummary = (row: WikiPageRow): WikiPageSummary => ({
   updatedAt: row.updated_at,
   updatedBy: row.updated_by,
   createdAt: row.created_at,
-  // The three archive columns are set and cleared together, so one of them
-  // tells whether the page is archived.
+  // The table's check keeps the three archive columns all set or all NULL,
+  // so one of them tells whether the page is archived.
   ...(row.archived_at === null
     ? {}
     : { archived: { at: row.archived_at, by: row.archived_by!, reason: row.archive_reason! } }),
@@ -265,25 +268,26 @@ const make = Effect.gen(function* () {
         return buildPageAtRevision(page, { ...content, revision });
       }),
 
-    /** Marks a page as archived. The page's revisions are left as they are. */
-    markArchived: (pageId: string, mark: WikiPageArchiveMark): Effect.Effect<void, SqlError> =>
+    /**
+     * Writes a page's archive mark, or clears it when `archived` is
+     * `undefined`, so the page is listed and counted again. The page's
+     * revisions are left as they are.
+     */
+    writeArchiveMark: (
+      pageId: string,
+      archived: WikiPageArchived | undefined,
+    ): Effect.Effect<void, SqlError> =>
       sql`
         UPDATE wiki_pages
-        SET archived_at = ${mark.at}, archived_by = ${mark.by}, archive_reason = ${mark.reason}
-        WHERE id = ${uuidFromString(pageId)}
-      `,
-
-    /** Clears a page's archive mark, so the page is listed and counted again. */
-    clearArchived: (pageId: string): Effect.Effect<void, SqlError> =>
-      sql`
-        UPDATE wiki_pages SET archived_at = NULL, archived_by = NULL, archive_reason = NULL
+        SET archived_at = ${archived?.at ?? null}, archived_by = ${archived?.by ?? null},
+            archive_reason = ${archived?.reason ?? null}
         WHERE id = ${uuidFromString(pageId)}
       `,
 
     /**
      * Returns one page of page summaries, of one repository or of all, in the
-     * requested order: the archived pages when `archived` is true, and
-     * otherwise the pages that are not archived. Fails with a `CursorError` if the cursor is invalid.
+     * requested order: the pages that are not archived, or the ones the
+     * request's `archived` names. Fails with a `CursorError` if the cursor is invalid.
      */
     list: (
       request: WikiPageListRequest,
@@ -297,10 +301,9 @@ const make = Effect.gen(function* () {
           "id",
           request.cursor,
         );
-        const clauses: Array<Fragment> = [
-          keyset,
-          request.archived ? sql`archived_at IS NOT NULL` : sql`archived_at IS NULL`,
-        ];
+        const clauses: Array<Fragment> = [keyset];
+        if (request.archived === undefined) clauses.push(sql`archived_at IS NULL`);
+        if (request.archived === "only") clauses.push(sql`archived_at IS NOT NULL`);
         if (request.resourceId !== undefined) {
           clauses.push(sql`resource_id = ${uuidFromString(request.resourceId)}`);
         }
@@ -322,8 +325,9 @@ const make = Effect.gen(function* () {
      * recently changed, newest first. Archived pages are neither counted nor
      * named. A repository with no pages is in the map with a count of 0.
      *
-     * One query for every repository. It reads each Wiki's page rows: at
-     * most 500 that are not archived, and the archived ones, which it skips.
+     * One query for every repository. It reads each Wiki's pages that are
+     * not archived, from the index that holds only those, which the cap of
+     * 500 pages per Wiki bounds.
      */
     summarizeWikis: (
       resourceIds: ReadonlyArray<string>,

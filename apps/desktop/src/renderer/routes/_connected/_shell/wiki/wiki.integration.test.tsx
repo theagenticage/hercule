@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { WikiPageSummary, WikiRevision } from "@hercule/contract";
+import type { WikiPageArchived, WikiPageSummary, WikiRevision } from "@hercule/contract";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -179,46 +179,54 @@ const RELEASE_BODY = "Releases are cut from `main`.\n\n- Tag the commit\n- Run t
 /**
  * Returns the handler that answers `wikiPage.read` for a page, as of
  * `revision` when the query names one. It reads the pages of `READABLE_PAGES`
- * and the pages in `listed`, which have one revision each.
+ * and the pages in `listed`, which have one revision each. A page whose id is
+ * in `archivedSince` is answered with that archive mark.
  */
-const buildAnswerPageRead = (listed: readonly WikiPageSummary[]) => (call: Call) => {
-  const id = call.path.split("/").at(-1)!;
-  const summary = [...READABLE_PAGES, ...listed].find((page) => page.id === id);
-  const revisions =
-    REVISIONS_BY_PAGE[id] ??
-    (summary === undefined
-      ? undefined
-      : [buildRevision(1, summary.title, "user", summary.updatedAt)]);
-  const requested = new URLSearchParams(call.search).get("revision");
-  const shown =
-    requested === null
-      ? revisions?.[0]
-      : revisions?.find((revision) => revision.revision === Number(requested));
-  if (summary === undefined || revisions === undefined || shown === undefined) {
-    return { status: 404, body: buildErrorBody("not_found", `no wiki page ${id}`) };
-  }
-  return {
-    body: {
-      page: {
-        ...summary,
-        title: shown.title,
-        // The current page keeps its listed summary; an older revision has its own.
-        summary: requested === null ? summary.summary : shown.summary,
-        revision: shown.revision,
-        updatedAt: shown.at,
-        updatedBy: shown.actor,
-        body: requested === null ? RELEASE_BODY : `The page as of revision ${shown.revision}.`,
+const buildAnswerPageRead =
+  (listed: readonly WikiPageSummary[], archivedSince: ReadonlyMap<string, WikiPageArchived>) =>
+  (call: Call) => {
+    const id = call.path.split("/").at(-1)!;
+    const found = [...READABLE_PAGES, ...listed].find((page) => page.id === id);
+    const mark = archivedSince.get(id);
+    const summary =
+      found === undefined || mark === undefined ? found : { ...found, archived: mark };
+    const revisions =
+      REVISIONS_BY_PAGE[id] ??
+      (summary === undefined
+        ? undefined
+        : [buildRevision(1, summary.title, "user", summary.updatedAt)]);
+    const requested = new URLSearchParams(call.search).get("revision");
+    const shown =
+      requested === null
+        ? revisions?.[0]
+        : revisions?.find((revision) => revision.revision === Number(requested));
+    if (summary === undefined || revisions === undefined || shown === undefined) {
+      return { status: 404, body: buildErrorBody("not_found", `no wiki page ${id}`) };
+    }
+    return {
+      body: {
+        page: {
+          ...summary,
+          title: shown.title,
+          // The current page keeps its listed summary; an older revision has its own.
+          summary: requested === null ? summary.summary : shown.summary,
+          revision: shown.revision,
+          updatedAt: shown.at,
+          updatedBy: shown.actor,
+          body: requested === null ? RELEASE_BODY : `The page as of revision ${shown.revision}.`,
+        },
+        revisions,
       },
-      revisions,
-    },
+    };
   };
-};
 
 /**
  * Opens the app at `path`, the Wiki's list by default, with the wiki pages in
  * `listed`, one array for each page the list is read in, and waits for the
  * floating header to show. While `isNextPageFailing`, the reads of the second
- * page fail; `healNextPage` makes them succeed.
+ * page fail; `healNextPage` makes them succeed. `archivePage` makes the
+ * controller answer as it does once a page is archived: the page leaves the
+ * list, and a read of it carries the mark.
  *
  * With `isNextPageFailing`, every read of the first page after the loader's
  * also answers 20 ms late, as a real controller's answer comes after the
@@ -231,7 +239,8 @@ const openWiki = async (
   listed: readonly (readonly WikiPageSummary[])[] = [PAGES],
   isNextPageFailing = false,
 ) => {
-  const answerPageRead = buildAnswerPageRead(listed.flat());
+  const archivedSince = new Map<string, WikiPageArchived>();
+  const answerRead = buildAnswerPageRead(listed.flat(), archivedSince);
   let failing = isNextPageFailing;
   let firstPageReads = 0;
   const handlers: Readonly<Record<string, Handler>> = {
@@ -249,14 +258,14 @@ const openWiki = async (
       }
       return {
         body: {
-          items: listed[index] ?? [],
+          items: (listed[index] ?? []).filter((page) => !archivedSince.has(page.id)),
           ...(index + 1 < listed.length ? { nextCursor: String(index + 1) } : {}),
         },
       };
     },
     ...Object.fromEntries(
       [...[...READABLE_PAGES, ...listed.flat()].map((page) => page.id), UNKNOWN_ID].map(
-        (id): [string, Handler] => [`GET /api/v1/wiki-pages/${id}`, answerPageRead],
+        (id): [string, Handler] => [`GET /api/v1/wiki-pages/${id}`, answerRead],
       ),
     ),
     // The agent that wrote the release page's newest revision.
@@ -273,6 +282,9 @@ const openWiki = async (
     calls,
     healNextPage: () => {
       failing = false;
+    },
+    archivePage: (id: string, mark: WikiPageArchived) => {
+      archivedSince.set(id, mark);
     },
     ...app,
   };
@@ -581,11 +593,9 @@ describe("an open wiki page", () => {
     await openWiki(`/wiki/${ARCHIVED.id}`);
 
     const page = await screen.findByRole("region", { name: "Old deploys" });
-    expect(page.querySelector(".archived-band")?.textContent).toBe(
+    expect(within(page).getByText(/^Archived Fri by/).textContent).toBe(
       "Archived Fri by Write the retry runbook. Merged into the page Deploy runbook",
     );
-    // The archived page is not a row of the list.
-    expect(readList()).not.toContain("Old deploys");
   });
 
   it("lists the history, newest first, with who wrote each revision, when, and which revision renamed the page", async () => {
@@ -793,6 +803,30 @@ describe("the Wiki's live updates", () => {
       expect(paths).toContain("/api/v1/wiki-pages");
       expect(paths).toContain(`/api/v1/wiki-pages/${RELEASES.id}`);
     });
+  });
+
+  it("shows the band and drops the row when the open page is archived", async () => {
+    const { live, context, archivePage } = await openWiki(`/wiki/${RELEASES.id}`);
+    await waitFor(() => expect(live.readTopics()).toContain("wikiPage"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    await waitFor(() => expect(context.queryClient.isFetching()).toBe(0));
+    const page = screen.getByRole("region", { name: "How releases work" });
+    expect(within(page).queryByText(/^Archived /)).toBeNull();
+    expect(readList()).toContain("How releases work");
+
+    archivePage(RELEASES.id, {
+      at: "2026-10-09T12:00:00.000Z",
+      by: "user",
+      reason: "Merged into the page Deploy runbook",
+    });
+    act(() => live.pushInvalidation("wikiPage", [RELEASES.id]));
+
+    // The page stays open, now under the band, and its row is gone from the list.
+    expect((await within(page).findByText(/^Archived Fri by/)).textContent).toBe(
+      "Archived Fri by You. Merged into the page Deploy runbook",
+    );
+    await waitFor(() => expect(readList()).not.toContain("How releases work"));
+    expect(within(page).getByRole("heading", { level: 1 }).textContent).toBe("How releases work");
   });
 
   it("reads the list and the open page again when the window shows again", async () => {

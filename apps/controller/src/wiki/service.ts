@@ -97,25 +97,6 @@ const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<WikiPageSortField>
 
 const NO_SUCH_PAGE = "no such wiki page; `hercule wiki-page list` shows the pages there are";
 
-/**
- * Returns the message for a write refused because the page has moved past the
- * revision the caller read. `current` is the page's revision now, and
- * `whatToDo` ends the message with the caller's next step.
- */
-const describeMovedRevision = (current: number, whatToDo: string): string =>
-  `The page changed since you read it (now revision ${String(current)}). ${whatToDo}`;
-
-/**
- * Creates the error for a Wiki that already holds the most pages it can.
- * `count` is how many it holds, and `whatToDo` ends the message with what the
- * caller can do instead.
- */
-const createPageCapError = (count: number, whatToDo: string): CapExceeded =>
-  createCapExceededError(
-    { count: count + 1, cap: MAX_WIKI_PAGES },
-    `This wiki has ${String(MAX_WIKI_PAGES)} pages, the most it can hold. ${whatToDo}`,
-  );
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const pages = yield* wikiPageRepository;
@@ -129,6 +110,49 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
+
+  /**
+   * Returns the page `id` when it is at `expectedRevision`, the revision the
+   * caller read. Fails with `NotFound` when there is no such page, and with
+   * `Conflict` when the page has moved past that revision. The conflict's
+   * message ends with `describeNextStep(current)`, the caller's next step
+   * given the page's revision now.
+   */
+  const readPageAtExpectedRevision = (
+    id: string,
+    expectedRevision: number,
+    describeNextStep: (currentRevision: string) => string,
+  ): Effect.Effect<WikiPageSummary, NotFound | Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const page = yield* readSummaryOrFail(id);
+      if (page.revision === expectedRevision) return page;
+      const current = String(page.revision);
+      return yield* Effect.fail(
+        createConflictError(
+          `The page changed since you read it (now revision ${current}). ${describeNextStep(current)}`,
+        ),
+      );
+    });
+
+  /**
+   * Checks that a repository's Wiki has room for one more page that is not
+   * archived. Fails with `CapExceeded` when it already holds 500; the message
+   * ends with `whatToDo`, what the caller can do instead.
+   */
+  const requireRoomForPage = (
+    resourceId: string,
+    whatToDo: string,
+  ): Effect.Effect<void, CapExceeded | SqlError> =>
+    Effect.gen(function* () {
+      const count = yield* pages.countPages(resourceId);
+      if (count < MAX_WIKI_PAGES) return;
+      return yield* Effect.fail(
+        createCapExceededError(
+          { count: count + 1, cap: MAX_WIKI_PAGES },
+          `This wiki has ${String(MAX_WIKI_PAGES)} pages, the most it can hold. ${whatToDo}`,
+        ),
+      );
+    });
 
   /** Records a write in the audit log, which also announces the page on its live topic. */
   const recordWrite = (page: WikiPage): Effect.Effect<void, SqlError> =>
@@ -161,8 +185,8 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns one page of page summaries, of one repository or of every
-     * repository: the pages that are not archived, or with `archived: true`
-     * only the archived ones. Fails with `Validation` when `resourceId` names a Resource
+     * repository: the pages that are not archived, or the ones `archived`
+     * names. Fails with `Validation` when `resourceId` names a Resource
      * that is not a repo. An id that names no Resource, a deleted one
      * included, matches nothing.
      */
@@ -183,7 +207,7 @@ const make = Effect.gen(function* () {
         const listing = yield* refuseCursor(
           pages.list({
             resourceId,
-            archived: archived ?? false,
+            archived,
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             sort: resolveSortKeys(sort, DEFAULT_SORT),
@@ -271,15 +295,10 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
-            const count = yield* pages.countPages(resourceId);
-            if (count >= MAX_WIKI_PAGES) {
-              return yield* Effect.fail(
-                createPageCapError(
-                  count,
-                  "Update an existing page instead, or archive one that no longer helps with `hercule wiki-page archive`.",
-                ),
-              );
-            }
+            yield* requireRoomForPage(
+              resourceId,
+              "Update an existing page instead, or archive one that no longer helps with `hercule wiki-page archive`.",
+            );
             const page = yield* pages.insert(
               { resourceId, repository, slug: decoded.slug },
               {
@@ -316,17 +335,12 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const current = yield* readSummaryOrFail(decoded.id);
-            if (current.revision !== decoded.expectedRevision) {
-              return yield* Effect.fail(
-                createConflictError(
-                  describeMovedRevision(
-                    current.revision,
-                    `Read it again, merge your change into it, and update with \`--expected-revision ${String(current.revision)}\`.`,
-                  ),
-                ),
-              );
-            }
+            const current = yield* readPageAtExpectedRevision(
+              decoded.id,
+              decoded.expectedRevision,
+              (now) =>
+                `Read it again, merge your change into it, and update with \`--expected-revision ${now}\`.`,
+            );
             if (current.archived !== undefined) {
               return yield* Effect.fail(
                 createInvalidStateError(
@@ -369,17 +383,12 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const current = yield* readSummaryOrFail(decoded.id);
-            if (current.revision !== decoded.expectedRevision) {
-              return yield* Effect.fail(
-                createConflictError(
-                  describeMovedRevision(
-                    current.revision,
-                    `Read it again, and archive it with \`--expected-revision ${String(current.revision)}\` if it should still go.`,
-                  ),
-                ),
-              );
-            }
+            const current = yield* readPageAtExpectedRevision(
+              decoded.id,
+              decoded.expectedRevision,
+              (now) =>
+                `Read it again, and archive it with \`--expected-revision ${now}\` if it should still go.`,
+            );
             if (current.archived !== undefined) {
               return yield* Effect.fail(
                 createInvalidStateError(
@@ -392,7 +401,7 @@ const make = Effect.gen(function* () {
               by: yield* currentStamp,
               reason: decoded.reason,
             };
-            yield* pages.markArchived(current.id, archived);
+            yield* pages.writeArchiveMark(current.id, archived);
             const page = { ...current, archived };
             yield* recordArchiveChange("wikiPage.archived", page, archived.by, archived.at);
             return page;
@@ -429,16 +438,11 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
-            const count = yield* pages.countPages(page.resourceId);
-            if (count >= MAX_WIKI_PAGES) {
-              return yield* Effect.fail(
-                createPageCapError(
-                  count,
-                  "Archive a page that no longer helps with `hercule wiki-page archive` before restoring this one.",
-                ),
-              );
-            }
-            yield* pages.clearArchived(page.id);
+            yield* requireRoomForPage(
+              page.resourceId,
+              "Archive a page that no longer helps with `hercule wiki-page archive` before restoring this one.",
+            );
+            yield* pages.writeArchiveMark(page.id, undefined);
             yield* recordArchiveChange(
               "wikiPage.restored",
               page,

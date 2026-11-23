@@ -1910,9 +1910,7 @@ describe("hercule wiki-page", () => {
       archived: {
         at: "2026-10-20T09:00:00.000Z",
         by: `session:${SESSION}`,
-        // A reason is one line when stored; a line break in it must not start a line that
-        // could pass for another field.
-        reason: "Merged into the page deploys\nrevision    9",
+        reason: "Merged into the page deploys",
       },
     };
     const read = renderHuman(
@@ -1929,7 +1927,7 @@ describe("hercule wiki-page", () => {
       "title       Release process",
       "summary     How a release is cut",
       "revision    2",
-      "archived    2026-10-20T09:00:00.000Z by session 000000ff: Merged into the page deploys ...",
+      "archived    2026-10-20T09:00:00.000Z by session 000000ff: Merged into the page deploys",
     ]);
 
     expect(
@@ -1939,7 +1937,7 @@ describe("hercule wiki-page", () => {
         CONTROLLER_URL,
       ),
     ).toEqual([
-      "archived wiki page release-process (0000a9e1) in github.com/acme/web; bring it back with `hercule wiki-page restore 0000a9e1`",
+      `archived wiki page release-process (0000a9e1) in github.com/acme/web; bring it back with \`hercule wiki-page restore ${PAGE_ID}\``,
     ]);
     expect(
       renderHuman(

@@ -52,7 +52,7 @@ export function OldRevisionBand({
 }): JSX.Element {
   const written = useListTime(updatedAt, timezone, "past", true);
   return (
-    <div className="old-rev">
+    <div className="page-band">
       <ClockIcon size={BAND_ICON_SIZE} />
       {/* One text node, as a text split over several can measure a hair wider. */}
       <span>{`Revision ${revision} of ${currentRevision}, from ${written}. This is not the current page.`}</span>
@@ -83,7 +83,7 @@ export function ArchivedBand({
 }): JSX.Element {
   const when = useListTime(archived.at, timezone, "past", true);
   return (
-    <div className="old-rev archived-band">
+    <div className="page-band page-band--archived">
       <ArchiveIcon size={BAND_ICON_SIZE} />
       <span>
         Archived {when} by <ActorName actor={archived.by} />. <bdi>{archived.reason}</bdi>

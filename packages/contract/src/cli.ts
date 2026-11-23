@@ -28,7 +28,7 @@ import {
   SHRINK_GUARD_MIN_SIZE,
 } from "./groups/memory";
 import { MAX_ROLE_LENGTH } from "./groups/session";
-import { MAX_WIKI_PAGES, MAX_WIKI_REVISIONS_LISTED } from "./groups/wiki-page";
+import { MAX_WIKI_PAGES, MAX_WIKI_REVISIONS_LISTED, WIKI_WRITING_RULES } from "./groups/wiki-page";
 import type { OperationId } from "./operations";
 
 /** One example invocation: the arguments after the command words, and what is piped to stdin. */
@@ -300,12 +300,14 @@ const SKILL_REVIEW_FORBIDDEN =
 const OPEN_AND_CLOSED_INITIATIVES = [{}, { closed: true }] as const;
 
 /**
- * The queries that read both the Wiki Pages that are not archived and the
- * archived ones. `wikiPage.query` leaves archived pages out by default, so a
- * command that must also reach an archived page resolves its id tail through
- * these.
+ * The query that lists every Wiki Page, archived or not. `wikiPage.query`
+ * leaves archived pages out by default, and every command that takes a
+ * page's id tail resolves it through this one listing: a tail then names the
+ * same page whatever the page's state, and the operation decides whether
+ * that state allows it. One listing, not one per state, because a page that
+ * is archived or restored between two listings would be in neither.
  */
-const CURRENT_AND_ARCHIVED_WIKI_PAGES = [{}, { archived: true }] as const;
+const EVERY_WIKI_PAGE = { archived: "include" } as const;
 
 /**
  * The `forbidden` meaning of a command that gives grants: `profile create`,
@@ -4346,11 +4348,11 @@ export const CLI = {
 
   "wikiPage.query": {
     command: "wiki-page list",
-    help: "Lists Wiki Pages, most recently changed first, with the repository each belongs to. Each row has the page's slug, title, summary and current revision. Without --resource it lists the pages of every repository. Archived pages are left out; --archived true lists only those. Read a page with `hercule wiki-page read`.",
+    help: "Lists Wiki Pages, most recently changed first, with the repository each belongs to. Each row has the page's slug, title, summary and current revision. Without --resource it lists the pages of every repository. Archived pages are left out: --archived only lists those, and --archived include lists every page. Read a page with `hercule wiki-page read`.",
     examples: [
       { args: ["--resource", "0199e0e7-1111-7000-8000-00000000abcd"] },
       { args: [] },
-      { args: ["--resource", "0199e0e7-1111-7000-8000-00000000abcd", "--archived", "true"] },
+      { args: ["--resource", "0199e0e7-1111-7000-8000-00000000abcd", "--archived", "only"] },
     ],
     fields: {
       resourceId: {
@@ -4359,7 +4361,7 @@ export const CLI = {
       },
       archived: {
         flag: "archived",
-        help: "true for only the archived pages. Left out or false, only the pages that are not archived.",
+        help: "only for the archived pages alone, include for every page, archived or not. Left out, the pages that are not archived.",
       },
     },
   },
@@ -4372,7 +4374,7 @@ export const CLI = {
         positional: true,
         help: "The page's id, or a tail of eight or more characters.",
         resolves: "wikiPage.query",
-        resolvesQuery: CURRENT_AND_ARCHIVED_WIKI_PAGES,
+        resolvesQuery: EVERY_WIKI_PAGE,
       },
       revision: {
         flag: "revision",
@@ -4382,7 +4384,7 @@ export const CLI = {
   },
   "wikiPage.create": {
     command: "wiki-page create",
-    help: `Creates a Wiki Page in a repository's Wiki, with the Markdown body piped to stdin. Run \`hercule wiki-page list\` first: when a page already covers the subject, add to that page with \`hercule wiki-page update\` instead. A page is about one subject of the repository and is named for it, never for a ticket, a pull request, a thread or a date. It holds what an agent doing different work would need and the repository's own docs do not say: how something is run or checked, a trap in a tool, a fact about a machine or an outside service, an exception a human allowed to a rule. The Wiki is not a worklog: what was built, reviewed or found in one ticket does not go in it, and a decision or a rule belongs in the repository's own docs. A Wiki holds at most ${String(MAX_WIKI_PAGES)} pages, not counting archived ones. Prints the new page; its revision is 1.`,
+    help: `Creates a Wiki Page in a repository's Wiki, with the Markdown body piped to stdin. ${WIKI_WRITING_RULES} A Wiki holds at most ${String(MAX_WIKI_PAGES)} pages, not counting archived ones. Prints the new page; its revision is 1.`,
     examples: [
       {
         args: [
@@ -4418,7 +4420,7 @@ export const CLI = {
   },
   "wikiPage.update": {
     command: "wiki-page update",
-    help: "Writes a new revision of a Wiki Page, with the whole Markdown body piped to stdin. Pass --expected-revision with the revision you read: when someone changed the page since, the update is refused, and you read the page again, merge your change into it, and update again. A title or a summary left out keeps its value. Keep the page about its subject: put what you learned where it belongs in the page and take out what is no longer true, instead of adding a dated section at the end.",
+    help: `Writes a new revision of a Wiki Page, with the whole Markdown body piped to stdin. Pass --expected-revision with the revision you read: when someone changed the page since, the update is refused, and you read the page again, merge your change into it, and update again. A title or a summary left out keeps its value. Put what you add where it belongs in the page, and take out what is no longer true. ${WIKI_WRITING_RULES}`,
     examples: [
       {
         args: ["1f3a9c2e", "--expected-revision", "3"],
@@ -4430,7 +4432,7 @@ export const CLI = {
         positional: true,
         help: "The page's id, or a tail of eight or more characters.",
         resolves: "wikiPage.query",
-        resolvesQuery: CURRENT_AND_ARCHIVED_WIKI_PAGES,
+        resolvesQuery: EVERY_WIKI_PAGE,
       },
       expectedRevision: {
         flag: "expected-revision",
@@ -4449,7 +4451,7 @@ export const CLI = {
   },
   "wikiPage.archive": {
     command: "wiki-page archive",
-    help: "Archives a Wiki Page that no longer helps, so it leaves the listing without being deleted. Use it for a page that is out of date, whose subject another page took over, or that was a worklog. The page leaves `hercule wiki-page list`, the page count and the titles shown to sessions. Nothing is deleted: `hercule wiki-page read` still prints it with its whole history, and `hercule wiki-page restore` brings it back. Move what is still worth keeping to the page that takes over before you archive. Pass --expected-revision with the revision you read: when someone changed the page since, the archive is refused, and you read the page again before deciding.",
+    help: "Archives a Wiki Page that no longer helps, so it leaves the listing without being deleted. Use it for a page that is out of date, whose subject another page took over, or that was a worklog. The page leaves `hercule wiki-page list`, the page count and the titles shown to sessions. Nothing is deleted: `hercule wiki-page read` still prints it, every one of its revisions stays readable, and `hercule wiki-page restore` brings it back. Move what is still worth keeping to the page that takes over before you archive. Pass --expected-revision with the revision you read: when someone changed the page since, the archive is refused, and you read the page again before deciding.",
     examples: [
       {
         args: [
@@ -4466,7 +4468,7 @@ export const CLI = {
         positional: true,
         help: "The page's id, or a tail of eight or more characters.",
         resolves: "wikiPage.query",
-        resolvesQuery: CURRENT_AND_ARCHIVED_WIKI_PAGES,
+        resolvesQuery: EVERY_WIKI_PAGE,
       },
       expectedRevision: {
         flag: "expected-revision",
@@ -4485,14 +4487,14 @@ export const CLI = {
   },
   "wikiPage.restore": {
     command: "wiki-page restore",
-    help: "Brings an archived Wiki Page back into the listing. It is listed and counted again, at the revision it was archived at, and takes updates again. Find archived pages with `hercule wiki-page list --archived true`.",
+    help: "Brings an archived Wiki Page back into the listing. It is listed and counted again, at the revision it was archived at, and takes updates again. Find archived pages with `hercule wiki-page list --archived only`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
         positional: true,
-        help: "The page's id, or a tail of eight or more characters; `hercule wiki-page list --archived true` shows the archived pages.",
+        help: "The page's id, or a tail of eight or more characters; `hercule wiki-page list --archived only` shows the archived pages.",
         resolves: "wikiPage.query",
-        resolvesQuery: { archived: true },
+        resolvesQuery: EVERY_WIKI_PAGE,
       },
     },
     errors: {

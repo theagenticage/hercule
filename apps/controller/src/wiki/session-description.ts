@@ -7,7 +7,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { prepareForQuoting, type Grant } from "@hercule/contract";
+import { prepareForQuoting, WIKI_WRITING_RULES, type Grant } from "@hercule/contract";
 import { wikiPageRepository, type WikiOverview } from "./repository";
 
 /** How many recently changed page titles a repository's line names. */
@@ -21,18 +21,6 @@ const READ_TEXT =
   "The repository's own docs (AGENTS.md, CLAUDE.md, ADRs) win over the wiki; the wiki holds what they do not say. " +
   "For larger work, checking the wiki is part of your research; a quick change does not need it. " +
   "List a repository's pages with `hercule wiki-page list --resource <id>`.";
-
-// The paragraph a session that may write pages gets. It says what the Wiki is
-// for and what it is not for, because a session sees only its own task and
-// the last few titles: told only to "write down what you learn", sessions
-// wrote one page per ticket and copied each other's titles.
-const WRITE_TEXT =
-  "The wiki holds lasting knowledge about the repository, one page per subject: how something is run or checked, a trap in a tool, a fact about a machine or an outside service. " +
-  "It is not a worklog: never write a page about a ticket, a pull request or a thread, or about what you built or found in one. " +
-  "When you learn something an agent doing different work here would need, list the pages first. Add it to the page on that subject, and create a page only when there is none. " +
-  "A decision or a rule belongs in the repository's own docs, not in the wiki. " +
-  "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when. " +
-  "Correct a page that is wrong, and archive one that no longer helps.";
 
 /** What the Wiki tells one session. */
 export interface WikiDescription {
@@ -70,7 +58,7 @@ export const buildWikiDescription = (
 ): WikiDescription | undefined => {
   if (!grants.has("wiki.read")) return undefined;
   return {
-    text: grants.has("wiki.write") ? `${READ_TEXT} ${WRITE_TEXT}` : READ_TEXT,
+    text: grants.has("wiki.write") ? `${READ_TEXT} ${WIKI_WRITING_RULES}` : READ_TEXT,
     repositoryNotes: new Map(
       [...overviews].map(([resourceId, overview]) => [resourceId, describeOverview(overview)]),
     ),
