@@ -17,7 +17,7 @@ const buildSentence = (text: string): string =>
  *
  * For each Agent that no candidate can run, the message names the Agent and
  * says what stops it on each candidate, such as "Codex on beelink is older
- * than Hercule supports; update it to 0.171.0 or newer.". A reason that is
+ * than Hercule supports; update it to 1.2.0 or newer.". A reason that is
  * the same on every candidate, such as an expired key, is said once. When
  * every Agent has a candidate but no candidate can run them all, the message
  * says that instead.

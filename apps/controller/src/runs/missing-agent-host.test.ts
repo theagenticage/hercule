@@ -4,7 +4,7 @@ import type { AccountRunners } from "../provider-accounts";
 import { describeMissingAgentHost } from "./missing-agent-host";
 
 const TOO_OLD = (machine: string) =>
-  `Codex on ${machine} is older than Hercule supports; update it to 0.171.0 or newer`;
+  `Codex on ${machine} is older than Hercule supports; update it to 1.2.0 or newer`;
 
 /** Codex is ready on atlas only, and too old on beelink and bosgame. */
 const CODEX_ON_ATLAS: AccountRunners = {
