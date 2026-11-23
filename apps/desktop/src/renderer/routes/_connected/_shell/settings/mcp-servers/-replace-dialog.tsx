@@ -28,7 +28,8 @@ import "../../../../../screens/settings/mcp-servers/url-server-dialogs.css";
  * - Replace writes once, on the chosen server, and switches it on, because
  *   the user pressed On.
  * - The list is read live: a chosen server that was removed or moved
- *   meanwhile is dropped from the choice, and the user chooses again.
+ *   meanwhile is dropped from the choice, and the user chooses again, with
+ *   the servers listed even when one is left. Replace stays off until they pick.
  * - A refusal stays in the dialog, in the controller's words, with the server
  *   that won when it names one.
  *
@@ -53,6 +54,8 @@ export function ReplaceDialog({
   const [chosenId, setChosenId] = useState<string | null>(
     candidates.length === 1 ? candidates[0]!.id : null,
   );
+  // True once a refusal cleared the choice: the servers stay listed, also when only one is left.
+  const [chooseAgain, setChooseAgain] = useState(false);
   // The servers the dialog listed when the user pressed Replace. The write moves the chosen
   // server onto the Connection, so the live list no longer holds it afterwards.
   const [confirmedList, setConfirmedList] = useState<readonly McpServer[] | null>(null);
@@ -64,12 +67,16 @@ export function ReplaceDialog({
   const shown = locked ? (confirmedList ?? live) : live;
   // The reason of the refusal stays, and a choice that no longer qualifies is cleared.
   const choiceIsStale =
+    chosenId !== null &&
     progress.kind === "refused" &&
     progress.serverId !== null &&
     !locked &&
     !live.some((server) => server.id === chosenId);
-  const pickedId = choiceIsStale ? (live.length === 1 ? live[0]!.id : null) : chosenId;
-  const selectedId = lockedId ?? pickedId;
+  if (choiceIsStale) {
+    setChosenId(null);
+    setChooseAgain(true);
+  }
+  const selectedId = lockedId ?? (choiceIsStale ? null : chosenId);
   const choice =
     selectedId === null
       ? null
@@ -97,7 +104,8 @@ export function ReplaceDialog({
           connection: row.connection,
           typeName: row.typeName,
         });
-  const several = shown.length > 1 || (lostChoice && live.length > 0);
+  const several =
+    shown.length > 1 || (chooseAgain && shown.length > 0) || (lostChoice && live.length > 0);
   return (
     <ConfirmDialog
       dialogRef={dialogRef}

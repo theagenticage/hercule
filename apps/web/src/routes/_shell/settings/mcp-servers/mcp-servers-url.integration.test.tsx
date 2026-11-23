@@ -613,6 +613,87 @@ describe("Settings > MCP servers > Add by URL", () => {
     expect(within(dialog).queryByLabelText("Token")).toBeNull();
   });
 
+  it("asks for the token again when a pasted token is refused, though the dialog was opened with 'Sign in again…'", async () => {
+    const user = userEvent.setup();
+    const oauth = buildUrlServer(S_WIKI.id, "wiki", "https://mcp.wiki.example/mcp", {
+      source: {
+        kind: "url",
+        url: "https://mcp.wiki.example/mcp",
+        signIn: "oauth",
+        signInOffered: "oauth",
+      },
+    });
+    const world = buildWorld([oauth]);
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world);
+    await user.click(await screen.findByRole("button", { name: "Sign in again…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
+    // The first form is the browser's, as the button says. The user chooses the token instead.
+    await user.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
+    await user.type(within(dialog).getByLabelText("Token"), "wrong-token-1");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Checking: asking the server for its tools.");
+
+    replaceInWorld(world, S_WIKI.id, (server) => ({
+      ...server,
+      status: "needs-sign-in",
+      statusDetail: "The server refused the token",
+    }));
+    await pushChange(live, S_WIKI.id);
+
+    expect(await within(dialog).findByText("The server refused the token")).toBeTruthy();
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
+  });
+
+  it("goes back to the browser choice when a sign-in through the browser is refused, though the dialog was opened with 'Replace token…'", async () => {
+    const user = userEvent.setup();
+    const holdsToken = buildUrlServer(S_WIKI.id, "wiki", "https://mcp.wiki.example/mcp", {
+      source: {
+        kind: "url",
+        url: "https://mcp.wiki.example/mcp",
+        signIn: "token",
+        signInOffered: "oauth",
+      },
+    });
+    const world = buildWorld([holdsToken]);
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
+      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in`]: {
+        body: {
+          authorizationUrl: "https://auth.wiki.example/authorize?state=abc123",
+          expiresAt: "2026-11-23T10:10:00.000Z",
+        },
+      },
+      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in/finish`]: () => ({
+        body: replaceInWorld(world, S_WIKI.id, (server) => ({
+          ...server,
+          status: "checking",
+          source: { ...server.source, signIn: "oauth" } as McpServer["source"],
+        })),
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Replace token…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
+    // The first form is the token field, as the button says. The user chooses the browser instead.
+    await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
+    await user.type(
+      await within(dialog).findByLabelText("Address the browser ended on"),
+      "http://127.0.0.1:50000/callback?code=the-code&state=abc123",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
+    await within(dialog).findByText("Checking: asking the server for its tools.");
+
+    replaceInWorld(world, S_WIKI.id, (server) => ({
+      ...server,
+      status: "needs-sign-in",
+      statusDetail: "The server did not accept the sign-in",
+    }));
+    await pushChange(live, S_WIKI.id);
+
+    expect(
+      await within(dialog).findByRole("button", { name: "Sign in with your browser" }),
+    ).toBeTruthy();
+    expect(within(dialog).queryByLabelText("Token")).toBeNull();
+  });
+
   it("offers the browser first for a server that signs in through it, and the pasted token as the quieter other way", async () => {
     const user = userEvent.setup();
     const world = buildWorld([S_WIKI]);
@@ -1194,10 +1275,19 @@ describe("Settings > MCP servers > Replace", () => {
     expect(readPageText(dialog)).toContain("https://mcp.sentry.example/v2/mcp");
 
     release();
-    // The refusal settles: the reason stays, the stale choice is cleared and the other server is chosen again.
+    // The refusal settles: the reason stays and the stale choice is cleared. One server is left,
+    // and it is not chosen for the user: it is listed, and Replace is off until it is picked.
     await waitFor(() => {
       expect(readPageText(dialog)).toContain("Another server holds it.");
     });
+    expect(within(dialog).getByRole("heading").textContent).toBe("Which server do you replace?");
+    const left = within(dialog).getByRole<HTMLInputElement>("radio", { name: /sentry_hand/ });
+    expect(within(dialog).getAllByRole("radio")).toHaveLength(1);
+    expect(left.checked).toBe(false);
+    expect(within(dialog).getByRole("button", { name: "Replace" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    await user.click(left);
     expect(within(dialog).getByRole("heading").textContent).toBe(
       "Replace the sentry_hand server you added?",
     );

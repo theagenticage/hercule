@@ -847,7 +847,7 @@ export function FlowBody({
           <TokenForm
             words={tokenWords}
             refusedReason={
-              state.outcome.refusedAgain
+              state.outcome.refusedWrite !== null
                 ? (state.outcome.detail ?? "The server refused this token.")
                 : null
             }

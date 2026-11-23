@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../errors";
 import {
   ADDRESS_FIELD_HINT,
+  decideTokenFormEntry,
   describeSignInHeading,
   describeTokenForm,
   describeToolNamePreview,
@@ -11,6 +12,7 @@ import {
   suggestServerName,
 } from "./add-by-url";
 import { buildServer } from "./testing";
+import type { ServerOutcome, UrlServerFlowState } from "./url-server-flows";
 
 describe("suggestServerName", () => {
   it.each([
@@ -159,6 +161,33 @@ describe("readFieldIssues", () => {
   it("is undefined for an error that is not a validation error", () => {
     expect(readFieldIssues(new ApiError("conflict", "Taken."))).toBeUndefined();
     expect(readFieldIssues(new Error("offline"))).toBeUndefined();
+  });
+});
+
+describe("decideTokenFormEntry", () => {
+  const following = (outcome: ServerOutcome): UrlServerFlowState => ({
+    kind: "following",
+    mcpServerId: "s-docs",
+    server: null,
+    outcome,
+    problem: null,
+  });
+  const needsToken = (refusedWrite: "token" | "sign-in" | null) =>
+    following({ kind: "needs-token", detail: "No.", refusedWrite });
+
+  it("keeps the button the dialog opened with until something was written", () => {
+    for (const entry of ["replace-token", "sign-in-again", "sign-in"] as const) {
+      expect(decideTokenFormEntry({ kind: "form", problem: null }, entry)).toBe(entry);
+      expect(decideTokenFormEntry(needsToken(null), entry)).toBe(entry);
+      expect(decideTokenFormEntry(following({ kind: "checking" }), entry)).toBe(entry);
+    }
+  });
+
+  it("leads from the method that was written once the check refused it, whatever the button was", () => {
+    for (const entry of ["replace-token", "sign-in-again", "sign-in"] as const) {
+      expect(decideTokenFormEntry(needsToken("token"), entry)).toBe("replace-token");
+      expect(decideTokenFormEntry(needsToken("sign-in"), entry)).toBe("sign-in-again");
+    }
   });
 });
 

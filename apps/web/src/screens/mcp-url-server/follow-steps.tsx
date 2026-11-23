@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import type { McpServer } from "@hercule/contract";
 import {
   NEW_SERVER_NOTE,
+  decideTokenFormEntry,
   describeClosing,
   describeFailedCheck,
   describeOffOutcome,
@@ -45,7 +46,7 @@ export function FollowSteps({
   readonly state: Exclude<UrlServerFlowState, { kind: "form" }>;
   readonly fallbackServer: McpServer | null;
   readonly openedOn: "server-page" | "elsewhere";
-  /** The button that opened the dialog, which the token form it shows again opens as. */
+  /** The button that opened the dialog. A token form after a refused write leads from the method that was written instead (`decideTokenFormEntry`). */
   readonly entry: SignInEntry;
   readonly onClose: () => void;
 }): JSX.Element {
@@ -99,7 +100,7 @@ export function FollowSteps({
           outcome={state.outcome}
           server={server}
           problem={state.problem}
-          entry={entry}
+          entry={decideTokenFormEntry(state, entry)}
           closingNote={closingNote}
           openAction={openAction}
           onClose={onClose}
@@ -230,7 +231,7 @@ function Outcome({
           server={server}
           problem={problem}
           entry={entry}
-          refusal={outcome.refusedAgain ? outcome.detail : null}
+          refusal={outcome.refusedWrite !== null ? outcome.detail : null}
           closingNote={closingNote}
           onSubmit={flow.submitToken}
           onSignIn={flow.startSignIn}

@@ -754,15 +754,25 @@ describe("Replace, as the controller and other clients move it", () => {
 
     release();
 
-    const chooser = await screen.findByRole("dialog", {
-      name: /Replace the sentrydocs server you added\?/,
-    });
+    const chooser = await screen.findByRole("dialog", { name: "Which server do you replace?" });
     expect(within(chooser).getByRole("alert").textContent).toBe(
       "Nothing was replaced. This server is gone.",
     );
-    // The deleted server is not offered, the one left is chosen for the user and Replace is free.
+    // The deleted server is not offered. The one left is listed but not chosen for the user,
+    // and Replace is off until they pick it.
     expect(within(chooser).queryByText("sentrynotes")).toBeNull();
-    await userEvent.click(within(chooser).getByRole("button", { name: "Replace" }));
+    const left = within(chooser).getByRole<HTMLInputElement>("radio", { name: /sentrydocs/ });
+    expect(within(chooser).getAllByRole("radio")).toHaveLength(1);
+    expect(left.checked).toBe(false);
+    expect(
+      within(chooser).getByRole("button", { name: "Replace" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    await userEvent.click(left);
+    await userEvent.click(
+      within(
+        screen.getByRole("dialog", { name: /Replace the sentrydocs server you added\?/ }),
+      ).getByRole("button", { name: "Replace" }),
+    );
     await waitFor(() => {
       expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_DOCS_ID}`)).toHaveLength(
         1,
@@ -1244,7 +1254,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       },
     ],
   ])(
-    "ends the sign-in at once on %s, so a return that comes before the dialog has closed changes nothing",
+    "ends the sign-in at once on %s, so a return that comes before the dialog's close event changes nothing",
     async (_name, request) => {
       const signInReturn = buildSignInReturn();
       const { app, dialog } = await openSignInDialog(signInReturn);
@@ -1253,17 +1263,37 @@ describe("Signing in to a server added by URL through the browser", () => {
       );
       await within(dialog).findByText("Finish in your browser");
 
-      // The result arrives in the same turn as the request, before the dialog's close event.
-      await act(async () => {
-        request(dialog);
-        signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
-        await Promise.resolve();
-      });
+      // A browser fires `close` in a task after the dialog closed. The test shim fires it at once,
+      // which would let the dialog's fallback end the sign-in. Hold it, as a browser does.
+      // Called with the node it was taken from, so it is not unbound.
+      // oxlint-disable-next-line typescript/unbound-method
+      const close = HTMLDialogElement.prototype.close;
+      let closed = false;
+      HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+        closed = true;
+        this.open = false;
+      };
+      try {
+        await act(async () => {
+          request(dialog);
+          signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+        expect(closed).toBe(true);
+        expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+        expect(
+          findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`),
+        ).toEqual([]);
+        act(() => {
+          dialog.dispatchEvent(new Event("close"));
+        });
+      } finally {
+        HTMLDialogElement.prototype.close = close;
+      }
 
       await waitFor(() => {
         expect(screen.queryByRole("dialog")).toBeNull();
       });
-      expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
       expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
         [],
       );
@@ -1315,6 +1345,83 @@ describe("Signing in to a server added by URL through the browser", () => {
       );
       return { body: app.world.servers.find((server) => server.id === DOCS_ID) };
     });
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+    );
+    await within(dialog).findByText("Finish in your browser");
+    await act(async () => {
+      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      await Promise.resolve();
+    });
+    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+
+    finishCheck(app, DOCS_ID, {
+      status: "needs-sign-in",
+      statusDetail: "docs.example refused it.",
+    });
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("docs.example refused it.");
+    expect(within(dialog).getByRole("button", { name: "Sign in with your browser" })).toBeTruthy();
+    expect(within(dialog).queryByLabelText("Token")).toBeNull();
+  });
+
+  it("asks for the token again when a pasted token is refused, though the dialog was opened with Sign in again…", async () => {
+    const app = await openPage({
+      ...DOCS,
+      source: { kind: "url", url: DOCS_URL, signIn: "oauth", signInOffered: "oauth" },
+    });
+    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
+    await userEvent.click(within(server).getByRole("button", { name: "Sign in again…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    // The first form is the browser's, as the button says. The user chooses the token instead.
+    await userEvent.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
+    await userEvent.type(within(dialog).getByLabelText("Token"), TOKEN);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+
+    finishCheck(app, DOCS_ID, {
+      status: "needs-sign-in",
+      statusDetail: "docs.example refused the token (401).",
+    });
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "docs.example refused the token (401).",
+    );
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
+  });
+
+  it("offers the browser again when a sign-in through the browser is refused, though the dialog was opened with Replace token…", async () => {
+    const signInReturn = buildSignInReturn();
+    const app = await openPage(
+      {
+        ...DOCS,
+        source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
+      },
+      {
+        signInReturn,
+        handlers: {
+          [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`]: {
+            body: { authorizationUrl: AUTHORIZATION_URL, expiresAt: "2026-11-23T10:10:00.000Z" },
+          },
+          [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`]: () => {
+            app.world.servers = app.world.servers.map((server) =>
+              server.id === DOCS_ID
+                ? {
+                    ...server,
+                    status: "checking",
+                    source: { kind: "url", url: DOCS_URL, signIn: "oauth", signInOffered: "oauth" },
+                  }
+                : server,
+            );
+            return { body: app.world.servers.find((server) => server.id === DOCS_ID) };
+          },
+        },
+      },
+    );
+    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
+    await userEvent.click(within(server).getByRole("button", { name: "Replace token…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    // The first form is the token field, as the button says. The user chooses the browser instead.
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );

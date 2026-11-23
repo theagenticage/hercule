@@ -9,6 +9,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { isWebLink } from "@hercule/client-core";
 import {
   buildMcpListQuery,
+  decideTokenFormEntry,
   describeTokenForm,
   findOrCreateMcpUrlServerFlows,
   IDLE_CHECK_NOW,
@@ -154,7 +155,9 @@ export function useUrlServerAttempt(target: UrlServerAttemptTarget): UrlServerAt
  * Returns the words of the token form for the server the dialog follows,
  * `server`, with the problem the attempt's last write left, so a rejected
  * token and the unsupported browser sign-in show where they belong. `entry`
- * is the button that opened the dialog, which decides the first step.
+ * is the button that opened the dialog, which decides the first form. After a
+ * refused write the form leads from the method that was written instead
+ * (`decideTokenFormEntry`).
  */
 export const describeAttemptTokenForm = (
   server: McpServer,
@@ -164,7 +167,7 @@ export const describeAttemptTokenForm = (
   describeTokenForm(
     server,
     state.kind === "form" || state.kind === "following" ? state.problem : null,
-    entry,
+    decideTokenFormEntry(state, entry),
   );
 
 /** What a dialog calls to drive the sign-in through the browser of its attempt. */

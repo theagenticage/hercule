@@ -7,6 +7,7 @@
  */
 export {
   ADDRESS_FIELD_HINT,
+  decideTokenFormEntry,
   describeSignInHeading,
   describeTokenForm,
   describeToolNamePreview,

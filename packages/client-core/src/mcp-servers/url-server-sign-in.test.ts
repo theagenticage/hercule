@@ -408,6 +408,66 @@ describe("a sign-in whose server changes while it runs", () => {
     expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "gone" });
   });
 
+  describe("an Add whose create was acknowledged", () => {
+    /** Adds the server, waits until it asks for a sign-in, and starts the browser sign-in. */
+    const startAddSignIn = async (context: Awaited<ReturnType<typeof setup>>) => {
+      const { world, client, flows, waitForOutcome, waitForStep } = context;
+      client.mcpServer.create.mockImplementationOnce(() => Promise.resolve(world.record));
+      const attempt = flows.openAdd();
+      flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+      await waitForOutcome(attempt, "needs-token");
+      await flows.startSignIn(attempt);
+      await waitForStep(attempt, "waiting");
+      return attempt;
+    };
+
+    /** Holds the next read of the server, which then fails as the deleted server's read does. */
+    const holdNextDetailRead = (context: Awaited<ReturnType<typeof setup>>) => {
+      const gate = hold();
+      context.client.mcpServer.read.mockImplementationOnce(async () => {
+        await gate.promise;
+        throw new ApiError("not_found", "No such server.");
+      });
+      return gate;
+    };
+
+    it("ends the sign-in at the list that shows the server deleted, though the read of the server is still held, and finishes nothing when the browser returns", async () => {
+      const context = await setup();
+      const { world, flows, client, port, waits, readList, push } = context;
+      const attempt = await startAddSignIn(context);
+
+      const gate = holdNextDetailRead(context);
+      world.gone = true;
+      push({});
+      await readList();
+
+      expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "gone" });
+      expect(port.cancel).toHaveBeenCalledWith("l-1");
+      waits[0]!.resolve({ kind: "received", callbackQuery: CALLBACK });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      gate.resolve();
+      expect(client.mcpServer.finishSignIn).not.toHaveBeenCalled();
+    });
+
+    it("ends the sign-in at the list that shows the server on a Connection, though the read of the server is still held", async () => {
+      const context = await setup();
+      const { world, flows, client, port, waits, readList, push } = context;
+      const attempt = await startAddSignIn(context);
+
+      const gate = holdNextDetailRead(context);
+      push({});
+      world.record = buildServer("s-docs", "docs", "c-work");
+      await readList();
+
+      expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "moved" });
+      expect(port.cancel).toHaveBeenCalledWith("l-1");
+      waits[0]!.resolve({ kind: "received", callbackQuery: CALLBACK });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      gate.resolve();
+      expect(client.mcpServer.finishSignIn).not.toHaveBeenCalled();
+    });
+  });
+
   it("ends a waiting sign-in when the server moved onto a Connection, and never goes back to the form on Cancel", async () => {
     const { world, flows, readList, waitForStep } = await setup();
     const attempt = flows.openToken("s-docs", "docs");

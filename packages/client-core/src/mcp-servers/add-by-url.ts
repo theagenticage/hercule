@@ -18,7 +18,7 @@ import { Schema } from "effect";
 import { readValidationIssues } from "../errors";
 import { BROWSER_SIGN_IN_LABEL, offersBrowserSignIn } from "./sign-in-words";
 import type { TextPart } from "./project-boxes";
-import type { FlowProblem } from "./url-server-flows";
+import type { FlowProblem, UrlServerFlowState } from "./url-server-flows";
 
 /** The host labels that say what a server is and not whose it is, so they never name a server. */
 const GENERIC_HOST_LABELS: readonly string[] = ["mcp", "www", "api"];
@@ -269,6 +269,32 @@ const describeTokenProblem = (problem: FlowProblem | null): string | undefined =
   }
 };
 
+/**
+ * Returns the `SignInEntry` the token form of a dialog is drawn with, given
+ * the dialog's `state` and `openedWith`, the button that opened it. The button
+ * decides the first form only. Once the attempt wrote and the check refused
+ * what it wrote, the form leads from the way that was written, whatever the
+ * button was:
+ *
+ * - a pasted token that was refused leads to the token field (`replace-token`);
+ * - a sign-in through the browser that was refused leads to the browser choice
+ *   (`sign-in-again`).
+ */
+export const decideTokenFormEntry = (
+  state: UrlServerFlowState,
+  openedWith: SignInEntry,
+): SignInEntry => {
+  if (state.kind !== "following" || state.outcome.kind !== "needs-token") return openedWith;
+  switch (state.outcome.refusedWrite) {
+    case "token":
+      return "replace-token";
+    case "sign-in":
+      return "sign-in-again";
+    case null:
+      return openedWith;
+  }
+};
+
 /** Returns the method a token form opens with: see `TokenFormWords.method`. */
 const decideFirstMethod = ({
   asksForOAuth,
@@ -307,7 +333,8 @@ const decideFirstMethod = ({
  * says only a pasted token works, the browser choice is dropped (`browser` is
  * `null`), and any problem puts the token field first. `entry` is the button
  * that opened the dialog (`SignInEntry`): the first step follows it, whatever
- * the record says by the time the dialog reads it.
+ * the record says by the time the dialog reads it. A form that follows a
+ * refused write gets its entry from `decideTokenFormEntry`.
  */
 export const describeTokenForm = (
   server: McpServer,

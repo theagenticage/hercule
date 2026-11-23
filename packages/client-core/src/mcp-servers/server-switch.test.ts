@@ -13,6 +13,7 @@ import {
   findOrCreateMcpServerSwitches,
   type McpServerSwitchCache,
   type McpServerSwitchTarget,
+  type ReplaceProgress,
 } from "./server-switch";
 import { joinOfferedServers } from "./offers";
 import { CONNECTIONS, OFFERING_PLUGINS, SENTRY_WORK, buildServer } from "./testing";
@@ -709,6 +710,22 @@ describe("where the Replace of an offer stands", () => {
     ...docsByUrl("s-a"),
     enabled: true,
     source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: "c-work" },
+  });
+
+  it("shows writing to a subscriber at the first notification after the confirmation, with no later cache event", async () => {
+    const { world, switches } = await setup([docsByUrl("s-a")]);
+    switches.attachReplaceReader(WORK);
+    const seen: ReplaceProgress[] = [];
+    const stop = switches.subscribeReplaceProgress(() => {
+      seen.push(switches.readReplaceProgress(WORK));
+    });
+    world.holdUpdate = hold().promise;
+
+    switches.replace(WORK, "s-a");
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]).toEqual({ kind: "writing", serverId: "s-a" });
+    stop();
   });
 
   it("stays writing after the acknowledgement while the list read after it is held, and is replaced once that read shows the record", async () => {

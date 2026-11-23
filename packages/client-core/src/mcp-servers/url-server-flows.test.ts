@@ -288,7 +288,7 @@ describe("Add by URL: following the created server", () => {
     expect(needsToken.outcome).toEqual({
       kind: "needs-token",
       detail: "Sign in.",
-      refusedAgain: false,
+      refusedWrite: null,
     });
     expect(needsToken.server?.id).toBe("s-docs");
 
@@ -315,6 +315,23 @@ describe("Add by URL: following the created server", () => {
     expect(decide({ enabled: false, status: "ready" })).toMatchObject({
       outcome: { kind: "off", saved: null },
     });
+  });
+
+  it("names the way this attempt signed in as the write the check refused, and none for a new server that asks for sign-in", () => {
+    const decide = (origin: "create" | "token" | "sign-in") =>
+      decideFollowing({
+        reading: {
+          kind: "found",
+          server: urlServer("s-docs", { status: "needs-sign-in", statusDetail: "No." }),
+        },
+        origin,
+        mcpServerId: "s-docs",
+        problem: null,
+      });
+
+    expect(decide("create")).toMatchObject({ outcome: { refusedWrite: null } });
+    expect(decide("token")).toMatchObject({ outcome: { refusedWrite: "token" } });
+    expect(decide("sign-in")).toMatchObject({ outcome: { refusedWrite: "sign-in" } });
   });
 
   it("says a failed read apart from a failed check, and reads again on request", async () => {
@@ -641,7 +658,7 @@ describe("the token form", () => {
     expect(refused.outcome).toEqual({
       kind: "needs-token",
       detail: "The token was refused.",
-      refusedAgain: true,
+      refusedWrite: "token",
     });
     flows.submitToken(attempt, "another-token-1");
     expect(client.mcpServer.setToken).toHaveBeenCalledTimes(2);
@@ -767,7 +784,7 @@ describe("the token form", () => {
     await vi.waitFor(() => {
       expect(flows.readState(attempt)).toMatchObject({
         kind: "following",
-        outcome: { kind: "needs-token", refusedAgain: false },
+        outcome: { kind: "needs-token", refusedWrite: null },
         problem: { kind: "failed", message: "offline" },
       });
     });
@@ -981,6 +998,61 @@ describe("the duplicate an Add refusal points at, kept current", () => {
   });
 });
 
+describe("the duplicate an Add refusal points at, when reads answer out of order", () => {
+  const conflict = () =>
+    new ApiError("conflict", "Exists.", { reason: "mcp-server-exists", mcpServerId: OTHER_ID });
+
+  it("keeps a duplicate found by its own read when a list that started before the winner existed answers after it", async () => {
+    const { world, flows, readList } = await setup();
+    const attempt = flows.openAdd();
+    // The list read starts while the attempt is open and before the winner exists, so its answer lacks it.
+    const listGate = hold();
+    world.holdNextList = listGate.promise;
+    const olderList = readList();
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki" }));
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.reject(conflict());
+    await vi.waitFor(() => {
+      expect(flows.readState(attempt)).toMatchObject({
+        problem: { existing: { kind: "found", name: "wiki" } },
+      });
+    });
+
+    listGate.resolve();
+    await olderList;
+
+    expect(flows.readState(attempt)).toMatchObject({
+      problem: { existing: { kind: "found", name: "wiki" } },
+    });
+  });
+
+  it("keeps a duplicate gone that a list showed deleted when the read of it that found it answers after the deletion", async () => {
+    const { world, flows, readList } = await setup();
+    const attempt = flows.openAdd();
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki" }));
+    // The read of the duplicate starts while it exists and answers last.
+    const readGate = hold();
+    world.holdNextRead = readGate.promise;
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.reject(conflict());
+    await vi.waitFor(() => {
+      expect(world.reads).toEqual([OTHER_ID]);
+    });
+    await readList();
+    expect(flows.readState(attempt)).toMatchObject({
+      problem: { existing: { kind: "found", name: "wiki" } },
+    });
+    world.records.delete(OTHER_ID);
+    await readList();
+    expect(flows.readState(attempt)).toMatchObject({ problem: { existing: { kind: "gone" } } });
+
+    readGate.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(flows.readState(attempt)).toMatchObject({ problem: { existing: { kind: "gone" } } });
+  });
+});
+
 describe("a token dialog kept by id", () => {
   it("ends with gone when a read of the list shows the server deleted, before the dialog closes", async () => {
     const { world, flows, readList } = await setup();
@@ -1133,6 +1205,79 @@ describe("Check now", () => {
     // The reason goes with the next press.
     await flows.checkNow(attempt);
     expect(flows.readCheck(attempt)).toEqual({ busy: true, error: null });
+  });
+
+  describe("a record that changes before the controller acknowledged the press", () => {
+    /** Presses "Check now" with the controller's acknowledgement held, then delivers a record with a newer timestamp. */
+    const pressThenChangeRecord = async () => {
+      const context = await followFailed();
+      const { client, flows, push, attempt } = context;
+      const acknowledgement = hold<void>();
+      client.mcpServer.check.mockImplementationOnce(() => acknowledgement.promise);
+      const press = flows.checkNow(attempt);
+      push("s-docs", { statusDetail: "timed out", updatedAt: "2026-11-24T10:00:00Z" });
+      await vi.waitFor(() => {
+        expect(flows.readState(attempt)).toMatchObject({ server: { statusDetail: "timed out" } });
+      });
+      return { ...context, acknowledgement, press };
+    };
+
+    it("stays busy and takes no second press until its own acknowledgement, which then ends it with no timer left behind", async () => {
+      const { client, flows, attempt, acknowledgement, press } = await pressThenChangeRecord();
+      expect(flows.readCheck(attempt)).toEqual({ busy: true, error: null });
+      expect(await flows.checkNow(attempt)).toBeNull();
+      expect(client.mcpServer.check).toHaveBeenCalledTimes(1);
+
+      acknowledgement.resolve();
+      await press;
+      expect(flows.readCheck(attempt)).toEqual({ busy: false, error: null });
+
+      // The next press waits for its own 30 seconds, whatever the first one left.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        await flows.checkNow(attempt);
+        vi.advanceTimersByTime(CHECK_ANSWER_WAIT_MILLIS - 1);
+        expect(flows.readCheck(attempt).busy).toBe(true);
+        vi.advanceTimersByTime(1);
+        expect(flows.readCheck(attempt).busy).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shows the controller's refusal and no other, and the busy state of the press ends with it", async () => {
+      const { client, flows, attempt, acknowledgement, press } = await pressThenChangeRecord();
+      expect(await flows.checkNow(attempt)).toBeNull();
+
+      acknowledgement.reject(new ApiError("invalid_state", "Switched off."));
+
+      expect(await press).toBe("Switched off.");
+      expect(flows.readCheck(attempt)).toEqual({ busy: false, error: "Switched off." });
+      expect(client.mcpServer.check).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("lets the reply of a press that was dropped when the attempt ended settle nothing of a later press", async () => {
+    const { world, client, flows, push, attempt } = await followFailed();
+    const first = hold<void>();
+    const second = hold<void>();
+    client.mcpServer.check.mockImplementationOnce(() => first.promise);
+    client.mcpServer.check.mockImplementationOnce(() => second.promise);
+    const firstPress = flows.checkNow(attempt);
+    push("s-docs", null);
+    await vi.waitFor(() => {
+      expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "gone" });
+    });
+    expect(world.records.has("s-docs")).toBe(false);
+    const secondPress = flows.checkNow(attempt);
+    expect(flows.readCheck(attempt)).toEqual({ busy: true, error: null });
+
+    first.reject(new ApiError("not_found", "No such server."));
+    await firstPress;
+
+    expect(flows.readCheck(attempt)).toEqual({ busy: true, error: null });
+    second.resolve();
+    await secondPress;
   });
 
   it("has nothing pending for an attempt that is closed", async () => {

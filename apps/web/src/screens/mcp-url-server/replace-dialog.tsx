@@ -30,7 +30,9 @@ import { ModalDialog } from "../modal-dialog";
  *   address included, until the write and the read of the list after it are
  *   done, also when the server leaves the list meanwhile. A refusal that
  *   settled releases the selection: the reason stays, a choice that no longer
- *   qualifies is cleared, and the user chooses again. When the chosen server
+ *   qualifies is cleared, and the user chooses again, with the servers listed
+ *   even when one is left. Nothing is chosen for the user then, so Replace stays
+ *   off until they pick. When the chosen server
  *   is deleted or moved while the user is still choosing, the dialog says so
  *   and writes nothing: a server that appeared since is a new choice, and
  *   needs a new press of Replace.
@@ -61,6 +63,8 @@ export function ReplaceDialog({
 }): JSX.Element {
   const servers = useSuspenseQuery(mcpServersQuery(client)).data.items;
   const [pickedId, setPickedId] = useState<string | null>(candidates[0]?.id ?? null);
+  // True once a refusal cleared the choice: the servers stay listed, also when only one is left.
+  const [chooseAgain, setChooseAgain] = useState(false);
   // The servers the dialog listed when the user pressed Replace. The write can move the chosen
   // server off the list before the dialog settles, and the dialog still names it.
   const [confirmedOptions, setConfirmedOptions] = useState<readonly McpServer[] | null>(null);
@@ -74,11 +78,16 @@ export function ReplaceDialog({
   const options = confirmed ? (confirmedOptions ?? live) : live;
   // A refusal that settled releases the selection. A choice that no longer qualifies is cleared.
   const choiceIsStale =
+    pickedId !== null &&
     progress.kind === "refused" &&
     progress.serverId !== null &&
     !confirmed &&
     !live.some((server) => server.id === pickedId);
-  const chosenId = lockedId ?? (choiceIsStale ? (live[0]?.id ?? null) : pickedId);
+  if (choiceIsStale) {
+    setPickedId(null);
+    setChooseAgain(true);
+  }
+  const chosenId = lockedId ?? (choiceIsStale ? null : pickedId);
   const choice =
     chosenId === null
       ? null
@@ -113,7 +122,9 @@ export function ReplaceDialog({
         </p>
       ) : null}
       {words === null ? null : <p className="text-row text-muted">{words.body}</p>}
-      {options.length > 1 || (choice?.kind === "changed" && !confirmed) ? (
+      {options.length > 1 ||
+      (chooseAgain && options.length > 0) ||
+      (choice?.kind === "changed" && !confirmed) ? (
         <fieldset className="flex flex-col gap-1">
           <legend className="sr-only">Server to replace</legend>
           {options.map((server) => (

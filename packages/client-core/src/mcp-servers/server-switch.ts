@@ -565,10 +565,12 @@ export const createMcpServerSwitches = ({
         return;
       }
       pressedAgainst.set(offerKey, KEEP_REFUSAL);
-      guard.start(offerKey);
-      guard.start(chosenKey);
+      // The confirmation is stored before the guard notifies: the first notification must already
+      // read `writing`, and nothing notifies a progress reader after the guard starts.
       const confirmed: ReplaceAttempt = { serverId, saved: false, listRead: false };
       confirmedReplaces.set(offerKey, confirmed);
+      guard.start(offerKey);
+      guard.start(chosenKey);
       const { contributionId, connectionId } = target;
       void run({
         keys: [offerKey, chosenKey],

@@ -91,6 +91,9 @@ export type FlowProblem =
   /** The controller says no sign-in through the browser works for this server, so only a pasted token does. */
   | { readonly kind: "sign-in-unsupported"; readonly message: string };
 
+/** How a dialog wrote the server's sign-in: the pasted token, or the browser sign-in. */
+export type WrittenMethod = "token" | "sign-in";
+
 /**
  * What the check of the server found, as the dialog goes on from it. `server`
  * of the state is the record this was decided from.
@@ -105,14 +108,15 @@ export type ServerOutcome =
   /** The server answered with its tools. `newServer` is true for a server this attempt created: the dialog then ends with the new server's footer. */
   | { readonly kind: "ready"; readonly toolCount: number; readonly newServer: boolean }
   /**
-   * The server wants a token: the form is shown. `refusedAgain` is true when
-   * the token this attempt just saved was refused, and `detail` is the
-   * controller's own reason.
+   * The server wants a token: the form is shown. `refusedWrite` is the way
+   * this attempt signed in that the check then refused, or `null` when the
+   * attempt wrote nothing (a new server that asks for sign-in). `detail` is
+   * the controller's own reason.
    */
   | {
       readonly kind: "needs-token";
       readonly detail: string | null;
-      readonly refusedAgain: boolean;
+      readonly refusedWrite: WrittenMethod | null;
     }
   /** The check ended with `unreachable` or `error`, and `detail` is the controller's reason. The user can check again or open the server. */
   | {
@@ -121,7 +125,7 @@ export type ServerOutcome =
       readonly detail: string | null;
     }
   /** The server is switched off, so it is not checked. `saved` says what this attempt saved, which is used when the server is switched on, or `null` when it saved nothing. */
-  | { readonly kind: "off"; readonly saved: "token" | "sign-in" | null };
+  | { readonly kind: "off"; readonly saved: WrittenMethod | null };
 
 /** Why an attempt has nothing left to follow. */
 export type EndReason =
@@ -265,7 +269,7 @@ export const decideFollowing = ({
           return following(server, {
             kind: "needs-token",
             detail: server.statusDetail,
-            refusedAgain: origin !== "create",
+            refusedWrite: origin === "create" ? null : origin,
           });
         case "unreachable":
         case "error":
@@ -284,7 +288,7 @@ export const describeReadyTools = (toolCount: number): string =>
   `ready · ${String(toolCount)} ${toolCount === 1 ? "tool" : "tools"}`;
 
 /** Returns what the dialog says of a switched-off server, from what this attempt saved: the token or the sign-in is kept and used once the server is switched on. */
-export const describeOffOutcome = (saved: "token" | "sign-in" | null): string =>
+export const describeOffOutcome = (saved: WrittenMethod | null): string =>
   saved === null
     ? "This server is switched off, so it is not checked."
     : `The ${saved} is saved. This server is switched off, so checking runs when it is switched on.`;
@@ -568,10 +572,20 @@ interface Attempt {
   signInRun: number;
   /** Stops watching the list of servers for the record the dialog was opened for. */
   stopWatchingList: () => void;
-  /** The ids that the authoritative read of one server found deleted. A list read that started earlier must not bring them back. */
-  readonly deletedServerIds: Set<string>;
+  /** The start stamp (see `startRead`) of the read behind the list of servers the cache shows, or 0 when that read started before the attempt opened. */
+  catalogueStamp: number;
+  /**
+   * For each duplicate an Add refusal pointed at, the start stamp of the
+   * newest read that decided what the refusal shows of it. A reply to a read
+   * with an earlier stamp changes nothing.
+   */
+  readonly duplicateStamps: Map<string, number>;
   /** What "Check now" shows. */
   check: CheckNowState;
+  /** Counts the presses of "Check now" and the ends of its wait, so the reply of an earlier press changes nothing. */
+  checkRun: number;
+  /** True once the controller acknowledged the pending "Check now". The record answers it only from then on. */
+  checkAcknowledged: boolean;
   /** What the followed record held when "Check now" was pressed, or `null` while none is pending or none was read. */
   checkedRecord: { readonly updatedAt: string; readonly checkedAt: string | null } | null;
   /** Ends a pending "Check now" that got no answer, or `null`. */
@@ -618,6 +632,18 @@ export const createMcpUrlServerFlows = ({
   const attempts = new Map<string, Attempt>();
   const listeners = new Set<() => void>();
   let opened = 0;
+  let readsStarted = 0;
+
+  /**
+   * Returns the stamp of a read that starts now. A later read has a larger
+   * stamp, so the answers of two reads of the same thing are ordered by when
+   * each read started, whichever answers first: the one that started later
+   * saw the controller later.
+   */
+  const startRead = (): number => {
+    readsStarted += 1;
+    return readsStarted;
+  };
 
   const commit = (attempt: Attempt, state: UrlServerFlowState): void => {
     attempt.state = state;
@@ -636,8 +662,11 @@ export const createMcpUrlServerFlows = ({
       | "listenerId"
       | "signInRun"
       | "stopWatchingList"
-      | "deletedServerIds"
+      | "catalogueStamp"
+      | "duplicateStamps"
       | "check"
+      | "checkRun"
+      | "checkAcknowledged"
       | "checkedRecord"
       | "checkTimer"
     >,
@@ -655,8 +684,11 @@ export const createMcpUrlServerFlows = ({
       listenerId: null,
       signInRun: 0,
       stopWatchingList: () => {},
-      deletedServerIds: new Set(),
+      catalogueStamp: 0,
+      duplicateStamps: new Map(),
       check: IDLE_CHECK_NOW,
+      checkRun: 0,
+      checkAcknowledged: false,
       checkedRecord: null,
       checkTimer: null,
     };
@@ -670,42 +702,53 @@ export const createMcpUrlServerFlows = ({
    * read again (a live push reads it), so a dialog never keeps pointing at
    * what is gone:
    *
-   * - a token dialog of a server that was deleted, or that is reached with a
-   *   plugin's Connection now, ends with `gone` or `moved`, so the dialog can
-   *   say so before it closes. It does so while it shows the form and while
-   *   it starts, waits for or has refused a sign-in through the browser (the
+   * - a dialog of a server (a token dialog, or an Add whose create was
+   *   acknowledged) that was deleted, or that is reached with a plugin's
+   *   Connection now, ends with `gone` or `moved`, so the dialog can say so
+   *   before it closes. It does so while it shows the form and while it
+   *   starts, waits for or has refused a sign-in through the browser (the
    *   listener of the browser's return is retired then). A write that is being
    *   finished decides for itself;
    * - the duplicate an Add refusal points at is `gone` once the list lacks it,
    *   and `found` with its current name while it is there, so the refusal's
-   *   button never leads to a page that does not exist. A duplicate that its
-   *   own read found deleted stays `gone`, and one whose read is still running
-   *   is left to that read, because a list that started before it can lack a
-   *   server that was added a moment ago.
+   *   button never leads to a page that does not exist. Reads are ordered by
+   *   when they started (see `startRead`): a list that started before the
+   *   read that decided what the refusal shows changes nothing, so a list
+   *   that started before a server was added cannot call it gone.
    *
    * Returns the function that stops watching.
    */
   const watchList = (id: string, attempt: Attempt): (() => void) => {
     const { queryKey } = cache.readCatalogue();
+    // The stamp of the fetch that is running, as far as this attempt saw it start.
+    let fetching = 0;
     return queryClient.getQueryCache().subscribe((event) => {
       if (
         event.type !== "updated" ||
-        event.action.type !== "success" ||
         !matchQuery({ queryKey, exact: true }, event.query) ||
         !isCurrent(id, attempt)
       ) {
         return;
       }
+      const { action } = event;
+      if (action.type === "fetch") {
+        fetching = startRead();
+        return;
+      }
+      if (action.type !== "success") return;
+      // Data put in by hand is as new as the moment it was put in. A fetch the attempt did not see start began before it opened.
+      attempt.catalogueStamp = action.manual === true ? startRead() : fetching;
+      fetching = 0;
       const servers = cache.readServers();
-      if (servers !== undefined) reviewList(attempt, servers);
+      if (servers !== undefined) reviewList(attempt, servers, attempt.catalogueStamp);
     });
   };
 
-  const reviewList = (attempt: Attempt, servers: readonly McpServer[]): void => {
+  const reviewList = (attempt: Attempt, servers: readonly McpServer[], stamp: number): void => {
     const { state, mcpServerId } = attempt;
     const waitsForUser =
       state.kind === "form" || (state.kind === "signing-in" && state.step.kind !== "finishing");
-    if (attempt.kind === "token" && mcpServerId !== null) {
+    if (mcpServerId !== null) {
       if (!waitsForUser) return;
       const record = servers.find((server) => server.id === mcpServerId);
       if (record !== undefined && record.source.kind === "url") return;
@@ -720,9 +763,8 @@ export const createMcpUrlServerFlows = ({
     }
     if (state.kind !== "form" || state.problem?.kind !== "exists") return;
     const { problem } = state;
-    if (attempt.deletedServerIds.has(problem.mcpServerId)) return;
+    if (!acceptDuplicateRead(attempt, problem.mcpServerId, stamp)) return;
     const record = servers.find((server) => server.id === problem.mcpServerId);
-    if (record === undefined && problem.existing.kind === "reading") return;
     const existing: ExistingServer =
       record === undefined ? { kind: "gone" } : { kind: "found", name: record.name };
     const same =
@@ -730,6 +772,18 @@ export const createMcpUrlServerFlows = ({
       (existing.kind !== "found" ||
         (problem.existing.kind === "found" && problem.existing.name === existing.name));
     if (!same) commit(attempt, { kind: "form", problem: { ...problem, existing } });
+  };
+
+  /**
+   * Decides whether the answer of a read that started at `stamp` may change
+   * what the refusal shows of the duplicate `mcpServerId`. It may unless a
+   * read that started later already decided it, and then it counts as the
+   * newest read.
+   */
+  const acceptDuplicateRead = (attempt: Attempt, mcpServerId: string, stamp: number): boolean => {
+    if (stamp < (attempt.duplicateStamps.get(mcpServerId) ?? 0)) return false;
+    attempt.duplicateStamps.set(mcpServerId, stamp);
+    return true;
   };
 
   /** Ends the attempt with `ended`: it stops following, its browser sign-in is retired, and a pending "Check now" is dropped. */
@@ -849,19 +903,23 @@ export const createMcpUrlServerFlows = ({
     problem: Extract<FlowProblem, { kind: "exists" }>,
   ): Promise<void> => {
     // The dialog may have a newer refusal for the same server by now, which this answer is still true of.
-    const settle = (existing: ExistingServer): void => {
+    const settle = (existing: ExistingServer, stamp: number): void => {
       const { state } = attempt;
       if (!isCurrent(id, attempt) || state.kind !== "form") return;
       if (state.problem?.kind !== "exists" || state.problem.mcpServerId !== problem.mcpServerId) {
         return;
       }
+      if (!acceptDuplicateRead(attempt, problem.mcpServerId, stamp)) return;
       commit(attempt, { kind: "form", problem: { ...state.problem, existing } });
     };
     const cached = cache.readServers()?.find((server) => server.id === problem.mcpServerId);
     if (cached !== undefined) {
-      settle({ kind: "found", name: cached.name });
+      settle({ kind: "found", name: cached.name }, attempt.catalogueStamp);
       return;
     }
+    // From here on, a list that started before this read cannot say the server is gone.
+    const stamp = startRead();
+    attempt.duplicateStamps.set(problem.mcpServerId, stamp);
     const { queryKey, queryFn } = cache.readServerQuery(problem.mcpServerId);
     try {
       const server = await queryClient.fetchQuery({
@@ -870,15 +928,14 @@ export const createMcpUrlServerFlows = ({
         retry: false,
         staleTime: 0,
       });
-      settle({ kind: "found", name: server.name });
+      settle({ kind: "found", name: server.name }, stamp);
     } catch (error) {
-      if (error instanceof ApiError && error.code === "not_found") {
-        // Ids are never used again, so no list read may bring this server back.
-        if (isCurrent(id, attempt)) attempt.deletedServerIds.add(problem.mcpServerId);
-        settle({ kind: "gone" });
-      } else {
-        settle({ kind: "unknown" });
-      }
+      settle(
+        error instanceof ApiError && error.code === "not_found"
+          ? { kind: "gone" }
+          : { kind: "unknown" },
+        stamp,
+      );
     }
   };
 
@@ -1233,18 +1290,24 @@ export const createMcpUrlServerFlows = ({
     for (const listener of listeners) listener();
   };
 
-  /** Drops a pending "Check now" without a word, for an attempt that goes away. */
+  /** Drops a pending "Check now" without a word, for an attempt that goes away. The reply of the press that was pending then changes nothing. */
   const stopCheck = (attempt: Attempt): void => {
+    attempt.checkRun += 1;
     if (attempt.checkTimer !== null) clearTimeout(attempt.checkTimer);
     attempt.checkTimer = null;
     attempt.checkedRecord = null;
     attempt.check = IDLE_CHECK_NOW;
   };
 
-  /** Ends the wait of a pending "Check now" when the followed record is not the one that was there at the press. */
+  /**
+   * Ends the wait of a pending "Check now" when the followed record is not
+   * the one that was there at the press. The record answers only a press the
+   * controller acknowledged: until then the press stays busy, so a second
+   * press cannot start while the first one's reply is still on its way.
+   */
   const answerCheck = (attempt: Attempt): void => {
     const { reading, checkedRecord } = attempt;
-    if (!attempt.check.busy || reading.kind !== "found") return;
+    if (!attempt.check.busy || !attempt.checkAcknowledged || reading.kind !== "found") return;
     const { updatedAt, checkedAt } = reading.server;
     if (
       checkedRecord === null ||
@@ -1259,6 +1322,9 @@ export const createMcpUrlServerFlows = ({
     const attempt = attempts.get(id);
     if (attempt === undefined || attempt.mcpServerId === null || attempt.check.busy) return null;
     const { mcpServerId, reading } = attempt;
+    attempt.checkRun += 1;
+    const run = attempt.checkRun;
+    attempt.checkAcknowledged = false;
     attempt.checkedRecord =
       reading.kind === "found"
         ? { updatedAt: reading.server.updatedAt, checkedAt: reading.server.checkedAt }
@@ -1277,10 +1343,16 @@ export const createMcpUrlServerFlows = ({
       exact: true,
     });
     readCatalogueAgain();
-    if (!isCurrent(id, attempt)) return reason;
+    // A later press, or the end of the attempt, took the check over: this reply is not about it.
+    if (!isCurrent(id, attempt) || attempt.checkRun !== run) return reason;
     if (reason !== null) {
       setCheck(attempt, { busy: false, error: reason });
-    } else if (attempt.check.busy) {
+      return reason;
+    }
+    attempt.checkAcknowledged = true;
+    // The record may have changed while the reply was on its way.
+    answerCheck(attempt);
+    if (attempt.check.busy) {
       attempt.checkTimer = setTimeout(() => {
         setCheck(attempt, IDLE_CHECK_NOW);
       }, CHECK_ANSWER_WAIT_MILLIS);
