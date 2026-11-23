@@ -236,8 +236,8 @@ function OpenServerLink({
  * Draws the waiting step: the host that asks for the approval, the link that
  * opens the sign-in page, and the field for the address the browser ended on.
  * The web app has no listener, so the paste is the only way back and its field
- * is always shown. That makes "Finish sign-in" the one boxed button, and the
- * link that opens the page the second choice, without a box.
+ * is always shown. The link that opens the page is a boxed button, and the whole
+ * address is shown under it as a link, so the user can see and copy it.
  */
 function WaitingStep({
   step,
@@ -264,16 +264,26 @@ function WaitingStep({
       {/* A host with no hyphen has no place to break, so it breaks anywhere: its end names who asks. */}
       <p className="text-row break-words text-ink">{step.approval}</p>
       <p className="text-row text-muted">{step.instruction}</p>
-      <div>
+      <div className="flex flex-col items-start gap-1.5">
         <a
           href={step.open.url}
           target="_blank"
           rel="noopener noreferrer"
           ref={openRef}
           onClick={() => void attempt.openSignInPage()}
-          className={buildButtonClassName("primary", "-ml-2")}
+          className={buildButtonClassName("form", undefined)}
         >
           {step.open.label}
+        </a>
+        {/* The whole address is shown so the user can see and copy where they sign in. */}
+        <a
+          href={step.open.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => void attempt.openSignInPage()}
+          className="max-w-full break-all font-mono text-fine text-live hover:underline"
+        >
+          {step.open.url}
         </a>
       </div>
       <Field id="mcp-url-callback" label={step.paste.label} error={step.paste.problem ?? undefined}>

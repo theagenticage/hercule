@@ -529,6 +529,12 @@ describe("Settings > MCP servers > Add by URL", () => {
       expect(link.getAttribute("href")).toBe(world.signIns.get(S_WIKI.id)!.authorizationUrl);
       expect(link.getAttribute("target")).toBe("_blank");
       expect(link.getAttribute("rel")).toContain("noopener");
+      // The link is a boxed button, and the whole address is shown under it as a link too.
+      expect(link.className).toContain("border-line");
+      const authorizationUrl = world.signIns.get(S_WIKI.id)!.authorizationUrl;
+      const addressLink = within(dialog).getByRole("link", { name: authorizationUrl });
+      expect(addressLink.textContent).toBe(authorizationUrl);
+      expect(addressLink.getAttribute("href")).toBe(authorizationUrl);
 
       const field = within(dialog).getByLabelText("Address the browser ended on");
       await user.type(field, "https://example.com/nothing");
