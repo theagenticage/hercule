@@ -5,7 +5,9 @@ import { isNotFound, queryKeys, readErrorMessage } from "@hercule/client-core";
 import {
   buildMcpServerViews,
   describeServerPageFields,
+  describeSignInRow,
   describeSourceChip,
+  type SignInEntry,
 } from "@hercule/client-core/mcp-servers";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
 import {
@@ -63,8 +65,9 @@ function McpServerPage(): JSX.Element | null {
   const { client, queryClient, live } = Route.useRouteContext();
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  // Whether the token dialog of a server added by URL is open: "Sign in…" of the band and "Replace token…" and "Sign in again…" of the Sign-in row open it.
-  const [signingIn, setSigningIn] = useState(false);
+  // The button that opened the token dialog of a server added by URL ("Sign in…" of the band,
+  // "Replace token…" or "Sign in again…" of the Sign-in row), or `null` while it is closed.
+  const [signingIn, setSigningIn] = useState<SignInEntry | null>(null);
 
   useLiveInvalidation(live, queryClient, "mcpServer");
 
@@ -131,7 +134,7 @@ function McpServerPage(): JSX.Element | null {
           if (!check.isPending) check.mutate();
         }}
         onSignIn={() => {
-          setSigningIn(true);
+          setSigningIn("sign-in");
         }}
         checkPending={check.isPending}
       />
@@ -149,23 +152,24 @@ function McpServerPage(): JSX.Element | null {
           if (!check.isPending) check.mutate();
         }}
         onOpenSignIn={() => {
-          setSigningIn(true);
+          setSigningIn(describeSignInRow(view)?.action?.kind ?? "sign-in");
         }}
         checkPending={check.isPending}
       />
       <Tools tools={server.tools} />
       <Projects client={client} view={view} />
       <Remove client={client} view={view} />
-      {signingIn ? (
+      {signingIn === null ? null : (
         <TokenDialog
           client={client}
           server={server}
           openedOn="server-page"
+          entry={signingIn}
           onClose={() => {
-            setSigningIn(false);
+            setSigningIn(null);
           }}
         />
-      ) : null}
+      )}
     </div>
   );
 }

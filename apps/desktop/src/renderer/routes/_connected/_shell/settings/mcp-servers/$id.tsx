@@ -13,6 +13,8 @@ import {
   decideServerPageSwitch,
   decideStatusBand,
   describeServerPageFields,
+  describeSignInRow,
+  type SignInEntry,
 } from "@hercule/client-core/mcp-servers";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
 import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
@@ -127,8 +129,9 @@ function McpServerPage(): JSX.Element {
     },
   });
   const [reconnecting, setReconnecting] = useState(false);
-  // The token dialog is the page's one sign-in for a server added by URL: the band's button and "Replace token…" open it.
-  const [signingIn, setSigningIn] = useState(false);
+  // The token dialog is the page's one sign-in for a server added by URL. It is opened by the band's
+  // button, "Replace token…" or "Sign in again…", and keeps the button that did, as its entry.
+  const [signingIn, setSigningIn] = useState<SignInEntry | null>(null);
   const connectionType = listConnectionTypes(plugins).find(
     (type) => type.type === view.connection?.type,
   );
@@ -150,7 +153,7 @@ function McpServerPage(): JSX.Element {
         busy={check.isPending}
         onBandAction={(action) => {
           if (action.kind === "check") startCheck();
-          else if (action.kind === "sign-in") setSigningIn(true);
+          else if (action.kind === "sign-in") setSigningIn("sign-in");
           else setReconnecting(true);
         }}
       />
@@ -166,17 +169,18 @@ function McpServerPage(): JSX.Element {
           flip.press(!pageSwitch.on);
         }}
         onCheck={startCheck}
-        onOpenSignIn={() => setSigningIn(true)}
+        onOpenSignIn={() => setSigningIn(describeSignInRow(view)?.action?.kind ?? "sign-in")}
       />
       <ToolsSection view={view} />
       <ProjectBoxes view={view} />
       <RemoveSection view={view} />
-      {signingIn && (
+      {signingIn !== null && (
         <Suspense fallback={null}>
           <TokenDialog
             mcpServerId={query.data.id}
             openedOn="server-page"
-            onClose={() => setSigningIn(false)}
+            entry={signingIn}
+            onClose={() => setSigningIn(null)}
           />
         </Suspense>
       )}

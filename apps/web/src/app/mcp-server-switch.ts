@@ -13,6 +13,7 @@ import {
   readMcpServerOffers,
   type McpServerSwitchPress,
   type McpServerSwitchTarget,
+  type McpServerSwitches,
   type ReplaceProgress,
 } from "@hercule/client-core/mcp-servers";
 import { mcpServerQuery, mcpServersQuery, pluginsQuery } from "./queries";
@@ -28,18 +29,30 @@ export interface McpServerSwitch {
   readonly press: (on: boolean) => McpServerSwitchPress;
   /** Moves the server added by URL `serverId` onto this target's Connection, and switches it on. */
   readonly replace: (serverId: string) => void;
-  /**
-   * Where the Replace of this target stands: choosing, writing the server the
-   * user confirmed, replaced, or refused with the server that won. It follows
-   * the switches and the servers in the cache.
-   */
-  readonly replaceProgress: ReplaceProgress;
-  /** Forgets the confirmed Replace and its refusal. A dialog calls it when it closes. */
+  /** Forgets the Replace's refusal. A dialog calls it when it closes. */
   readonly clearReplace: () => void;
   /** Whether a write of the switch runs, started by any control, or the list could not be read again after one. */
   readonly blocked: boolean;
   /** Returns why the last press made no change, or that a saved change could not be read again, or `null`. */
   readonly problem: string | null;
+}
+
+/** Returns the switches of this app's query client, over this app's shapes of the cache. */
+function useMcpServerSwitches(client: HerculeClient): McpServerSwitches {
+  const queryClient = useQueryClient();
+  return findOrCreateMcpServerSwitches({
+    queryClient,
+    client,
+    cache: {
+      readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey)?.items,
+      readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
+      readOfferOrigin: (contributionId) =>
+        readMcpServerOffers(queryClient.getQueryData(pluginsQuery(client).queryKey) ?? []).find(
+          (offer) => offer.contributionId === contributionId,
+        )?.origin,
+      readPageKey: (serverId) => mcpServerQuery(client, serverId).queryKey,
+    },
+  });
 }
 
 /**
@@ -55,37 +68,8 @@ export function useMcpServerSwitch(
   target: McpServerSwitchTarget,
   existingRecordId?: string,
 ): McpServerSwitch {
-  const queryClient = useQueryClient();
-  const switches = findOrCreateMcpServerSwitches({
-    queryClient,
-    client,
-    cache: {
-      readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey)?.items,
-      readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
-      readOfferOrigin: (contributionId) =>
-        readMcpServerOffers(queryClient.getQueryData(pluginsQuery(client).queryKey) ?? []).find(
-          (offer) => offer.contributionId === contributionId,
-        )?.origin,
-      readPageKey: (serverId) => mcpServerQuery(client, serverId).queryKey,
-    },
-  });
+  const switches = useMcpServerSwitches(client);
   const state = useSyncExternalStore(switches.subscribe, () => switches.readState(target));
-  // The progress reads the servers the cache holds now, so it follows the cache as well as the
-  // switches. `useSyncExternalStore` needs a snapshot that is equal while nothing changed, so
-  // the snapshot is the progress written as text.
-  const subscribeToProgress = (listener: () => void): (() => void) => {
-    const stopSwitches = switches.subscribe(listener);
-    const stopCache = queryClient.getQueryCache().subscribe(listener);
-    return () => {
-      stopSwitches();
-      stopCache();
-    };
-  };
-  const replaceProgress = JSON.parse(
-    useSyncExternalStore(subscribeToProgress, () =>
-      JSON.stringify(switches.readReplaceProgress(target)),
-    ),
-  ) as ReplaceProgress;
   // A refusal stays while a control shows the target, and expires some time after the last one left.
   const key = JSON.stringify(target);
   useEffect(() => {
@@ -97,11 +81,33 @@ export function useMcpServerSwitch(
     replace: (serverId) => {
       switches.replace(target, serverId);
     },
-    replaceProgress,
     clearReplace: () => {
       switches.clearRefusal(target);
     },
     blocked: state.blocked,
     problem: describeMcpListProblem(state),
   };
+}
+
+/**
+ * Returns where the Replace of `target` stands, for the Replace dialog that is
+ * open: choosing, writing the server the user confirmed, replaced, or refused
+ * with the server that won. It follows the switches and the list of servers
+ * only, so a closed dialog and an unrelated change of the query cache cost
+ * nothing. While the caller is mounted, the confirmed server is kept; after the
+ * last dialog unmounts it is dropped once the write has settled.
+ */
+export function useReplaceProgress(
+  client: HerculeClient,
+  target: McpServerSwitchTarget,
+): ReplaceProgress {
+  const switches = useMcpServerSwitches(client);
+  const key = JSON.stringify(target);
+  useEffect(() => {
+    const mine = JSON.parse(key) as McpServerSwitchTarget;
+    return switches.attachReplaceReader(mine);
+  }, [switches, key]);
+  return useSyncExternalStore(switches.subscribeReplaceProgress, () =>
+    switches.readReplaceProgress(target),
+  );
 }

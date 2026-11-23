@@ -1,10 +1,13 @@
-import { QueryClient } from "@tanstack/query-core";
+import { QueryClient, QueryObserver } from "@tanstack/query-core";
 import { describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
+import { invalidateWithoutCancelling } from "../live/invalidation";
+import { buildQueryKeys } from "../live/keys";
 import { buildMcpListQuery } from "./list-edits";
 import {
+  CHECK_ANSWER_WAIT_MILLIS,
   createMcpUrlServerFlows,
   decideFollowing,
   describeClosing,
@@ -60,13 +63,21 @@ const setup = async () => {
     readFails: null as Error | null,
     /** Holds the next read until it is released, or `null`. The read answers with the record as it was when it started. */
     holdNextRead: null as Promise<void> | null,
+    /** Holds the next read of the list until it is released, or `null`. The read answers with the records as they were when it started. */
+    holdNextList: null as Promise<void> | null,
     /** One entry for each create the client was asked for, to settle by hand. */
     creates: [] as ReturnType<typeof hold<McpServer>>[],
     tokenWrites: [] as ReturnType<typeof hold<McpServer>>[],
   };
   const client = {
     mcpServer: {
-      query: vi.fn(() => Promise.resolve([...world.records.values()])),
+      query: vi.fn(async () => {
+        const records = [...world.records.values()];
+        const gate = world.holdNextList;
+        world.holdNextList = null;
+        if (gate !== null) await gate;
+        return records;
+      }),
       read: vi.fn(async ({ params }: { params: { id: string } }) => {
         world.reads.push(params.id);
         const record = world.records.get(params.id);
@@ -791,13 +802,23 @@ describe("the token form", () => {
 });
 
 describe("Add by URL: the proof that a stale reply never shows", () => {
-  it("delivers the live push before the reply and the read, and never shows or caches the checking record the reply carries", async () => {
-    const { world, queryClient, flows } = await setup();
-    const seenInCache: (string | undefined)[] = [];
+  it("delivers a real live push to a mounted list before the reply and the read, and never shows or caches the checking record the reply carries", async () => {
+    const { world, queryClient, client, flows } = await setup();
+    // The list screen is mounted: its observer keeps the list active, so a push reads it again.
+    const stopList = new QueryObserver(queryClient, {
+      queryKey: SERVERS_KEY,
+      queryFn: () => client.mcpServer.query(),
+    }).subscribe(() => {});
+    const seenInCache: string[] = [];
     queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated") return;
       const queryKey = event.query.queryKey as readonly unknown[];
-      if (event.type === "updated" && queryKey[0] === "mcp-server") {
-        seenInCache.push((event.query.state.data as McpServer | undefined)?.status);
+      const data: unknown = event.query.state.data;
+      if (queryKey[0] === "mcp-server") {
+        seenInCache.push(`detail:${(data as McpServer | undefined)?.status}`);
+      } else if (queryKey[0] === "mcp-servers") {
+        const record = (data as McpServer[] | undefined)?.find((server) => server.id === "s-docs");
+        if (record !== undefined) seenInCache.push(`list:${record.status}`);
       }
     });
     const seenInDialog: string[] = [];
@@ -809,30 +830,51 @@ describe("Add by URL: the proof that a stale reply never shows", () => {
     });
     const attempt = flows.openAdd();
     flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
-    // Hold the read that follows the acknowledgement.
-    const gate = hold();
-    world.holdNextRead = gate.promise;
 
     // The controller commits, checks and pushes the ready record before the create's reply arrives.
     world.records.set(
       "s-docs",
       urlServer("s-docs", { status: "ready", tools: SENTRY_WORK.tools, checkedAt: "2026-11-20" }),
     );
-    void queryClient.invalidateQueries({ queryKey: DETAIL_KEY("s-docs") });
+    for (const queryKey of buildQueryKeys(
+      "mcpServer",
+      ["s-docs"],
+      undefined,
+      undefined,
+      "created",
+    )) {
+      invalidateWithoutCancelling(queryClient, queryKey);
+    }
+    await vi.waitFor(() => {
+      expect(
+        queryClient.getQueryData<McpServer[]>(SERVERS_KEY)?.find((server) => server.id === "s-docs")
+          ?.status,
+      ).toBe("ready");
+    });
+    // No page of the server was open, so the push left nothing in its own cache.
+    expect(queryClient.getQueryData(DETAIL_KEY("s-docs"))).toBeUndefined();
+
+    // Hold the read that follows the acknowledgement.
+    const gate = hold();
+    world.holdNextRead = gate.promise;
     world.creates[0]!.resolve(urlServer("s-docs", { status: "checking" }));
     await vi.waitFor(() => {
       expect(world.reads).toEqual(["s-docs"]);
     });
-    // The reply is released, and the held read has not answered: nothing of the reply shows.
+    // The reply is released, and the held read has not answered: nothing of the reply shows, in either cache.
     expect(flows.readState(attempt)).toMatchObject({ outcome: { kind: "reading" } });
-    expect(seenInCache).not.toContain("checking");
+    expect(queryClient.getQueryData(DETAIL_KEY("s-docs"))).toBeUndefined();
+    expect(queryClient.getQueryData<McpServer[]>(SERVERS_KEY)?.[0]?.status).toBe("ready");
 
     gate.resolve();
     await vi.waitFor(() => {
       expect(flows.readState(attempt)).toMatchObject({ outcome: { kind: "ready" } });
     });
-    expect(seenInCache).not.toContain("checking");
+    // The ready record was read by the id of the acknowledged create.
+    expect(queryClient.getQueryData<McpServer>(DETAIL_KEY("s-docs"))?.status).toBe("ready");
+    expect(seenInCache.some((seen) => seen.endsWith(":checking"))).toBe(false);
     expect(seenInDialog.some((seen) => seen.endsWith(":checking"))).toBe(false);
+    stopList();
   });
 
   it("sends every submission to the controller, whatever the address looks like", async () => {
@@ -862,7 +904,7 @@ describe("the duplicate an Add refusal points at, kept current", () => {
   const conflict = () =>
     new ApiError("conflict", "Exists.", { reason: "mcp-server-exists", mcpServerId: OTHER_ID });
 
-  it("turns to gone when a read of the list no longer holds it, and back to found when it returns", async () => {
+  it("turns to gone when a read of the list no longer holds it, and follows a rename while the list holds it", async () => {
     const { world, flows, readList } = await setup();
     world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki" }));
     await readList();
@@ -875,17 +917,66 @@ describe("the duplicate an Add refusal points at, kept current", () => {
       });
     });
 
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki2" }));
+    await readList();
+    expect(flows.readState(attempt)).toMatchObject({
+      problem: { existing: { kind: "found", name: "wiki2" } },
+    });
+
     world.records.delete(OTHER_ID);
     await readList();
     expect(flows.readState(attempt)).toMatchObject({
       kind: "form",
       problem: { kind: "exists", existing: { kind: "gone" } },
     });
+  });
 
-    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki2" }));
-    await readList();
-    expect(flows.readState(attempt)).toMatchObject({
-      problem: { existing: { kind: "found", name: "wiki2" } },
+  it("keeps a duplicate gone that its own read found deleted, when a list read that started before the deletion answers later", async () => {
+    const { world, flows, readList } = await setup();
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki" }));
+    // The list read starts while the duplicate exists, and answers after it was deleted.
+    const gate = hold();
+    world.holdNextList = gate.promise;
+    const olderList = readList();
+    world.records.delete(OTHER_ID);
+    const attempt = flows.openAdd();
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.reject(conflict());
+    await vi.waitFor(() => {
+      expect(flows.readState(attempt)).toMatchObject({ problem: { existing: { kind: "gone" } } });
+    });
+
+    gate.resolve();
+    await olderList;
+
+    expect(flows.readState(attempt)).toMatchObject({ problem: { existing: { kind: "gone" } } });
+  });
+
+  it("keeps the read of a new winner running when a list read that started before the winner was created answers first", async () => {
+    const { world, flows, readList } = await setup();
+    // The list read starts before the winner exists, so its answer lacks it.
+    const listGate = hold();
+    world.holdNextList = listGate.promise;
+    const olderList = readList();
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki" }));
+    const readGate = hold();
+    world.holdNextRead = readGate.promise;
+    const attempt = flows.openAdd();
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.reject(conflict());
+    await vi.waitFor(() => {
+      expect(world.reads).toEqual([OTHER_ID]);
+    });
+
+    listGate.resolve();
+    await olderList;
+    expect(flows.readState(attempt)).toMatchObject({ problem: { existing: { kind: "reading" } } });
+    readGate.resolve();
+
+    await vi.waitFor(() => {
+      expect(flows.readState(attempt)).toMatchObject({
+        problem: { existing: { kind: "found", name: "wiki" } },
+      });
     });
   });
 });
@@ -954,41 +1045,103 @@ describe("a token dialog kept by id", () => {
 });
 
 describe("Check now", () => {
-  it("asks for the check, then reads the server and the list at once, without waiting for a push", async () => {
-    const { world, client, flows, waitForOutcome } = await setup();
-    world.records.set("s-docs", urlServer("s-docs", { status: "unreachable", statusDetail: "x" }));
+  /** An attempt of an Add that follows a failed server, with the record the dialog read. */
+  const followFailed = async (statusDetail = "x") => {
+    const context = await setup();
+    const { world, flows, waitForOutcome } = context;
+    world.records.set("s-docs", urlServer("s-docs", { status: "unreachable", statusDetail }));
     const attempt = flows.openAdd();
     flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
     world.creates[0]!.resolve(urlServer("s-docs"));
     await waitForOutcome(attempt, "failed");
-    client.mcpServer.query.mockClear();
+    context.client.mcpServer.query.mockClear();
+    return { ...context, attempt };
+  };
 
-    // The controller starts the check; no push is delivered.
-    world.records.set("s-docs", urlServer("s-docs", { status: "checking" }));
+  it("asks for the check, reads the server and the list at once, and stays busy while both still show the old failure", async () => {
+    const { client, flows, attempt } = await followFailed();
+
+    // The controller acknowledges and checks later: it changes nothing the record shows yet.
     const reason = await flows.checkNow(attempt);
 
     expect(reason).toBeNull();
     expect(client.mcpServer.check).toHaveBeenCalledWith({ params: { id: "s-docs" } });
-    await waitForOutcome(attempt, "checking");
     await vi.waitFor(() => {
       expect(client.mcpServer.query).toHaveBeenCalled();
     });
+    expect(flows.readCheck(attempt)).toEqual({ busy: true, error: null });
+    expect(flows.readState(attempt)).toMatchObject({ outcome: { kind: "failed" } });
   });
 
-  it("returns the controller's reason when it refuses the check, and still reads again", async () => {
-    const { world, client, flows, waitForOutcome } = await setup();
-    world.records.set("s-docs", urlServer("s-docs", { status: "error", statusDetail: "x" }));
-    const attempt = flows.openAdd();
-    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
-    world.creates[0]!.resolve(urlServer("s-docs"));
-    await waitForOutcome(attempt, "failed");
+  it("takes no second press while one is pending, and is idle once the record changes", async () => {
+    const { world, client, flows, push, attempt } = await followFailed();
+    await flows.checkNow(attempt);
+    // A second press while the upstream check is held asks for nothing.
+    expect(await flows.checkNow(attempt)).toBeNull();
+    expect(client.mcpServer.check).toHaveBeenCalledTimes(1);
+    expect(flows.readCheck(attempt).busy).toBe(true);
+
+    // The upstream check ends with another reason, and the push brings the new record.
+    push("s-docs", { statusDetail: "timed out", updatedAt: "2026-11-24T10:00:00Z" });
+    await vi.waitFor(() => {
+      expect(flows.readCheck(attempt)).toEqual({ busy: false, error: null });
+    });
+    expect(world.records.get("s-docs")?.statusDetail).toBe("timed out");
+    // A new press asks again.
+    await flows.checkNow(attempt);
+    expect(client.mcpServer.check).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends the wait at a newer check time, though nothing else of the record changed", async () => {
+    const { flows, push, attempt } = await followFailed();
+    await flows.checkNow(attempt);
+
+    push("s-docs", { checkedAt: "2026-11-24T10:00:00Z" });
+
+    await vi.waitFor(() => {
+      expect(flows.readCheck(attempt).busy).toBe(false);
+    });
+  });
+
+  it("ends the wait by itself when the check finds what the last one found, since the controller announces nothing then", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { flows, attempt } = await followFailed();
+      await flows.checkNow(attempt);
+      expect(flows.readCheck(attempt).busy).toBe(true);
+
+      vi.advanceTimersByTime(CHECK_ANSWER_WAIT_MILLIS - 1);
+      expect(flows.readCheck(attempt).busy).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(flows.readCheck(attempt)).toEqual({ busy: false, error: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns the controller's reason when it refuses the check, is not busy, and still reads again", async () => {
+    const { world, client, flows, attempt } = await followFailed();
     client.mcpServer.check.mockRejectedValueOnce(new ApiError("invalid_state", "Switched off."));
     const readsBefore = world.reads.length;
 
     expect(await flows.checkNow(attempt)).toBe("Switched off.");
+
+    expect(flows.readCheck(attempt)).toEqual({ busy: false, error: "Switched off." });
     await vi.waitFor(() => {
       expect(world.reads.length).toBeGreaterThan(readsBefore);
     });
+    // The reason goes with the next press.
+    await flows.checkNow(attempt);
+    expect(flows.readCheck(attempt)).toEqual({ busy: true, error: null });
+  });
+
+  it("has nothing pending for an attempt that is closed", async () => {
+    const { flows, attempt } = await followFailed();
+    await flows.checkNow(attempt);
+
+    flows.close(attempt);
+
+    expect(flows.readCheck(attempt).busy).toBe(false);
   });
 });
 
@@ -1024,6 +1177,16 @@ describe("what a dialog says and offers after the check", () => {
       label: "Open docs",
     });
     expect(describeOpenServerAction(failed, "server-page")).toBeNull();
+  });
+
+  it("offers Open on the off outcome of a dialog opened elsewhere, though the footer of a new server is for a ready server only", () => {
+    const off = following({ kind: "off", saved: null });
+
+    expect(describeOpenServerAction(off, "elsewhere")).toEqual({
+      mcpServerId: "s-docs",
+      label: "Open docs",
+    });
+    expect(describeOpenServerAction(off, "server-page")).toBeNull();
   });
 
   it("offers Open for a record that moved onto a Connection, and for a ready server this dialog created, but for no other outcome", () => {

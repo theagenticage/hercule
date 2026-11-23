@@ -57,6 +57,7 @@ function McpNoteLine({
         client={client}
         server={views?.find((view) => view.server.id === signingIn.id)?.server ?? signingIn}
         openedOn="elsewhere"
+        entry="sign-in"
         onClose={() => {
           setSigningIn(null);
         }}

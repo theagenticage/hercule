@@ -352,10 +352,14 @@ export const Appearance = Schema.Struct({
 });
 export type Appearance = typeof Appearance.Type;
 
-/** An absolute `http:` or `https:` URL. */
+/**
+ * An absolute `http:` or `https:` URL. The refusal message never repeats the
+ * URL: it reaches the renderer and main's log, and the URL of a sign-in
+ * carries a one-time `state` in its query. The message still names the field.
+ */
 const HttpUrl = Schema.String.check(
   Schema.makeFilter((url: string) =>
-    isHttpUrl(url) ? undefined : `Expected an http: or https: URL, got ${url}`,
+    isHttpUrl(url) ? undefined : "Expected an http: or https: URL",
   ),
 );
 

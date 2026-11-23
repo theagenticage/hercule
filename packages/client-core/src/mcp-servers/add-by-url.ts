@@ -191,6 +191,19 @@ export const readFieldIssues = (error: unknown): FieldIssues | undefined => {
   };
 };
 
+/**
+ * The button the user pressed to open the sign-in dialog of a server added by
+ * URL. It decides what the dialog opens with, so a record that changes
+ * between the press and the dialog's first read does not change the user's
+ * choice:
+ *
+ * - `replace-token`: the page's "Replace token…", which opens on the token field.
+ * - `sign-in-again`: the page's "Sign in again…", which opens on the browser.
+ * - `sign-in`: any other "Sign in…" (the status band, a thread's line or menu),
+ *   which opens on what the record says (see `describeTokenForm`).
+ */
+export type SignInEntry = "replace-token" | "sign-in-again" | "sign-in";
+
 /** The words of the token form for one server. */
 export interface TokenFormWords {
   /** The sentence over the field: what the server asks for. For a server that signs in through the browser, the pasted token is the other way. */
@@ -208,10 +221,12 @@ export interface TokenFormWords {
   /**
    * What the form opens with. `browser` shows the browser choice first, with
    * the token field behind "Paste a token instead". `token` shows the token
-   * field. A server that holds a pasted token (a refused token, or "Replace
-   * token…") and one that cannot sign in through the browser open with
-   * `token`; a server whose browser sign-in was refused, or that holds none,
-   * opens with `browser` when it offers one.
+   * field. A form that has a problem to show and one that cannot sign in
+   * through the browser open with `token`. Otherwise the entry decides:
+   * "Replace token…" opens with `token` and "Sign in again…" with `browser`;
+   * any other entry opens with `token` for a server that holds a pasted token
+   * (a refused token), and with `browser` for a server that holds none and
+   * offers one.
    */
   readonly method: "browser" | "token";
   /** The reason to show with the token field for the last write's `problem`, or `undefined`. */
@@ -254,6 +269,23 @@ const describeTokenProblem = (problem: FlowProblem | null): string | undefined =
   }
 };
 
+/** Returns the method a token form opens with: see `TokenFormWords.method`. */
+const decideFirstMethod = ({
+  asksForOAuth,
+  holdsToken,
+  hasProblem,
+  entry,
+}: {
+  readonly asksForOAuth: boolean;
+  readonly holdsToken: boolean;
+  readonly hasProblem: boolean;
+  readonly entry: SignInEntry;
+}): "browser" | "token" => {
+  if (!asksForOAuth || hasProblem || entry === "replace-token") return "token";
+  if (entry === "sign-in-again") return "browser";
+  return holdsToken ? "token" : "browser";
+};
+
 /**
  * Returns the words of the token form for `server`, a server added by URL.
  * Add, the page's "Replace token…" and the "Sign in…" of a thread line and of
@@ -273,11 +305,14 @@ const describeTokenProblem = (problem: FlowProblem | null): string | undefined =
  *
  * `problem` is what the last write of the form left (`FlowProblem`). When it
  * says only a pasted token works, the browser choice is dropped (`browser` is
- * `null`), and any problem puts the token field first.
+ * `null`), and any problem puts the token field first. `entry` is the button
+ * that opened the dialog (`SignInEntry`): the first step follows it, whatever
+ * the record says by the time the dialog reads it.
  */
 export const describeTokenForm = (
   server: McpServer,
   problem: FlowProblem | null = null,
+  entry: SignInEntry = "sign-in",
 ): TokenFormWords => {
   const { source } = server;
   const holdsToken = source.kind === "url" && source.signIn === "token";
@@ -295,7 +330,12 @@ export const describeTokenForm = (
         : "Paste a new token. It replaces the one this server holds.";
   return {
     intro,
-    method: !asksForOAuth || holdsToken || problemText !== undefined ? "token" : "browser",
+    method: decideFirstMethod({
+      asksForOAuth,
+      holdsToken,
+      hasProblem: problemText !== undefined,
+      entry,
+    }),
     problemText,
     browser: asksForOAuth
       ? {

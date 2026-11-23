@@ -93,7 +93,12 @@ export const openComposerApp = async (
     "POST /api/v1/sessions": { body: thread.session },
     ...handlers,
   });
-  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const fake = createFakeBridge({
+    controllerUrl: CONTROLLER_URL,
+    token: "bearer",
+    ...(options.signInReturn === undefined ? {} : { signInReturn: options.signInReturn }),
+    ...(options.openLink === undefined ? {} : { openLink: options.openLink }),
+  });
   const app = await renderApp(fake, { path });
   await screen.findByRole("textbox", { name: "Message" });
   await app.live.waitForFirstPushes();

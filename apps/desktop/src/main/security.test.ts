@@ -21,7 +21,7 @@ const SIGN_IN_URL = "https://auth.docs.example/authorize?state=one-time-state&cl
 const mainFrame = { origin: "app://hercule" };
 
 /** Runs `link.open` as main answers it, and returns the reply and every line main logged. */
-const answerLinkOpen = async (url: string) => {
+const answerLinkOpen = async (url: unknown) => {
   const logged: unknown[] = [];
   const logger = Logger.make<unknown, void>(({ message }) => {
     logged.push(message);
@@ -74,5 +74,44 @@ describe("link.open", () => {
     expect(everything).not.toContain("one-time-state");
     expect(everything).not.toContain("authorize");
     expect(everything).not.toContain("no application is set");
+  });
+
+  it("refuses an address that is not a web address without repeating it in the reply or the log", async () => {
+    const { reply, logged } = await answerLinkOpen(
+      "nope://auth.docs.example/authorize?state=one-time-state",
+    );
+
+    expect(JSON.stringify(reply)).toContain(
+      "Main refused a message on link.open: its request does not match the contract: Expected an http: or https: URL",
+    );
+    expect(logged).toHaveLength(1);
+    const everything = JSON.stringify([reply, logged]);
+    expect(everything).toContain("url");
+    expect(everything).not.toContain("one-time-state");
+    expect(everything).not.toContain("auth.docs.example");
+  });
+
+  it("refuses the authorization address of signInReturn.wait the same way", async () => {
+    const logged: unknown[] = [];
+    const logger = Logger.make<unknown, void>(({ message }) => {
+      logged.push(message);
+    });
+    const reply = await Effect.runPromise(
+      answerIpcMessage("signInReturn.wait", () => Effect.die("not reached"), {
+        senderFrame: mainFrame,
+        mainFrame,
+        args: [
+          {
+            listenerId: "L",
+            authorizationUrl: "ftp://auth.docs.example/authorize?state=one-time-state",
+          },
+        ],
+      }).pipe(Effect.provide(Logger.layer([logger]))),
+    );
+
+    const everything = JSON.stringify([reply, logged]);
+    expect(everything).toContain("authorizationUrl");
+    expect(everything).not.toContain("one-time-state");
+    expect(everything).not.toContain("auth.docs.example");
   });
 });

@@ -9,6 +9,8 @@ import type { HerculeClient } from "@hercule/client-core";
 import {
   buildMcpListQuery,
   findOrCreateMcpUrlServerFlows,
+  IDLE_CHECK_NOW,
+  type CheckNowState,
   type McpUrlServerFlows,
   type UrlServerFlowState,
 } from "@hercule/client-core/mcp-servers";
@@ -33,8 +35,10 @@ export interface UrlServerFlow {
   readonly finishSignInByPaste: (pasted: string) => void;
   readonly cancelSignIn: () => void;
   readonly retryRead: () => void;
-  /** Checks the followed server again and reads it again. Resolves to the controller's reason when it refused the check, or `null`. */
-  readonly checkNow: () => Promise<string | null>;
+  /** What "Check now" shows: busy from the press until the followed record changes, and the controller's reason when it refused the check. */
+  readonly check: CheckNowState;
+  /** Asks the controller to check the followed server again. Does nothing while a check is pending. */
+  readonly checkNow: () => void;
 }
 
 /** What a dialog shows before its attempt has opened, which is the first render only. */
@@ -84,8 +88,11 @@ const buildAttemptStore = (flows: McpUrlServerFlows, subject: UrlServerFlowSubje
     retryRead: (): void => {
       if (attemptId !== null) flows.retryRead(attemptId);
     },
-    checkNow: (): Promise<string | null> =>
-      attemptId === null ? Promise.resolve(null) : flows.checkNow(attemptId),
+    checkNow: (): void => {
+      if (attemptId !== null) void flows.checkNow(attemptId);
+    },
+    readCheck: (): CheckNowState =>
+      attemptId === null ? IDLE_CHECK_NOW : flows.readCheck(attemptId),
   };
 };
 
@@ -118,6 +125,8 @@ export function useUrlServerFlow(
     [flows, key],
   );
   const state = useSyncExternalStore(store.subscribe, store.readState);
+  // The attempt is opened by `store.subscribe` alone, so this one listens to the attempts without opening another.
+  const check = useSyncExternalStore(flows.subscribe, store.readCheck);
   return {
     state,
     submitAdd: store.submitAdd,
@@ -126,6 +135,7 @@ export function useUrlServerFlow(
     finishSignInByPaste: store.finishSignInByPaste,
     cancelSignIn: store.cancelSignIn,
     retryRead: store.retryRead,
+    check,
     checkNow: store.checkNow,
   };
 }

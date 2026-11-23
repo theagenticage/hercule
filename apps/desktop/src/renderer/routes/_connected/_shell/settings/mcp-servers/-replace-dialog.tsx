@@ -4,13 +4,14 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   buildOfferSwitchTarget,
   decideReplaceChoice,
+  decideReplaceLock,
   describeReplaceDialog,
   describeReplaceTitle,
   findReplaceCandidates,
   type McpServerSettingsRow,
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
-import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
+import { useMcpServerSwitch, useReplaceProgress } from "../../../../../app/mcp-server-switch";
 import { mcpServersQuery } from "../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
 import "../../../../../screens/settings/mcp-servers/url-server-dialogs.css";
@@ -46,26 +47,35 @@ export function ReplaceDialog({
   const servers = useSuspenseQuery(mcpServersQuery(client)).data;
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const flip = useMcpServerSwitch(buildOfferSwitchTarget(row));
+  const offerTarget = buildOfferSwitchTarget(row);
+  const flip = useMcpServerSwitch(offerTarget);
+  const progress = useReplaceProgress(offerTarget);
   const [chosenId, setChosenId] = useState<string | null>(
     candidates.length === 1 ? candidates[0]!.id : null,
   );
   // The servers the dialog listed when the user pressed Replace. The write moves the chosen
   // server onto the Connection, so the live list no longer holds it afterwards.
   const [confirmedList, setConfirmedList] = useState<readonly McpServer[] | null>(null);
-  const progress = flip.replaceProgress;
-  const choosing = progress.kind === "choosing";
+  // Once the user confirmed, the dialog keeps the confirmed server selected, whatever the list
+  // does, until the attempt settles. A refusal that settled releases the selection.
+  const lockedId = decideReplaceLock(progress, flip.blocked);
+  const locked = lockedId !== null;
   const live = findReplaceCandidates(row.offer, servers);
-  const shown = choosing ? live : (confirmedList ?? live);
-  // Once the user confirmed, the dialog keeps the confirmed server selected, whatever the list does.
-  const selectedId =
-    progress.kind === "choosing" || progress.serverId === null ? chosenId : progress.serverId;
+  const shown = locked ? (confirmedList ?? live) : live;
+  // The reason of the refusal stays, and a choice that no longer qualifies is cleared.
+  const choiceIsStale =
+    progress.kind === "refused" &&
+    progress.serverId !== null &&
+    !locked &&
+    !live.some((server) => server.id === chosenId);
+  const pickedId = choiceIsStale ? (live.length === 1 ? live[0]!.id : null) : chosenId;
+  const selectedId = lockedId ?? pickedId;
   const choice =
     selectedId === null
       ? null
-      : choosing
-        ? decideReplaceChoice({ offer: row.offer, servers, chosenServerId: selectedId })
-        : { kind: "chosen" as const, server: shown.find((server) => server.id === selectedId) };
+      : locked
+        ? { kind: "chosen" as const, server: shown.find((server) => server.id === selectedId) }
+        : decideReplaceChoice({ offer: row.offer, servers, chosenServerId: selectedId });
   const chosen = choice?.kind === "chosen" ? (choice.server ?? null) : null;
   const lostChoice = choice?.kind === "changed";
   const refusal = progress.kind === "refused" ? progress.message : null;
@@ -98,7 +108,7 @@ export function ReplaceDialog({
       pending={flip.blocked || chosen === null}
       error={refusal}
       refusal={
-        live.length === 0 && choosing
+        live.length === 0 && !locked
           ? "No server added by URL sits on this address any more."
           : null
       }
@@ -126,7 +136,7 @@ export function ReplaceDialog({
                 type="radio"
                 name="replace-server"
                 checked={chosen?.id === server.id}
-                disabled={flip.blocked || !choosing}
+                disabled={flip.blocked || locked}
                 onChange={() => {
                   setChosenId(server.id);
                 }}

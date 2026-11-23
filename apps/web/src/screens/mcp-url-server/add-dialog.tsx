@@ -75,6 +75,7 @@ export function AddByUrlDialog({
           state={state}
           fallbackServer={null}
           openedOn="elsewhere"
+          entry="sign-in"
           onClose={onClose}
         />
       )}

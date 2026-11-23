@@ -44,6 +44,8 @@ const setup = async (initial: readonly McpServer[] = []) => {
   const world = {
     servers: [...initial],
     readsFail: false,
+    /** Holds the next read of the list until it is released, or `null`. */
+    holdQuery: null as Promise<void> | null,
     /** The error the next update fails with, or `null`. */
     updateFails: null as Error | null,
     /** Holds the next update until it is released, or `null`. */
@@ -53,11 +55,13 @@ const setup = async (initial: readonly McpServer[] = []) => {
   };
   const client = {
     mcpServer: {
-      query: vi.fn(() =>
-        world.readsFail
-          ? Promise.reject(new Error("offline"))
-          : Promise.resolve([...world.servers]),
-      ),
+      query: vi.fn(async () => {
+        const gate = world.holdQuery;
+        world.holdQuery = null;
+        if (gate !== null) await gate;
+        if (world.readsFail) throw new Error("offline");
+        return [...world.servers];
+      }),
       create: vi.fn(
         () =>
           new Promise<unknown>((resolve, reject) => {
@@ -614,6 +618,7 @@ describe("where the Replace of an offer stands", () => {
 
   it("goes from choosing to writing the confirmed server to replaced, once that server shows on the Connection", async () => {
     const { switches, settle } = await setup([docsByUrl("s-a"), docsByUrl("s-b", "/sse")]);
+    switches.attachReplaceReader(WORK);
     expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "choosing" });
 
     switches.replace(WORK, "s-b");
@@ -697,6 +702,150 @@ describe("where the Replace of an offer stands", () => {
       params: { id: "s-b" },
       payload: expect.objectContaining({ enabled: true }) as unknown,
     });
+  });
+
+  /** The record of `s-a` after another client moved it onto the Connection. */
+  const movedA = (): McpServer => ({
+    ...docsByUrl("s-a"),
+    enabled: true,
+    source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: "c-work" },
+  });
+
+  it("stays writing after the acknowledgement while the list read after it is held, and is replaced once that read shows the record", async () => {
+    const { world, queryClient, switches, settle } = await setup([docsByUrl("s-a")]);
+    switches.attachReplaceReader(WORK);
+    const patch = hold();
+    const read = hold();
+    world.holdUpdate = patch.promise;
+    switches.replace(WORK, "s-a");
+    // Another client's move of the same server reaches the cache before the acknowledgement.
+    queryClient.setQueryData(SERVERS_KEY, [movedA()]);
+    world.holdQuery = read.promise;
+
+    patch.resolve();
+    await vi.waitFor(() => {
+      expect(world.holdQuery).toBeNull();
+    });
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "writing", serverId: "s-a" });
+
+    read.resolve();
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "replaced", serverId: "s-a" });
+  });
+
+  it("stays writing while the list read after the acknowledgement fails, and is replaced when a later read succeeds", async () => {
+    const { world, client, queryClient, switches, settle } = await setup([docsByUrl("s-a")]);
+    switches.attachReplaceReader(WORK);
+    const patch = hold();
+    world.holdUpdate = patch.promise;
+    switches.replace(WORK, "s-a");
+    queryClient.setQueryData(SERVERS_KEY, [movedA()]);
+    world.readsFail = true;
+
+    patch.resolve();
+    await vi.waitFor(() => {
+      expect(switches.readState(WORK).unread).not.toBeNull();
+    });
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "writing", serverId: "s-a" });
+
+    world.readsFail = false;
+    await queryClient.fetchQuery({
+      queryKey: SERVERS_KEY,
+      queryFn: () => client.mcpServer.query(),
+      staleTime: 0,
+    });
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "replaced", serverId: "s-a" });
+  });
+
+  it("ends refused, with no winner, when the acknowledged server is gone from the list read after the write, and never goes back to writing", async () => {
+    const { world, queryClient, switches, settle } = await setup([docsByUrl("s-a")]);
+    switches.attachReplaceReader(WORK);
+    const patch = hold();
+    const read = hold();
+    world.holdUpdate = patch.promise;
+    switches.replace(WORK, "s-a");
+    queryClient.setQueryData(SERVERS_KEY, [movedA()]);
+    patch.resolve();
+    await vi.waitFor(() => {
+      expect(world.holdUpdate).toBeNull();
+    });
+    // Another client deletes the server after the write was acknowledged.
+    world.holdQuery = read.promise;
+    world.servers = [];
+
+    read.resolve();
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toMatchObject({
+      kind: "refused",
+      serverId: "s-a",
+      winnerServerId: null,
+    });
+  });
+
+  it("returns the same progress object while nothing changed, and does no Replace work for an unrelated change of the cache", async () => {
+    const { queryClient, switches } = await setup([docsByUrl("s-a")]);
+    const listener = vi.fn();
+    const stop = switches.subscribeReplaceProgress(listener);
+    const first = switches.readReplaceProgress(WORK);
+    const spy = vi.spyOn(queryClient, "getQueryData");
+
+    queryClient.setQueryData(["unrelated"], { anything: true });
+    void queryClient.invalidateQueries({ queryKey: ["unrelated"] });
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+    expect(switches.readReplaceProgress(WORK)).toBe(first);
+
+    queryClient.setQueryData(SERVERS_KEY, [docsByUrl("s-a"), { ...SENTRY_WORK, id: WINNER_ID }]);
+    expect(listener).toHaveBeenCalled();
+    const refused = switches.readReplaceProgress(WORK);
+    expect(refused).toMatchObject({ kind: "refused", winnerServerId: WINNER_ID });
+    expect(switches.readReplaceProgress(WORK)).toBe(refused);
+    stop();
+  });
+
+  it("drops the confirmed server of an abandoned Replace when its refusal expires, so a later dialog starts from choosing", async () => {
+    vi.useFakeTimers();
+    try {
+      const { world, switches, settle } = await setup([docsByUrl("s-a")]);
+      const gate = hold();
+      world.holdUpdate = gate.promise;
+      world.updateFails = new ApiError("not_found", "Gone.");
+      const detachDialog = switches.attachReplaceReader(WORK);
+      switches.replace(WORK, "s-a");
+      // The user leaves Settings while the write is held: nothing shows the target.
+      detachDialog();
+      expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "writing", serverId: "s-a" });
+
+      gate.resolve();
+      await settle(WORK);
+      expect(switches.readReplaceProgress(WORK)).toMatchObject({
+        kind: "refused",
+        serverId: "s-a",
+      });
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS);
+
+      expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "choosing" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops the confirmed server when the last dialog that reads it unmounts after the attempt settled", async () => {
+    const { switches, settle } = await setup([docsByUrl("s-a")]);
+    const first = switches.attachReplaceReader(WORK);
+    const second = switches.attachReplaceReader(WORK);
+    switches.replace(WORK, "s-a");
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "replaced", serverId: "s-a" });
+
+    first();
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "replaced", serverId: "s-a" });
+    second();
+
+    // The confirmation is gone: the record on the Connection is no one's confirmed server now.
+    expect(switches.readReplaceProgress(WORK)).toMatchObject({ kind: "refused", serverId: null });
   });
 
   it("forgets the confirmed server when the refusal is dismissed, and is always choosing for a target that is not a plugin's", async () => {

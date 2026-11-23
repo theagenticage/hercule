@@ -8,6 +8,7 @@
  */
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -233,7 +234,10 @@ export function TokenForm({
   readonly onCancel: () => void;
 }): JSX.Element {
   const [token, setToken] = useState("");
-  const [showsToken, setShowsToken] = useState(words.method === "token");
+  // The user's press of "Paste a token instead" adds to what the words say the form opens with,
+  // so a record that changes while the form is open can still move an untouched form.
+  const [choseToken, setChoseToken] = useState(false);
+  const showsToken = choseToken || words.method === "token";
   const { browser } = words;
   if (browser !== null && !showsToken) {
     return (
@@ -253,7 +257,7 @@ export function TokenForm({
             type="button"
             className="btn"
             onClick={() => {
-              setShowsToken(true);
+              setChoseToken(true);
             }}
           >
             {browser.pasteToggle}
@@ -686,14 +690,28 @@ function WaitingView({
     openedByApp: step.opened,
   });
   const pasteShown = step.returnBy === "paste" || showsPaste || step.pasteProblem !== null;
-  // React's Strict Mode runs this effect twice before the step shows `opened`, and the page must open once.
-  const requestedOpen = useRef(false);
-  const { onOpenSignInPage } = actions;
+  // The browser takes the focus when it opens, so it opens only once this card has been presented:
+  // after the next animation frame, and in the task after it. An effect runs when the commit ends,
+  // which can be before the frame that shows the card, so it only schedules the open. The cleanup
+  // cancels it (Strict Mode's first run, a step that goes away, the user pressing Open again).
+  const openRef = useRef(actions.onOpenSignInPage);
+  useLayoutEffect(() => {
+    openRef.current = actions.onOpenSignInPage;
+  });
+  const pendingOpen = !step.opened;
   useEffect(() => {
-    if (step.opened || requestedOpen.current) return;
-    requestedOpen.current = true;
-    onOpenSignInPage();
-  }, [step.opened, onOpenSignInPage]);
+    if (!pendingOpen) return;
+    let task: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      task = setTimeout(() => {
+        openRef.current();
+      }, 0);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(task);
+    };
+  }, [pendingOpen]);
   return (
     <div className="url-waiting">
       <MarkedRows>

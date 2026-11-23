@@ -238,6 +238,29 @@ describe("describeTokenForm", () => {
     expect(describeTokenForm(urlServer("oauth", "oauth")).method).toBe("browser");
   });
 
+  it("opens as the button the user pressed says, whatever the record reads by the time the dialog reads it", () => {
+    // "Replace token…" was drawn from a pasted token. A sign-in that came in since changed the record to OAuth.
+    const signedInSince = urlServer("oauth", "oauth");
+    expect(describeTokenForm(signedInSince, null, "replace-token").method).toBe("token");
+    expect(describeTokenForm(signedInSince).method).toBe("browser");
+
+    // "Sign in again…" was drawn from an OAuth sign-in. A pasted token replaced it since.
+    const tokenSince = urlServer("token", "oauth");
+    expect(describeTokenForm(tokenSince, null, "sign-in-again").method).toBe("browser");
+    expect(describeTokenForm(tokenSince, null, "sign-in").method).toBe("token");
+  });
+
+  it("still opens with the token field for a form that has a problem, or a server that cannot sign in through the browser, whatever the entry", () => {
+    const oauth = urlServer("oauth", "oauth");
+    expect(
+      describeTokenForm(oauth, { kind: "failed", message: "offline" }, "sign-in-again").method,
+    ).toBe("token");
+    expect(describeTokenForm(urlServer("token", "token"), null, "sign-in-again")).toMatchObject({
+      method: "token",
+      browser: null,
+    });
+  });
+
   it("drops the browser choice and shows the controller's words once only a token works, whatever was offered", () => {
     const server = urlServer("none", "oauth", { status: "needs-sign-in" });
     const words = describeTokenForm(server, {

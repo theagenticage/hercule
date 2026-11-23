@@ -111,7 +111,7 @@ function CheckedAge({ at }: { readonly at: string }): JSX.Element {
  *   wrong instead, in `--fail`, and no button: the band holds the page's one
  *   button.
  * - The Sign-in row, for a server added by URL, says what the server holds
- *   ("None needed", "A token" or "OAuth"). Its button, "Replace token…" calls
+ *   ("None needed", "Not signed in", "A token" or "OAuth"). Its button, "Replace token…" calls
  *   `onOpenSignIn`, and is drawn only while the server does not need
  *   sign-in: the band holds the one button then.
  * - Check now is off while the server is checking or switched off, and while

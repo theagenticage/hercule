@@ -6,6 +6,7 @@ import {
   describeClosing,
   describeOpenServerAction,
   describeSignInHeading,
+  type SignInEntry,
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
 import {
@@ -31,23 +32,29 @@ import { FlowBody, TokenForm, UrlServerDialogFrame } from "./url-server-dialog-p
  * dialog is kept by the server's id: when the server is removed, or moves onto
  * a Connection, while the dialog is open, the dialog shows why before it closes.
  * `openedOn` is where the dialog was opened: the server's own page, which
- * has no "Open <name>" button to offer, or `elsewhere`. `onClose` is called
- * whenever the dialog closes; the caller then unmounts it.
+ * has no "Open <name>" button to offer, or `elsewhere`. `entry` is the
+ * button that opened it, which decides the first step even when the record
+ * changes before the dialog reads it. `onClose` is called whenever the dialog
+ * closes; the caller then unmounts it.
  */
 export function TokenDialog({
   mcpServerId,
   openedOn,
+  entry,
   onClose,
 }: {
   readonly mcpServerId: string;
   readonly openedOn: "server-page" | "elsewhere";
+  readonly entry: SignInEntry;
   readonly onClose: () => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const server = useQuery(mcpServerQuery(client, mcpServerId));
   const dialogRef = useRef<HTMLDialogElement>(null);
   if (server.data !== undefined) {
-    return <TokenDialogFor server={server.data} openedOn={openedOn} onClose={onClose} />;
+    return (
+      <TokenDialogFor server={server.data} openedOn={openedOn} entry={entry} onClose={onClose} />
+    );
   }
   const failure = server.error;
   return (
@@ -86,10 +93,12 @@ export function TokenDialog({
 function TokenDialogFor({
   server,
   openedOn,
+  entry,
   onClose,
 }: {
   readonly server: McpServer;
   readonly openedOn: "server-page" | "elsewhere";
+  readonly entry: SignInEntry;
   readonly onClose: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
@@ -128,7 +137,7 @@ function TokenDialogFor({
   };
   // The words follow the record the attempt last read, which a check may have changed.
   const followed = state.kind === "following" ? (state.server ?? server) : server;
-  const words = describeAttemptTokenForm(followed, state);
+  const words = describeAttemptTokenForm(followed, state, entry);
   return (
     <UrlServerDialogFrame
       dialogRef={dialogRef}

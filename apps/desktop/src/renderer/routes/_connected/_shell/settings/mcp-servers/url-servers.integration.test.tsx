@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { queryKeys } from "@hercule/client-core";
 import { ADDRESS_FIELD_HINT } from "@hercule/client-core/mcp-servers";
 import type { Handler } from "@hercule/client-core/testing";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
@@ -277,6 +278,64 @@ describe("Add by URL", () => {
       expect(app.world.checked).toEqual([CREATED_ID]);
     });
     await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+  });
+
+  it("stays busy after Check now until the record answers, takes no second press, and shows the new failure when it comes", async () => {
+    let checkRequests = 0;
+    // The controller acknowledges and checks later: it changes nothing the record shows at first.
+    const app = await openList({
+      servers: [],
+      handlers: {
+        [`POST ${SERVER_LIST_PATH}/${CREATED_ID}/check`]: () => {
+          checkRequests += 1;
+          return { body: {} };
+        },
+      },
+    });
+    const dialog = await openAddDialog();
+    await checkAddress(dialog, DOCS_URL);
+    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    finishCheck(app, CREATED_ID, {
+      status: "unreachable",
+      statusDetail: "No answer in 10 seconds.",
+      updatedAt: "2026-11-23T09:00:00.000Z",
+    });
+    await within(dialog).findByText("mcp.docs.example could not be reached.");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Check now" }));
+    await waitFor(() => {
+      expect(checkRequests).toBe(1);
+    });
+    await waitFor(() => {
+      expect(app.context.queryClient.isFetching()).toBe(0);
+    });
+
+    // Both reads came back with the old failure. The button is still busy, and a press asks nothing.
+    const checkNow = within(dialog).getByRole("button", { name: "Check now" });
+    expect(checkNow.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(checkNow);
+    expect(checkRequests).toBe(1);
+
+    finishCheck(app, CREATED_ID, {
+      statusDetail: "Connection refused.",
+      updatedAt: "2026-11-23T09:01:00.000Z",
+    });
+    await within(dialog).findByText(/Connection refused\./);
+    expect(
+      within(dialog).getByRole("button", { name: "Check now" }).getAttribute("aria-disabled"),
+    ).toBe("false");
+  });
+
+  it("offers Open on a new server that is switched off while it is checked", async () => {
+    const app = await openList({ servers: [] });
+    const dialog = await openAddDialog();
+    await checkAddress(dialog, DOCS_URL);
+    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+
+    finishCheck(app, CREATED_ID, { enabled: false });
+
+    await within(dialog).findByText("This server is switched off, so it is not checked.");
+    expect(within(dialog).getByRole("button", { name: "Open docs" })).toBeTruthy();
   });
 
   it("keeps the server when the dialog is closed after the check, and says so while it waits", async () => {
@@ -577,8 +636,30 @@ describe("Replace, as the controller and other clients move it", () => {
     },
   } as const;
 
-  /** Opens the Replace dialog of the hobby row with `SENTRY_DOCS` and `SENTRY_NOTES` to choose from, and holds the update until `release` is called. */
-  const openHeldReplace = async () => {
+  /** The answer of a controller that finds the record of the Connection's account already there. */
+  const CONFLICT = {
+    status: 409,
+    body: {
+      error: {
+        code: "conflict",
+        message: "This Connection has a server already.",
+        details: { reason: "mcp-server-exists", mcpServerId: SENTRY_HOBBY_ID },
+      },
+    },
+  } as const;
+
+  /** The answer of a controller that no longer has the server the update is for. */
+  const NOT_FOUND = {
+    status: 404,
+    body: { error: { code: "not_found", message: "This server is gone." } },
+  } as const;
+
+  /**
+   * Opens the Replace dialog of the hobby row with `SENTRY_DOCS` and `SENTRY_NOTES` to choose
+   * from, and holds the update until `release` is called. The update then answers with `answer`,
+   * or moves `SENTRY_NOTES` onto the Connection when there is none.
+   */
+  const openHeldReplace = async (answer?: typeof CONFLICT | typeof NOT_FOUND) => {
     let release = (): void => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -589,6 +670,7 @@ describe("Replace, as the controller and other clients move it", () => {
       handlers: {
         [`PATCH ${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`]: async () => {
           await gate;
+          if (answer !== undefined) return answer;
           holder.app!.world.servers = holder.app!.world.servers.map((server) =>
             server.id === SENTRY_NOTES_ID ? MOVED_NOTES : server,
           );
@@ -626,8 +708,8 @@ describe("Replace, as the controller and other clients move it", () => {
     expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
   });
 
-  it("keeps the dialog with the refusal and a link when another client's server appears on the Connection while the update is held", async () => {
-    const { app, dialog, release } = await openHeldReplace();
+  it("keeps the dialog with the refusal and a link when another client's server appears on the Connection while the update is held, and lets the user choose again once the controller refuses", async () => {
+    const { app, dialog, release } = await openHeldReplace(CONFLICT);
     await userEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
 
     app.world.servers = [...app.world.servers, HOBBY_WINNER];
@@ -639,11 +721,53 @@ describe("Replace, as the controller and other clients move it", () => {
     expect(refusal.textContent).toBe(
       "Nothing was replaced. This Connection's server was added meanwhile.",
     );
+    // The selection is fixed while the update is held.
+    expect(
+      within(screen.getByRole("dialog"))
+        .getAllByRole<HTMLInputElement>("radio")
+        .every((radio) => radio.disabled),
+    ).toBe(true);
+
     release();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    // The update that the controller accepted does not make the winner's record the user's own.
+    // The controller refuses: the dialog stays with the reason and the winner's link, and the radios are free.
+    await waitFor(() => {
+      const radios = within(screen.getByRole("dialog")).getAllByRole<HTMLInputElement>("radio");
+      expect(radios.some((radio) => radio.disabled)).toBe(false);
+    });
     const open = screen.getByRole("dialog", { name: /Replace the sentrynotes server you added\?/ });
+    expect(within(open).getByRole("alert").textContent).toBe(
+      "Nothing was replaced. This Connection has a server already.",
+    );
     expect(within(open).getByRole("button", { name: "Open sentry" })).toBeTruthy();
+    expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
+  });
+
+  it("releases the selection when the confirmed server was deleted and the controller says not_found: the reason stays, the stale choice is cleared and the user chooses again", async () => {
+    const { app, dialog, release } = await openHeldReplace(NOT_FOUND);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+    app.world.servers = app.world.servers.filter((server) => server.id !== SENTRY_NOTES_ID);
+    act(() => {
+      app.live.pushInvalidation("mcpServer", [SENTRY_NOTES_ID]);
+    });
+    // While the update is held the dialog still names the confirmed server.
+    await screen.findByRole("dialog", { name: /Replace the sentrynotes server you added\?/ });
+
+    release();
+
+    const chooser = await screen.findByRole("dialog", {
+      name: /Replace the sentrydocs server you added\?/,
+    });
+    expect(within(chooser).getByRole("alert").textContent).toBe(
+      "Nothing was replaced. This server is gone.",
+    );
+    // The deleted server is not offered, the one left is chosen for the user and Replace is free.
+    expect(within(chooser).queryByText("sentrynotes")).toBeNull();
+    await userEvent.click(within(chooser).getByRole("button", { name: "Replace" }));
+    await waitFor(() => {
+      expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_DOCS_ID}`)).toHaveLength(
+        1,
+      );
+    });
     expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
   });
 
@@ -794,6 +918,51 @@ describe("the page of a server added by URL", () => {
     expect(within(dialog).queryByText("This server signs in through your browser.")).toBeNull();
   });
 
+  it("opens Replace token… on the token field though the record turned to OAuth between the press and the dialog's read", async () => {
+    const app = await openPage({
+      ...NOTION,
+      source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
+    });
+    const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
+    const button = within(server).getByRole("button", { name: "Replace token…" });
+
+    // A sign-in through the browser lands in the cache in the same turn as the press.
+    act(() => {
+      fireEvent.click(button);
+      app.context.queryClient.setQueryData(queryKeys.mcpServer(NOTION_ID), {
+        ...NOTION,
+        source: { kind: "url", url: DOCS_URL, signIn: "oauth", signInOffered: "oauth" },
+      });
+    });
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
+    expect(within(dialog).queryByText("This server signs in through your browser.")).toBeNull();
+  });
+
+  it("moves an untouched browser choice to the token field when the record turns token-first meanwhile", async () => {
+    const app = await openPage({
+      ...DOCS,
+      status: "needs-sign-in",
+      source: { kind: "url", url: DOCS_URL, signIn: "none", signInOffered: "oauth" },
+    });
+    const band = document.querySelector<HTMLElement>(".mcp-band")!;
+    await userEvent.click(within(band).getByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    expect(within(dialog).queryByLabelText("Token")).toBeNull();
+
+    // Somebody pasted a token, and the server refused it.
+    app.world.servers = app.world.servers.map((server) => ({
+      ...server,
+      source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
+    }));
+    act(() => {
+      app.live.pushInvalidation("mcpServer", [DOCS_ID]);
+    });
+
+    expect(await within(dialog).findByLabelText("Token")).toBeTruthy();
+  });
+
   it("offers no Open button on the server's own page when the check of a new token fails, only Check now", async () => {
     const app = await openPage(NOTION);
     const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
@@ -942,7 +1111,9 @@ describe("Signing in to a server added by URL through the browser", () => {
       findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`).map((c) => c.body),
     ).toEqual([{ redirectUri: "http://127.0.0.1:4937/callback" }]);
     expect(signInReturn.listen).toHaveBeenCalledTimes(1);
-    expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+    await waitFor(() => {
+      expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+    });
     expect(signInReturn.wait).toHaveBeenCalledWith({
       listenerId: "l-1",
       authorizationUrl: AUTHORIZATION_URL,
@@ -987,7 +1158,41 @@ describe("Signing in to a server added by URL through the browser", () => {
     expect(within(dialog).getByRole("button", { name: "Open again" })).toBeTruthy();
   });
 
-  it("is ready for the browser's return before it opens the browser, and finishes with a return that was there at the launch", async () => {
+  it("opens the browser only after the frame that presents the waiting step and the task after it, never in the commit's own effect flush", async () => {
+    const frames: FrameRequestCallback[] = [];
+    const holdFrames = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const signInReturn = buildSignInReturn();
+      const { app, dialog } = await openSignInDialog(signInReturn);
+
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+      );
+      await within(dialog).findByText("Finish in your browser");
+
+      // The card is committed and its effects have run, but no frame presented it: no browser yet,
+      // however many tasks go by.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(frames.length).toBeGreaterThan(0);
+      expect(app.openedLinks).toEqual([]);
+
+      // The frame has run. The browser still waits for the task after it.
+      act(() => {
+        for (const frame of frames.splice(0)) frame(0);
+      });
+      expect(app.openedLinks).toEqual([]);
+      await waitFor(() => {
+        expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+      });
+    } finally {
+      holdFrames.mockRestore();
+    }
+  });
+
+  it("is ready for the browser's return before the browser opens, and opens no browser for a sign-in that a return already finished", async () => {
     const signInReturn = buildSignInReturn(true, true);
     const openLink = vi.fn(() => Promise.resolve({ _tag: "Opened" } as const));
     const { app, dialog } = await openSignInDialog(signInReturn, undefined, openLink);
@@ -1003,9 +1208,10 @@ describe("Signing in to a server added by URL through the browser", () => {
         ),
       ).toEqual([{ callbackQuery: CALLBACK }]);
     });
-    expect(signInReturn.wait.mock.invocationCallOrder[0]!).toBeLessThan(
-      openLink.mock.invocationCallOrder[0]!,
-    );
+    // The return finished the sign-in before the card was presented, so there is nothing to open.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(signInReturn.wait).toHaveBeenCalled();
+    expect(openLink).not.toHaveBeenCalled();
   });
 
   it("says why the browser did not open, in main's own sentence", async () => {
@@ -1064,6 +1270,43 @@ describe("Signing in to a server added by URL through the browser", () => {
     },
   );
 
+  it("retires the sign-in in the commit that unmounts the dialog, before the dialog leaves the DOM, so a return delivered at that boundary finishes nothing", async () => {
+    const signInReturn = buildSignInReturn();
+    const { app, dialog } = await openSignInDialog(signInReturn);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+    );
+    await within(dialog).findByText("Finish in your browser");
+    // The moment React takes the dialog out of the DOM is the boundary: the browser's return is
+    // delivered there, and the listener must have been retired by then. A passive cleanup runs after it.
+    // Called with the node it was taken from, so it is not unbound.
+    // oxlint-disable-next-line typescript/unbound-method
+    const removeChild = Node.prototype.removeChild;
+    let cancelsWhenRemoved: number | null = null;
+    Node.prototype.removeChild = function <T extends Node>(this: Node, child: T): T {
+      if (cancelsWhenRemoved === null && child.contains(dialog)) {
+        cancelsWhenRemoved = signInReturn.cancel.mock.calls.length;
+        signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      }
+      return removeChild.call(this, child) as T;
+    };
+    try {
+      await act(async () => {
+        await app.router.navigate({ to: "/settings/connections" });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      Node.prototype.removeChild = removeChild;
+    }
+
+    expect(document.contains(dialog)).toBe(false);
+    expect(cancelsWhenRemoved).toBe(1);
+    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+    expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
+      [],
+    );
+  });
+
   it("offers the browser again, with the server's reason, when the server refuses the sign-in it was just given", async () => {
     const signInReturn = buildSignInReturn();
     const { app, dialog } = await openSignInDialog(signInReturn, () => {
@@ -1100,7 +1343,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
     await within(dialog).findByText("Finish in your browser");
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Open again" }));
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Open again" }));
 
     await waitFor(() => {
       expect(app.openedLinks).toEqual([AUTHORIZATION_URL, AUTHORIZATION_URL]);
@@ -1215,7 +1458,9 @@ describe("Signing in to a server added by URL through the browser", () => {
       within(dialog).queryByRole("button", { name: "Paste the browser's address…" }),
     ).toBeNull();
     expect(signInReturn.wait).not.toHaveBeenCalled();
-    expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+    await waitFor(() => {
+      expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+    });
     const [start] = findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`);
     expect((start!.body as { redirectUri: string }).redirectUri).toMatch(
       /^http:\/\/127\.0\.0\.1:\d+\/callback$/,

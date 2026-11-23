@@ -1,6 +1,10 @@
 import { useState, type JSX } from "react";
 import type { McpServer } from "@hercule/contract";
-import { describeTokenForm, type FlowProblem } from "@hercule/client-core/mcp-servers";
+import {
+  describeTokenForm,
+  type FlowProblem,
+  type SignInEntry,
+} from "@hercule/client-core/mcp-servers";
 import { Button, Field, Input } from "@hercule/ui";
 
 /**
@@ -21,6 +25,8 @@ import { Button, Field, Input } from "@hercule/ui";
  * attempt checks the token against the contract's rule when it is sent and
  * answers in `problem`.
  *
+ * - `entry` is the button that opened the dialog (`SignInEntry`), which
+ *   decides what the form opens with.
  * - `refusal` is the controller's reason when the token just saved was
  *   refused, shown above the field.
  * - `closingNote` is what closing the dialog now would do, or `null`.
@@ -28,6 +34,7 @@ import { Button, Field, Input } from "@hercule/ui";
 export function TokenForm({
   server,
   problem,
+  entry,
   refusal,
   closingNote,
   onSubmit,
@@ -36,6 +43,7 @@ export function TokenForm({
 }: {
   readonly server: McpServer;
   readonly problem: FlowProblem | null;
+  readonly entry: SignInEntry;
   readonly refusal: string | null;
   readonly closingNote: string | null;
   readonly onSubmit: (token: string) => void;
@@ -44,7 +52,7 @@ export function TokenForm({
   readonly onCancel: () => void;
 }): JSX.Element {
   const [token, setToken] = useState("");
-  const words = describeTokenForm(server, problem);
+  const words = describeTokenForm(server, problem, entry);
   const { browser, problemText } = words;
   // The user's press of "Paste a token instead" adds to what the words say the form opens with.
   const [choseToken, setChoseToken] = useState(false);

@@ -11,7 +11,7 @@
  * it is needed, so the tests wait for it.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { McpServer, Session } from "@hercule/contract";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
@@ -622,6 +622,84 @@ describe("the + menu on a started thread", () => {
 
     await within(dialog).findByText("ready · 2 tools");
   });
+
+  it.each([
+    [
+      "deleted",
+      (app: { world: { servers: McpServer[] } }) => {
+        app.world.servers = [];
+      },
+      "notion was removed.",
+    ],
+    [
+      "moved onto a Connection",
+      (app: { world: { servers: McpServer[] } }) => {
+        app.world.servers = app.world.servers.map((server) =>
+          buildServer(server.id, "notion", LINEAR_CONNECTION),
+        );
+      },
+      "notion is reached with a Connection now.",
+    ],
+  ])(
+    "ends a browser sign-in that waits when its server is %s meanwhile, and sends nothing when the browser returns after that",
+    async (_name, change, words) => {
+      const authorizationUrl = "https://auth.notion.example/authorize?state=abc123";
+      const returns: ((outcome: { _tag: "received"; callbackQuery: string }) => void)[] = [];
+      const signInReturn = {
+        listen: vi.fn(() =>
+          Promise.resolve({
+            _tag: "listening",
+            listenerId: "l-1",
+            redirectUri: "http://127.0.0.1:4937/callback",
+          } as const),
+        ),
+        wait: vi.fn(
+          () =>
+            new Promise<{ _tag: "received"; callbackQuery: string }>((resolve) => {
+              returns.push(resolve);
+            }),
+        ),
+        cancel: vi.fn(() => Promise.resolve(undefined)),
+      };
+      const signedOut = {
+        ...NOTION,
+        status: "needs-sign-in",
+        source: { ...NOTION.source, signIn: "none", signInOffered: "oauth" },
+      } as McpServer;
+      const app = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+        servers: [signedOut],
+        signInReturn,
+        handlers: {
+          [`POST ${SERVER_LIST}/${NOTION.id}/sign-in`]: {
+            body: { authorizationUrl, expiresAt: "2026-11-23T10:10:00.000Z" },
+          },
+          [`POST ${SERVER_LIST}/${NOTION.id}/sign-in/finish`]: { body: {} },
+        },
+      });
+      const popover = await openServersSubmenu();
+      fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+      );
+      await within(dialog).findByText("Finish in your browser");
+
+      change(app);
+      act(() => {
+        app.live.pushInvalidation("mcpServer", [NOTION.id]);
+      });
+      await within(dialog).findByText(words);
+      await act(async () => {
+        returns[0]!({ _tag: "received", callbackQuery: "code=the-code&state=abc123" });
+        await Promise.resolve();
+      });
+
+      expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+      expect(findCalls(app.calls, "POST", `${SERVER_LIST}/${NOTION.id}/sign-in/finish`)).toEqual(
+        [],
+      );
+    },
+  );
 
   it("says why Reconnect cannot go on when its Connection is deleted while the dialog is open, and closes with Close", async () => {
     const thread = threadWith([SENTRY_WORK]);

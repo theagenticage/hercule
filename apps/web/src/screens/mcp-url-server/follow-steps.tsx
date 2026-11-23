@@ -1,6 +1,5 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
 import type { McpServer } from "@hercule/contract";
 import {
   NEW_SERVER_NOTE,
@@ -12,6 +11,7 @@ import {
   type FlowProblem,
   type OpenServerAction,
   type ServerOutcome,
+  type SignInEntry,
   type UrlServerFlowState,
 } from "@hercule/client-core/mcp-servers";
 import { buildButtonClassName, Button } from "@hercule/ui";
@@ -38,12 +38,15 @@ export function FollowSteps({
   state,
   fallbackServer,
   openedOn,
+  entry,
   onClose,
 }: {
   readonly flow: UrlServerFlow;
   readonly state: Exclude<UrlServerFlowState, { kind: "form" }>;
   readonly fallbackServer: McpServer | null;
   readonly openedOn: "server-page" | "elsewhere";
+  /** The button that opened the dialog, which the token form it shows again opens as. */
+  readonly entry: SignInEntry;
   readonly onClose: () => void;
 }): JSX.Element {
   const closingNote = describeClosing(state);
@@ -96,6 +99,7 @@ export function FollowSteps({
           outcome={state.outcome}
           server={server}
           problem={state.problem}
+          entry={entry}
           closingNote={closingNote}
           openAction={openAction}
           onClose={onClose}
@@ -131,6 +135,7 @@ function Outcome({
   outcome,
   server,
   problem,
+  entry,
   closingNote,
   openAction,
   onClose,
@@ -139,12 +144,11 @@ function Outcome({
   readonly outcome: ServerOutcome;
   readonly server: McpServer | null;
   readonly problem: FlowProblem | null;
+  readonly entry: SignInEntry;
   readonly closingNote: string | null;
   readonly openAction: OpenServerAction | null;
   readonly onClose: () => void;
 }): JSX.Element {
-  // The reason the controller gave when it refused the check, or `null`.
-  const check = useMutation({ mutationFn: flow.checkNow });
   const name = server?.name ?? "server";
   const openButton =
     openAction === null ? null : <OpenServerLink action={openAction} onClose={onClose} />;
@@ -225,6 +229,7 @@ function Outcome({
         <TokenForm
           server={server}
           problem={problem}
+          entry={entry}
           refusal={outcome.refusedAgain ? outcome.detail : null}
           closingNote={closingNote}
           onSubmit={flow.submitToken}
@@ -243,9 +248,9 @@ function Outcome({
           <p className="text-row text-fail" role="alert">
             {failed.headline} {failed.detail}
           </p>
-          {check.data == null ? null : (
+          {flow.check.error === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {check.data}
+              {flow.check.error}
             </p>
           )}
           <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
@@ -259,9 +264,9 @@ function Outcome({
             <Button
               type="button"
               variant="form"
-              aria-disabled={check.isPending}
+              aria-disabled={flow.check.busy}
               onClick={() => {
-                if (!check.isPending) check.mutate();
+                if (!flow.check.busy) flow.checkNow();
               }}
             >
               Check now

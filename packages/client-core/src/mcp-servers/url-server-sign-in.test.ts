@@ -46,10 +46,10 @@ type WaitOutcome = Awaited<ReturnType<BrowserSignInPort["wait"]>>;
  * `wait` the test settles.
  */
 const setup = async ({ withPort = true, listens = true } = {}) => {
-  const world = { record: oauthServer() };
+  const world = { record: oauthServer(), gone: false };
   const client = {
     mcpServer: {
-      query: vi.fn(() => Promise.resolve([world.record])),
+      query: vi.fn(() => Promise.resolve(world.gone ? [] : [world.record])),
       read: vi.fn(() => Promise.resolve({ ...world.record })),
       create: vi.fn(),
       setToken: vi.fn(),
@@ -122,7 +122,9 @@ const setup = async ({ withPort = true, listens = true } = {}) => {
       expect(state.kind === "following" && state.outcome.kind).toBe(kind);
     });
   };
-  return { world, client, port, waits, flows, push, waitForStep, waitForOutcome };
+  /** Reads the list of servers again from the controller, as a live push of the list does. */
+  const readList = () => catalogue.fetch();
+  return { world, client, port, waits, flows, push, readList, waitForStep, waitForOutcome };
 };
 
 const invalidState = (reason: string, message = "The controller's words.") =>
@@ -379,6 +381,100 @@ describe("the browser sign-in of the desktop app", () => {
     waits[0]!.resolve({ kind: "cancelled" });
 
     expect(await waitForStep(attempt, "refused")).toMatchObject({ reason: "failed" });
+  });
+});
+
+describe("a sign-in whose server changes while it runs", () => {
+  it("ends a waiting sign-in when the list shows the server deleted, retires the listener, and finishes nothing when the browser returns after it", async () => {
+    const { world, flows, client, port, waits, readList, waitForStep } = await setup();
+    const attempt = flows.openToken("s-docs", "docs");
+    await flows.startSignIn(attempt);
+    await waitForStep(attempt, "waiting");
+
+    world.gone = true;
+    await readList();
+
+    expect(flows.readState(attempt)).toEqual({
+      kind: "ended",
+      reason: "gone",
+      mcpServerId: "s-docs",
+      name: "docs",
+      message: null,
+    });
+    expect(port.cancel).toHaveBeenCalledWith("l-1");
+    waits[0]!.resolve({ kind: "received", callbackQuery: CALLBACK });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(client.mcpServer.finishSignIn).not.toHaveBeenCalled();
+    expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "gone" });
+  });
+
+  it("ends a waiting sign-in when the server moved onto a Connection, and never goes back to the form on Cancel", async () => {
+    const { world, flows, readList, waitForStep } = await setup();
+    const attempt = flows.openToken("s-docs", "docs");
+    await flows.startSignIn(attempt);
+    await waitForStep(attempt, "waiting");
+
+    world.record = buildServer("s-docs", "docs", "c-work");
+    await readList();
+    flows.cancelSignIn(attempt);
+
+    expect(flows.readState(attempt)).toMatchObject({
+      kind: "ended",
+      reason: "moved",
+      mcpServerId: "s-docs",
+      name: "docs",
+    });
+  });
+
+  it("ends a sign-in that is still starting, and closes the listener that was opened for it", async () => {
+    const { world, flows, client, port, readList, waitForStep } = await setup();
+    let release!: (started: { authorizationUrl: string; expiresAt: string }) => void;
+    client.mcpServer.startSignIn.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          release = done;
+        }),
+    );
+    const attempt = flows.openToken("s-docs", "docs");
+    const starting = flows.startSignIn(attempt);
+    await waitForStep(attempt, "starting");
+    await vi.waitFor(() => {
+      expect(client.mcpServer.startSignIn).toHaveBeenCalled();
+    });
+
+    world.gone = true;
+    await readList();
+    release({ authorizationUrl: AUTHORIZATION_URL, expiresAt: "2026-11-23T10:10:00Z" });
+    await starting;
+
+    expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "gone" });
+    expect(port.cancel).toHaveBeenCalledWith("l-1");
+    expect(port.wait).not.toHaveBeenCalled();
+  });
+
+  it("leaves a sign-in that is being finished to its own write", async () => {
+    const { world, flows, client, waits, readList, waitForStep } = await setup();
+    let finish!: (server: McpServer) => void;
+    client.mcpServer.finishSignIn.mockImplementationOnce(
+      () =>
+        new Promise<McpServer>((done) => {
+          finish = done;
+        }),
+    );
+    const attempt = flows.openToken("s-docs", "docs");
+    await flows.startSignIn(attempt);
+    await waitForStep(attempt, "waiting");
+    waits[0]!.resolve({ kind: "received", callbackQuery: CALLBACK });
+    await waitForStep(attempt, "finishing");
+
+    world.gone = true;
+    await readList();
+
+    expect(flows.readState(attempt)).toMatchObject({
+      kind: "signing-in",
+      step: { kind: "finishing" },
+    });
+    finish(world.record);
   });
 });
 

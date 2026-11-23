@@ -16,6 +16,7 @@ export {
   suggestServerName,
   type AddFormReading,
   type FieldIssues,
+  type SignInEntry,
   type TokenFieldReading,
   type TokenFormWords,
 } from "./add-by-url";
@@ -28,6 +29,8 @@ export {
   type RefusalDescription,
 } from "./add-refusal";
 export {
+  CHECK_ANSWER_WAIT_MILLIS,
+  IDLE_CHECK_NOW,
   NEW_SERVER_NOTE,
   createMcpUrlServerFlows,
   decideFollowing,
@@ -38,6 +41,7 @@ export {
   describeReadyTools,
   findOrCreateMcpUrlServerFlows,
   type BrowserSignInPort,
+  type CheckNowState,
   type EndReason,
   type FailedCheckWords,
   type FlowProblem,
@@ -94,6 +98,7 @@ export {
   buildOfferSwitchTarget,
   buildServerSwitchTarget,
   createMcpServerSwitches,
+  decideReplaceLock,
   decideServerPageSwitch,
   findOrCreateMcpServerSwitches,
   type ServerPageSwitch,

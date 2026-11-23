@@ -165,6 +165,7 @@ export function ThreadPlusMenu({
           client={client}
           server={signingInServer}
           openedOn="elsewhere"
+          entry="sign-in"
           onClose={() => {
             setSigningIn(null);
           }}

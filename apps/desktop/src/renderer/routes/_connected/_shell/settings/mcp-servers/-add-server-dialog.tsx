@@ -130,7 +130,7 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
           state={state}
           tokenWords={
             state.kind === "following" && state.server !== null
-              ? describeAttemptTokenForm(state.server, state)
+              ? describeAttemptTokenForm(state.server, state, "sign-in")
               : null
           }
           openAction={describeOpenServerAction(state, "elsewhere")}

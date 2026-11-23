@@ -1,7 +1,11 @@
 import { useState, type JSX } from "react";
 import type { HerculeClient } from "@hercule/client-core";
 import type { McpServer } from "@hercule/contract";
-import { describeClosing, describeSignInHeading } from "@hercule/client-core/mcp-servers";
+import {
+  describeClosing,
+  describeSignInHeading,
+  type SignInEntry,
+} from "@hercule/client-core/mcp-servers";
 import { useUrlServerFlow } from "../../app/mcp-url-server-flow";
 import { ModalDialog } from "../modal-dialog";
 import { FollowSteps } from "./follow-steps";
@@ -18,16 +22,20 @@ import { TokenForm } from "./token-form";
  * `server` is the record the button was drawn from. The dialog reads a newer
  * one once it has written. `openedOn` is whether the dialog sits on the
  * server's own page, which decides whether "Open <name>" leads anywhere.
+ * `entry` is the button that opened the dialog, which decides its first step
+ * even when the record changes after the press.
  */
 export function TokenDialog({
   client,
   server,
   openedOn,
+  entry,
   onClose,
 }: {
   readonly client: HerculeClient;
   readonly server: McpServer;
   readonly openedOn: "server-page" | "elsewhere";
+  readonly entry: SignInEntry;
   readonly onClose: () => void;
 }): JSX.Element {
   const flow = useUrlServerFlow(client, {
@@ -45,6 +53,7 @@ export function TokenDialog({
         <TokenForm
           server={server}
           problem={state.problem}
+          entry={entry}
           refusal={null}
           closingNote={describeClosing(state)}
           onSubmit={flow.submitToken}
@@ -57,6 +66,7 @@ export function TokenDialog({
           state={state}
           fallbackServer={server}
           openedOn={openedOn}
+          entry={entry}
           onClose={onClose}
         />
       )}

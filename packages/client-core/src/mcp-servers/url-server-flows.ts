@@ -28,6 +28,10 @@
  *
  * What the rules are for:
  *
+ * - A dialog kept by a server's id follows the server's list while it waits
+ *   for the user or the browser: when the server is deleted, or moved onto a
+ *   plugin's Connection, the attempt ends with that reason and its listener
+ *   is retired, so a return that comes later finishes nothing.
  * - The id comes from the dialog's own acknowledged create. The record is
  *   then read by that id and never taken from a write's reply, and no reply is
  *   cached. The read starts after the acknowledgement and cancels one that was
@@ -333,8 +337,9 @@ export interface OpenServerAction {
  *
  * - `server-page` is a dialog opened on the server's own page: never.
  * - `elsewhere` is a dialog opened from the list (Add) or from a thread: when
- *   the check failed, when the server moved onto a Connection, and, for a
- *   server this dialog just created, when it is ready.
+ *   the check failed, when the server is switched off, when the server moved
+ *   onto a Connection, and, for a server this dialog just created, when it is
+ *   ready.
  *
  * It does not draw the new server's footer (`NEW_SERVER_NOTE`), which belongs
  * to a ready server this attempt created and nothing else.
@@ -351,11 +356,32 @@ export const describeOpenServerAction = (
   }
   if (state.kind !== "following") return null;
   const { outcome } = state;
-  const leads = outcome.kind === "failed" || (outcome.kind === "ready" && outcome.newServer);
+  const leads =
+    outcome.kind === "failed" ||
+    outcome.kind === "off" ||
+    (outcome.kind === "ready" && outcome.newServer);
   return leads
     ? { mcpServerId: state.mcpServerId, label: `Open ${state.server?.name ?? "server"}` }
     : null;
 };
+
+/** What "Check now" of an attempt shows. */
+export interface CheckNowState {
+  /** True from the press until the followed server's record changes, which is the check's answer. A second press does nothing meanwhile. */
+  readonly busy: boolean;
+  /** Why the controller refused the check, or `null`. */
+  readonly error: string | null;
+}
+
+/** "Check now" before it was pressed, and for an attempt that is not open. */
+export const IDLE_CHECK_NOW: CheckNowState = { busy: false, error: null };
+
+/**
+ * How long "Check now" waits for the record to change. A check that finds
+ * what the last one found changes nothing the record shows, and the
+ * controller announces nothing for it, so the wait must end by itself.
+ */
+export const CHECK_ANSWER_WAIT_MILLIS = 30_000;
 
 /** The footer a new server's dialog ends with, under "ready · N tools". */
 export const NEW_SERVER_NOTE =
@@ -462,12 +488,16 @@ export interface McpUrlServerFlows {
   readonly openSignInPage: (attemptId: string) => Promise<void>;
   /**
    * Asks the controller to check the server the attempt follows again, then
-   * reads the server and the list again, so the attempt shows `checking` at
-   * once and does not wait for the push. Resolves to the controller's reason
+   * reads the server and the list again. The controller acknowledges the
+   * request and checks later, leaving the record as it was until the check
+   * has an answer, so `readCheck` is `busy` until the record changes (or
+   * `CHECK_ANSWER_WAIT_MILLIS` pass). Resolves to the controller's reason
    * when it refused the check, or `null`. Does nothing, and resolves to
-   * `null`, when the attempt follows no server.
+   * `null`, when the attempt follows no server or a check is pending.
    */
   readonly checkNow: (attemptId: string) => Promise<string | null>;
+  /** Returns what "Check now" shows. The object stays the same until it changes. */
+  readonly readCheck: (attemptId: string) => CheckNowState;
   /** Ends the sign-in that is starting, waiting or refused, and returns the attempt to where it was. */
   readonly cancelSignIn: (attemptId: string) => void;
   /** Reads the followed server again, after `read-failed`. */
@@ -538,6 +568,14 @@ interface Attempt {
   signInRun: number;
   /** Stops watching the list of servers for the record the dialog was opened for. */
   stopWatchingList: () => void;
+  /** The ids that the authoritative read of one server found deleted. A list read that started earlier must not bring them back. */
+  readonly deletedServerIds: Set<string>;
+  /** What "Check now" shows. */
+  check: CheckNowState;
+  /** What the followed record held when "Check now" was pressed, or `null` while none is pending or none was read. */
+  checkedRecord: { readonly updatedAt: string; readonly checkedAt: string | null } | null;
+  /** Ends a pending "Check now" that got no answer, or `null`. */
+  checkTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Describes what closing the dialog does, from the attempt's state: a sentence for the dialog to show, or `null` when closing says nothing new. */
@@ -598,6 +636,10 @@ export const createMcpUrlServerFlows = ({
       | "listenerId"
       | "signInRun"
       | "stopWatchingList"
+      | "deletedServerIds"
+      | "check"
+      | "checkedRecord"
+      | "checkTimer"
     >,
   ) => {
     opened += 1;
@@ -613,6 +655,10 @@ export const createMcpUrlServerFlows = ({
       listenerId: null,
       signInRun: 0,
       stopWatchingList: () => {},
+      deletedServerIds: new Set(),
+      check: IDLE_CHECK_NOW,
+      checkedRecord: null,
+      checkTimer: null,
     };
     attempts.set(id, created);
     created.stopWatchingList = watchList(id, created);
@@ -620,16 +666,22 @@ export const createMcpUrlServerFlows = ({
   };
 
   /**
-   * Reviews the records the form of an attempt stands on whenever the list of
-   * servers is read again (a live push reads it), so a form never keeps
-   * pointing at what is gone:
+   * Reviews the records an attempt stands on whenever the list of servers is
+   * read again (a live push reads it), so a dialog never keeps pointing at
+   * what is gone:
    *
-   * - a token form of a server that was deleted, or that is reached with a
+   * - a token dialog of a server that was deleted, or that is reached with a
    *   plugin's Connection now, ends with `gone` or `moved`, so the dialog can
-   *   say so before it closes;
+   *   say so before it closes. It does so while it shows the form and while
+   *   it starts, waits for or has refused a sign-in through the browser (the
+   *   listener of the browser's return is retired then). A write that is being
+   *   finished decides for itself;
    * - the duplicate an Add refusal points at is `gone` once the list lacks it,
    *   and `found` with its current name while it is there, so the refusal's
-   *   button never leads to a page that does not exist.
+   *   button never leads to a page that does not exist. A duplicate that its
+   *   own read found deleted stays `gone`, and one whose read is still running
+   *   is left to that read, because a list that started before it can lack a
+   *   server that was added a moment ago.
    *
    * Returns the function that stops watching.
    */
@@ -645,30 +697,52 @@ export const createMcpUrlServerFlows = ({
         return;
       }
       const servers = cache.readServers();
-      const { state } = attempt;
-      if (servers === undefined || state.kind !== "form") return;
-      if (attempt.kind === "token" && attempt.mcpServerId !== null) {
-        const record = servers.find((server) => server.id === attempt.mcpServerId);
-        if (record !== undefined && record.source.kind === "url") return;
-        commit(attempt, {
-          kind: "ended",
-          reason: record === undefined ? "gone" : "moved",
-          mcpServerId: attempt.mcpServerId,
-          name: record?.name ?? attempt.name,
-          message: null,
-        });
-      } else if (state.problem?.kind === "exists") {
-        const { problem } = state;
-        const record = servers.find((server) => server.id === problem.mcpServerId);
-        const existing: ExistingServer =
-          record === undefined ? { kind: "gone" } : { kind: "found", name: record.name };
-        const same =
-          problem.existing.kind === existing.kind &&
-          (existing.kind !== "found" ||
-            (problem.existing.kind === "found" && problem.existing.name === existing.name));
-        if (!same) commit(attempt, { kind: "form", problem: { ...problem, existing } });
-      }
+      if (servers !== undefined) reviewList(attempt, servers);
     });
+  };
+
+  const reviewList = (attempt: Attempt, servers: readonly McpServer[]): void => {
+    const { state, mcpServerId } = attempt;
+    const waitsForUser =
+      state.kind === "form" || (state.kind === "signing-in" && state.step.kind !== "finishing");
+    if (attempt.kind === "token" && mcpServerId !== null) {
+      if (!waitsForUser) return;
+      const record = servers.find((server) => server.id === mcpServerId);
+      if (record !== undefined && record.source.kind === "url") return;
+      endAttempt(attempt, {
+        kind: "ended",
+        reason: record === undefined ? "gone" : "moved",
+        mcpServerId,
+        name: record?.name ?? attempt.name,
+        message: null,
+      });
+      return;
+    }
+    if (state.kind !== "form" || state.problem?.kind !== "exists") return;
+    const { problem } = state;
+    if (attempt.deletedServerIds.has(problem.mcpServerId)) return;
+    const record = servers.find((server) => server.id === problem.mcpServerId);
+    if (record === undefined && problem.existing.kind === "reading") return;
+    const existing: ExistingServer =
+      record === undefined ? { kind: "gone" } : { kind: "found", name: record.name };
+    const same =
+      problem.existing.kind === existing.kind &&
+      (existing.kind !== "found" ||
+        (problem.existing.kind === "found" && problem.existing.name === existing.name));
+    if (!same) commit(attempt, { kind: "form", problem: { ...problem, existing } });
+  };
+
+  /** Ends the attempt with `ended`: it stops following, its browser sign-in is retired, and a pending "Check now" is dropped. */
+  const endAttempt = (
+    attempt: Attempt,
+    ended: Extract<UrlServerFlowState, { kind: "ended" }>,
+  ): void => {
+    attempt.stopFollowing?.();
+    attempt.stopFollowing = null;
+    stopSignIn(attempt);
+    attempt.stateBeforeSignIn = null;
+    stopCheck(attempt);
+    commit(attempt, ended);
   };
 
   /** Returns the attempt if it is still the one the dialog `id` holds, so a reply of a closed or replaced attempt changes nothing. */
@@ -686,10 +760,7 @@ export const createMcpUrlServerFlows = ({
       problem: state.kind === "following" ? state.problem : null,
     });
     if (decided.kind === "ended") {
-      attempt.stopFollowing?.();
-      attempt.stopFollowing = null;
-      stopSignIn(attempt);
-      commit(attempt, { ...decided, name: decided.name ?? attempt.name });
+      endAttempt(attempt, { ...decided, name: decided.name ?? attempt.name });
     } else if (state.kind === "following") {
       commit(attempt, decided);
     }
@@ -734,6 +805,7 @@ export const createMcpUrlServerFlows = ({
     if (!isCurrent(id, attempt)) return;
     const read = (reading: RecordReading): void => {
       attempt.reading = reading;
+      answerCheck(attempt);
       decideAgain(attempt);
     };
     const stopCache = queryClient.getQueryCache().subscribe((event) => {
@@ -776,10 +848,14 @@ export const createMcpUrlServerFlows = ({
     attempt: Attempt,
     problem: Extract<FlowProblem, { kind: "exists" }>,
   ): Promise<void> => {
+    // The dialog may have a newer refusal for the same server by now, which this answer is still true of.
     const settle = (existing: ExistingServer): void => {
       const { state } = attempt;
-      if (!isCurrent(id, attempt) || state.kind !== "form" || state.problem !== problem) return;
-      commit(attempt, { kind: "form", problem: { ...problem, existing } });
+      if (!isCurrent(id, attempt) || state.kind !== "form") return;
+      if (state.problem?.kind !== "exists" || state.problem.mcpServerId !== problem.mcpServerId) {
+        return;
+      }
+      commit(attempt, { kind: "form", problem: { ...state.problem, existing } });
     };
     const cached = cache.readServers()?.find((server) => server.id === problem.mcpServerId);
     if (cached !== undefined) {
@@ -796,11 +872,13 @@ export const createMcpUrlServerFlows = ({
       });
       settle({ kind: "found", name: server.name });
     } catch (error) {
-      settle(
-        error instanceof ApiError && error.code === "not_found"
-          ? { kind: "gone" }
-          : { kind: "unknown" },
-      );
+      if (error instanceof ApiError && error.code === "not_found") {
+        // Ids are never used again, so no list read may bring this server back.
+        if (isCurrent(id, attempt)) attempt.deletedServerIds.add(problem.mcpServerId);
+        settle({ kind: "gone" });
+      } else {
+        settle({ kind: "unknown" });
+      }
     }
   };
 
@@ -1144,22 +1222,69 @@ export const createMcpUrlServerFlows = ({
     });
   };
 
+  /** Replaces what "Check now" shows, and ends the wait for an answer when the check is no longer pending. */
+  const setCheck = (attempt: Attempt, check: CheckNowState): void => {
+    attempt.check = check;
+    if (!check.busy) {
+      attempt.checkedRecord = null;
+      if (attempt.checkTimer !== null) clearTimeout(attempt.checkTimer);
+      attempt.checkTimer = null;
+    }
+    for (const listener of listeners) listener();
+  };
+
+  /** Drops a pending "Check now" without a word, for an attempt that goes away. */
+  const stopCheck = (attempt: Attempt): void => {
+    if (attempt.checkTimer !== null) clearTimeout(attempt.checkTimer);
+    attempt.checkTimer = null;
+    attempt.checkedRecord = null;
+    attempt.check = IDLE_CHECK_NOW;
+  };
+
+  /** Ends the wait of a pending "Check now" when the followed record is not the one that was there at the press. */
+  const answerCheck = (attempt: Attempt): void => {
+    const { reading, checkedRecord } = attempt;
+    if (!attempt.check.busy || reading.kind !== "found") return;
+    const { updatedAt, checkedAt } = reading.server;
+    if (
+      checkedRecord === null ||
+      checkedRecord.updatedAt !== updatedAt ||
+      checkedRecord.checkedAt !== checkedAt
+    ) {
+      setCheck(attempt, IDLE_CHECK_NOW);
+    }
+  };
+
   const checkNow = async (id: string): Promise<string | null> => {
     const attempt = attempts.get(id);
-    if (attempt === undefined || attempt.mcpServerId === null) return null;
-    const { mcpServerId } = attempt;
+    if (attempt === undefined || attempt.mcpServerId === null || attempt.check.busy) return null;
+    const { mcpServerId, reading } = attempt;
+    attempt.checkedRecord =
+      reading.kind === "found"
+        ? { updatedAt: reading.server.updatedAt, checkedAt: reading.server.checkedAt }
+        : null;
+    setCheck(attempt, { busy: true, error: null });
     let reason: string | null = null;
     try {
       await client.mcpServer.check({ params: { id: mcpServerId } });
     } catch (error) {
       reason = readErrorMessage(error);
     }
-    // Read again whether or not the check was accepted, so the status shows without the push.
+    // Read again whether or not the check was accepted. The record may still be as it was: the
+    // controller acknowledges the request and writes the answer when the check ends.
     void queryClient.invalidateQueries({
       queryKey: cache.readServerQuery(mcpServerId).queryKey,
       exact: true,
     });
     readCatalogueAgain();
+    if (!isCurrent(id, attempt)) return reason;
+    if (reason !== null) {
+      setCheck(attempt, { busy: false, error: reason });
+    } else if (attempt.check.busy) {
+      attempt.checkTimer = setTimeout(() => {
+        setCheck(attempt, IDLE_CHECK_NOW);
+      }, CHECK_ANSWER_WAIT_MILLIS);
+    }
     return reason;
   };
 
@@ -1229,6 +1354,7 @@ export const createMcpUrlServerFlows = ({
       if (attempt !== undefined) await openSignInPage(id, attempt, attempt.signInRun);
     },
     checkNow,
+    readCheck: (id) => attempts.get(id)?.check ?? IDLE_CHECK_NOW,
     cancelSignIn: (id) => {
       const attempt = attempts.get(id);
       if (attempt === undefined || attempt.state.kind !== "signing-in") return;
@@ -1255,6 +1381,7 @@ export const createMcpUrlServerFlows = ({
       attempt.stopFollowing?.();
       attempt.stopWatchingList();
       stopSignIn(attempt);
+      stopCheck(attempt);
       attempts.delete(id);
       for (const listener of listeners) listener();
     },

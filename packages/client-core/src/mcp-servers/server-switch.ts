@@ -23,7 +23,7 @@
  * The module has no React in it. An app passes its cache's shapes in a
  * `McpServerSwitchCache` and subscribes its controls to `readState`.
  */
-import type { QueryClient, QueryKey } from "@tanstack/query-core";
+import { matchQuery, type QueryClient, type QueryKey } from "@tanstack/query-core";
 import type { McpServer } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError, readErrorMessage } from "../errors";
@@ -76,14 +76,19 @@ export type ReplaceProgress =
   | { readonly kind: "choosing" }
   /** The user confirmed `serverId`. The write, or the read of the list after it, is not done. The dialog keeps `serverId` selected. */
   | { readonly kind: "writing"; readonly serverId: string }
-  /** The write of `serverId` succeeded, and the list shows it on the offer's Connection. */
+  /**
+   * The write of `serverId` succeeded, and the list read after the write's
+   * acknowledgement shows it on the offer's Connection.
+   */
   | { readonly kind: "replaced"; readonly serverId: string }
   /**
    * Nothing was replaced. `message` says why. `winnerServerId` is the server
    * that holds the offer's Connection when there is one, which the dialog
    * links to: another client's server that appeared while the user was
    * choosing or while the confirmed write was held, or the one the controller
-   * named. `serverId` is the one the user confirmed, or `null`.
+   * named. It is `null` when the confirmed server was removed or moved after
+   * the write, so nothing holds the Connection. `serverId` is the one the user
+   * confirmed, or `null`.
    */
   | {
       readonly kind: "refused";
@@ -91,6 +96,18 @@ export type ReplaceProgress =
       readonly message: string;
       readonly winnerServerId: string | null;
     };
+
+/**
+ * Returns the id of the server whose confirmation holds the Replace dialog's
+ * selection, or `null` when the user may choose. The selection is held from the
+ * confirmation until the attempt settles: while the write or the read after it
+ * runs (`blocked`), and once it is `replaced`. A refusal that settled (not
+ * `blocked`) releases it, so the user picks again; the dialog keeps the reason.
+ */
+export const decideReplaceLock = (progress: ReplaceProgress, blocked: boolean): string | null =>
+  progress.kind === "choosing" || (progress.kind === "refused" && !blocked)
+    ? null
+    : progress.serverId;
 
 /** What the switch on a server's page shows. */
 export interface ServerPageSwitch {
@@ -222,13 +239,33 @@ export interface McpServerSwitches {
    * target that is not the confirmed server, or that appeared before any
    * confirmation, is a winner: it is `refused` with a link to it, never
    * `replaced`, whether it arrives before the press or while the write is
-   * held. `replaced` needs the confirmed server's own record. A target that is
-   * not a plugin's is always `choosing`.
+   * held. `replaced` needs the confirmed server's own record in the list that
+   * was read after the write was acknowledged: until that read answers the
+   * progress stays `writing`, and when it answers without the record
+   * (deleted or moved meanwhile) the progress is `refused`, never `writing`
+   * again. A target that is not a plugin's is always `choosing`.
+   *
+   * The returned object is the same one while nothing it shows changed.
    */
   readonly readReplaceProgress: (target: McpServerSwitchTarget) => ReplaceProgress;
+  /**
+   * Calls `listener` whenever `readReplaceProgress` may return something else:
+   * when a switch changes, when the list of servers changes, and when a
+   * confirmation is made or dropped. Other changes of the query cache do not
+   * call it. Returns the function that stops it.
+   */
+  readonly subscribeReplaceProgress: (listener: () => void) => () => void;
+  /**
+   * Counts the caller as a Replace dialog that reads the progress of the
+   * plugin target. The confirmed server is kept while one does. After the last
+   * one has left, it is dropped once the write is settled and the refusal is
+   * gone, so a later dialog for the same offer starts from `choosing`. Returns
+   * the function that detaches.
+   */
+  readonly attachReplaceReader: (target: McpServerSwitchTarget) => () => void;
   /** Returns what a control shows of the target. */
   readonly readState: (target: McpServerSwitchTarget) => McpListEditState;
-  /** Forgets the target's refusal, when the user dismisses it. */
+  /** Forgets the target's refusal, when the user dismisses it. For a Replace, the confirmed server is dropped with it once no dialog reads it. */
   readonly clearRefusal: (target: McpServerSwitchTarget) => void;
   /**
    * Counts the caller as a control that shows the target's state. A refusal
@@ -258,6 +295,8 @@ const readExistingServerId = (failure: unknown): { readonly existingServerId?: s
 const KEEP_REFUSAL = Symbol("keep refusal");
 
 const HANDLED: McpServerSwitchPress = { kind: "handled" };
+
+const CHOOSING: ReplaceProgress = { kind: "choosing" };
 
 const buildTargetKey = (target: McpServerSwitchTarget): string =>
   target.kind === "plugin"
@@ -297,14 +336,62 @@ export const createMcpServerSwitches = ({
    * belongs to, so it is dropped when the guard drops the refusal.
    */
   const pressedAgainst = new Map<string, string | null | typeof KEEP_REFUSAL>();
+  /** Where the Replace of an offer was confirmed, and how far its write got. */
+  interface ReplaceAttempt {
+    readonly serverId: string;
+    /** True once the controller acknowledged the write. */
+    saved: boolean;
+    /** True once the list read after the write answered. */
+    listRead: boolean;
+  }
+  const confirmedReplaces = new Map<string, ReplaceAttempt>();
+  const replaceReaders = new Map<string, number>();
+  const replaceListeners = new Set<() => void>();
+  const notifyReplace = (): void => {
+    for (const listener of [...replaceListeners]) listener();
+  };
+
+  /** Drops the confirmation of the offer when no dialog reads it, its write is settled and its refusal is gone. */
+  const dropSettledConfirmation = (key: string): void => {
+    if (!confirmedReplaces.has(key) || (replaceReaders.get(key) ?? 0) > 0) return;
+    const { refusal, blocked } = guard.readState(key);
+    if (refusal !== null || blocked) return;
+    confirmedReplaces.delete(key);
+    notifyReplace();
+  };
+
   guard.subscribe(() => {
     for (const key of pressedAgainst.keys()) {
       const { refusal, blocked } = guard.readState(key);
       if (refusal === null && !blocked) pressedAgainst.delete(key);
     }
+    for (const key of [...confirmedReplaces.keys()]) dropSettledConfirmation(key);
   });
-  const readReplaceProgress = (target: McpServerSwitchTarget): ReplaceProgress => {
-    if (target.kind !== "plugin") return { kind: "choosing" };
+
+  const lastProgress = new Map<string, ReplaceProgress>();
+  /** Returns `progress`, or the object returned before when it shows the same, so a reader can compare by identity. */
+  const keepStable = (key: string, progress: ReplaceProgress): ReplaceProgress => {
+    if (progress.kind === "choosing") {
+      lastProgress.delete(key);
+      return progress;
+    }
+    const before = lastProgress.get(key);
+    const same =
+      before !== undefined &&
+      before.kind === progress.kind &&
+      before.serverId === progress.serverId &&
+      (before.kind !== "refused" ||
+        (progress.kind === "refused" &&
+          before.message === progress.message &&
+          before.winnerServerId === progress.winnerServerId));
+    if (same) return before;
+    lastProgress.set(key, progress);
+    return progress;
+  };
+
+  const decideReplaceProgress = (
+    target: McpServerSwitchTarget & { kind: "plugin" },
+  ): ReplaceProgress => {
     const key = buildTargetKey(target);
     const confirmed = confirmedReplaces.get(key);
     const record = findRecord(cache.readServers() ?? [], target);
@@ -326,14 +413,24 @@ export const createMcpServerSwitches = ({
         winnerServerId: winner,
       };
     }
-    if (confirmed === undefined) return { kind: "choosing" };
-    return record?.id === confirmed.serverId && confirmed.saved
-      ? { kind: "replaced", serverId: confirmed.serverId }
-      : { kind: "writing", serverId: confirmed.serverId };
+    if (confirmed === undefined) return CHOOSING;
+    if (!confirmed.saved || !confirmed.listRead)
+      return { kind: "writing", serverId: confirmed.serverId };
+    return record === undefined
+      ? {
+          kind: "refused",
+          serverId: confirmed.serverId,
+          message:
+            "The server you chose was removed or moved by another client right after the write, so it is not on this Connection.",
+          winnerServerId: null,
+        }
+      : { kind: "replaced", serverId: confirmed.serverId };
   };
+  const readReplaceProgress = (target: McpServerSwitchTarget): ReplaceProgress =>
+    target.kind !== "plugin"
+      ? CHOOSING
+      : keepStable(buildTargetKey(target), decideReplaceProgress(target));
   const stateWithoutRefusal = new WeakMap<McpListEditState, McpListEditState>();
-  /** The server each offer's Replace was confirmed for, and whether its write succeeded. Dropped with the refusal. */
-  const confirmedReplaces = new Map<string, { readonly serverId: string; saved: boolean }>();
 
   /**
    * Runs the write, then reads the list of servers again, on its own
@@ -344,17 +441,22 @@ export const createMcpServerSwitches = ({
    *
    * `keys` are the targets the write holds, the first one carries the
    * refusal. `pageIds` are the servers whose pages the write may have changed.
+   * `onListRead` is called, before the keys are released, once a read of the
+   * list after the write has succeeded: at once, or later when the first read
+   * failed or is held.
    */
   const run = async ({
     keys,
     pageIds,
     write,
     failurePrefix = "",
+    onListRead,
   }: {
     readonly keys: readonly [string, ...string[]];
     readonly pageIds: readonly string[];
     readonly write: () => Promise<unknown>;
     readonly failurePrefix?: string;
+    readonly onListRead?: () => void;
   }): Promise<void> => {
     let saved = false;
     let failure: unknown = undefined;
@@ -370,6 +472,7 @@ export const createMcpServerSwitches = ({
     // A refusal can mean the cache was out of date, such as the `conflict` of a second server for one Connection.
     const read = await readBaseAfterWrite(queryClient, cache.readCatalogue());
     const wasRead = read.hasSucceeded();
+    if (onListRead !== undefined && saved) read.whenSucceeded(onListRead);
     if (wasRead) read.stop();
     const refusal: McpListRefusal | null = saved
       ? null
@@ -432,6 +535,8 @@ export const createMcpServerSwitches = ({
       const offerKey = buildTargetKey(target);
       const chosenKey = buildTargetKey({ kind: "url", serverId });
       if (guard.isBlocked(offerKey) || guard.isBlocked(chosenKey)) return;
+      // A new press starts a new attempt: what an earlier one confirmed is not this one's.
+      if (confirmedReplaces.delete(offerKey)) notifyReplace();
       /** The refusal stays whatever the cache shows of the target later: a winner that appears is what it points at. */
       const refuse = (message: string, existingServerId?: string): void => {
         pressedAgainst.set(offerKey, KEEP_REFUSAL);
@@ -462,7 +567,7 @@ export const createMcpServerSwitches = ({
       pressedAgainst.set(offerKey, KEEP_REFUSAL);
       guard.start(offerKey);
       guard.start(chosenKey);
-      const confirmed = { serverId, saved: false };
+      const confirmed: ReplaceAttempt = { serverId, saved: false, listRead: false };
       confirmedReplaces.set(offerKey, confirmed);
       const { contributionId, connectionId } = target;
       void run({
@@ -476,9 +581,42 @@ export const createMcpServerSwitches = ({
           confirmed.saved = true;
         },
         failurePrefix: "Nothing was replaced. ",
+        onListRead: () => {
+          confirmed.listRead = true;
+        },
       });
     },
     readReplaceProgress,
+    subscribeReplaceProgress: (listener) => {
+      const stopSwitches = guard.subscribe(listener);
+      const stopCache = queryClient.getQueryCache().subscribe((event) => {
+        if (
+          (event.type === "added" || event.type === "updated" || event.type === "removed") &&
+          matchQuery({ queryKey: cache.readCatalogue().queryKey, exact: true }, event.query)
+        ) {
+          listener();
+        }
+      });
+      replaceListeners.add(listener);
+      return () => {
+        stopSwitches();
+        stopCache();
+        replaceListeners.delete(listener);
+      };
+    },
+    attachReplaceReader: (target) => {
+      const key = buildTargetKey(target);
+      replaceReaders.set(key, (replaceReaders.get(key) ?? 0) + 1);
+      let attachedNow = true;
+      return () => {
+        if (!attachedNow) return;
+        attachedNow = false;
+        const count = (replaceReaders.get(key) ?? 1) - 1;
+        if (count === 0) replaceReaders.delete(key);
+        else replaceReaders.set(key, count);
+        dropSettledConfirmation(key);
+      };
+    },
     readState: (target) => {
       const key = buildTargetKey(target);
       const state = guard.readState(key);
@@ -497,7 +635,6 @@ export const createMcpServerSwitches = ({
     },
     clearRefusal: (target) => {
       guard.clearRefusal(buildTargetKey(target));
-      confirmedReplaces.delete(buildTargetKey(target));
     },
     attach: (target) => guard.attach(buildTargetKey(target)),
     subscribe: guard.subscribe,

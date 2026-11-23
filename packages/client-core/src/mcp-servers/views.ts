@@ -264,8 +264,11 @@ export const describeRemoveEffect = (view: McpServerView): string => {
 
 /** The Sign-in row on the page of a server added by URL. */
 export interface SignInRow {
-  /** What the server holds: "None needed", "A token" or "OAuth". */
-  readonly value: "None needed" | "A token" | "OAuth";
+  /**
+   * What the server holds: "None needed", "Not signed in" (the server needs a
+   * sign-in it does not hold yet), "A token" or "OAuth".
+   */
+  readonly value: "None needed" | "Not signed in" | "A token" | "OAuth";
   /**
    * The row's button, or `null` for none: "Replace token…" while the server
    * holds a pasted token and does not need sign-in. A server that needs sign-in
@@ -283,8 +286,13 @@ export interface SignInRow {
 export const describeSignInRow = (view: McpServerView): SignInRow | null => {
   const { source } = view.server;
   if (source.kind === "plugin") return null;
-  if (source.signIn === "none") return { value: "None needed", action: null };
   const needsSignIn = MCP_SERVER_STATUS_FACTS[view.displayStatus].needsSignIn;
+  // A server that offers OAuth and was never signed in holds nothing yet, but
+  // "None needed" would contradict the band saying it needs sign-in. The band
+  // holds the page's one button, so the row has none.
+  if (source.signIn === "none") {
+    return { value: needsSignIn ? "Not signed in" : "None needed", action: null };
+  }
   if (source.signIn === "oauth") {
     return {
       value: "OAuth",

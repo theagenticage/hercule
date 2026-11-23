@@ -266,6 +266,20 @@ describe("the page of a server added by URL", () => {
         }),
       ),
     ).toEqual({ value: "None needed", action: null });
+    // A server that offers OAuth and was never signed in must not say "None needed" under a band that says it needs sign-in.
+    expect(
+      row(
+        URL_SERVER({
+          status: "needs-sign-in",
+          source: {
+            kind: "url",
+            url: "https://a.example/mcp",
+            signIn: "none",
+            signInOffered: "oauth",
+          },
+        }),
+      ),
+    ).toEqual({ value: "Not signed in", action: null });
     expect(
       row(
         URL_SERVER({

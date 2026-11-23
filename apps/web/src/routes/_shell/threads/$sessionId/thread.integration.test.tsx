@@ -6297,6 +6297,69 @@ describe("Thread: the MCP servers of the + menu", () => {
     });
   });
 
+  it.each([
+    [
+      "deleted",
+      (): readonly McpServer[] => [],
+      /docs was removed, so there is nothing more to do here\./,
+    ],
+    [
+      "moved onto a Connection",
+      (server: McpServer): readonly McpServer[] => [
+        {
+          ...server,
+          source: {
+            kind: "plugin",
+            contributionId: "sentry/sentry",
+            connectionId: findServerConnection(S_SENTRY_WORK).id,
+          },
+          status: "ready",
+          statusDetail: null,
+        },
+      ],
+      /docs is reached with a Connection now/,
+    ],
+  ])(
+    "ends a browser sign-in that waits for the pasted address when its server is %s meanwhile",
+    async (_name, change, words) => {
+      const user = userEvent.setup();
+      const server: McpServer = {
+        ...S_DOCS_URL,
+        source: {
+          ...S_DOCS_URL.source,
+          signIn: "none",
+          signInOffered: "oauth",
+        } as McpServer["source"],
+      };
+      let servers: readonly McpServer[] = [server];
+      const { live, api } = await openServersThread([], {
+        ...buildMcpServerRoutes(() => servers),
+        [`GET /api/v1/mcp-servers/${server.id}`]: () => ({
+          body: servers.find((each) => each.id === server.id) ?? server,
+        }),
+        [`POST /api/v1/mcp-servers/${server.id}/sign-in`]: () => ({
+          body: {
+            authorizationUrl: "https://auth.acme.example/authorize?state=abc123",
+            expiresAt: "2026-11-23T10:10:00.000Z",
+          },
+        }),
+        [`POST /api/v1/mcp-servers/${server.id}/sign-in/finish`]: () => ({ body: server }),
+      });
+      const submenu = await openServersSubmenu(user);
+      await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+      await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
+      await within(dialog).findByText("Finish in your browser");
+
+      servers = change(server);
+      await pushServerChange(live, server.id);
+
+      await within(dialog).findByText(words);
+      expect(within(dialog).queryByText("Finish in your browser")).toBeNull();
+      expect(api.calls.filter((call) => call.path.endsWith("/sign-in/finish"))).toEqual([]);
+    },
+  );
+
   it("leads from a token dialog opened on a thread to the server when its check fails", async () => {
     const user = userEvent.setup();
     let server: McpServer = S_DOCS_URL;

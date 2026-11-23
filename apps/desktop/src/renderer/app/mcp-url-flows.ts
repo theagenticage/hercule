@@ -3,7 +3,7 @@
  * `url-server-flows.ts` in client-core): how this app's query cache holds the
  * servers, and the hook the Add by URL dialog and the token dialog use.
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { isWebLink } from "@hercule/client-core";
@@ -11,8 +11,10 @@ import {
   buildMcpListQuery,
   describeTokenForm,
   findOrCreateMcpUrlServerFlows,
+  IDLE_CHECK_NOW,
   type BrowserSignInPort,
   type McpUrlServerFlows,
+  type SignInEntry,
   type TokenFormWords,
   type UrlServerFlowState,
 } from "@hercule/client-core/mcp-servers";
@@ -55,8 +57,8 @@ export type UrlServerAttemptTarget =
   | { readonly kind: "token"; readonly mcpServerId: string; readonly name: string };
 
 /**
- * Holds the id of a dialog's attempt, which the dialog's effect opens and
- * closes, so that React Strict Mode's second run of the effect opens a new
+ * Holds the id of a dialog's attempt, which the dialog's layout effect opens
+ * and closes, so that React Strict Mode's second run of the effect opens a new
  * attempt instead of reusing one that was closed. It is a small store the
  * dialog reads with `useSyncExternalStore`.
  */
@@ -91,8 +93,9 @@ export interface UrlServerAttempt {
    * Ends the attempt at once: a sign-in result or a push that arrives after
    * this call changes nothing. A dialog calls it the moment the user asks to
    * close it (Esc, the scrim, a button), not when the browser's `close` event
-   * comes later. The unmount ends the attempt too, for a dialog that goes
-   * away with its page.
+   * comes later. The unmount ends the attempt too, in a layout cleanup that
+   * runs while the dialog leaves the screen, for a dialog that goes away with
+   * its page.
    */
   readonly closeAttempt: () => void;
 }
@@ -127,7 +130,9 @@ export function useUrlServerAttempt(target: UrlServerAttemptTarget): UrlServerAt
   // Strings, not the target object, which is a new object on every render.
   const mcpServerId = target.kind === "token" ? target.mcpServerId : null;
   const name = target.kind === "token" ? target.name : null;
-  useEffect(() => {
+  // A layout effect, so the unmount retires the attempt while the dialog leaves the screen:
+  // a passive cleanup runs later, and a sign-in result that lands in between would finish.
+  useLayoutEffect(() => {
     const id =
       mcpServerId === null || name === null ? flows.openAdd() : flows.openToken(mcpServerId, name);
     slot.set(id);
@@ -148,15 +153,18 @@ export function useUrlServerAttempt(target: UrlServerAttemptTarget): UrlServerAt
 /**
  * Returns the words of the token form for the server the dialog follows,
  * `server`, with the problem the attempt's last write left, so a rejected
- * token and the unsupported browser sign-in show where they belong.
+ * token and the unsupported browser sign-in show where they belong. `entry`
+ * is the button that opened the dialog, which decides the first step.
  */
 export const describeAttemptTokenForm = (
   server: McpServer,
   state: UrlServerFlowState,
+  entry: SignInEntry,
 ): TokenFormWords =>
   describeTokenForm(
     server,
     state.kind === "form" || state.kind === "following" ? state.problem : null,
+    entry,
   );
 
 /** What a dialog calls to drive the sign-in through the browser of its attempt. */
@@ -192,7 +200,7 @@ export const buildSignInActions = (
 
 /** What `useCheckNow` returns. */
 export interface CheckNow {
-  /** Asks the controller to check the followed server again. Does nothing while a check was asked for and the answer is not in. */
+  /** Asks the controller to check the followed server again. Does nothing while a check was asked for and the record has not answered yet. */
   readonly run: () => void;
   readonly busy: boolean;
   /** Why the controller refused the check, or `null`. */
@@ -201,20 +209,16 @@ export interface CheckNow {
 
 /**
  * Returns "Check now" for the attempt `attemptId` of a dialog that follows a
- * server. The refresh itself, the read of the server and of the list that
- * shows the status `checking` at once, is `flows.checkNow`.
+ * server. The attempt keeps the request apart from the answer: it is busy
+ * until the record changes (`flows.readCheck`), not until the next read.
  */
 export function useCheckNow(flows: McpUrlServerFlows, attemptId: string | null): CheckNow {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error } = useSyncExternalStore(flows.subscribe, () =>
+    attemptId === null ? IDLE_CHECK_NOW : flows.readCheck(attemptId),
+  );
   return {
     run: () => {
-      if (busy || attemptId === null) return;
-      setBusy(true);
-      void flows.checkNow(attemptId).then((reason) => {
-        setError(reason);
-        setBusy(false);
-      });
+      if (attemptId !== null) void flows.checkNow(attemptId);
     },
     busy,
     error,

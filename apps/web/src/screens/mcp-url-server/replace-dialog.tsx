@@ -4,14 +4,16 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { Connection, McpServer } from "@hercule/contract";
 import {
+  buildOfferSwitchTarget,
   decideReplaceChoice,
+  decideReplaceLock,
   describeReplaceDialog,
   describeReplaceTitle,
   findReplaceCandidates,
   type OfferedServer,
 } from "@hercule/client-core/mcp-servers";
 import { buildButtonClassName, Button, ChoiceInput } from "@hercule/ui";
-import type { McpServerSwitch } from "../../app/mcp-server-switch";
+import { useReplaceProgress, type McpServerSwitch } from "../../app/mcp-server-switch";
 import { mcpServersQuery } from "../../app/queries";
 import { ModalDialog } from "../modal-dialog";
 
@@ -24,8 +26,11 @@ import { ModalDialog } from "../modal-dialog";
  * - `candidates` are the servers added by URL on the offer's address when the
  *   switch was pressed. With several, the user chooses which one to replace,
  *   starting from the first. The choices follow the servers as they are now.
- * - What the user confirmed stays fixed, selection included, until the
- *   write and the read of the list after it are done. When the chosen server
+ * - What the user confirmed stays fixed, selection and the server's name and
+ *   address included, until the write and the read of the list after it are
+ *   done, also when the server leaves the list meanwhile. A refusal that
+ *   settled releases the selection: the reason stays, a choice that no longer
+ *   qualifies is cleared, and the user chooses again. When the chosen server
  *   is deleted or moved while the user is still choosing, the dialog says so
  *   and writes nothing: a server that appeared since is a new choice, and
  *   needs a new press of Replace.
@@ -56,24 +61,40 @@ export function ReplaceDialog({
 }): JSX.Element {
   const servers = useSuspenseQuery(mcpServersQuery(client)).data.items;
   const [pickedId, setPickedId] = useState<string | null>(candidates[0]?.id ?? null);
-  const progress = switchServer.replaceProgress;
+  // The servers the dialog listed when the user pressed Replace. The write can move the chosen
+  // server off the list before the dialog settles, and the dialog still names it.
+  const [confirmedOptions, setConfirmedOptions] = useState<readonly McpServer[] | null>(null);
+  const progress = useReplaceProgress(client, buildOfferSwitchTarget({ offer, connection }));
   // The server the user confirmed stays selected until the write and the read after it are
   // done, also when a refusal (a winner) is already shown while the write is still held.
-  const fixedId =
-    progress.kind === "choosing" || (progress.kind === "refused" && !switchServer.blocked)
-      ? null
-      : progress.serverId;
-  const confirmed = fixedId !== null;
-  const chosenId = fixedId ?? pickedId;
+  const lockedId = decideReplaceLock(progress, switchServer.blocked);
+  const confirmed = lockedId !== null;
+  // The servers that qualify now, so a deleted one is never offered and a new one is, to be chosen.
+  const live = findReplaceCandidates(offer, servers);
+  const options = confirmed ? (confirmedOptions ?? live) : live;
+  // A refusal that settled releases the selection. A choice that no longer qualifies is cleared.
+  const choiceIsStale =
+    progress.kind === "refused" &&
+    progress.serverId !== null &&
+    !confirmed &&
+    !live.some((server) => server.id === pickedId);
+  const chosenId = lockedId ?? (choiceIsStale ? (live[0]?.id ?? null) : pickedId);
   const choice =
-    chosenId === null ? null : decideReplaceChoice({ offer, servers, chosenServerId: chosenId });
+    chosenId === null
+      ? null
+      : confirmed
+        ? {
+            kind: "chosen" as const,
+            server:
+              options.find((server) => server.id === chosenId) ??
+              candidates.find((server) => server.id === chosenId),
+          }
+        : decideReplaceChoice({ offer, servers, chosenServerId: chosenId });
   const replaced = progress.kind === "replaced";
   useEffect(() => {
     if (replaced) onClose();
   }, [replaced, onClose]);
-  const chosen = choice?.kind === "chosen" ? choice.server : null;
-  // The servers that qualify now, so a deleted one is never offered and a new one is, to be chosen.
-  const options = findReplaceCandidates(offer, servers);
+  const chosen = choice?.kind === "chosen" ? (choice.server ?? null) : null;
   const words =
     chosen === null ? null : describeReplaceDialog({ server: chosen, connection, typeName });
   const refusal = progress.kind === "refused" ? progress : null;
@@ -156,7 +177,9 @@ export function ReplaceDialog({
           disabled={chosen === null}
           aria-disabled={switchServer.blocked}
           onClick={() => {
-            if (chosen !== null && !switchServer.blocked) switchServer.replace(chosen.id);
+            if (chosen === null || switchServer.blocked) return;
+            setConfirmedOptions(options);
+            switchServer.replace(chosen.id);
           }}
         >
           Replace
