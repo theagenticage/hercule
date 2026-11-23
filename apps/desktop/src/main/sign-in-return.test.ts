@@ -4,7 +4,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Scope from "effect/Scope";
+import { answerIpcMessage } from "./ipc/message";
 import {
   AuthorizationUrlHasNoState,
   cancelWhenPageEnds,
@@ -273,5 +275,71 @@ describe("an authorization URL with no state", () => {
     );
 
     expect(error).toBeInstanceOf(AuthorizationUrlHasNoState);
+  });
+});
+
+describe("signInReturn.wait as the renderer calls it", () => {
+  const mainFrame = { origin: "app://hercule" };
+  const AUTHORIZATION_URL = "https://mcp.example/authorize?state=sentinel-state";
+
+  /**
+   * Sends `signInReturn.wait` through `answerIpcMessage` to the real service,
+   * the way the handler table in `ipc/index.ts` does. Returns the pending
+   * reply, and the lines main logged so far.
+   */
+  const askToWait = (service: SignInReturn["Service"], listenerId: string) => {
+    const logged: unknown[] = [];
+    const logger = Logger.make<unknown, void>(({ message }) => {
+      logged.push(message);
+    });
+    const reply = Effect.runPromise(
+      answerIpcMessage(
+        "signInReturn.wait",
+        ({ listenerId: id, authorizationUrl }) => service.wait(id, authorizationUrl),
+        {
+          senderFrame: mainFrame,
+          mainFrame,
+          args: [{ listenerId, authorizationUrl: AUTHORIZATION_URL }],
+        },
+      ).pipe(Effect.provide(Logger.layer([logger]))),
+    );
+    return { reply, logged };
+  };
+
+  it("hands the query to the renderer only for the matching state, and logs none of a return without or with a wrong state", async () => {
+    const consoleCalls: unknown[] = [];
+    const consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        consoleCalls.push(args);
+      }),
+    );
+    try {
+      const { service } = await openService();
+      const { listenerId, redirectUri } = await listenOn(service);
+      const { reply, logged } = askToWait(service, listenerId);
+      let answered = false;
+      void reply.then(() => {
+        answered = true;
+      });
+
+      const noState = await fetch(`${redirectUri}?code=sentinel-code-1`);
+      const wrongState = await fetch(`${redirectUri}?code=sentinel-code-2&state=sentinel-other`);
+      await Promise.all([noState.text(), wrongState.text()]);
+
+      expect([noState.status, wrongState.status]).toEqual([404, 404]);
+      expect(answered).toBe(false);
+      expect(JSON.stringify([logged, consoleCalls])).not.toContain("sentinel");
+
+      await fetch(`${redirectUri}?code=sentinel-code-3&state=sentinel-state`);
+      expect(await reply).toEqual({
+        response: {
+          _tag: "received",
+          callbackQuery: "code=sentinel-code-3&state=sentinel-state",
+        },
+      });
+      expect(JSON.stringify([logged, consoleCalls])).not.toContain("sentinel");
+    } finally {
+      for (const spy of consoleSpies) spy.mockRestore();
+    }
   });
 });

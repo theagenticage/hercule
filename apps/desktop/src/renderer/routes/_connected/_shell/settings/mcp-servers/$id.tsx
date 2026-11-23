@@ -12,8 +12,9 @@ import {
   buildServerSwitchTarget,
   decideServerPageSwitch,
   decideStatusBand,
-  describeOfferAddress,
-  readMcpServerOffers,
+  describeServerPageFields,
+  describeSignInRow,
+  type SignInEntry,
 } from "@hercule/client-core/mcp-servers";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
 import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
@@ -26,6 +27,7 @@ import {
   settingsQuery,
 } from "../../../../../app/queries";
 import { LazyConnectionSetupDialog } from "../../../../../screens/settings/connections/lazy-connection-setup-dialog";
+import { LazyTokenDialog } from "../../../../../screens/settings/mcp-servers/lazy-token-dialog";
 import {
   ServerHead,
   ServerSection,
@@ -45,7 +47,7 @@ const namesNoServer = (error: unknown): boolean =>
 
 /**
  * Settings > MCP servers, the page of one server (spec 17 §Settings, MCP
- * servers): its heading with the plugin and the address, the status band
+ * servers): its heading with the source (the plugin, or "Added by URL") and the address, the status band
  * with its one button, the Server section, Tools, Projects and Remove. The
  * header reads "Settings / MCP servers / <name>", with the list linked, and
  * has nothing on the right.
@@ -101,11 +103,8 @@ function McpServerPage(): JSX.Element {
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   // One server in, one view out.
   const view = buildMcpServerViews([query.data], connections, plugins)[0]!;
-  const { source } = query.data;
-  const offer =
-    source.kind === "plugin"
-      ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
-      : undefined;
+  // A server added by URL shows its whole address, a plugin's server the address its plugin offers.
+  const fields = describeServerPageFields(view, plugins);
   const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data), query.data.id);
   // The switch shows the server's record in the list of servers, the value a
   // press is decided on. While this page's own read shows another value, it
@@ -130,6 +129,9 @@ function McpServerPage(): JSX.Element {
     },
   });
   const [reconnecting, setReconnecting] = useState(false);
+  // The token dialog is the page's one sign-in for a server added by URL. It is opened by the band's
+  // button, "Replace token…" or "Sign in again…", and keeps the button that did, as its entry.
+  const [signingIn, setSigningIn] = useState<SignInEntry | null>(null);
   const connectionType = listConnectionTypes(plugins).find(
     (type) => type.type === view.connection?.type,
   );
@@ -146,11 +148,12 @@ function McpServerPage(): JSX.Element {
       <ServerHead
         view={view}
         plugins={plugins}
-        address={offer === undefined ? null : describeOfferAddress(offer.origin)}
+        fields={fields}
         band={band}
         busy={check.isPending}
         onBandAction={(action) => {
           if (action.kind === "check") startCheck();
+          else if (action.kind === "sign-in") setSigningIn("sign-in");
           else setReconnecting(true);
         }}
       />
@@ -166,10 +169,21 @@ function McpServerPage(): JSX.Element {
           flip.press(!pageSwitch.on);
         }}
         onCheck={startCheck}
+        onOpenSignIn={() => setSigningIn(describeSignInRow(view)?.action?.kind ?? "sign-in")}
       />
       <ToolsSection view={view} />
       <ProjectBoxes view={view} />
       <RemoveSection view={view} />
+      {signingIn !== null && (
+        <Suspense fallback={null}>
+          <LazyTokenDialog
+            mcpServerId={query.data.id}
+            openedOn="server-page"
+            entry={signingIn}
+            onClose={() => setSigningIn(null)}
+          />
+        </Suspense>
+      )}
       {reconnecting && view.connection !== undefined && connectionType !== undefined && (
         <Suspense fallback={null}>
           <LazyConnectionSetupDialog

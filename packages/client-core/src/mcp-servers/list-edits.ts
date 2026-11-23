@@ -141,7 +141,7 @@ export interface McpListEdits {
 }
 
 /** What the module decided about a choice. */
-export type McpListDecision =
+type McpListDecision =
   | { readonly kind: "write"; readonly mcpServerIds: readonly string[] }
   | { readonly kind: "unchanged" }
   /** The list names `occupantId`, another server of the name, and not the one the user saw. `serverId` is the server the user asked for. */

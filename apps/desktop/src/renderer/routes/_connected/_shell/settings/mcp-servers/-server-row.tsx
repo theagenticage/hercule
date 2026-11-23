@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { Suspense, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -8,6 +8,7 @@ import {
 import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
 import { pluginsQuery, projectsQuery } from "../../../../../app/queries";
 import { ServerRowView } from "../../../../../screens/settings/mcp-servers/server-list";
+import { LazyReplaceDialog } from "./-lazy-dialogs";
 
 /**
  * Renders one row of "From your Connections" and owns its switch (spec 17
@@ -18,23 +19,51 @@ import { ServerRowView } from "../../../../../screens/settings/mcp-servers/serve
  * controller's words. The refusal and the guard belong to the row's target,
  * not to the row, so closing the section and opening it again keeps a write
  * that still runs.
+ *
+ * Switching on a row with no record while servers added by URL sit on its
+ * address opens the Replace dialog and writes nothing.
  */
 export function ServerRow({ row }: { readonly row: McpServerSettingsRow }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const { view } = row;
-  const flip = useMcpServerSwitch(buildOfferSwitchTarget(row));
+  const offerTarget = buildOfferSwitchTarget(row);
+  const offerSwitch = useMcpServerSwitch(offerTarget);
+  // True while the Replace dialog is open.
+  const [replacing, setReplacing] = useState(false);
+  const { closeReplace } = offerSwitch;
+  // The row owns the Replace attempt: leaving the row (the user navigates away, or the offer goes)
+  // releases it, even when its dialog never finished loading. A write that runs still reconciles.
+  useEffect(() => (replacing ? closeReplace : undefined), [replacing, closeReplace]);
   return (
-    <ServerRowView
-      row={row}
-      plugins={plugins}
-      allProjects={projects}
-      busy={flip.blocked}
-      refusal={flip.problem}
-      onFlip={() => {
-        flip.press(!(view?.server.enabled ?? false));
-      }}
-    />
+    <>
+      <ServerRowView
+        row={row}
+        plugins={plugins}
+        allProjects={projects}
+        busy={offerSwitch.blocked}
+        refusal={offerSwitch.problem}
+        onFlip={() => {
+          const pressed = offerSwitch.press(!(view?.server.enabled ?? false));
+          if (pressed.kind !== "replace") return;
+          offerSwitch.openReplace({
+            connectionLabel: row.connection.label,
+            typeName: row.typeName,
+          });
+          setReplacing(true);
+        }}
+      />
+      {replacing && (
+        <Suspense fallback={null}>
+          <LazyReplaceDialog
+            target={offerTarget}
+            onClose={() => {
+              setReplacing(false);
+            }}
+          />
+        </Suspense>
+      )}
+    </>
   );
 }

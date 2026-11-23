@@ -33,6 +33,7 @@ import type {
   Profile,
   Project,
   ProviderAccount,
+  McpServer,
   Resource,
   Runner,
   Session,
@@ -64,6 +65,7 @@ import {
 import {
   MCP_SERVERS,
   S_DATADOG,
+  S_DOCS_URL,
   S_FIGMA,
   S_GITHUB,
   S_GRAFANA,
@@ -314,6 +316,16 @@ const settle = () =>
   act(async () => {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
+
+/** Pushes that the server `id` changed, once the thread holds the live topic. */
+const pushServerChange = async (live: LiveStub, id: string): Promise<void> => {
+  await waitFor(() => {
+    expect(live.topics()).toContain("mcpServer");
+  });
+  act(() => {
+    live.push("mcpServer", { _tag: "invalidate", ids: [id], kind: "updated" });
+  });
+};
 
 /** Builds a `TranscriptRow` at `position`, with `at` copied from the event. */
 const buildTranscriptRow = (position: number, event: TranscriptRow["event"]): TranscriptRow => ({
@@ -6240,6 +6252,136 @@ describe("Thread: the MCP servers of the + menu", () => {
         .getAttribute("aria-checked"),
     ).toBe("true");
   });
+
+  it("offers 'Sign in…' for a server added by URL that needs sign-in, which opens its token dialog, and names it by its name alone", async () => {
+    const user = userEvent.setup();
+    await openServersThread(
+      [S_DOCS_URL],
+      buildMcpServerRoutes(() => [S_DOCS_URL]),
+    );
+
+    const submenu = await openServersSubmenu(user);
+
+    // No Reconnect: a server added by URL has no Connection. Its address is its account, so it is not printed beside the name.
+    expect(within(submenu).queryByRole("link", { name: /Reconnect/ })).toBeNull();
+    expect(readPageText(submenu)).not.toContain("https://docs.acme.example/mcp");
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+
+    expect(await screen.findByRole("dialog", { name: "Sign in to docs" })).toBeTruthy();
+    // The menu closed to make room for the dialog.
+    expect(screen.queryByRole("dialog", { name: "Servers of this thread" })).toBeNull();
+  });
+
+  it("keeps the sign-in dialog of the submenu when its server is deleted, says so, and lets go of the topic once it is closed", async () => {
+    const user = userEvent.setup();
+    let servers: readonly McpServer[] = [S_DOCS_URL];
+    // The thread's own list is empty: only the open dialog needs the servers.
+    const { live } = await openServersThread(
+      [],
+      buildMcpServerRoutes(() => servers),
+    );
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+
+    servers = [];
+    await pushServerChange(live, S_DOCS_URL.id);
+
+    await within(dialog).findByText("docs was removed.");
+    expect(screen.getByRole("dialog", { name: "Sign in to docs" })).toBe(dialog);
+    expect(live.topics()).toContain("mcpServer");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Sign in to docs" })).toBeNull();
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
+  });
+
+  it.each([
+    ["deleted", (): readonly McpServer[] => [], /docs was removed\./],
+    [
+      "moved onto a Connection",
+      (server: McpServer): readonly McpServer[] => [
+        {
+          ...server,
+          source: {
+            kind: "plugin",
+            contributionId: "sentry/sentry",
+            connectionId: findServerConnection(S_SENTRY_WORK).id,
+          },
+          status: "ready",
+          statusDetail: null,
+        },
+      ],
+      /docs is reached with a Connection now/,
+    ],
+  ])(
+    "ends a browser sign-in that waits for the pasted address when its server is %s meanwhile",
+    async (_name, change, words) => {
+      const user = userEvent.setup();
+      const server: McpServer = {
+        ...S_DOCS_URL,
+        source: {
+          ...S_DOCS_URL.source,
+          signIn: "none",
+          signInOffered: "oauth",
+        } as McpServer["source"],
+      };
+      let servers: readonly McpServer[] = [server];
+      const { live, api } = await openServersThread([], {
+        ...buildMcpServerRoutes(() => servers),
+        [`GET /api/v1/mcp-servers/${server.id}`]: () => ({
+          body: servers.find((each) => each.id === server.id) ?? server,
+        }),
+        [`POST /api/v1/mcp-servers/${server.id}/sign-in`]: () => ({
+          body: {
+            authorizationUrl: "https://auth.acme.example/authorize?state=abc123",
+            expiresAt: "2026-11-23T10:10:00.000Z",
+          },
+        }),
+        [`POST /api/v1/mcp-servers/${server.id}/sign-in/finish`]: () => ({ body: server }),
+      });
+      const submenu = await openServersSubmenu(user);
+      await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+      await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
+      await within(dialog).findByText("Finish in your browser");
+
+      servers = change(server);
+      await pushServerChange(live, server.id);
+
+      await within(dialog).findByText(words);
+      expect(within(dialog).queryByText("Finish in your browser")).toBeNull();
+      expect(api.calls.filter((call) => call.path.endsWith("/sign-in/finish"))).toEqual([]);
+    },
+  );
+
+  it("leads from a token dialog opened on a thread to the server when its check fails", async () => {
+    const user = userEvent.setup();
+    let server: McpServer = S_DOCS_URL;
+    const { live } = await openServersThread([], {
+      ...buildMcpServerRoutes(() => [server]),
+      [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+      [`POST /api/v1/mcp-servers/${S_DOCS_URL.id}/token`]: () => {
+        server = { ...server, status: "checking", statusDetail: null };
+        return { body: server };
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    await user.type(within(dialog).getByLabelText("Token"), "abc12345-xyz");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Asking docs.acme.example for its tools…");
+
+    server = { ...server, status: "unreachable", statusDetail: "connection refused" };
+    await pushServerChange(live, S_DOCS_URL.id);
+
+    await within(dialog).findByText(/docs.acme.example could not be reached\./);
+    expect(within(dialog).getByRole("link", { name: "Open docs" }).getAttribute("href")).toBe(
+      `/settings/mcp-servers/${S_DOCS_URL.id}`,
+    );
+  });
 });
 
 describe("Thread: the lines about MCP servers", () => {
@@ -6298,6 +6440,88 @@ describe("Thread: the lines about MCP servers", () => {
     const quiet = await findLine("Retrying the request.");
     expect(quiet.className).toContain("text-muted");
     expect(within(quiet).getByText("Warning:")).toBeDefined();
+  });
+
+  it("opens the token dialog from the 'Sign in…' of a server added by URL, and saves the token", async () => {
+    const user = userEvent.setup();
+    let server = S_DOCS_URL;
+    const { api } = await openApp(
+      buildSession({ status: "idle" }),
+      buildWarningRows([{ mcpServerId: S_DOCS_URL.id, reason: "needs-sign-in" }]),
+      {
+        ...buildMcpServerRoutes(() => [server]),
+        [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+        [`POST /api/v1/mcp-servers/${S_DOCS_URL.id}/token`]: () => {
+          server = { ...server, status: "checking", statusDetail: null };
+          return { body: server };
+        },
+      },
+    );
+
+    // A server with no Connection has no Reconnect: its button opens the dialog.
+    const signIn = await screen.findByRole("button", { name: "Sign in…: docs" });
+    const line = await findLine("MCP servers were left out.");
+    expect(within(line).queryByRole("link")).toBeNull();
+    expect(line.className).toContain("text-fail");
+    await user.click(signIn);
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    expect(readPageText(dialog)).toContain("The server refused its token. Paste a new one.");
+    await user.type(within(dialog).getByLabelText("Token"), "abc12345-xyz");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/token")),
+      ).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.path.endsWith("/token"))!.body).toEqual({
+      token: "abc12345-xyz",
+    });
+    await within(dialog).findByText("Asking docs.acme.example for its tools…");
+    // Closing leaves the thread as it was.
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Sign in to docs" })).toBeNull();
+    expect(readPageText()).not.toContain("abc12345-xyz");
+  });
+
+  it("keeps the token dialog of a warning line when a live change takes its button away, and says where the server went", async () => {
+    const user = userEvent.setup();
+    let server: McpServer = S_DOCS_URL;
+    const { live } = await openApp(
+      buildSession({ status: "idle" }),
+      buildWarningRows([{ mcpServerId: S_DOCS_URL.id, reason: "needs-sign-in" }]),
+      {
+        ...buildMcpServerRoutes(() => [server]),
+        [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+      },
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in…: docs" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+
+    // Another client moves the server onto Sentry's Connection: a Connection signs it in now, so the line has no button for it.
+    server = {
+      ...server,
+      source: {
+        kind: "plugin",
+        contributionId: "sentry/sentry",
+        connectionId: findServerConnection(S_SENTRY_WORK).id,
+      },
+      status: "ready",
+      statusDetail: null,
+    };
+    await pushServerChange(live, S_DOCS_URL.id);
+
+    await within(dialog).findByText(/docs is reached with a Connection now/);
+    // The button went, and the dialog it opened is still the one on the page.
+    expect(await screen.findByRole("link", { name: "Reconnect Sentry · work" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in…: docs" })).toBeNull();
+    expect(dialog.isConnected).toBe(true);
+    expect(within(dialog).getByRole("link", { name: "Open docs" }).getAttribute("href")).toBe(
+      `/settings/mcp-servers/${S_DOCS_URL.id}`,
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(dialog.isConnected).toBe(false);
   });
 
   it("gives each server it names its own button, 'Open server' for an unreachable one, and none for a reason without a fix", async () => {

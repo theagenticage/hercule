@@ -7,8 +7,11 @@ import { decideStatusBand, type McpServerView } from "@hercule/client-core/mcp-s
  * The band under the heading of a server's page: what the status means and the
  * one thing to do about it. It shows for every status but ready.
  *
- * - A server that needs sign-in offers its Connection's Reconnect. The button
- *   leads to the Connections screen, which opens that Connection's panel.
+ * - A server reached with a Connection that needs sign-in offers its
+ *   Connection's Reconnect. The button leads to the Connections screen, which
+ *   opens that Connection's panel.
+ * - A server added by URL that needs sign-in offers "Sign in…" (or "Paste a
+ *   token…"), which calls `onSignIn` to open its token dialog.
  * - An unreachable server, or one in error, offers Check now.
  * - A band that needs the user has a failure dot and a heading in the failure
  *   colour. The rest is as quiet as a line of text.
@@ -19,10 +22,12 @@ import { decideStatusBand, type McpServerView } from "@hercule/client-core/mcp-s
 export function StatusBand({
   view,
   onCheck,
+  onSignIn,
   checkPending,
 }: {
   readonly view: McpServerView;
   readonly onCheck: () => void;
+  readonly onSignIn: () => void;
   readonly checkPending: boolean;
 }): JSX.Element | null {
   const band = decideStatusBand(view);
@@ -57,6 +62,10 @@ export function StatusBand({
         >
           {action.label}
         </Link>
+      ) : action.kind === "sign-in" ? (
+        <Button variant="form" className="shrink-0" onClick={onSignIn}>
+          {action.label}
+        </Button>
       ) : (
         <Button variant="form" className="shrink-0" aria-disabled={checkPending} onClick={onCheck}>
           {action.label}

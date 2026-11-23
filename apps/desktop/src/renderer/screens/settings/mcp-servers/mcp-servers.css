@@ -124,6 +124,14 @@
   justify-self: end;
   white-space: nowrap;
 }
+/* An address is shown whole, so it wraps, breaking anywhere in a host or path that has no space,
+   and the tool count after it stays in view. */
+.profile-name.mcp-row-link > span {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
 .mcp-projects {
   display: flex;
   align-items: center;
@@ -214,6 +222,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+/* A long address wraps inside its chip, breaking anywhere, and the chip grows taller with a
+   corner radius that fits, instead of running past the window. */
+.mcp-chips > .chip {
+  min-width: 0;
+  height: auto;
+  min-height: 22px;
+  padding-block: 2px;
+  border-radius: var(--r-md);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 /* The mark beside the server's name at the top of its page. */
 .mcp-head-mark {

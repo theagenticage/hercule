@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { McpServer } from "@hercule/contract";
 import {
   buildMcpServerViews,
   describeConnectionRowProblem,
   describeReconnect,
+  describeRemoveEffect,
+  describeServerPageFields,
+  describeSignInRow,
+  describeSourceChip,
   isCheckDisabled,
 } from "./views";
 import {
@@ -29,7 +34,7 @@ describe("buildMcpServerViews", () => {
     expect(linear).toMatchObject({ pluginId: "linear", account: "acme", typeName: "Linear" });
   });
 
-  it("gives a server added by URL no plugin and the address's host as its account", () => {
+  it("gives a server added by URL no plugin and its whole address as its account", () => {
     const [view] = buildViews([
       buildServer("s-url", "docs", "", {
         source: {
@@ -44,10 +49,32 @@ describe("buildMcpServerViews", () => {
     expect(view).toMatchObject({
       pluginId: null,
       connection: undefined,
-      account: "mcp.docs.example.com",
+      account: "https://mcp.docs.example.com/v1",
       typeName: "",
-      secondLine: "mcp.docs.example.com · 2 tools",
+      secondLine: "https://mcp.docs.example.com/v1 · 2 tools",
     });
+  });
+
+  it("writes the address of a server added by URL whole, and gives no count before the first check", () => {
+    const [checked, unchecked] = buildViews(
+      [
+        { tools: [{ name: "a", description: "" }] },
+        { tools: [], checkedAt: null, status: "checking" as const },
+      ].map((overrides, index) =>
+        buildServer(`s-${String(index)}`, "docs", "", {
+          source: {
+            kind: "url",
+            url: "https://docs.example.com:8443/mcp?team=a",
+            signIn: "token",
+            signInOffered: null,
+          },
+          ...overrides,
+        }),
+      ),
+    );
+
+    expect(checked?.secondLine).toBe("https://docs.example.com:8443/mcp?team=a · 1 tool");
+    expect(unchecked?.secondLine).toBe("https://docs.example.com:8443/mcp?team=a");
   });
 
   it("says '1 tool' for one tool, and gives no count before the first check", () => {
@@ -151,5 +178,134 @@ describe("describeConnectionRowProblem", () => {
     const [view] = buildViews([{ ...SENTRY_WORK, status: "unreachable" }]);
 
     expect(describeConnectionRowProblem(view!)).toBeNull();
+  });
+});
+
+const URL_SERVER = (overrides: Partial<McpServer> = {}) =>
+  buildServer("s-docs", "docs", "", {
+    source: {
+      kind: "url",
+      url: "https://docs.example.com/mcp",
+      signIn: "token",
+      signInOffered: "token",
+    },
+    ...overrides,
+  });
+
+describe("the page of a server added by URL", () => {
+  it("is chipped by its source", () => {
+    const [url, plugin] = buildViews([URL_SERVER(), SENTRY_WORK]);
+
+    expect(describeSourceChip(url!)).toBe("Added by URL");
+    expect(describeSourceChip(plugin!)).toBe("From the Sentry plugin");
+    expect(describeSourceChip(plugin!, "Sentry for teams")).toBe(
+      "From the Sentry for teams plugin",
+    );
+  });
+
+  it("shows its whole address and no account beside the name", () => {
+    const [url] = buildViews([URL_SERVER()]);
+
+    expect(describeServerPageFields(url!, OFFERING_PLUGINS)).toEqual({
+      address: "https://docs.example.com/mcp",
+      account: null,
+    });
+  });
+
+  it("shows a plugin's server with the host its plugin offers and its Connection's label as the account", () => {
+    const [plugin] = buildViews([SENTRY_WORK]);
+
+    expect(describeServerPageFields(plugin!, OFFERING_PLUGINS)).toEqual({
+      address: "mcp.sentry.example",
+      account: "work",
+    });
+  });
+
+  it("shows no address for a plugin's server whose plugin no longer offers it, and no account without its Connection", () => {
+    const orphan = buildViews([SENTRY_WORK])[0]!;
+
+    expect(describeServerPageFields({ ...orphan, account: undefined }, [])).toEqual({
+      address: null,
+      account: null,
+    });
+  });
+
+  it("says what removing it takes along", () => {
+    const [url, plugin] = buildViews([URL_SERVER(), SENTRY_WORK]);
+
+    expect(describeRemoveEffect(url!)).toBe(
+      "Deletes the server and its sign-in. Projects that name it stop naming it.",
+    );
+    expect(describeRemoveEffect(plugin!)).toBe(
+      "Deletes the server. Projects that name it stop naming it. The Connection Sentry · work stays.",
+    );
+  });
+
+  it("shows a Sign-in row with Replace token… or Sign in again… only while the server holds a sign-in and works", () => {
+    const row = (server: McpServer) => describeSignInRow(buildViews([server])[0]!);
+
+    expect(row(URL_SERVER())).toEqual({
+      value: "A token",
+      action: { kind: "replace-token", label: "Replace token…" },
+    });
+    expect(row(URL_SERVER({ status: "unreachable" }))?.action).not.toBeNull();
+    // The band holds the one button while the server needs sign-in.
+    expect(row(URL_SERVER({ status: "needs-sign-in" }))).toEqual({
+      value: "A token",
+      action: null,
+    });
+    expect(
+      row(
+        URL_SERVER({
+          source: {
+            kind: "url",
+            url: "https://a.example/mcp",
+            signIn: "none",
+            signInOffered: null,
+          },
+        }),
+      ),
+    ).toEqual({ value: "None needed", action: null });
+    // A server that offers OAuth and was never signed in must not say "None needed" under a band that says it needs sign-in.
+    expect(
+      row(
+        URL_SERVER({
+          status: "needs-sign-in",
+          source: {
+            kind: "url",
+            url: "https://a.example/mcp",
+            signIn: "none",
+            signInOffered: "oauth",
+          },
+        }),
+      ),
+    ).toEqual({ value: "Not signed in", action: null });
+    expect(
+      row(
+        URL_SERVER({
+          source: {
+            kind: "url",
+            url: "https://a.example/mcp",
+            signIn: "oauth",
+            signInOffered: "oauth",
+          },
+        }),
+      ),
+    ).toEqual({ value: "OAuth", action: { kind: "sign-in-again", label: "Sign in again…" } });
+    // As for a token, the band holds the one button while the server needs sign-in.
+    expect(
+      row(
+        URL_SERVER({
+          status: "needs-sign-in",
+          source: {
+            kind: "url",
+            url: "https://a.example/mcp",
+            signIn: "oauth",
+            signInOffered: "oauth",
+          },
+        }),
+      ),
+    ).toEqual({ value: "OAuth", action: null });
+    expect(row(SENTRY_WORK)).toBeNull();
   });
 });

@@ -13,8 +13,10 @@ import type { McpServer } from "@hercule/contract";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  buildConnection as buildSharedConnection,
   buildMcpControllerHandlers,
   buildMcpWorld,
+  buildPlugin as buildSharedPlugin,
 } from "@hercule/client-core/mcp-servers/testing";
 import {
   buildErrorBody,
@@ -40,58 +42,17 @@ interface ProjectFixture {
   readonly updatedAt: string;
 }
 
-/** A plugin that declares the Connection type and the MCP server `<slug>/<slug>`. */
-const buildPlugin = (slug: string, displayName: string) => ({
-  id: slug,
-  displayName,
-  hostApi: 1,
-  capabilities: ["connections", "mcp-servers"],
-  enabled: true,
-  status: { _tag: "active" },
-  config: {},
-  contributions: [
-    {
-      extensionPoint: "connection-type",
-      id: `${slug}/${slug}`,
-      definition: { type: `${slug}/${slug}`, displayName, setup: [] },
-    },
-    {
-      extensionPoint: "mcp-server",
-      id: `${slug}/${slug}`,
-      definition: {
-        displayName,
-        description: `The ${displayName} MCP server.`,
-        connectionType: `${slug}/${slug}`,
-        origin: `https://mcp.${slug}.example`,
-      },
-    },
-  ],
-  intake: { eventKinds: [], signalKinds: [] },
-  entityKinds: [],
-});
-
 const PLUGINS = [
-  buildPlugin("sentry", "Sentry"),
-  buildPlugin("linear", "Linear"),
-  buildPlugin("notion", "Notion"),
-  buildPlugin("github", "GitHub"),
-  buildPlugin("grafana", "Grafana"),
-  buildPlugin("context7", "Context7"),
+  buildSharedPlugin("sentry", "Sentry"),
+  buildSharedPlugin("linear", "Linear"),
+  buildSharedPlugin("notion", "Notion"),
+  buildSharedPlugin("github", "GitHub"),
+  buildSharedPlugin("grafana", "Grafana"),
+  buildSharedPlugin("context7", "Context7"),
 ];
 
-const buildConnection = (id: string, slug: string, label: string) => ({
-  id,
-  type: `${slug}/${slug}`,
-  label,
-  displayName: `acct:${label}`,
-  status: "connected",
-  labels: [],
-  config: {},
-  feedIntervals: {},
-  credentials: [],
-  createdAt: AT,
-  updatedAt: AT,
-});
+const buildConnection = (id: string, slug: string, label: string) =>
+  buildSharedConnection(id, `${slug}/${slug}`, label, `acct:${label}`);
 
 const C_WORK = makeId("c", 1);
 const C_HOBBY = makeId("c", 2);
@@ -180,6 +141,8 @@ const buildWorld = () =>
       buildProject(P_OPS, "ops", [S_HOBBY.id]),
     ],
     defaultIds: [S_GITHUB.id],
+    plugins: PLUGINS,
+    connections: CONNECTIONS,
   });
 
 type World = ReturnType<typeof buildWorld>;

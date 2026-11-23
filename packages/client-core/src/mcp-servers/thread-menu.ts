@@ -12,7 +12,7 @@
  */
 import { groupServersByName, type ServerNameGroup } from "./named-lists";
 import { MCP_SERVER_STATUS_FACTS } from "./status";
-import { describeReconnect, type McpServerView, type ReconnectTarget } from "./views";
+import { describeSignInAction, type McpServerView, type SignInAction } from "./views";
 
 /** How many server names a menu or a picker lists before it moves the rest behind a link or a filter. */
 const NAME_LIMIT = 8;
@@ -63,12 +63,12 @@ export interface ServerMenuRow {
   readonly on: boolean;
   /** What a server that needs sign-in says beside its name, or `null` for any other server. */
   readonly note: "on, joins once you sign in" | "needs sign-in" | null;
-  /** The button that fixes `note`, or `null` when there is no note. */
-  readonly reconnect: ReconnectTarget | null;
+  /** The button that fixes `note` (`describeSignInAction`), or `null` when there is no note. */
+  readonly signIn: SignInAction | null;
 }
 
 /** The submenu under the `+` button. */
-export interface ThreadServerMenu {
+interface ThreadServerMenu {
   readonly rows: readonly ServerMenuRow[];
   /** How many server names the rows leave out, those that only switched-off servers have included. They are in the picker. */
   readonly moreCount: number;
@@ -137,7 +137,7 @@ export const buildThreadServerMenu = ({
         shown,
         on,
         note,
-        reconnect: note === null ? null : describeReconnect(shown),
+        signIn: note === null ? null : describeSignInAction(shown),
       };
     });
   return { rows, moreCount: groups.length - rows.length };
@@ -151,7 +151,11 @@ export interface ServerPickerRow {
   /** The account the row stands for: the chosen one, else the remembered one, else the first. */
   readonly shown: McpServerView;
   readonly chosen: boolean;
-  /** Such as "Sentry Connection" or "Sentry Connection · 2 accounts". */
+  /**
+   * What the shown account is reached with, such as "Sentry Connection",
+   * "Sentry Connection · 2 accounts" or, for a server added by URL, its whole
+   * address, "https://mcp.example.com/mcp".
+   */
   readonly secondLine: string;
   /** The status word of the shown account when it needs sign-in, is unreachable, in error or off. `null` otherwise. */
   readonly statusWord: string | null;
@@ -197,15 +201,15 @@ export const buildServerPicker = ({
   const rows = ordered.map((group): ServerPickerRow => {
     const shown = decideShownAccount(group, mcpServerIds, rememberedAccounts);
     const accountCount = group.views.length;
+    // A server added by URL is named by its whole address, a Connection's server by its type.
+    const source =
+      shown.server.source.kind === "url" ? shown.server.source.url : `${shown.typeName} Connection`;
     return {
       name: group.name,
       accounts: group.views,
       shown,
       chosen: group.views.some((view) => mcpServerIds.includes(view.server.id)),
-      secondLine:
-        accountCount > 1
-          ? `${shown.typeName} Connection · ${String(accountCount)} accounts`
-          : `${shown.typeName} Connection`,
+      secondLine: accountCount > 1 ? `${source} · ${String(accountCount)} accounts` : source,
       statusWord: MCP_SERVER_STATUS_FACTS[shown.displayStatus].showsWordInPicker
         ? shown.statusWord
         : null,

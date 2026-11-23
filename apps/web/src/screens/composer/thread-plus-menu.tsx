@@ -1,8 +1,10 @@
-import { useEffect, useState, type JSX } from "react";
+import { Suspense, useEffect, useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Thread, ThreadChoice } from "@hercule/client-core";
+import type { McpServer } from "@hercule/contract";
 import { decideDraftServersPick, type McpListChoice } from "@hercule/client-core/mcp-servers";
 import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
+import { LazyTokenDialog } from "../mcp-url-server/lazy-dialogs";
 import { useThreadServers } from "../thread-servers";
 import { PlusMenu } from "./plus-menu";
 import { ThreadServerPicker } from "./thread-server-picker";
@@ -75,8 +77,13 @@ export function ThreadPlusMenu({
     if (next) setServersPressed(false);
     onOpenChange(next);
   };
+  // The server added by URL whose token dialog is open, as the submenu showed it. It opens from
+  // the submenu, which closes. The dialog is kept by the id until the user closes it, also when a
+  // live change deletes the server or moves it onto a Connection: the dialog then says so.
+  const [signingIn, setSigningIn] = useState<McpServer | null>(null);
   // One state for the submenu and the picker, so the handoff from one to the other never drops it.
-  const editing = showsServers || picking;
+  // The open sign-in dialog needs the live topic as well, which follows the server it signs in to.
+  const editing = showsServers || picking || signingIn !== null;
   useEffect(() => {
     setEditing(editing);
     return () => {
@@ -106,6 +113,11 @@ export function ThreadPlusMenu({
     if (picked !== undefined) recordThreadChoice(picked);
   };
   const apply = session === null ? applyToDraft : edit.apply;
+  // The newest record of the server the dialog was opened for, or the one it opened with once the list lost it.
+  const signingInServer =
+    signingIn === null
+      ? null
+      : (views?.find((view) => view.server.id === signingIn.id)?.server ?? signingIn);
   const refusal = edit.problem();
 
   return (
@@ -133,6 +145,10 @@ export function ThreadPlusMenu({
                 setPicking(true);
                 onOpenChange(false);
               }}
+              onSignIn={(mcpServerId) => {
+                setSigningIn(views.find((view) => view.server.id === mcpServerId)?.server ?? null);
+                onOpenChange(false);
+              }}
             />
           ) : (
             <p
@@ -144,6 +160,19 @@ export function ThreadPlusMenu({
           )
         }
       />
+      {signingInServer === null ? null : (
+        <Suspense fallback={null}>
+          <LazyTokenDialog
+            client={client}
+            server={signingInServer}
+            openedOn="elsewhere"
+            entry="sign-in"
+            onClose={() => {
+              setSigningIn(null);
+            }}
+          />
+        </Suspense>
+      )}
       {picking && views !== undefined && plugins !== undefined && start !== undefined ? (
         <ThreadServerPicker
           views={views}

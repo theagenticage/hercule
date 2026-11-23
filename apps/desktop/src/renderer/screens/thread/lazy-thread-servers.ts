@@ -11,7 +11,8 @@ import { lazy } from "react";
  *   the open menu or picker needs them (see `ThreadServersProvider`).
  * - `LazyThreadServersMenu`: the submenu, loaded when the "MCP servers" row opens.
  * - `LazyThreadServerPicker`: the picker, loaded when "N more servers…" is pressed.
- * - `LazyReconnectDialog`: the Reconnect dialog, loaded when a row's button opens it.
+ * - `LazySignInDialog`: the dialog a row's sign-in button opens, the Connection's
+ *   Reconnect dialog or a server's token dialog, loaded when the button is pressed.
  *
  * The submenu and the picker bring the edits of the thread's list with them
  * (see `WithThreadServerEdits`). This file must never import these modules as
@@ -25,6 +26,6 @@ export const LazyThreadServersMenu = lazy(() => import("./thread-servers-menu"))
 
 export const LazyThreadServerPicker = lazy(() => import("./thread-server-picker"));
 
-export const LazyReconnectDialog = lazy(() =>
-  import("./reconnect-dialog").then((module) => ({ default: module.ReconnectDialog })),
+export const LazySignInDialog = lazy(() =>
+  import("./sign-in-dialog").then((module) => ({ default: module.SignInDialog })),
 );

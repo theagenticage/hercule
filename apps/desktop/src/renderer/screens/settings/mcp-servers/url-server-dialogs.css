@@ -1,0 +1,142 @@
+/* The dialogs that write a server added by URL: Add by URL, the token form
+   and Replace (#1211). Built from the Connection setup dialog's parts
+   (connection-setup.css), which give them its 448px width; only what those
+   do not draw is here. */
+
+/* Replace is a confirm dialog, which is 400px wide. It is as wide as the other
+   three, so the four read as one family. */
+.confirm-dialog.url-replace-dialog {
+  width: 448px;
+}
+
+/* The Address, the refusal under it and the Name, one gap apart. */
+.url-form {
+  display: grid;
+  gap: 16px;
+}
+.url-dialog .field > input {
+  width: 100%;
+}
+.url-wait {
+  padding: 6px 2px;
+}
+/* A wait line may run to two lines, and its spinner sits beside the first one,
+   not in the middle of the block. */
+.url-dialog .wait {
+  align-items: flex-start;
+}
+.url-dialog .wait > .spin {
+  margin-top: calc((1lh - 13px) / 2);
+}
+/* The refusal sits between the two fields, and the form's gap spaces it. */
+.url-form > .warn {
+  margin-top: 0;
+}
+/* A note under a step, such as what closing the dialog does. */
+.url-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.url-wait > .url-note {
+  margin-top: 10px;
+}
+/* A paragraph of the sign-in steps: body size, with the same gap under it as
+   the lead paragraphs above it, so a field that follows does not touch it. */
+p.setup-lead.url-note {
+  margin-bottom: 10px;
+  font-size: inherit;
+}
+
+/* The server the token form is about, above its sentence. A gap under the card keeps the
+   sentence off its edge, and the card has no gap above it, as in the dialog's other steps. */
+.url-subject {
+  margin-bottom: 12px;
+}
+.url-subject > .hx {
+  margin-top: 0;
+}
+/* "Paste a token instead", the quieter second choice, as a link on a line under the sentence of
+   the browser choice. Its padding makes the target tall enough to press, and the negative margin
+   takes that padding back from the gap to the sentence. */
+.url-token-choice {
+  margin: -4px 0 12px;
+}
+.url-token-choice > .link {
+  padding-block: 4px;
+}
+
+/* The waiting card says who asks for the approval in a whole sentence, which wraps instead of
+   being cut short as a record's address is. A host with no hyphen has no place to break, so it
+   breaks anywhere: the end of the host names who asks, and it must stay in view. */
+.url-waiting > .hx {
+  margin-top: 0;
+}
+.url-waiting .hx-name > span {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+/* A paragraph inside the waiting card has no margin of its own: the card's rows are one gap
+   apart, and the browser's default paragraph margin would add an empty band to it. */
+.url-waiting .hx-more > p {
+  margin: 0;
+}
+/* The paste field of the waiting card: the field under the card's text, and its button at the end. */
+.url-paste {
+  display: grid;
+  gap: 8px;
+}
+.url-paste .field > input {
+  width: 100%;
+}
+.url-paste .setup-acts {
+  margin-top: 0;
+}
+/* Under the waiting card: the way out when the browser never comes back, as one line that ends
+   in its button. The card over it has its own border, so the line has no rule. */
+.url-stuck {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  /* The question is two lines beside its button, broken into even halves. */
+  text-wrap: balance;
+}
+/* The tools a new server offered, under its done row: a name beside what it does, as on the page. */
+.url-tools {
+  max-height: 30vh;
+  margin-top: 10px;
+  overflow-y: auto;
+}
+.url-tools .mcp-tool {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 12px;
+}
+
+/* What Replace keeps, changes and deletes: three labelled lines. */
+.url-replace {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.url-replace > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 10px;
+}
+.url-replace span {
+  color: var(--faint);
+}
+.url-replace b {
+  font-weight: var(--w-medium);
+}

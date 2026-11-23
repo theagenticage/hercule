@@ -4,7 +4,8 @@
  * desktop app cannot disagree about which button a reason gets.
  */
 import type { TranscriptRow } from "@hercule/contract";
-import { describeReconnect, type McpServerView, type ReconnectTarget } from "./views";
+import { offersBrowserSignIn } from "./sign-in-words";
+import { describeSignInAction, type McpServerView, type SignInAction } from "./views";
 
 /**
  * One server a `runtime.warning` names, and why: the entry of the event's
@@ -17,7 +18,7 @@ export type McpServerWarningEntry = NonNullable<
 
 /** The button a thread's line draws for one server it names. */
 export type WarningFix =
-  | ({ readonly kind: "reconnect" } & ReconnectTarget)
+  | SignInAction
   | {
       readonly kind: "open-server";
       readonly mcpServerId: string;
@@ -27,7 +28,7 @@ export type WarningFix =
 /**
  * Returns the button that fixes `entry`, or `null` when there is none:
  *
- * - `needs-sign-in`: reconnect the server's Connection;
+ * - `needs-sign-in`: the sign-in button of the server (`describeSignInAction`);
  * - `unreachable`, `error`, `switched-off`: open the server's page;
  * - every other reason has no fix: the line's text says what to do (a runner
  *   or harness that cannot take servers, a server still checking, a call
@@ -44,10 +45,8 @@ export const decideWarningFix = (
   const view = views.find((each) => each.server.id === entry.mcpServerId);
   if (view === undefined) return null;
   switch (entry.reason) {
-    case "needs-sign-in": {
-      const reconnect = describeReconnect(view);
-      return reconnect === null ? null : { kind: "reconnect", ...reconnect };
-    }
+    case "needs-sign-in":
+      return describeSignInAction(view);
     case "unreachable":
     case "error":
     case "switched-off":
@@ -87,7 +86,7 @@ export const buildMcpWarningLine = (
 
 /** The button of a server's status band. */
 export type StatusBandAction =
-  | ({ readonly kind: "reconnect" } & ReconnectTarget)
+  | SignInAction
   | { readonly kind: "check"; readonly label: "Check now" };
 
 /**
@@ -107,10 +106,21 @@ export interface StatusBand {
 }
 
 /**
+ * Returns what the band says to do for a server added by URL that needs
+ * sign-in. A server that signs in through the browser is signed in there, and
+ * a pasted token is named as the other way.
+ */
+const describeUrlSignInText = (view: McpServerView): string =>
+  offersBrowserSignIn(view.server)
+    ? "Sign in through your browser, or paste a token, and this server comes back with it."
+    : "Paste a new token, and this server comes back with it.";
+
+/**
  * Returns the band for a server's page, or `null` when the page draws none:
  * the server is ready, or it needs sign-in with no Connection to reconnect.
  * The one button of the band is "Check now" for an unreachable server or one
- * in error, and the Connection's Reconnect for a server that needs sign-in.
+ * in error. For a server that needs sign-in it is the server's sign-in
+ * button (`describeSignInAction`).
  */
 export const decideStatusBand = (view: McpServerView): StatusBand | null => {
   switch (view.displayStatus) {
@@ -133,14 +143,17 @@ export const decideStatusBand = (view: McpServerView): StatusBand | null => {
         action: null,
       };
     case "needs-sign-in": {
-      const reconnect = describeReconnect(view);
-      if (reconnect === null) return null;
+      const action = describeSignInAction(view);
+      if (action === null) return null;
       return {
         tone: "fail",
         heading: "Needs sign-in.",
-        text: `${reconnect.label} in your browser, and this server comes back with it.`,
+        text:
+          action.kind === "reconnect"
+            ? `${action.label} in your browser, and this server comes back with it.`
+            : describeUrlSignInText(view),
         detail: view.statusDetail,
-        action: { kind: "reconnect", ...reconnect },
+        action,
       };
     }
     case "unreachable":

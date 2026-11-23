@@ -200,11 +200,21 @@ export function DeviceCodeSteps({
   );
 }
 
-/** Renders `text` after a spinner, for a wait the user started and cannot speed up. */
-export function WaitLine({ text }: { readonly text: string }): JSX.Element {
+/**
+ * Renders `text` after a spinner, for a wait the user started and cannot speed
+ * up. With `spinning` false the spinner is not drawn, for a wait that cannot
+ * end because what it waits for never started.
+ */
+export function WaitLine({
+  text,
+  spinning = true,
+}: {
+  readonly text: string;
+  readonly spinning?: boolean;
+}): JSX.Element {
   return (
     <span className="wait" role="status">
-      <span className="spin" />
+      {spinning && <span className="spin" />}
       {text}
     </span>
   );

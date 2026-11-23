@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildProject } from "../threads/workspaces.testing";
-import { buildMcpServerSettingsRows, describeNamingProjects } from "./settings-list";
+import {
+  buildMcpServerSettingsRows,
+  buildUrlServerSettingsRows,
+  describeNamingProjects,
+} from "./settings-list";
 import {
   CONNECTIONS,
   LINEAR,
@@ -9,6 +13,7 @@ import {
   SENTRY_HOBBY_CONNECTION,
   SENTRY_PLUGIN,
   buildConnection,
+  buildServer,
 } from "./testing";
 
 const WEBSHOP = { ...buildProject("p-shop", "webshop"), mcpServerIds: ["s-hobby", "s-linear"] };
@@ -128,6 +133,52 @@ describe("buildMcpServerSettingsRows", () => {
     });
 
     expect(rows).toEqual([]);
+  });
+});
+
+const urlServer = (id: string, name: string, url: string) =>
+  buildServer(id, name, "", {
+    source: { kind: "url", url, signIn: "none", signInOffered: null },
+  });
+
+describe("buildUrlServerSettingsRows", () => {
+  it("returns only the servers added by URL, by name, then address, whatever order they arrive in", () => {
+    const rows = buildUrlServerSettingsRows({
+      servers: [
+        SENTRY_HOBBY,
+        urlServer("s-b2", "docs", "https://b.example.com/mcp"),
+        urlServer("s-z", "zeta", "https://z.example.com/mcp"),
+        urlServer("s-b1", "docs", "https://a.example.com/mcp"),
+        LINEAR,
+      ],
+      projects: [],
+    });
+
+    expect(rows.map((row) => row.view.server.id)).toEqual(["s-b1", "s-b2", "s-z"]);
+  });
+
+  it("gives each row the view with the address whole, and the projects that name it", () => {
+    const docs = urlServer("s-docs", "docs", "https://docs.example.com/mcp");
+    const [row] = buildUrlServerSettingsRows({
+      servers: [docs, LINEAR],
+      projects: [
+        { ...buildProject("p-shop", "webshop"), mcpServerIds: ["s-docs", "s-linear"] },
+        BLOG,
+      ],
+    });
+
+    expect(row?.view).toMatchObject({
+      pluginId: null,
+      secondLine: "https://docs.example.com/mcp · 2 tools",
+      statusWord: "ready",
+    });
+    expect(row?.projects.map((project) => project.name)).toEqual(["webshop"]);
+  });
+
+  it("returns no row when no server was added by URL", () => {
+    expect(buildUrlServerSettingsRows({ servers: [SENTRY_HOBBY], projects: [WEBSHOP] })).toEqual(
+      [],
+    );
   });
 });
 

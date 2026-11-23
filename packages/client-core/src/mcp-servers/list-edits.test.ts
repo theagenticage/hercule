@@ -292,9 +292,9 @@ describe("what a write puts in the cache", () => {
     edits.apply(DEFAULT, choose("sentry", "s-work", "s-work"));
     await settle(DEFAULT);
     answerOldList();
-    // The write cancelled the old read, so it may settle either way.
+    // The write cancelled the old read, so it may settle either way. A cache write by the old
+    // read happens before its promise settles, so nothing is left to wait for after this.
     await Promise.allSettled([oldRead]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(queryClient.getQueryData(SETTINGS_KEY)).toEqual({
       user: { "thread.mcpServerIds": world.defaultIds },

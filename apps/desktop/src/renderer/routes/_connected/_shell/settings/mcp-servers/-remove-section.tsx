@@ -2,7 +2,11 @@ import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { isNotFound, readErrorMessage } from "@hercule/client-core";
-import { describeServerRemoval, type McpServerView } from "@hercule/client-core/mcp-servers";
+import {
+  describeRemoveEffect,
+  describeServerRemoval,
+  type McpServerView,
+} from "@hercule/client-core/mcp-servers";
 import {
   mcpServerQuery,
   mcpServersQuery,
@@ -10,6 +14,7 @@ import {
   settingsQuery,
 } from "../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
+import { readNameAccount } from "../../../../../screens/settings/mcp-servers/server-parts";
 
 /**
  * Renders the Remove section of the page of the server `view`, its last
@@ -30,8 +35,9 @@ export function RemoveSection({ view }: { readonly view: McpServerView }): JSX.E
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [confirming, setConfirming] = useState(false);
-  const { server, connection } = view;
-  const written = view.account === undefined ? server.name : `${server.name} ${view.account}`;
+  const { server } = view;
+  const account = readNameAccount(view);
+  const written = account === undefined ? server.name : `${server.name} ${account}`;
   const leaveDeletedServer = async (): Promise<void> => {
     dialogRef.current?.close();
     // The page leaves before its read is dropped: the page reads the
@@ -57,11 +63,7 @@ export function RemoveSection({ view }: { readonly view: McpServerView }): JSX.E
   return (
     <section className="set-sec">
       <h2>{`Remove ${server.name}`}</h2>
-      <p>
-        {connection === undefined
-          ? "Deletes the server. Projects that name it stop naming it."
-          : `Deletes the server. Projects that name it stop naming it. The Connection ${view.typeName} · ${connection.label} stays.`}
-      </p>
+      <p>{describeRemoveEffect(view)}</p>
       <button
         type="button"
         className="btn btn--danger"

@@ -420,6 +420,157 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".render-failure-headline",
     nonTextParts: [],
   },
+  // Servers added by URL: the list with its group, the Add by URL dialog at its token step, the dialog's
+  // refusal of an address added before, the Replace dialog, and the page of a server that needs sign-in.
+  {
+    name: "settings-mcp-urls",
+    path: "settings-mcp-servers.html?state=urls",
+    contentSelector: '.mcp-group[aria-label="Added by URL"] .mcp-row',
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+      { selector: ".mcp-status--fail .dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-add-token",
+    path: "settings-mcp-servers.html?state=add-token",
+    contentSelector: 'dialog.url-dialog input[type="password"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-duplicate",
+    path: "settings-mcp-servers.html?state=add-duplicate",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-replace",
+    path: "settings-mcp-servers.html?state=replace",
+    contentSelector: "dialog.confirm-dialog .url-replace",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-waiting",
+    path: "settings-mcp-servers.html?state=sign-in-waiting",
+    contentSelector: "dialog.url-dialog .hx-row",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-refused",
+    path: "settings-mcp-servers.html?state=sign-in-refused",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-url-page",
+    path: "settings-mcp-servers.html?state=url-page",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  // The other steps of the dialogs that write a server added by URL, and the pages and rows that open them.
+  {
+    name: "settings-mcp-add-empty",
+    path: "settings-mcp-servers.html?state=add-empty",
+    contentSelector: "dialog.url-dialog form",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-checking",
+    path: "settings-mcp-servers.html?state=add-checking",
+    contentSelector: "dialog.url-dialog .wait",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-ready",
+    path: "settings-mcp-servers.html?state=add-ready",
+    contentSelector: "dialog.url-dialog .url-tools",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-plugin-origin",
+    path: "settings-mcp-servers.html?state=add-plugin-origin",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-choice",
+    path: "settings-mcp-servers.html?state=sign-in-choice",
+    contentSelector: "dialog.url-dialog .setup-acts .btn--accent",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-long-host",
+    path: "settings-mcp-servers.html?state=sign-in-long-host",
+    contentSelector: "dialog.url-dialog .hx-row",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-open-failed",
+    path: "settings-mcp-servers.html?state=sign-in-open-failed",
+    contentSelector: "dialog.url-dialog .url-waiting .fl-err",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-paste",
+    path: "settings-mcp-servers.html?state=sign-in-paste",
+    contentSelector: "dialog.url-dialog .url-paste",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-timed-out",
+    path: "settings-mcp-servers.html?state=sign-in-timed-out",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-token",
+    path: "settings-mcp-servers.html?state=token",
+    contentSelector: 'dialog.url-dialog input[type="password"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-several",
+    path: "settings-mcp-servers.html?state=replace-several",
+    contentSelector: "dialog.confirm-dialog .options",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-stale",
+    path: "settings-mcp-servers.html?state=replace-stale",
+    contentSelector: "dialog.confirm-dialog .fl-err",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-url-page-token",
+    path: "settings-mcp-servers.html?state=url-page-token",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-url-page-oauth",
+    path: "settings-mcp-servers.html?state=url-page-oauth",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-urls-long",
+    path: "settings-mcp-servers.html?state=urls-long",
+    contentSelector: '.mcp-group[aria-label="Added by URL"] .mcp-row',
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+    ],
+  },
   // The "agent tools" note of each Connection whose plugin offers an MCP server: on, off, and needs sign-in.
   {
     name: "settings-connections",

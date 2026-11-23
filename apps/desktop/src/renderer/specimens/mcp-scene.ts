@@ -10,7 +10,8 @@
  * `listUnknownRequests` and fails the scene.
  */
 import type { Handler } from "@hercule/client-core/testing";
-import type { EventCountsByConnection } from "@hercule/contract";
+import type { Bridge } from "../../ipc/bridge";
+import type { EventCountsByConnection, McpServer } from "@hercule/contract";
 import { BOOT_HANDLERS, buildSidebarHandlers } from "../app/fake-controller";
 import type { SidebarRecords as ControllerRecords } from "../app/fake-controller";
 import { buildDraftKey } from "../app/pending-submissions";
@@ -30,6 +31,32 @@ export interface McpScene {
   readonly mcp: McpServersRecords;
   /** What Settings > Connections reads of the events each Connection received. None when the scene reads none. */
   readonly eventCounts?: EventCountsByConnection;
+  /**
+   * What `mcpServer.create` answers, for a scene whose Add by URL dialog is
+   * used. An answer with status 200 holds the new server: it is listed and
+   * readable from then on. The ids in it follow the scene's id conversion.
+   */
+  readonly create?: { readonly status: number; readonly body: unknown };
+  /**
+   * What `mcpServer.startSignIn` answers, for a scene whose sign-in dialog is
+   * used, on every server of the scene.
+   */
+  readonly signIn?: { readonly status: number; readonly body: unknown };
+  /**
+   * What `mcpServer.update` answers, for a scene whose Replace dialog is
+   * pressed, on every server of the scene.
+   */
+  readonly update?: { readonly status: number; readonly body: unknown };
+  /**
+   * For a scene whose sign-in dialog is drawn after main started its listener
+   * for the browser's return, so the waiting step is the one a Mac shows:
+   * `listens`, and the browser never comes back, or `times-out`, and main
+   * reports at once that it did not come back within 10 minutes. Without it,
+   * main cannot listen, and the sign-in shows its paste step.
+   */
+  readonly signInReturn?: "listens" | "times-out";
+  /** False for a scene where main cannot open the browser. */
+  readonly browserOpens?: boolean;
   /** The thread the scene opens. */
   readonly thread?: ThreadScreenRecords;
   /** The Draft Thread the scene opens. */
@@ -58,7 +85,19 @@ const buildControllerRecords = (records: SidebarRecords): ControllerRecords => (
 
 /** Returns the handlers that answer every read of `scene`. */
 export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> {
-  const { records, mcp, eventCounts, thread, draft, handlers: replacements } = scene;
+  const {
+    records,
+    mcp,
+    eventCounts,
+    thread,
+    draft,
+    create,
+    signIn,
+    update,
+    handlers: replacements,
+  } = scene;
+  // The server `mcpServer.create` made, once it has been called.
+  let created: McpServer | undefined;
   const handlers: Record<string, Handler> = {
     ...BOOT_HANDLERS,
     ...buildSidebarHandlers(buildControllerRecords(records)),
@@ -70,12 +109,40 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
         user: { timezone: "UTC", "thread.mcpServerIds": mcp.defaultServerIds },
       },
     },
-    "GET /api/v1/mcp-servers": { body: { items: mcp.servers } },
+    "GET /api/v1/mcp-servers": () => ({
+      body: { items: created === undefined ? mcp.servers : [...mcp.servers, created] },
+    }),
     ...Object.fromEntries(
       mcp.servers.map((server) => [`GET /api/v1/mcp-servers/${server.id}`, { body: server }]),
     ),
     "GET /api/v1/events/counts": { body: eventCounts ?? { connections: [] } },
   };
+  if (create !== undefined) {
+    handlers["POST /api/v1/mcp-servers"] = () => {
+      if (create.status === 200) created = create.body as McpServer;
+      return { status: create.status, body: create.body };
+    };
+    // Registered up front, because the returned handlers are a copy: a handler added
+    // after the copy is made would never answer. Nothing reads the new server before
+    // the call above makes it.
+    if (create.status === 200) {
+      const { id } = create.body as McpServer;
+      handlers[`GET /api/v1/mcp-servers/${id}`] = { body: create.body };
+    }
+  }
+  if (signIn !== undefined) {
+    for (const { id } of mcp.servers) {
+      handlers[`POST /api/v1/mcp-servers/${id}/sign-in`] = {
+        status: signIn.status,
+        body: signIn.body,
+      };
+    }
+  }
+  if (update !== undefined) {
+    for (const { id } of mcp.servers) {
+      handlers[`PATCH /api/v1/mcp-servers/${id}`] = { status: update.status, body: update.body };
+    }
+  }
   if (thread !== undefined) {
     const path = `/api/v1/sessions/${thread.session.id}`;
     handlers[`GET ${path}`] = { body: thread.session };
@@ -110,6 +177,12 @@ export function mountMcpScene(
     path: fixturePath.replace(/[^/?=&]+/g, (part) => convertIds(part)),
     username: scene.records.user.username,
     appearance: readSheetAppearance(),
+    ...(scene.signInReturn === undefined
+      ? {}
+      : { signInReturn: SIGN_IN_RETURNS[scene.signInReturn] }),
+    ...(scene.browserOpens === false
+      ? { linkOpen: () => Promise.resolve(BROWSER_NOT_OPENED) }
+      : {}),
     prepare: ({ controller }) => {
       if (draft === undefined || controller === null) return;
       for (const entry of draft.recent ?? []) rememberRecentModel(CONTROLLER_URL, entry);
@@ -117,6 +190,30 @@ export function mountMcpScene(
     },
   });
 }
+
+/** Main's answer when the system could not open the browser, in main's own sentence. */
+const BROWSER_NOT_OPENED = {
+  _tag: "NotOpened",
+  reason: "The system could not open your default browser. Check that one is set.",
+} as const;
+
+/** Returns main's answers when it listens for the browser's return, and `wait` answers what became of the wait. */
+const buildListeningReturn = (wait: Bridge["signInReturn"]["wait"]): Bridge["signInReturn"] => ({
+  listen: () =>
+    Promise.resolve({
+      _tag: "listening",
+      listenerId: "specimen",
+      redirectUri: "http://127.0.0.1:4937/callback",
+    }),
+  wait,
+  cancel: () => Promise.resolve(undefined),
+});
+
+/** The browser never comes back, or main gives up waiting for it. */
+const SIGN_IN_RETURNS: Record<"listens" | "times-out", Bridge["signInReturn"]> = {
+  listens: buildListeningReturn(() => new Promise(() => undefined)),
+  "times-out": buildListeningReturn(() => Promise.resolve({ _tag: "timed-out" })),
+};
 
 /**
  * Waits until the page's sidebar has drawn and no read is running, fails when

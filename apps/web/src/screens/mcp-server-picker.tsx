@@ -10,7 +10,7 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import { Button, ChoiceInput, Input, Select } from "@hercule/ui";
 import { McpServerStatusWord } from "./mcp-server-status";
-import { ProviderMark } from "./provider-mark";
+import { McpServerMark } from "./mcp-server-mark";
 
 /**
  * The picker of MCP Servers: one dialog that edits any list of servers, a
@@ -151,12 +151,14 @@ export function McpServerPicker({
                     );
                   }}
                 />
-                <ProviderMark pluginId={row.shown.pluginId} plugins={plugins} />
+                <McpServerMark view={row.shown} plugins={plugins} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">
                     <b className="font-emph text-ink">{row.name}</b>
                     {/* A row with a choice of account shows the name alone: the choice names the account. */}
-                    {row.accounts.length === 1 && row.shown.account !== undefined ? (
+                    {row.accounts.length === 1 &&
+                    row.shown.account !== undefined &&
+                    row.shown.server.source.kind === "plugin" ? (
                       <>
                         {" "}
                         <span className="text-muted">{row.shown.account}</span>

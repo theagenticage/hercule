@@ -5,10 +5,11 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
 import type { PlusAttach } from "../session/composer-frame";
 import { isMenuFocusKey, moveMenuFocus } from "../move-menu-focus";
 import type { ThreadServersRow } from "@hercule/client-core/mcp-servers/first-screen";
+import type { SignInAction } from "@hercule/client-core/mcp-servers";
 import { PlusIcon } from "../../icons/plus";
 import { ComposerMenu } from "./composer-menu";
 import {
-  LazyReconnectDialog,
+  LazySignInDialog,
   LazyThreadServerPicker,
   LazyThreadServersMenu,
 } from "./lazy-thread-servers";
@@ -37,7 +38,7 @@ import type { ThreadServersTarget } from "./thread-server-edits";
  * MCP row or the picker tells the provider the editor is open, which is when
  * it reads the servers, and it stays open from the submenu to the picker.
  * Opening the menu for Attach alone reads nothing. The dialogs the menu
- * opens, the picker and Reconnect, are drawn outside the menu, because the
+ * opens, the picker and the sign-in, are drawn outside the menu, because the
  * menu closes first. `serversOff` is the reason the MCP row is off, or
  * `null` when it works. The menu opens on a thread that takes no message too:
  * its list can be edited, and `attach` says that Attach is off.
@@ -61,9 +62,11 @@ export function PlusMenu({
   const [picking, setPicking] = useState(false);
   // Whether the submenu is open. It closes with the menu, in `onClosed`.
   const [showsServers, setShowsServers] = useState(false);
-  const [reconnectingId, setReconnectingId] = useState<string | null>(null);
-  // One state for the submenu and the picker, so the handoff from one to the other never drops it.
-  const editing = showsServers || picking;
+  const [signingIn, setSigningIn] = useState<SignInAction | null>(null);
+  // One state for the submenu, the picker and the sign-in dialog, so the handoff from one to the
+  // other never drops it. The sign-in dialog follows its server's check on the `mcpServer` topic,
+  // which the thread holds only while this is true, and the menu that opened it is closed by then.
+  const editing = showsServers || picking || signingIn !== null;
   useEffect(() => {
     setEditing(editing);
     return () => {
@@ -108,9 +111,9 @@ export function PlusMenu({
               close();
               setPicking(true);
             }}
-            onReconnect={(connectionId) => {
+            onSignIn={(action) => {
               close();
-              setReconnectingId(connectionId);
+              setSigningIn(action);
             }}
           />
         )}
@@ -126,12 +129,12 @@ export function PlusMenu({
           />
         </Suspense>
       )}
-      {reconnectingId !== null && (
+      {signingIn !== null && (
         <Suspense fallback={null}>
-          <LazyReconnectDialog
-            connectionId={reconnectingId}
+          <LazySignInDialog
+            action={signingIn}
             onClose={() => {
-              setReconnectingId(null);
+              setSigningIn(null);
             }}
           />
         </Suspense>
@@ -156,7 +159,7 @@ function PlusMenuPanels({
   onAttach,
   onClose,
   onOpenPicker,
-  onReconnect,
+  onSignIn,
 }: {
   readonly attach: PlusAttach;
   readonly row: ThreadServersRow;
@@ -167,7 +170,7 @@ function PlusMenuPanels({
   readonly onAttach: () => void;
   readonly onClose: () => void;
   readonly onOpenPicker: () => void;
-  readonly onReconnect: (connectionId: string) => void;
+  readonly onSignIn: (action: SignInAction) => void;
 }): JSX.Element {
   const openServers = (): void => {
     if (serversOff === null) onShowServers();
@@ -231,7 +234,7 @@ function PlusMenuPanels({
           <LazyThreadServersMenu
             target={target}
             onOpenPicker={onOpenPicker}
-            onReconnect={onReconnect}
+            onSignIn={onSignIn}
             onClose={onClose}
           />
         </Suspense>

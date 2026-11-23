@@ -11,7 +11,7 @@
  * it is needed, so the tests wait for it.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { McpServer, Session } from "@hercule/contract";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
@@ -28,6 +28,7 @@ import {
   SENTRY_HOBBY_ID,
   SENTRY_WORK,
   SENTRY_WORK_ID,
+  NOTION,
 } from "../settings/mcp-servers/mcp-servers.testing";
 import {
   findCalls,
@@ -576,6 +577,122 @@ describe("the + menu on a started thread", () => {
 
     expect(await screen.findByRole("dialog", { name: "Reconnect Sentry · work" })).toBeTruthy();
   });
+
+  it("offers Sign in… for a server added by URL that needs a token, which opens its token dialog", async () => {
+    const signedOut = { ...NOTION, status: "needs-sign-in" } as const;
+    const thread = threadWith([signedOut]);
+    const { world } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [signedOut],
+    });
+    const popover = await openServersSubmenu();
+
+    // A server added by URL is written by its name alone, never with its address beside it.
+    expect(readSubmenuRows(popover)).toEqual(["notion"]);
+    fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+    await userEvent.type(within(dialog).getByLabelText("Token"), "abcd1234efgh5678");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await waitFor(() => {
+      expect(world.tokens).toEqual([{ id: NOTION.id, token: "abcd1234efgh5678" }]);
+    });
+  });
+
+  it("keeps the thread on the live topic while a sign-in dialog opened from the submenu follows its server, on a thread with an empty list", async () => {
+    const signedOut = { ...NOTION, status: "needs-sign-in" } as const;
+    const app = await openComposerApp(`/?project=${WEBSHOP.id}`, { servers: [signedOut] });
+    const popover = await openServersSubmenu();
+    expect(readSubmenuRows(popover)).toEqual(["notion"]);
+    fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+    await userEvent.type(within(dialog).getByLabelText("Token"), "abcd1234efgh5678");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Asking mcp.notion.example for its tools…");
+
+    // The menu that opened the dialog is closed now, and nothing else on the thread names a server.
+    toggleMenu(popover, "closed");
+    expect(app.live.readTopics()).toContain("mcpServer");
+    app.world.servers = app.world.servers.map((server) =>
+      server.id === NOTION.id ? { ...server, status: "ready" } : server,
+    );
+    act(() => {
+      app.live.pushInvalidation("mcpServer", [NOTION.id]);
+    });
+
+    await within(dialog).findByText("ready · 2 tools");
+  });
+
+  it.each([
+    [
+      "deleted",
+      (app: { world: { servers: McpServer[] } }) => {
+        app.world.servers = [];
+      },
+      "notion was removed.",
+    ],
+    [
+      "moved onto a Connection",
+      (app: { world: { servers: McpServer[] } }) => {
+        app.world.servers = app.world.servers.map((server) =>
+          buildServer(server.id, "notion", LINEAR_CONNECTION),
+        );
+      },
+      "notion is reached with a Connection now.",
+    ],
+  ])(
+    "ends a browser sign-in that waits when its server is %s meanwhile, and sends nothing when the browser returns after that",
+    async (_name, change, words) => {
+      const returns: ((outcome: { _tag: "received"; callbackQuery: string }) => void)[] = [];
+      const signInReturn = {
+        listen: vi.fn(() =>
+          Promise.resolve({
+            _tag: "listening",
+            listenerId: "l-1",
+            redirectUri: "http://127.0.0.1:4937/callback",
+          } as const),
+        ),
+        wait: vi.fn(
+          () =>
+            new Promise<{ _tag: "received"; callbackQuery: string }>((resolve) => {
+              returns.push(resolve);
+            }),
+        ),
+        cancel: vi.fn(() => Promise.resolve(undefined)),
+      };
+      const signedOut = {
+        ...NOTION,
+        status: "needs-sign-in",
+        source: { ...NOTION.source, signIn: "none", signInOffered: "oauth" },
+      } as McpServer;
+      const app = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+        servers: [signedOut],
+        signInReturn,
+      });
+      const popover = await openServersSubmenu();
+      fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+      );
+      await within(dialog).findByText("Finish in your browser");
+
+      change(app);
+      act(() => {
+        app.live.pushInvalidation("mcpServer", [NOTION.id]);
+      });
+      await within(dialog).findByText(words);
+      await act(async () => {
+        returns[0]!({ _tag: "received", callbackQuery: "code=the-code&state=abc123" });
+        await Promise.resolve();
+      });
+
+      expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+      expect(findCalls(app.calls, "POST", `${SERVER_LIST}/${NOTION.id}/sign-in/finish`)).toEqual(
+        [],
+      );
+    },
+  );
 
   it("says why Reconnect cannot go on when its Connection is deleted while the dialog is open, and closes with Close", async () => {
     const thread = threadWith([SENTRY_WORK]);

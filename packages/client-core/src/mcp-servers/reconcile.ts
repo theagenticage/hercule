@@ -13,13 +13,40 @@
  * - Only a fetch counts. `setQueryData` also marks a query as a success, but
  *   it proves nothing about what the controller holds.
  */
-import { matchQuery, type QueryClient, type QueryKey } from "@tanstack/query-core";
+import {
+  matchQuery,
+  type QueryClient,
+  type QueryKey,
+  type QueryObserverOptions,
+} from "@tanstack/query-core";
+import type { McpServer } from "@hercule/contract";
 
 /** A query the module reads: its key, and a read of it that never answers from the cache. */
 export interface McpListQuery {
   readonly queryKey: QueryKey;
   /** Reads the query from the controller and puts the answer in the cache, even when the cache holds a fresh one. */
   readonly fetch: () => Promise<unknown>;
+}
+
+/**
+ * How an app's query cache holds the servers. Each app defines this once, for
+ * its own cache shapes, and every module that reads servers uses that one
+ * definition.
+ */
+export interface McpServerQueries {
+  /** Returns the servers the cache holds now, or `undefined` while the list is not cached. */
+  readServers(): readonly McpServer[] | undefined;
+  /** Returns the query that reads the list of servers. After a write it is read again, so the list shows what the write did. */
+  readCatalogue(): McpListQuery;
+  /**
+   * Returns the key and the read of one server's page. An attempt follows the
+   * server with it, so the live topic's pushes read it again. It is marked
+   * stale when a write of a closed attempt or of a switch leaves the server
+   * changed.
+   */
+  readServerQuery(
+    mcpServerId: string,
+  ): Pick<QueryObserverOptions<McpServer>, "queryKey" | "queryFn">;
 }
 
 /** Watches one query for a fetch that succeeded after the watch started. */

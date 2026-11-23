@@ -1,11 +1,11 @@
-import { useEffect, type JSX } from "react";
-import { Link, createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { Suspense, useEffect, useState, type JSX } from "react";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, queryKeys, readErrorMessage } from "@hercule/client-core";
 import {
   buildMcpServerViews,
-  describeOfferAddress,
-  readMcpServerOffers,
+  describeSignInRow,
+  type SignInEntry,
 } from "@hercule/client-core/mcp-servers";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
 import {
@@ -16,9 +16,10 @@ import {
   projectsQuery,
   settingsQuery,
 } from "../../../../app/queries";
-import { ProviderMark } from "../../../../screens/provider-mark";
+import { LazyTokenDialog } from "../../../../screens/mcp-url-server/lazy-dialogs";
 import { Projects } from "./-projects";
 import { Remove } from "./-remove";
+import { ServerHeading } from "./-server-heading";
 import { ServerSection } from "./-server-section";
 import { StatusBand } from "./-status-band";
 import { Tools } from "./-tools";
@@ -62,6 +63,9 @@ function McpServerPage(): JSX.Element | null {
   const { client, queryClient, live } = Route.useRouteContext();
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  // The button that opened the token dialog of a server added by URL ("Sign in…" of the band,
+  // "Replace token…" or "Sign in again…" of the Sign-in row), or `null` while it is closed.
+  const [signingIn, setSigningIn] = useState<SignInEntry | null>(null);
 
   useLiveInvalidation(live, queryClient, "mcpServer");
 
@@ -92,46 +96,18 @@ function McpServerPage(): JSX.Element | null {
   if (server === undefined || gone) return null;
 
   const view = buildMcpServerViews([server], connections, plugins)[0]!;
-  const { source } = server;
-  const origin =
-    source.kind === "plugin"
-      ? readMcpServerOffers(plugins).find((offer) => offer.contributionId === source.contributionId)
-          ?.origin
-      : undefined;
-  const pluginName = plugins.find((plugin) => plugin.id === view.pluginId)?.displayName;
-  const chip = "rounded-full border border-line px-2 py-0.5 text-fine text-muted";
 
   return (
     <div className="flex flex-col gap-4">
-      <Link to="/settings/mcp-servers" className="text-fine text-muted hover:text-ink">
-        ← MCP servers
-      </Link>
-
-      <div className="flex flex-col gap-2.5">
-        <h2 className="flex items-center gap-2.5 text-[17px] font-emph tracking-[-0.01em] text-ink">
-          <ProviderMark pluginId={view.pluginId} plugins={plugins} className="size-5" />
-          <span>
-            {server.name}
-            {view.account === undefined ? null : (
-              <>
-                {" "}
-                <span className="text-row font-normal text-muted">{view.account}</span>
-              </>
-            )}
-          </span>
-        </h2>
-        <div className="flex flex-wrap gap-1.5">
-          <span className={chip}>From the {pluginName ?? view.typeName} plugin</span>
-          {origin === undefined ? null : (
-            <span className={chip}>{describeOfferAddress(origin)}</span>
-          )}
-        </div>
-      </div>
+      <ServerHeading view={view} plugins={plugins} />
 
       <StatusBand
         view={view}
         onCheck={() => {
           if (!check.isPending) check.mutate();
+        }}
+        onSignIn={() => {
+          setSigningIn("sign-in");
         }}
         checkPending={check.isPending}
       />
@@ -148,11 +124,27 @@ function McpServerPage(): JSX.Element | null {
         onCheck={() => {
           if (!check.isPending) check.mutate();
         }}
+        onOpenSignIn={() => {
+          setSigningIn(describeSignInRow(view)?.action?.kind ?? "sign-in");
+        }}
         checkPending={check.isPending}
       />
       <Tools tools={server.tools} />
       <Projects client={client} view={view} />
       <Remove client={client} view={view} />
+      {signingIn === null ? null : (
+        <Suspense fallback={null}>
+          <LazyTokenDialog
+            client={client}
+            server={server}
+            openedOn="server-page"
+            entry={signingIn}
+            onClose={() => {
+              setSigningIn(null);
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

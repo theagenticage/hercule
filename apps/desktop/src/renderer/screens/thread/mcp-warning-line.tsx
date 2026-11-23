@@ -4,19 +4,24 @@
  * `lazy-mcp-warning-line.ts`); until then the transcript draws it as a plain
  * warning.
  */
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { buildMcpWarningLine, type McpServerWarningEntry } from "@hercule/client-core/mcp-servers";
+import {
+  buildMcpWarningLine,
+  type McpServerWarningEntry,
+  type SignInAction,
+} from "@hercule/client-core/mcp-servers";
 import { useThreadViews } from "./thread-servers";
 import { RuntimeNote } from "./blocks";
-import { ReconnectDialog } from "./reconnect-dialog";
+import { LazySignInDialog } from "./lazy-thread-servers";
 
 /**
  * Renders a runtime warning that names MCP servers (`entries`) as the
  * warning's line, with one button for each server that has a fix: "Reconnect
- * Sentry · work" opens that Connection's Reconnect dialog, and "Open server"
- * goes to the server's page in Settings. A server that was deleted since, and
- * a reason with no fix, draw no button.
+ * Sentry · work" opens that Connection's Reconnect dialog, "Sign in…" (or
+ * "Paste a token…") opens the token dialog of a server added by URL, and "Open
+ * server" goes to the server's page in Settings. A server that was deleted
+ * since, and a reason with no fix, draw no button.
  *
  * `buildMcpWarningLine` decides the buttons and the tone. A line with at
  * least one button is drawn in the failure colours, because the user must
@@ -43,7 +48,7 @@ export default function McpWarningLine({
 }): JSX.Element {
   const views = useThreadViews();
   const navigate = useNavigate();
-  const [reconnectingId, setReconnectingId] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState<SignInAction | null>(null);
   const { tone, fixes } = buildMcpWarningLine(entries, views ?? []);
   return (
     <>
@@ -63,7 +68,7 @@ export default function McpWarningLine({
                   type="button"
                   className="btn btn--sm"
                   onClick={() => {
-                    if (fix.kind === "reconnect") setReconnectingId(fix.connectionId);
+                    if (fix.kind === "reconnect" || fix.kind === "sign-in") setSigningIn(fix);
                     else
                       void navigate({
                         to: "/settings/mcp-servers/$id",
@@ -76,13 +81,16 @@ export default function McpWarningLine({
               ))
         }
       />
-      {reconnectingId !== null && (
-        <ReconnectDialog
-          connectionId={reconnectingId}
-          onClose={() => {
-            setReconnectingId(null);
-          }}
-        />
+      {signingIn !== null && (
+        // Without its own boundary, the dialog's load would suspend the whole transcript.
+        <Suspense fallback={null}>
+          <LazySignInDialog
+            action={signingIn}
+            onClose={() => {
+              setSigningIn(null);
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

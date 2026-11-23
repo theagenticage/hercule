@@ -2,7 +2,11 @@ import { useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
-import { describeServerRemoval, type McpServerView } from "@hercule/client-core/mcp-servers";
+import {
+  describeRemoveEffect,
+  describeServerRemoval,
+  type McpServerView,
+} from "@hercule/client-core/mcp-servers";
 import { Button, FormCard } from "@hercule/ui";
 import { projectsQuery, settingsQuery } from "../../../../app/queries";
 import { InPlaceQuestion } from "../../../../screens/in-place-question";
@@ -30,7 +34,7 @@ export function Remove({
   const [asking, setAsking] = useState(false);
   const projects = useSuspenseQuery(projectsQuery(client)).data.items;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const { server, connection } = view;
+  const { server } = view;
 
   const leave = async (): Promise<void> => {
     await navigate({ to: "/settings/mcp-servers", replace: true });
@@ -60,15 +64,15 @@ export function Remove({
     projects,
     settings.user["thread.mcpServerIds"] ?? [],
   );
-  const who = view.account === undefined ? server.name : `${server.name} ${view.account}`;
+  // A server added by URL is named by its name alone: its account is its address.
+  const who =
+    view.account === undefined || server.source.kind === "url"
+      ? server.name
+      : `${server.name} ${view.account}`;
 
   return (
     <FormCard label={<CardHeading title="Remove" />}>
-      <p className="text-fine text-faint">
-        {connection === undefined
-          ? "Deletes the server. Projects that name it stop naming it."
-          : `Deletes the server. Projects that name it stop naming it. The Connection ${view.typeName} · ${connection.label} stays.`}
-      </p>
+      <p className="text-fine text-faint">{describeRemoveEffect(view)}</p>
       {asking ? (
         <InPlaceQuestion
           stacked
