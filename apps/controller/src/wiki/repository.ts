@@ -326,8 +326,10 @@ const make = Effect.gen(function* () {
      * named. A repository with no pages is in the map with a count of 0.
      *
      * One query for every repository. It reads each Wiki's pages that are
-     * not archived, from the index that holds only those, which the cap of
-     * 500 pages per Wiki bounds.
+     * not archived, which the cap of 500 pages per Wiki bounds. The query
+     * names the index that holds only those pages: left to choose, SQLite
+     * takes the slug index when several repositories are asked for, and then
+     * walks every page those Wikis ever archived.
      */
     summarizeWikis: (
       resourceIds: ReadonlyArray<string>,
@@ -347,7 +349,7 @@ const make = Effect.gen(function* () {
             SELECT resource_id, title,
               count(*) OVER (PARTITION BY resource_id) AS page_count,
               row_number() OVER (PARTITION BY resource_id ORDER BY updated_at DESC, id DESC) AS place
-            FROM wiki_pages
+            FROM wiki_pages INDEXED BY wiki_pages_current_resource_updated
             WHERE resource_id IN ${sql.in(resourceIds.map(uuidFromString))}
               AND archived_at IS NULL
           )

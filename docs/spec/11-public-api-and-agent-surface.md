@@ -41,7 +41,7 @@ Standard verbs, used with the same meaning on every entity that has them:
 
 | Verb | Meaning |
 |---|---|
-| `query` | the one list operation of an entity: filters (including `text` where full-text search exists) plus pagination; no filters lists everything; returns `items: <Entity>[]`. There is no `list` and no `search` anywhere in the catalogue. |
+| `query` | the one list operation of an entity: filters (including `text` where full-text search exists) plus pagination; no filters lists everything *(amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223): except where an entity documents a filter's default, as `initiative.query` lists the open Initiatives without `closed`, and `wikiPage.query` the pages that are not archived without `archived`)*; returns `items: <Entity>[]`. There is no `list` and no `search` anywhere in the catalogue. |
 | `read` | one entity by id |
 | `create` / `update` / `delete` | the obvious; `update` is a partial patch |
 | custom verbs | `spawn`, `steer`, `run`, `submit`, `emit`, `cancel`, `rerun`, `drain`, ...: named per entity in section 2 |

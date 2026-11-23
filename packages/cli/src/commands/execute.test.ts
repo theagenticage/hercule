@@ -18,8 +18,14 @@ const stubClient = (handler: Handler) => {
   return { fetch, client };
 };
 
-/** Returns a Wiki Page summary with the id `id`, as `wikiPage.query` lists it. */
-const buildWikiPage = (id: string) => ({
+/** The mark of an archived Wiki Page. */
+const WIKI_ARCHIVED = { at: "2026-10-20T09:00:00.000Z", by: "user", reason: "Out of date" };
+
+/**
+ * Returns a Wiki Page summary with the id `id`, as `wikiPage.query` lists it:
+ * an archived page with `isArchived`.
+ */
+const buildWikiPage = (id: string, isArchived = false) => ({
   id,
   resourceId: buildId("0000be11"),
   repository: "github.com/acme/web",
@@ -30,6 +36,7 @@ const buildWikiPage = (id: string) => ({
   updatedAt: "2026-10-14T10:05:00.000Z",
   updatedBy: "user",
   createdAt: "2026-10-14T10:00:00.000Z",
+  ...(isArchived ? { archived: WIKI_ARCHIVED } : {}),
 });
 
 /** Returns a join token, as `runner join-token list` returns it. */
@@ -241,7 +248,7 @@ describe("a positional whose row resolves tails", () => {
 
   it("resolves a wiki page tail in one listing of every page, archived or not, in creation order", async () => {
     const current = buildWikiPage("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
-    const archived = buildWikiPage("0199e0e7-7b21-7000-8000-0000bbbbbbb2");
+    const archived = buildWikiPage("0199e0e7-7b21-7000-8000-0000bbbbbbb2", true);
     for (const [verb, extra, method] of [
       ["read", [], "GET"],
       ["update", ["--expected-revision", "3"], "PATCH"],
@@ -281,7 +288,7 @@ describe("a positional whose row resolves tails", () => {
 
   it("refuses a wiki page tail that a current and an archived page share, and writes nothing", async () => {
     const current = buildWikiPage("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
-    const archivedTwin = buildWikiPage("0199e0e7-7b21-7000-8000-1111aaaaaaa1");
+    const archivedTwin = buildWikiPage("0199e0e7-7b21-7000-8000-1111aaaaaaa1", true);
     const { fetch, client } = stubClient(() => ({ items: [current, archivedTwin] }));
     const restore = lookUpCommand("wiki-page", "restore");
 

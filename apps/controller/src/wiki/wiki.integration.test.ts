@@ -505,6 +505,11 @@ describe("the Wiki over HTTP", () => {
       });
       const writerRestored = await requestRestore(arranged, page.id, writer.token);
       expect(writerRestored.status, await writerRestored.clone().text()).toBe(200);
+      // The answer is the page's summary: what it is called, never its body.
+      const restoredSummary = (await writerRestored.json()) as Record<string, unknown>;
+      expect(restoredSummary).toMatchObject({ title: PAGE.title, summary: PAGE.summary });
+      expect(restoredSummary).not.toHaveProperty("archived");
+      expect(restoredSummary).not.toHaveProperty("body");
       const actors = [
         ...(await arranged.harness.audit("wikiPage.archived")),
         ...(await arranged.harness.audit("wikiPage.restored")),
