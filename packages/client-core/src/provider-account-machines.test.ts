@@ -44,14 +44,14 @@ describe("listProviderAccountMachines", () => {
     ).toEqual(["moss", "atlas"]);
   });
 
-  it("is signed in where the readiness row is ready, and says who as", () => {
+  it("is ready where the readiness row is ready, and says who as", () => {
     const [moss, atlas] = list(SIGNED_IN_ON_MOSS, [WITH_CLAUDE, ATLAS]);
 
-    expect(moss).toMatchObject({ signedIn: true, identity: "rogier@example.com" });
-    expect(atlas).toMatchObject({ signedIn: false, identity: null });
+    expect(moss).toMatchObject({ ready: true, identity: "rogier@example.com" });
+    expect(atlas).toMatchObject({ ready: false, identity: null });
   });
 
-  it("is signed in without an identity when the harness named nobody", () => {
+  it("is ready without an identity when the harness named nobody", () => {
     const account = buildProviderAccount(
       ANTHROPIC_IDENTITY,
       [
@@ -63,15 +63,16 @@ describe("listProviderAccountMachines", () => {
       [{ runnerId: WITH_CLAUDE.id }],
     );
 
-    expect(list(account, [WITH_CLAUDE])[0]).toMatchObject({ signedIn: true, identity: null });
+    expect(list(account, [WITH_CLAUDE])[0]).toMatchObject({ ready: true, identity: null });
   });
 
-  it("is not signed in where the readiness row says anything but ready, whatever the last probe found", () => {
+  it("is not ready where the readiness row says anything but ready, whatever the last probe found", () => {
     for (const state of [
       "not-signed-in",
       "credential-missing",
       "token-expired",
       "harness-missing",
+      "harness-too-old",
     ] as const) {
       const account = buildProviderAccount(
         ANTHROPIC_IDENTITY,
@@ -79,16 +80,16 @@ describe("listProviderAccountMachines", () => {
         [{ runnerId: WITH_CLAUDE.id, state }],
       );
 
-      expect(list(account, [WITH_CLAUDE])[0]).toMatchObject({ signedIn: false, identity: null });
+      expect(list(account, [WITH_CLAUDE])[0]).toMatchObject({ ready: false, identity: null });
     }
   });
 
-  it("is not signed in on a runner with no readiness row", () => {
+  it("is not ready on a runner with no readiness row", () => {
     const account = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({ runnerId: WITH_CLAUDE.id }),
     ]);
 
-    expect(list(account, [WITH_CLAUDE])[0]?.signedIn).toBe(false);
+    expect(list(account, [WITH_CLAUDE])[0]?.ready).toBe(false);
   });
 
   it("reads only the readiness row of the account's default harness", () => {
@@ -98,7 +99,37 @@ describe("listProviderAccountMachines", () => {
       [{ runnerId: WITH_CLAUDE.id, harnessId: "pi/pi" }],
     );
 
-    expect(list(account, [WITH_CLAUDE])[0]?.signedIn).toBe(false);
+    expect(list(account, [WITH_CLAUDE])[0]?.ready).toBe(false);
+  });
+
+  it("names the problem in the readiness row, and none where the account is ready", () => {
+    const problemOf = (state: "not-signed-in" | "token-expired" | "harness-missing") =>
+      list(buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: WITH_CLAUDE.id, state }]), [
+        WITH_CLAUDE,
+      ])[0]?.problem;
+
+    expect(problemOf("not-signed-in")).toBe("Not signed in");
+    expect(problemOf("token-expired")).toBe("Token expired");
+    expect(problemOf("harness-missing")).toBe("Claude Code is not installed");
+    expect(list(SIGNED_IN_ON_MOSS, [WITH_CLAUDE])[0]?.problem).toBeNull();
+  });
+
+  it("says the harness is too old, with the version the machine reported, and offers the update rather than a sign-in", () => {
+    // The probe found the account signed in: only the harness version stops it.
+    const account = buildProviderAccount(
+      ANTHROPIC_IDENTITY,
+      [buildSnapshot({ runnerId: WITH_CLAUDE.id, harnessVersion: "2.0.1" })],
+      [{ runnerId: WITH_CLAUDE.id, state: "harness-too-old" }],
+    );
+
+    expect(list(account, [WITH_CLAUDE])[0]).toMatchObject({
+      ready: false,
+      problem: "Claude Code 2.0.1 is too old",
+      action: { kind: "update", reason: null },
+    });
+    expect(list(account, [{ ...WITH_CLAUDE, connectivity: "offline" }])[0]?.action).toMatchObject({
+      kind: "offline",
+    });
   });
 
   it("offers a sign-in where the harness is installed", () => {
