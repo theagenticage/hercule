@@ -91,6 +91,31 @@ describe("link.open", () => {
     expect(everything).not.toContain("auth.docs.example");
   });
 
+  it.each([
+    "https://user:sentinel-password@auth.docs.example/",
+    "https://sentinel-user@auth.docs.example/",
+  ])(
+    "refuses an address with a user name or password without repeating it in the reply or the log (%#)",
+    async (url) => {
+      const opened: string[] = [];
+      electron.openExternal = (target) => {
+        opened.push(target);
+        return Promise.resolve();
+      };
+
+      const { reply, logged } = await answerLinkOpen(url);
+
+      expect(JSON.stringify(reply)).toContain(
+        "Main refused a message on link.open: its request does not match the contract: Expected a URL with no user name or password",
+      );
+      expect(opened).toEqual([]);
+      const everything = JSON.stringify([reply, logged]);
+      expect(everything).toContain("url");
+      expect(everything).not.toContain("sentinel");
+      expect(everything).not.toContain("auth.docs.example");
+    },
+  );
+
   it("refuses the authorization address of signInReturn.wait the same way", async () => {
     const logged: unknown[] = [];
     const logger = Logger.make<unknown, void>(({ message }) => {

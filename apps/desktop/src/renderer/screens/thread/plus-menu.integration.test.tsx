@@ -643,7 +643,6 @@ describe("the + menu on a started thread", () => {
   ])(
     "ends a browser sign-in that waits when its server is %s meanwhile, and sends nothing when the browser returns after that",
     async (_name, change, words) => {
-      const authorizationUrl = "https://auth.notion.example/authorize?state=abc123";
       const returns: ((outcome: { _tag: "received"; callbackQuery: string }) => void)[] = [];
       const signInReturn = {
         listen: vi.fn(() =>
@@ -669,12 +668,6 @@ describe("the + menu on a started thread", () => {
       const app = await openComposerApp(`/?project=${WEBSHOP.id}`, {
         servers: [signedOut],
         signInReturn,
-        handlers: {
-          [`POST ${SERVER_LIST}/${NOTION.id}/sign-in`]: {
-            body: { authorizationUrl, expiresAt: "2026-11-23T10:10:00.000Z" },
-          },
-          [`POST ${SERVER_LIST}/${NOTION.id}/sign-in/finish`]: { body: {} },
-        },
       });
       const popover = await openServersSubmenu();
       fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));

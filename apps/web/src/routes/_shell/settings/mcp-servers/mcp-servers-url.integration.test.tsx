@@ -11,8 +11,14 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
-import type { McpServer } from "@hercule/contract";
-import { buildConnection, buildPlugin } from "@hercule/client-core/mcp-servers/testing";
+import type { Connection, McpServer, PluginDetail } from "@hercule/contract";
+import {
+  buildConnection,
+  buildMcpControllerHandlers,
+  buildMcpWorld,
+  buildPlugin,
+  type McpWorld,
+} from "@hercule/client-core/mcp-servers/testing";
 import {
   buildErrorBody,
   readPageText,
@@ -63,18 +69,19 @@ const WINNER_ID = makeId("5", 91);
 const P_WEBSHOP = makeId("a", 1);
 
 /** What the stub controller holds. A test changes it to play a change made elsewhere. */
-interface World {
-  servers: McpServer[];
-  plugins: unknown[];
-  connections: unknown[];
-}
+type World = McpWorld;
 
-const buildWorld = (servers: readonly McpServer[], overrides: Partial<World> = {}): World => ({
-  servers: [...servers],
-  plugins: [SENTRY],
-  connections: CONNECTIONS,
-  ...overrides,
-});
+const buildWorld = (
+  servers: readonly McpServer[],
+  overrides: { plugins?: PluginDetail[]; connections?: Connection[] } = {},
+): World =>
+  buildMcpWorld({
+    servers,
+    projects: [],
+    plugins: [SENTRY],
+    connections: CONNECTIONS,
+    ...overrides,
+  });
 
 const conflict = (message: string, details: unknown) => ({
   status: 409,
@@ -91,12 +98,24 @@ const replaceInWorld = (world: World, id: string, change: (server: McpServer) =>
 const buildCreated = (url: string, name: string): McpServer =>
   buildUrlServer(NEW_ID, name, url, { status: "checking", checkedAt: null, tools: [] });
 
+/**
+ * Returns the address the browser ends on after the user approves the sign-in
+ * of the wiki server that waits in `world`: its redirect address, with a code
+ * and the sign-in's `state`.
+ */
+const buildReturnAddress = (world: World): string => {
+  const { redirectUri, state } = world.signIns.get(S_WIKI.id)!;
+  return `${redirectUri}?code=the-code&state=${state}`;
+};
+
 /** Builds a stub controller over `world` that accepts the writes of these screens and applies them to `world`. */
 const buildController = (
   world: World,
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => {
   const handlers: Record<string, Handler> = {
+    // The fake serves the token and the sign-in; the handlers below answer for the rest.
+    ...buildMcpControllerHandlers(world, { createdIds: [NEW_ID, WINNER_ID] }),
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": {
       body: {
@@ -139,13 +158,6 @@ const buildController = (
       body: replaceInWorld(world, id, (server) => ({
         ...server,
         ...(call.body as Partial<McpServer>),
-      })),
-    });
-    handlers[`POST ${path}/token`] = () => ({
-      body: replaceInWorld(world, id, (server) => ({
-        ...server,
-        status: "checking",
-        statusDetail: null,
       })),
     });
     handlers[`POST ${path}/check`] = { body: {} };
@@ -543,16 +555,7 @@ describe("Settings > MCP servers > Add by URL", () => {
   it("asks for the token again, not for the browser, when the server refuses a pasted token and still offers the browser", async () => {
     const user = userEvent.setup();
     const world = buildWorld([S_WIKI]);
-    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
-      [`POST /api/v1/mcp-servers/${S_WIKI.id}/token`]: () => ({
-        body: replaceInWorld(world, S_WIKI.id, (server) => ({
-          ...server,
-          status: "checking",
-          statusDetail: null,
-          source: { ...server.source, signIn: "token" } as McpServer["source"],
-        })),
-      }),
-    });
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world);
     await user.click(await screen.findByRole("button", { name: "Sign in…" }));
     const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
     await user.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
@@ -575,27 +578,13 @@ describe("Settings > MCP servers > Add by URL", () => {
   it("goes back to the browser choice when a sign-in through the browser is refused by the check", async () => {
     const user = userEvent.setup();
     const world = buildWorld([S_WIKI]);
-    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
-      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in`]: {
-        body: {
-          authorizationUrl: "https://auth.wiki.example/authorize?state=abc123",
-          expiresAt: "2026-11-23T10:10:00.000Z",
-        },
-      },
-      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in/finish`]: () => ({
-        body: replaceInWorld(world, S_WIKI.id, (server) => ({
-          ...server,
-          status: "checking",
-          source: { ...server.source, signIn: "oauth" } as McpServer["source"],
-        })),
-      }),
-    });
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world);
     await user.click(await screen.findByRole("button", { name: "Sign in…" }));
     const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
     await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
     await user.type(
       await within(dialog).findByLabelText("Address the browser ended on"),
-      "http://127.0.0.1:50000/callback?code=the-code&state=abc123",
+      buildReturnAddress(world),
     );
     await user.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
     await within(dialog).findByText("Checking: asking the server for its tools.");
@@ -655,28 +644,14 @@ describe("Settings > MCP servers > Add by URL", () => {
       },
     });
     const world = buildWorld([holdsToken]);
-    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
-      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in`]: {
-        body: {
-          authorizationUrl: "https://auth.wiki.example/authorize?state=abc123",
-          expiresAt: "2026-11-23T10:10:00.000Z",
-        },
-      },
-      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in/finish`]: () => ({
-        body: replaceInWorld(world, S_WIKI.id, (server) => ({
-          ...server,
-          status: "checking",
-          source: { ...server.source, signIn: "oauth" } as McpServer["source"],
-        })),
-      }),
-    });
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world);
     await user.click(await screen.findByRole("button", { name: "Replace token…" }));
     const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
     // The first form is the token field, as the button says. The user chooses the browser instead.
     await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
     await user.type(
       await within(dialog).findByLabelText("Address the browser ended on"),
-      "http://127.0.0.1:50000/callback?code=the-code&state=abc123",
+      buildReturnAddress(world),
     );
     await user.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
     await within(dialog).findByText("Checking: asking the server for its tools.");
@@ -714,17 +689,11 @@ describe("Settings > MCP servers > Add by URL", () => {
   });
 
   describe("the sign-in through the browser", () => {
-    const SIGN_IN_URL = "https://auth.wiki.example/authorize?state=abc123&client_id=x";
     const WIKI_PATH = `/api/v1/mcp-servers/${S_WIKI.id}`;
     const invalidState = (reason: string, message: string) => ({
       status: 409,
       body: { error: { code: "invalid_state", message, details: { reason } } },
     });
-    const startsSignIn: Readonly<Record<string, Handler>> = {
-      [`POST ${WIKI_PATH}/sign-in`]: {
-        body: { authorizationUrl: SIGN_IN_URL, expiresAt: "2026-11-23T10:10:00.000Z" },
-      },
-    };
     const signInCalls = (api: { readonly calls: readonly Call[] }, suffix: string) =>
       listWrites(api).filter((call) => call.path.endsWith(suffix));
 
@@ -734,10 +703,7 @@ describe("Settings > MCP servers > Add by URL", () => {
       extra: Readonly<Record<string, Handler>> = {},
       world = buildWorld([S_WIKI]),
     ) => {
-      const opened = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
-        ...startsSignIn,
-        ...extra,
-      });
+      const opened = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, extra);
       await user.click(await screen.findByRole("button", { name: "Sign in…" }));
       const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
       await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
@@ -748,27 +714,15 @@ describe("Settings > MCP servers > Add by URL", () => {
     it("starts with an address nothing listens on, names who approves, links the sign-in page, and finishes with the pasted address", async () => {
       const user = userEvent.setup();
       const world = buildWorld([S_WIKI]);
-      const { api, dialog, live } = await startSignIn(
-        user,
-        {
-          [`POST ${WIKI_PATH}/sign-in/finish`]: () => ({
-            body: replaceInWorld(world, S_WIKI.id, (server) => ({
-              ...server,
-              status: "checking",
-              source: { ...server.source, signIn: "oauth" } as McpServer["source"],
-            })),
-          }),
-        },
-        world,
-      );
+      const { api, dialog, live } = await startSignIn(user, {}, world);
 
       const [start] = signInCalls(api, "/sign-in");
       expect((start!.body as { redirectUri: string }).redirectUri).toMatch(
         /^http:\/\/127\.0\.0\.1:\d+\/callback$/,
       );
-      expect(readPageText(dialog)).toContain("You will approve on auth.wiki.example.");
+      expect(readPageText(dialog)).toContain("You will approve on auth.mcp.wiki.example.");
       const link = within(dialog).getByRole("link", { name: "Open the sign-in page" });
-      expect(link.getAttribute("href")).toBe(SIGN_IN_URL);
+      expect(link.getAttribute("href")).toBe(world.signIns.get(S_WIKI.id)!.authorizationUrl);
       expect(link.getAttribute("target")).toBe("_blank");
       expect(link.getAttribute("rel")).toContain("noopener");
 
@@ -779,11 +733,12 @@ describe("Settings > MCP servers > Add by URL", () => {
       expect(signInCalls(api, "/sign-in/finish")).toHaveLength(0);
 
       await user.clear(field);
-      await user.type(field, "http://127.0.0.1:50000/callback?code=the-code&state=abc123");
+      const returned = buildReturnAddress(world);
+      await user.type(field, returned);
       await user.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
       await waitFor(() => {
         expect(signInCalls(api, "/sign-in/finish").map((call) => call.body)).toEqual([
-          { callbackQuery: "http://127.0.0.1:50000/callback?code=the-code&state=abc123" },
+          { callbackQuery: returned },
         ]);
       });
 
@@ -803,7 +758,7 @@ describe("Settings > MCP servers > Add by URL", () => {
     it("draws who approves in the same render as the link to the sign-in page, so the host is there before the link can be followed", async () => {
       const user = userEvent.setup();
       const world = buildWorld([S_WIKI]);
-      await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, startsSignIn);
+      await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world);
       await user.click(await screen.findByRole("button", { name: "Sign in…" }));
       const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
 
@@ -811,8 +766,9 @@ describe("Settings > MCP servers > Add by URL", () => {
       const seen: { link: boolean; host: boolean }[] = [];
       const observer = new MutationObserver(() => {
         seen.push({
-          link: document.querySelector(`a[href="${SIGN_IN_URL}"]`) !== null,
-          host: readPageText(dialog).includes("You will approve on auth.wiki.example."),
+          link:
+            document.querySelector(`a[href^="https://auth.mcp.wiki.example/authorize"]`) !== null,
+          host: readPageText(dialog).includes("You will approve on auth.mcp.wiki.example."),
         });
       });
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });

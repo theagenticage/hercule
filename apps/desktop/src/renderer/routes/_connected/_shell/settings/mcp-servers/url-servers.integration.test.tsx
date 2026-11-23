@@ -12,6 +12,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
 import { ADDRESS_FIELD_HINT } from "@hercule/client-core/mcp-servers";
+import { readAuthorizationState } from "@hercule/contract";
 import type { Handler } from "@hercule/client-core/testing";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
@@ -36,6 +37,7 @@ import {
   openPage,
   readCells,
   SERVER_LIST_PATH,
+  type McpWorld,
   type OpenedMcpApp,
 } from "../../../../../screens/settings/mcp-servers/mcp-world.testing";
 
@@ -1022,8 +1024,13 @@ describe("the page of a server added by URL", () => {
   });
 });
 
-const AUTHORIZATION_URL = "https://auth.docs.example/authorize?state=abc123&client_id=x";
-const CALLBACK = "code=the-code&state=abc123";
+/** Returns the address the fake controller's `startSignIn` answered for `serverId`, which the browser opens. */
+const readAuthorizationUrl = (app: { readonly world: McpWorld }, serverId = DOCS_ID): string =>
+  app.world.signIns.get(serverId)!.authorizationUrl;
+
+/** Returns what the browser comes back with after the sign-in that waits on `serverId`: a code and its `state`. */
+const buildCallbackQuery = (app: { readonly world: McpWorld }, serverId = DOCS_ID): string =>
+  `code=the-code&state=${app.world.signIns.get(serverId)!.state}`;
 
 type ReturnOutcome =
   | { readonly _tag: "received"; readonly callbackQuery: string }
@@ -1032,13 +1039,19 @@ type ReturnOutcome =
 
 /**
  * Plays main's `signInReturn`: a listener on `redirectUri` (or none when
- * `listens` is false), whose waits the test settles by hand, or that the
- * browser has come back to already when `returnsAtOnce` is true.
+ * `listens` is false), whose waits the test settles with `comeBack`, or that
+ * the browser has come back to already when `returnsAtOnce` is true. The
+ * browser's return carries the `state` of the authorization address the wait
+ * was given, as a real browser's does.
  */
 const buildSignInReturn = (listens = true, returnsAtOnce = false) => {
   const waits: ((outcome: ReturnOutcome) => void)[] = [];
+  const callbackQueries: string[] = [];
   return {
     waits,
+    callbackQueries,
+    /** Settles the first wait with the browser's return. */
+    comeBack: () => waits[0]!({ _tag: "received", callbackQuery: callbackQueries[0]! }),
     listen: vi.fn(() =>
       Promise.resolve(
         listens
@@ -1051,9 +1064,11 @@ const buildSignInReturn = (listens = true, returnsAtOnce = false) => {
       ),
     ),
     wait: vi.fn(
-      () =>
+      ({ authorizationUrl }: { readonly listenerId: string; readonly authorizationUrl: string }) =>
         new Promise<ReturnOutcome>((resolve) => {
-          if (returnsAtOnce) resolve({ _tag: "received", callbackQuery: CALLBACK });
+          const callbackQuery = `code=the-code&state=${readAuthorizationState(authorizationUrl)}`;
+          callbackQueries.push(callbackQuery);
+          if (returnsAtOnce) resolve({ _tag: "received", callbackQuery });
           else waits.push(resolve);
         }),
     ),
@@ -1071,7 +1086,7 @@ const invalidState = (reason: string) => ({
 /** Opens the page of a server added by URL that needs sign-in through the browser, and its dialog at the first step. */
 const openSignInDialog = async (
   signInReturn: ReturnType<typeof buildSignInReturn>,
-  finish: Handler = { body: {} },
+  finish?: Handler,
   openLink?: (
     url: string,
   ) => Promise<
@@ -1087,12 +1102,9 @@ const openSignInDialog = async (
     {
       signInReturn,
       ...(openLink === undefined ? {} : { openLink }),
-      handlers: {
-        [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`]: {
-          body: { authorizationUrl: AUTHORIZATION_URL, expiresAt: "2026-11-23T10:10:00.000Z" },
-        },
-        [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`]: finish,
-      },
+      ...(finish === undefined
+        ? {}
+        : { handlers: { [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`]: finish } }),
     },
   );
   const band = document.querySelector<HTMLElement>(".mcp-band")!;
@@ -1104,33 +1116,28 @@ const openSignInDialog = async (
 describe("Signing in to a server added by URL through the browser", () => {
   it("listens first, starts with the listener's address, opens the browser after showing who approves, and finishes with what the browser sent", async () => {
     const signInReturn = buildSignInReturn();
-    const { app, dialog } = await openSignInDialog(signInReturn, () => {
-      app.world.servers = app.world.servers.map((server) =>
-        server.id === DOCS_ID ? { ...server, status: "checking" } : server,
-      );
-      return { body: app.world.servers.find((server) => server.id === DOCS_ID) };
-    });
+    const { app, dialog } = await openSignInDialog(signInReturn);
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
 
     await within(dialog).findByText("Finish in your browser");
-    expect(within(dialog).getByText("You will approve on auth.docs.example.")).toBeTruthy();
+    expect(within(dialog).getByText("You will approve on auth.mcp.docs.example.")).toBeTruthy();
     expect(
       findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`).map((c) => c.body),
     ).toEqual([{ redirectUri: "http://127.0.0.1:4937/callback" }]);
     expect(signInReturn.listen).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+      expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
     expect(signInReturn.wait).toHaveBeenCalledWith({
       listenerId: "l-1",
-      authorizationUrl: AUTHORIZATION_URL,
+      authorizationUrl: readAuthorizationUrl(app),
     });
 
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
 
@@ -1139,7 +1146,7 @@ describe("Signing in to a server added by URL through the browser", () => {
         findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`).map(
           (c) => c.body,
         ),
-      ).toEqual([{ callbackQuery: CALLBACK }]);
+      ).toEqual([{ callbackQuery: signInReturn.callbackQueries[0] }]);
     });
     await within(dialog).findByText("Asking mcp.docs.example for its tools.");
     finishCheck(app, DOCS_ID, READY);
@@ -1159,11 +1166,11 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
 
     await waitFor(() => {
-      expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+      expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
     expect(dialogsWhenOpened).toHaveLength(1);
     expect(dialogsWhenOpened[0]).toContain("Finish in your browser");
-    expect(dialogsWhenOpened[0]).toContain("You will approve on auth.docs.example.");
+    expect(dialogsWhenOpened[0]).toContain("You will approve on auth.mcp.docs.example.");
     // It said so before it opened: the label is Open again from then on.
     expect(within(dialog).getByRole("button", { name: "Open again" })).toBeTruthy();
   });
@@ -1195,7 +1202,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       });
       expect(app.openedLinks).toEqual([]);
       await waitFor(() => {
-        expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+        expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
       });
     } finally {
       holdFrames.mockRestore();
@@ -1216,7 +1223,7 @@ describe("Signing in to a server added by URL through the browser", () => {
         findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`).map(
           (c) => c.body,
         ),
-      ).toEqual([{ callbackQuery: CALLBACK }]);
+      ).toEqual([{ callbackQuery: signInReturn.callbackQueries[0] }]);
     });
     // The return finished the sign-in before the card was presented, so there is nothing to open.
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1276,7 +1283,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       try {
         await act(async () => {
           request(dialog);
-          signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+          signInReturn.comeBack();
           await new Promise((resolve) => setTimeout(resolve, 20));
         });
         expect(closed).toBe(true);
@@ -1316,7 +1323,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     Node.prototype.removeChild = function <T extends Node>(this: Node, child: T): T {
       if (cancelsWhenRemoved === null && child.contains(dialog)) {
         cancelsWhenRemoved = signInReturn.cancel.mock.calls.length;
-        signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+        signInReturn.comeBack();
       }
       return removeChild.call(this, child) as T;
     };
@@ -1339,18 +1346,13 @@ describe("Signing in to a server added by URL through the browser", () => {
 
   it("offers the browser again, with the server's reason, when the server refuses the sign-in it was just given", async () => {
     const signInReturn = buildSignInReturn();
-    const { app, dialog } = await openSignInDialog(signInReturn, () => {
-      app.world.servers = app.world.servers.map((server) =>
-        server.id === DOCS_ID ? { ...server, status: "checking" } : server,
-      );
-      return { body: app.world.servers.find((server) => server.id === DOCS_ID) };
-    });
+    const { app, dialog } = await openSignInDialog(signInReturn);
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
     await within(dialog).findByText("Finish in your browser");
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
     await within(dialog).findByText("Asking mcp.docs.example for its tools.");
@@ -1397,26 +1399,7 @@ describe("Signing in to a server added by URL through the browser", () => {
         ...DOCS,
         source: { kind: "url", url: DOCS_URL, signIn: "token", signInOffered: "oauth" },
       },
-      {
-        signInReturn,
-        handlers: {
-          [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`]: {
-            body: { authorizationUrl: AUTHORIZATION_URL, expiresAt: "2026-11-23T10:10:00.000Z" },
-          },
-          [`POST ${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`]: () => {
-            app.world.servers = app.world.servers.map((server) =>
-              server.id === DOCS_ID
-                ? {
-                    ...server,
-                    status: "checking",
-                    source: { kind: "url", url: DOCS_URL, signIn: "oauth", signInOffered: "oauth" },
-                  }
-                : server,
-            );
-            return { body: app.world.servers.find((server) => server.id === DOCS_ID) };
-          },
-        },
-      },
+      { signInReturn },
     );
     const server = screen.getByRole("heading", { level: 2, name: "Server" }).closest("section")!;
     await userEvent.click(within(server).getByRole("button", { name: "Replace token…" }));
@@ -1427,7 +1410,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
     await within(dialog).findByText("Finish in your browser");
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
     await within(dialog).findByText("Asking mcp.docs.example for its tools.");
@@ -1453,7 +1436,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(await within(dialog).findByRole("button", { name: "Open again" }));
 
     await waitFor(() => {
-      expect(app.openedLinks).toEqual([AUTHORIZATION_URL, AUTHORIZATION_URL]);
+      expect(app.openedLinks).toEqual([readAuthorizationUrl(app), readAuthorizationUrl(app)]);
     });
   });
 
@@ -1467,7 +1450,7 @@ describe("Signing in to a server added by URL through the browser", () => {
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
 
@@ -1493,7 +1476,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
 
@@ -1536,10 +1519,8 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Paste the browser's address…" }),
     );
-    await userEvent.type(
-      within(dialog).getByLabelText("Address the browser ended on"),
-      `http://127.0.0.1:4937/callback?${CALLBACK}`,
-    );
+    const pasted = `http://127.0.0.1:4937/callback?${buildCallbackQuery(app)}`;
+    await userEvent.type(within(dialog).getByLabelText("Address the browser ended on"), pasted);
     await userEvent.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
 
     await waitFor(() => {
@@ -1547,7 +1528,7 @@ describe("Signing in to a server added by URL through the browser", () => {
         findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`).map(
           (c) => c.body,
         ),
-      ).toEqual([{ callbackQuery: `http://127.0.0.1:4937/callback?${CALLBACK}` }]);
+      ).toEqual([{ callbackQuery: pasted }]);
     });
     expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
   });
@@ -1566,7 +1547,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     ).toBeNull();
     expect(signInReturn.wait).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(app.openedLinks).toEqual([AUTHORIZATION_URL]);
+      expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
     const [start] = findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`);
     expect((start!.body as { redirectUri: string }).redirectUri).toMatch(
@@ -1596,7 +1577,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await within(dialog).findByText("Finish in your browser");
 
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
 
@@ -1613,7 +1594,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await within(dialog).findByText("Finish in your browser");
 
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
 
@@ -1628,22 +1609,7 @@ describe("Signing in to a server added by URL through the browser", () => {
 
   it("signs in a server the Add dialog just created, and ends on the new server's footer", async () => {
     const signInReturn = buildSignInReturn();
-    const app = await openList({
-      servers: [],
-      signInReturn,
-      handlers: {
-        [`POST ${SERVER_LIST_PATH}/${CREATED_ID}/sign-in`]: {
-          body: { authorizationUrl: AUTHORIZATION_URL, expiresAt: "2026-11-23T10:10:00.000Z" },
-        },
-        [`POST ${SERVER_LIST_PATH}/${CREATED_ID}/sign-in/finish`]: () => {
-          app.world.servers = app.world.servers.map((server) => ({
-            ...server,
-            status: "checking",
-          }));
-          return { body: app.world.servers.find((server) => server.id === CREATED_ID) };
-        },
-      },
-    });
+    const app = await openList({ servers: [], signInReturn });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
     await within(dialog).findByText("Asking mcp.docs.example for its tools.");
@@ -1657,7 +1623,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
     await within(dialog).findByText("Finish in your browser");
     await act(async () => {
-      signInReturn.waits[0]!({ _tag: "received", callbackQuery: CALLBACK });
+      signInReturn.comeBack();
       await Promise.resolve();
     });
     await within(dialog).findByText("Asking mcp.docs.example for its tools.");

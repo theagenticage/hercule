@@ -225,8 +225,9 @@ describe("Settings > MCP servers, the switches", () => {
       expect(findRow("sentry work").querySelector(".mcp-status")?.textContent).toBe("off");
     });
     await userEvent.click(flip());
+    // Switching on puts the status back to checking, until the next check ends.
     await waitFor(() => {
-      expect(findRow("sentry work").querySelector(".mcp-status")?.textContent).toBe("ready");
+      expect(findRow("sentry work").querySelector(".mcp-status")?.textContent).toBe("checking");
     });
 
     expect(

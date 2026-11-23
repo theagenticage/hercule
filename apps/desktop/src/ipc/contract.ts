@@ -353,14 +353,19 @@ export const Appearance = Schema.Struct({
 export type Appearance = typeof Appearance.Type;
 
 /**
- * An absolute `http:` or `https:` URL. The refusal message never repeats the
- * URL: it reaches the renderer and main's log, and the URL of a sign-in
- * carries a one-time `state` in its query. The message still names the field.
+ * An absolute `http:` or `https:` URL with no user name or password. The
+ * refusal messages never repeat the URL: they reach the renderer and main's
+ * log, and the URL of a sign-in carries a one-time `state` in its query, while
+ * a URL with credentials carries a password. The messages still name the field.
  */
 const HttpUrl = Schema.String.check(
-  Schema.makeFilter((url: string) =>
-    isHttpUrl(url) ? undefined : "Expected an http: or https: URL",
-  ),
+  Schema.makeFilter((url: string) => {
+    if (!isHttpUrl(url)) return "Expected an http: or https: URL";
+    const { username, password } = new URL(url);
+    return username === "" && password === ""
+      ? undefined
+      : "Expected a URL with no user name or password";
+  }),
 );
 
 /**
@@ -696,7 +701,7 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   },
   /**
    * Opens an `http:` or `https:` URL in the default browser. Refuses any other
-   * URL. Answers `NotOpened` when the system cannot open it.
+   * URL, and a URL with a user name or password. Answers `NotOpened` when the system cannot open it.
    */
   "link.open": {
     request: Schema.Struct({ url: HttpUrl }),

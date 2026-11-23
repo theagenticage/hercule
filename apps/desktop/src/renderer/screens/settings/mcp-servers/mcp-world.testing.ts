@@ -40,7 +40,7 @@ const NEW_SERVER_IDS = [1, 2, 3, 4].map(
 );
 
 /** What the stubbed controller holds, with the Connections its list serves. */
-export type McpWorld = SharedMcpWorld & { connections: Connection[] };
+export type McpWorld = SharedMcpWorld;
 
 export interface OpenWorldOptions {
   readonly servers?: readonly McpServer[];
@@ -63,14 +63,13 @@ export interface OpenWorldOptions {
 export const buildMcpWorld = (
   options: OpenWorldOptions,
 ): { readonly world: McpWorld; readonly handlers: Record<string, Handler> } => {
-  const world: McpWorld = Object.assign(
-    buildSharedMcpWorld({
-      servers: options.servers ?? [SENTRY_WORK, SENTRY_HOBBY],
-      projects: options.projects ?? [WEBSHOP, OPS],
-      defaultIds: options.defaultIds,
-    }),
-    { connections: [...(options.connections ?? OFFERING_CONNECTIONS)] },
-  );
+  const world: McpWorld = buildSharedMcpWorld({
+    servers: options.servers ?? [SENTRY_WORK, SENTRY_HOBBY],
+    projects: options.projects ?? [WEBSHOP, OPS],
+    defaultIds: options.defaultIds,
+    plugins: OFFERING_PLUGINS,
+    connections: options.connections ?? OFFERING_CONNECTIONS,
+  });
   return {
     world,
     handlers: {
