@@ -364,8 +364,16 @@ export const createMcpServerSwitches = ({
     const { refusal, unread } = guard.readState(key);
     // The record decides before a refusal does: a write whose reply was lost can commit after the
     // list was read, and a second Replace is then refused because the chosen server is already on
-    // the Connection.
-    if (refusal?.kind === "refused" && record !== undefined && record.id === confirmed?.serverId) {
+    // the Connection. That only counts when the list read after the write succeeded (`unread` is
+    // null) and the record is what Replace asked for: on the Connection and switched on. Otherwise
+    // the cache may be stale, or another client changed the record, so the refusal below stays.
+    if (
+      refusal?.kind === "refused" &&
+      unread === null &&
+      record !== undefined &&
+      record.id === confirmed?.serverId &&
+      record.enabled
+    ) {
       return { kind: "replaced" };
     }
     const unreadNote = unread === null ? "" : " The list of servers could not be read again.";

@@ -1084,6 +1084,46 @@ describe("the Replace dialog", () => {
       expect(view()).toMatchObject({ done: true, notice: null });
     });
 
+    it("keeps Read again, and is not done, when a second Replace is refused while the cache shows the server on the Connection but the list cannot be read", async () => {
+      const { world, queryClient, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
+      const patch = hold();
+      world.holdUpdate = patch.promise;
+      world.updateFails = new ApiError("conflict", "This Connection has a server already.", {
+        reason: "mcp-server-exists",
+        mcpServerId: "s-a",
+      });
+      switches.confirmReplace(WORK);
+      // Another client moved the server onto the Connection, then the read after the refusal fails.
+      queryClient.setQueryData(SERVERS_KEY, [movedA()]);
+      world.readsFail = true;
+
+      patch.resolve();
+      await vi.waitFor(() => {
+        expect(view().notice).toMatchObject({ kind: "refused", readAgainLabel: "Read again" });
+      });
+      expect(view().done).toBe(false);
+
+      world.servers = [movedA()];
+      world.readsFail = false;
+      switches.readReplaceListAgain(WORK);
+      await settle(WORK);
+      expect(view().done).toBe(true);
+    });
+
+    it("is not done when a second Replace is refused and the server on the Connection is switched off", async () => {
+      const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
+      world.servers = [{ ...movedA(), enabled: false }];
+      world.updateFails = new ApiError("conflict", "This Connection has a server already.", {
+        reason: "mcp-server-exists",
+        mcpServerId: "s-a",
+      });
+
+      switches.confirmReplace(WORK);
+      await settle(WORK);
+
+      expect(view()).toMatchObject({ done: false, notice: { kind: "refused" } });
+    });
+
     it("says the outcome is not known while the list cannot be read, and is done when a read shows the server moved", async () => {
       const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
       world.losesReply = true;
