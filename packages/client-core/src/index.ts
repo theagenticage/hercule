@@ -921,11 +921,13 @@ export {
   decideThreadRowEnd,
   decideThreadRowStatus,
   describePose,
+  describeThreadRowState,
   isAbsentPose,
   POSES,
   type Pose,
   type SessionPose,
   type ThreadRowEnd,
+  type ThreadRowState,
   type ThreadRowStatus,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
@@ -1018,12 +1020,14 @@ export {
   type SessionPresentation,
 } from "./threads/session-presentation";
 export {
+  buildRowSecondLine,
   findGroupRow,
   findWorkspaceGroupRow,
   type GroupAsk,
   type GroupMember,
   type GroupRow,
   type GroupSummary,
+  type RowLinePart,
   type SessionDot,
 } from "./threads/group-row";
 export { indexRowMembers, type RowMember } from "./threads/row-members";

@@ -321,14 +321,18 @@
    button, such as the Text size steps. The radio gives the group its
    semantics and its arrow keys, and is drawn invisibly over its label, so the
    label looks exactly like a button. The checked radio is the value in use,
-   and a keyboard focus ring goes round its segment. */
+   and a keyboard focus ring goes round its segment.
+   The track's edge is the quiet chrome divider, not `--control-edge`: a 3:1
+   edge made a segmented control louder than the content around it, and the
+   selected segment's raised puck already tells the segments apart. Every
+   segmented control draws the same track, the sidebar's face switch too. */
 .seg {
   display: inline-flex;
   padding: 2px;
   gap: 2px;
   border-radius: var(--r-sm);
   background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--control-edge);
+  box-shadow: inset 0 0 0 1px var(--divider);
 }
 .seg button,
 .seg label {
