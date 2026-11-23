@@ -327,7 +327,7 @@ export interface UrlServerAttempt {
   readonly close: () => void;
 }
 
-const FIRST_FORM: StateOf<"form"> = { kind: "form", problem: null };
+const FIRST_FORM: AttemptStateWithKind<"form"> = { kind: "form", problem: null };
 
 /** The attempt a dialog holds until its own is open: it shows the empty form and does nothing. */
 const UNOPENED_ATTEMPT: UrlServerAttempt = {
@@ -389,11 +389,14 @@ type Back =
       readonly outcome: ServerOutcome;
     };
 
-type StateOf<K extends UrlServerAttemptState["kind"]> = Extract<UrlServerAttemptState, { kind: K }>;
+type AttemptStateWithKind<K extends UrlServerAttemptState["kind"]> = Extract<
+  UrlServerAttemptState,
+  { kind: K }
+>;
 
 interface FormPhase {
   readonly kind: "form";
-  state: StateOf<"form">;
+  state: AttemptStateWithKind<"form">;
   /** The fields the refusal in `state` was made for. `null` for a token form, which has none. */
   readonly sent: AddFields | null;
   release: () => void;
@@ -401,7 +404,7 @@ interface FormPhase {
 
 interface WritingPhase {
   readonly kind: "writing";
-  state: StateOf<"writing">;
+  state: AttemptStateWithKind<"writing">;
   /** Where a refused or failed token write returns to. */
   readonly back: Back;
   release: () => void;
@@ -419,7 +422,7 @@ interface PendingCheck {
 
 interface FollowingPhase {
   readonly kind: "following";
-  state: StateOf<"following">;
+  state: AttemptStateWithKind<"following">;
   readonly origin: FollowOrigin;
   problem: AttemptProblem | null;
   reading: RecordReading;
@@ -430,7 +433,7 @@ interface FollowingPhase {
 
 interface EndedPhase {
   readonly kind: "ended";
-  state: StateOf<"ended">;
+  state: AttemptStateWithKind<"ended">;
   release: () => void;
 }
 
@@ -522,7 +525,7 @@ export const openUrlServerAttempt = (
   const followRecord = (id: string, onReading: (reading: RecordReading) => void): (() => void) => {
     let stopped = false;
     let stopWatching = noRelease;
-    const serverQuery = queries.readServerQuery(id);
+    const serverQuery = queries.buildServerQuery(id);
     const { queryKey } = serverQuery;
     void (async () => {
       await queryClient.cancelQueries({ queryKey, exact: true });
@@ -607,7 +610,7 @@ export const openUrlServerAttempt = (
   /** Marks the server's page stale, so whoever shows it reads it again. */
   const invalidateServerPage = (id: string): void => {
     void queryClient.invalidateQueries({
-      queryKey: queries.readServerQuery(id).queryKey,
+      queryKey: queries.buildServerQuery(id).queryKey,
       exact: true,
     });
   };
@@ -788,8 +791,11 @@ export const openUrlServerAttempt = (
       };
       if (before.kind === "form") show(before, { kind: "form", problem });
       else {
+        // Shows the refusal on the state the phase has now. A refresh would decide from the
+        // record, which a resumed phase has not read yet, and replace the form with "Reading
+        // the server…".
         before.problem = problem;
-        refresh(before);
+        show(before, { ...before.state, problem });
       }
       return;
     }

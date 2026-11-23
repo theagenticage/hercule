@@ -758,7 +758,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
 
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
     expect(within(dialog).getByText("You will approve on auth.mcp.docs.example.")).toBeTruthy();
     expect(
       findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`).map((c) => c.body),
@@ -774,6 +774,8 @@ describe("Signing in to a server added by URL through the browser", () => {
     await waitFor(() => {
       expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
+    // Only after the press does the step wait for the browser.
+    await within(dialog).findByText("Finish in your browser");
 
     await act(async () => {
       signInReturn.comeBack();
@@ -864,7 +866,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
     expect(app.openedLinks).toEqual([]);
     await userEvent.click(within(dialog).getByRole("button", { name: "Open the browser" }));
 
@@ -916,7 +918,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Sign in with your browser" }),
       );
-      await within(dialog).findByText("Finish in your browser");
+      await within(dialog).findByText("Sign in through your browser");
 
       // A browser fires `close` in a task after the dialog closed. The test shim fires it at once,
       // which would let the dialog's fallback end the sign-in. Hold it, as a browser does.
@@ -961,7 +963,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
 
     await act(async () => {
       await app.router.navigate({ to: "/settings/connections" });
@@ -984,7 +986,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
     // The moment React takes the dialog out of the DOM is the boundary: the browser's return is
     // delivered there, and the listener must have been retired by then. A passive cleanup runs after it.
     // Called with the node it was taken from, so it is not unbound.
@@ -1021,7 +1023,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
 
     await act(async () => {
       signInReturn.waits[0]!({ _tag: "timed-out" });
@@ -1032,7 +1034,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       "The browser did not come back within 10 minutes. Start again.",
     );
     await userEvent.click(within(dialog).getByRole("button", { name: "Start again" }));
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
     expect(signInReturn.listen).toHaveBeenCalledTimes(2);
   });
 
@@ -1042,7 +1044,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
     // The browser cannot have failed to come back before it was opened.
     expect(
       within(dialog).queryByText("Approved, and the browser did not come back here?"),
@@ -1118,7 +1120,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       await within(dialog).findByRole("button", { name: "Sign in with your browser" }),
     );
-    await within(dialog).findByText("Finish in your browser");
+    await within(dialog).findByText("Sign in through your browser");
     await act(async () => {
       signInReturn.comeBack();
       await Promise.resolve();

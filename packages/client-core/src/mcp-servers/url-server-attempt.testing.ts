@@ -223,7 +223,7 @@ export const setupUrlServers = async ({
   const queries: McpServerQueries = {
     readServers: () => queryClient.getQueryData<McpServer[]>(SERVERS_KEY),
     readCatalogue: () => catalogue,
-    readServerQuery: (id) => ({
+    buildServerQuery: (id) => ({
       queryKey: detailKey(id),
       queryFn: () => client.mcpServer.read({ params: { id } }),
     }),

@@ -748,6 +748,31 @@ describe("the token form", () => {
     });
   });
 
+  it("keeps the token form and shows the refusal when an invalid token is submitted before a resumed phase has read the server", async () => {
+    const { open, change, lose, holdRequest, waitForOutcome } = await setupUrlServers();
+    const attempt = open(ADD);
+    attempt.submitAdd(FIELDS);
+    await waitForOutcome(attempt, "checking");
+    change(DOCS_ID, { status: "needs-sign-in" });
+    await waitForOutcome(attempt, "needs-token");
+    // The read the resumed phase starts does not answer.
+    const read = holdRequest(ROUTES.read(DOCS_ID));
+    lose(ROUTES.setToken(DOCS_ID));
+    attempt.submitToken(TOKEN);
+    await vi.waitFor(() => {
+      expect(attempt.read()).toMatchObject({ kind: "following", problem: { kind: "failed" } });
+    });
+
+    attempt.submitToken("Bearer abc");
+
+    expect(attempt.read()).toMatchObject({
+      kind: "following",
+      outcome: { kind: "needs-token" },
+      problem: { kind: "invalid" },
+    });
+    read.release();
+  });
+
   it("does not take a token while the server is still being checked", async () => {
     const { open, spies, waitForOutcome } = await setupUrlServers();
     const attempt = open(ADD);

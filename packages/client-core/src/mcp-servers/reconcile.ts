@@ -44,7 +44,7 @@ export interface McpServerQueries {
    * stale when a write of a closed attempt or of a switch leaves the server
    * changed.
    */
-  readServerQuery(
+  buildServerQuery(
     mcpServerId: string,
   ): Pick<QueryObserverOptions<McpServer>, "queryKey" | "queryFn">;
 }

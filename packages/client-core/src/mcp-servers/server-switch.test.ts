@@ -117,7 +117,7 @@ const setup = async (initial: readonly McpServer[] = []) => {
     readServers: () => queryClient.getQueryData<McpServer[]>(SERVERS_KEY),
     readCatalogue: () => catalogue,
     readOfferOrigin: OFFER_ORIGIN,
-    readServerQuery: READ_PAGE,
+    buildServerQuery: READ_PAGE,
   };
   const switches = createMcpServerSwitches({
     queryClient,
@@ -345,7 +345,7 @@ describe("a press on the switch", () => {
         readServers: () => undefined,
         readCatalogue: () => catalogue,
         readOfferOrigin: OFFER_ORIGIN,
-        readServerQuery: READ_PAGE,
+        buildServerQuery: READ_PAGE,
       },
     });
 
@@ -402,7 +402,7 @@ describe("a press on the switch", () => {
         readCatalogue: () =>
           buildMcpListQuery(queryClient, { queryKey: SERVERS_KEY, queryFn: () => [] }),
         readOfferOrigin: OFFER_ORIGIN,
-        readServerQuery: READ_PAGE,
+        buildServerQuery: READ_PAGE,
       },
     };
 
@@ -512,6 +512,7 @@ describe("the Replace dialog", () => {
         locked: false,
         notice: null,
         canReplace: true,
+        confirmLabel: "Replace",
         done: false,
       });
       expect(switches.readReplaceDialog(URL_TARGET("s-a"))).toBeNull();
@@ -677,6 +678,7 @@ describe("the Replace dialog", () => {
         locked: true,
         selectedId: "s-b",
         canReplace: false,
+        confirmLabel: "Replacing…",
         done: false,
         notice: { kind: "working", message: "Replacing…" },
       });
@@ -944,7 +946,10 @@ describe("the Replace dialog", () => {
 
       // A read that fails again leaves the same words.
       switches.readReplaceListAgain(WORK);
-      expect(view().notice).toMatchObject({ kind: "working", message: "Reading the list again…" });
+      expect(view()).toMatchObject({
+        confirmLabel: "Replace",
+        notice: { kind: "working", message: "Reading the list again…" },
+      });
       await vi.waitFor(() => {
         expect(view().notice?.kind).toBe("unread");
       });
@@ -1058,6 +1063,25 @@ describe("the Replace dialog", () => {
           "The controller's reply was lost, and the list shows another server on this Connection. It is not known whether the server you chose was moved first.",
         winner: { serverId: WINNER_ID },
       });
+    });
+
+    it("is done, not refused with Nothing was replaced, when a second Replace is refused because the first one committed after the list was read", async () => {
+      const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
+      world.updateFails = new ConnectionError("http://controller.test", new Error("reset"));
+      switches.confirmReplace(WORK);
+      await settle(WORK);
+      expect(view().notice?.kind).toBe("refused");
+
+      // The first write commits late, then the second is refused: the server holds the Connection.
+      world.servers = [movedA()];
+      world.updateFails = new ApiError("conflict", "This Connection has a server already.", {
+        reason: "mcp-server-exists",
+        mcpServerId: "s-a",
+      });
+      switches.confirmReplace(WORK);
+      await settle(WORK);
+
+      expect(view()).toMatchObject({ done: true, notice: null });
     });
 
     it("says the outcome is not known while the list cannot be read, and is done when a read shows the server moved", async () => {

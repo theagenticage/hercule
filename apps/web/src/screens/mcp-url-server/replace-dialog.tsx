@@ -117,7 +117,7 @@ export function ReplaceDialog({
           Cancel
         </Button>
         <Button type="button" variant="form" disabled={!view.canReplace} onClick={confirm}>
-          Replace
+          {view.confirmLabel}
         </Button>
       </div>
     </ModalDialog>

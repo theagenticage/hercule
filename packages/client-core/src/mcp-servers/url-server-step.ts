@@ -19,6 +19,7 @@ import {
   describePluginOriginRefusal,
   type RefusalDescription,
 } from "./add-refusal";
+import { isNotFound, readErrorMessage } from "../errors";
 import type { SignInStep } from "./browser-sign-in";
 import type { UrlServerAttemptState, WrittenMethod } from "./url-server-attempt";
 
@@ -97,11 +98,13 @@ export interface WaitStep extends StepBase {
 /** The sign-in waits for the browser. */
 export interface SignInWaitingStep extends StepBase {
   readonly kind: "sign-in-waiting";
-  /** "Finish in your browser". */
+  /** "Sign in through your browser" before the user pressed the open button, "Finish in your browser" after it. */
   readonly heading: string;
+  /** True while the step waits for the browser: after the press, and while the browser did open. Before the press, and after a failure to open it, nothing is being waited for. */
+  readonly waiting: boolean;
   /** Who asks for the approval, such as "You will approve on auth.example.com.". */
   readonly approval: string;
-  /** What to do in the browser, and how the sign-in comes back. */
+  /** Before the press, what the button does. After it, what to do in the browser and how the sign-in comes back. */
   readonly instruction: string;
   /** The button that opens the sign-in page: "Open the browser", and "Open again" once it was pressed. The host is not in the label, because a long host would not fit a button. `approval` names it. `url` is the page, an http or https address without credentials. */
   readonly open: StepButton & { readonly url: string };
@@ -215,6 +218,18 @@ export type UrlServerStep = AddFormStep | UrlServerLaterStep;
 const NEW_SERVER_NOTE =
   "No project names it yet. A thread gets it from its project's list once a project names it, from the default list when it is named there, or when it is switched on in that thread's composer. Name it in the projects that should use it.";
 
+/**
+ * Describes why the sign-in dialog cannot show its server because the record
+ * could not be read (`failure`): the server was removed, or the read failed.
+ * Returns a bold `headline` and the `body` that follows it.
+ */
+export const describeServerReadFailure = (
+  failure: unknown,
+): { readonly headline: string; readonly body: string } =>
+  isNotFound(failure)
+    ? { headline: "This server was removed.", body: "There is nothing left to sign in to." }
+    : { headline: "The server could not be read.", body: readErrorMessage(failure) };
+
 /** Returns the title of a dialog: "Add an MCP server", or the sign-in heading of the server the token form is for. */
 export const describeUrlServerDialogTitle = (dialog: UrlServerDialog): string =>
   dialog.kind === "add" ? "Add an MCP server" : describeSignInHeading(dialog.server);
@@ -246,6 +261,14 @@ const describeClosing = (state: UrlServerAttemptState, dialog: UrlServerDialog):
     case "signing-in":
       if (state.step.kind === "finishing") {
         return "The sign-in is being finished. Closing now does not undo it.";
+      }
+      // A sign-in that failed has ended already, and one whose page did not open is a failed
+      // step too, so neither says what closing does to the sign-in.
+      if (
+        state.step.kind === "refused" ||
+        (state.step.kind === "waiting" && state.step.openError !== null)
+      ) {
+        return creates ? "The server stays in the list." : null;
       }
       return creates
         ? "Closing now ends the sign-in. The server stays in the list."
@@ -359,13 +382,17 @@ const describeSignIn = (
       };
     case "waiting": {
       const listener = step.returnBy === "listener";
+      const approve = step.opened
+        ? "Approve the sign-in in your browser."
+        : 'Press "Open the browser", then approve the sign-in there.';
       return {
         kind: "sign-in-waiting",
-        heading: "Finish in your browser",
+        heading: step.opened ? "Finish in your browser" : "Sign in through your browser",
+        waiting: step.opened && step.openError === null,
         approval: `You will approve on ${step.approvalHost}.`,
         instruction: listener
-          ? "Approve the sign-in in your browser. This window finishes by itself when the browser comes back."
-          : "Approve the sign-in in your browser. The browser then shows an error page for an address that starts with http://127.0.0.1. Copy that address from the address bar and paste it here.",
+          ? `${approve} This window finishes by itself when the browser comes back.`
+          : `${approve} The browser then shows an error page for an address that starts with http://127.0.0.1. Copy that address from the address bar and paste it here.`,
         open: {
           label: step.opened ? "Open again" : "Open the browser",
           url: step.authorizationUrl,

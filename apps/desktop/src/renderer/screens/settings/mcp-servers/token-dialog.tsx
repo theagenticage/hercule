@@ -1,8 +1,8 @@
 import { useRef, useState, type JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
-import { isNotFound, readErrorMessage } from "@hercule/client-core";
 import {
+  describeServerReadFailure,
   describeUrlServerDialogTitle,
   describeUrlServerStep,
   type SignInEntry,
@@ -52,22 +52,15 @@ export function TokenDialog({
     );
   }
   const failure = server.error;
+  const unread = failure === null ? null : describeServerReadFailure(failure);
   return (
     <UrlServerDialogFrame dialogRef={dialogRef} heading="Sign in" onClose={onClose}>
-      {failure === null ? (
+      {unread === null ? (
         <WaitLine text="Reading the server…" />
       ) : (
         <>
           <Warning icon={<QuestionIcon size={14} />}>
-            {isNotFound(failure) ? (
-              <>
-                <b>This server was removed.</b> There is nothing left to sign in to.
-              </>
-            ) : (
-              <>
-                <b>The server could not be read.</b> {readErrorMessage(failure)}
-              </>
-            )}
+            <b>{unread.headline}</b> {unread.body}
           </Warning>
           <div className="setup-acts">
             <button

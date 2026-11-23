@@ -509,7 +509,7 @@ describe("Settings > MCP servers > Add by URL", () => {
       await user.click(await screen.findByRole("button", { name: "Sign in…" }));
       const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
       await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
-      await within(dialog).findByText("Finish in your browser");
+      await within(dialog).findByText("Sign in through your browser");
       return { ...opened, dialog };
     };
 

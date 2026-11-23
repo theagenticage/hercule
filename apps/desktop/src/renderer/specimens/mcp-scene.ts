@@ -9,7 +9,7 @@
  * controller, so a request the handlers do not answer shows up in
  * `listUnknownRequests` and fails the scene.
  */
-import type { Handler } from "@hercule/client-core/testing";
+import { buildErrorBody, type Handler } from "@hercule/client-core/testing";
 import type { Bridge } from "../../ipc/bridge";
 import type { EventCountsByConnection, McpServer } from "@hercule/contract";
 import { BOOT_HANDLERS, buildSidebarHandlers } from "../app/fake-controller";
@@ -44,17 +44,27 @@ export interface McpScene {
   readonly signIn?: { readonly status: number; readonly body: unknown };
   /**
    * What `mcpServer.update` answers, for a scene whose Replace dialog is
-   * pressed, on every server of the scene.
+   * pressed, on every server of the scene, or `never-answers`, and the write
+   * stays unanswered.
    */
-  readonly update?: { readonly status: number; readonly body: unknown };
+  readonly update?: { readonly status: number; readonly body: unknown } | "never-answers";
+  /** True for a scene whose list of servers cannot be read once `mcpServer.update` answered. */
+  readonly listUnreadableAfterUpdate?: boolean;
   /**
    * For a scene whose sign-in dialog is drawn after main started its listener
    * for the browser's return, so the waiting step is the one a Mac shows:
    * `listens`, and the browser never comes back, or `times-out`, and main
-   * reports at once that it did not come back within 10 minutes. Without it,
-   * main cannot listen, and the sign-in shows its paste step.
+   * reports at once that it did not come back within 10 minutes, or `returns`,
+   * and the browser comes back as soon as the page is opened (see `signedIn`).
+   * Without it, main cannot listen, and the sign-in shows its paste step.
    */
-  readonly signInReturn?: "listens" | "times-out";
+  readonly signInReturn?: "listens" | "times-out" | "returns";
+  /**
+   * The server as it is once its sign-in finished, for a scene whose browser
+   * returns. The controller answers `finishSignIn` with it, and the server's
+   * page and the list hold it from then on.
+   */
+  readonly signedIn?: McpServer;
   /** False for a scene where main cannot open the browser. */
   readonly browserOpens?: boolean;
   /** The thread the scene opens. */
@@ -93,11 +103,18 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
     draft,
     create,
     signIn,
+    signedIn,
     update,
+    listUnreadableAfterUpdate,
     handlers: replacements,
   } = scene;
+  let updated = false;
   // The server `mcpServer.create` made, once it has been called.
   let created: McpServer | undefined;
+  // True once the scene's `finishSignIn` was called: the servers then show `signedIn`.
+  let signInFinished = false;
+  const readServer = (server: McpServer): McpServer =>
+    signInFinished && signedIn?.id === server.id ? signedIn : server;
   const handlers: Record<string, Handler> = {
     ...BOOT_HANDLERS,
     ...buildSidebarHandlers(buildControllerRecords(records)),
@@ -109,11 +126,24 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
         user: { timezone: "UTC", "thread.mcpServerIds": mcp.defaultServerIds },
       },
     },
-    "GET /api/v1/mcp-servers": () => ({
-      body: { items: created === undefined ? mcp.servers : [...mcp.servers, created] },
-    }),
+    "GET /api/v1/mcp-servers": () =>
+      listUnreadableAfterUpdate === true && updated
+        ? {
+            status: 500,
+            body: buildErrorBody("internal", "The list of servers could not be read."),
+          }
+        : {
+            body: {
+              items: (created === undefined ? mcp.servers : [...mcp.servers, created]).map(
+                readServer,
+              ),
+            },
+          },
     ...Object.fromEntries(
-      mcp.servers.map((server) => [`GET /api/v1/mcp-servers/${server.id}`, { body: server }]),
+      mcp.servers.map((server) => [
+        `GET /api/v1/mcp-servers/${server.id}`,
+        () => ({ body: readServer(server) }),
+      ]),
     ),
     "GET /api/v1/events/counts": { body: eventCounts ?? { connections: [] } },
   };
@@ -138,9 +168,21 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
       };
     }
   }
+  if (signedIn !== undefined) {
+    handlers[`POST /api/v1/mcp-servers/${signedIn.id}/sign-in/finish`] = () => {
+      signInFinished = true;
+      return { body: signedIn };
+    };
+  }
   if (update !== undefined) {
     for (const { id } of mcp.servers) {
-      handlers[`PATCH /api/v1/mcp-servers/${id}`] = { status: update.status, body: update.body };
+      handlers[`PATCH /api/v1/mcp-servers/${id}`] =
+        update === "never-answers"
+          ? () => new Promise(() => undefined)
+          : () => {
+              updated = true;
+              return { status: update.status, body: update.body };
+            };
     }
   }
   if (thread !== undefined) {
@@ -172,14 +214,28 @@ export function mountMcpScene(
   const convertIds = buildFixtureIdConverter(fixtureScene);
   const scene = convertIds(fixtureScene);
   const { draft } = scene;
+  // A scene whose browser returns: the wait ends when the page is opened.
+  let returnToApp: () => void = () => undefined;
+  const browserReturns = new Promise<{ readonly _tag: "received"; readonly callbackQuery: string }>(
+    (resolve) => {
+      returnToApp = () =>
+        resolve({ _tag: "received", callbackQuery: "code=approved&state=abc123" });
+    },
+  );
+  const openThenReturn = (): Promise<{ readonly _tag: "Opened" }> => {
+    returnToApp();
+    return Promise.resolve({ _tag: "Opened" });
+  };
   return mountProductionApp({
     handlers: buildMcpSceneHandlers(scene),
     path: fixturePath.replace(/[^/?=&]+/g, (part) => convertIds(part)),
     username: scene.records.user.username,
     appearance: readSheetAppearance(),
-    ...(scene.signInReturn === undefined
-      ? {}
-      : { signInReturn: SIGN_IN_RETURNS[scene.signInReturn] }),
+    ...(scene.signInReturn === "returns"
+      ? { signInReturn: buildListeningReturn(() => browserReturns), linkOpen: openThenReturn }
+      : scene.signInReturn === undefined
+        ? {}
+        : { signInReturn: SIGN_IN_RETURNS[scene.signInReturn] }),
     ...(scene.browserOpens === false
       ? { linkOpen: () => Promise.resolve(BROWSER_NOT_OPENED) }
       : {}),

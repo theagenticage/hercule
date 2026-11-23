@@ -44,7 +44,7 @@ export function ReplaceDialog({
     <ConfirmDialog
       dialogRef={dialogRef}
       title={view.title}
-      actionLabel={notice?.kind === "working" ? "Replacing…" : "Replace"}
+      actionLabel={view.confirmLabel}
       actionClass="accent"
       className="url-replace-dialog"
       initialFocus="close"

@@ -248,6 +248,16 @@ export const MCP_OAUTH_SERVER: McpServer = buildUrlServer(
   },
 );
 
+/** The server of `MCP_OAUTH_SERVER` as it is after the sign-in through the browser finished. */
+export const MCP_SIGNED_IN_OAUTH_SERVER: McpServer = buildUrlServer(
+  ATLAS_ID,
+  "atlas",
+  "https://mcp.atlas.example/mcp",
+  "oauth",
+  "oauth",
+  { tools: LINEAR_TOOLS.slice(0, 4), checkedAt: minutesAgo(0), createdAt: minutesAgo(3 * 24 * 60) },
+);
+
 /**
  * The servers of the scenes that draw servers added by URL: the world's
  * servers and `MCP_URL_SERVERS`, and the default list. Other scenes keep
@@ -345,6 +355,14 @@ export const MCP_REPLACE_SEVERAL_RECORDS: McpServersRecords = addUrlServers(POST
 /** The ids of the ready servers whose pages offer "Replace token…" and "Sign in again…". */
 export const MCP_LEDGER_SERVER_ID = LEDGER_SERVER.id;
 export const MCP_RELAY_SERVER_ID = RELAY_SERVER.id;
+
+/** The id of the server whose address is far longer than a row. */
+export const MCP_ARCHIVE_SERVER_ID = ARCHIVE_SERVER.id;
+
+/** The server on PostHog's address that Replace moves onto the PostHog Connection. */
+export const MCP_POSTHOG_URL_SERVER: McpServer = MCP_URL_SERVERS.find(
+  (server) => server.id === POSTHOG_DOCS_ID,
+)!;
 
 /** The id of the server that signs in through the browser. */
 export const MCP_ATLAS_SERVER_ID = ATLAS_ID;

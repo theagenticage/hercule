@@ -362,6 +362,12 @@ export const createMcpServerSwitches = ({
     const { confirmed } = attempt;
     const winner = record !== undefined && record.id !== confirmed?.serverId ? record.id : null;
     const { refusal, unread } = guard.readState(key);
+    // The record decides before a refusal does: a write whose reply was lost can commit after the
+    // list was read, and a second Replace is then refused because the chosen server is already on
+    // the Connection.
+    if (refusal?.kind === "refused" && record !== undefined && record.id === confirmed?.serverId) {
+      return { kind: "replaced" };
+    }
     const unreadNote = unread === null ? "" : " The list of servers could not be read again.";
     if (refusal?.kind === "refused") {
       return {
@@ -386,7 +392,8 @@ export const createMcpServerSwitches = ({
     }
     if (confirmed === null) return { kind: "choosing" };
     if (!confirmed.listRead) {
-      if (attempt.rereading) return { kind: "working", message: "Reading the list again…" };
+      if (attempt.rereading)
+        return { kind: "working", message: "Reading the list again…", step: "reading-list" };
       if (unread !== null) {
         return {
           kind: "unread",
@@ -395,7 +402,7 @@ export const createMcpServerSwitches = ({
             : "The server was replaced, but the list of servers could not be read again, so the result is not shown yet.",
         };
       }
-      return { kind: "working", message: "Replacing…" };
+      return { kind: "working", message: "Replacing…", step: "writing" };
     }
     if (record !== undefined) return { kind: "replaced" };
     const stillListed = servers.some(({ id }) => id === confirmed.serverId);
@@ -492,7 +499,7 @@ export const createMcpServerSwitches = ({
     }
     for (const id of pageIds) {
       void queryClient.invalidateQueries({
-        queryKey: cache.readServerQuery(id).queryKey,
+        queryKey: cache.buildServerQuery(id).queryKey,
         exact: true,
       });
     }
