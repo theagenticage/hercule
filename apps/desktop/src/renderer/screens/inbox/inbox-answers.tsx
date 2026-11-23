@@ -1,8 +1,9 @@
 /**
  * The answers of one open signal as the Inbox's pane draws them (spec 17 §The
  * pane): buttons, the suggested answer filled and carrying ↩ only on the
- * current ask, Done quiet at the end, the describe line of the answer under
- * the pointer or the focus, and the reply box of an answer with a text field.
+ * current ask, Done an unfilled button right after the others, the describe
+ * line of the answer under the pointer or the focus, and the reply box of an
+ * answer with a text field.
  */
 import { useLayoutEffect, useRef, useState, type JSX } from "react";
 import type { SignalAction } from "@hercule/contract";
@@ -104,12 +105,7 @@ export function InboxAnswers({
               (chosen.state === "held" || chosen.state === "sending") &&
               chosen.actionId === action.id) ||
             reply?.actionId === action.id;
-          const classes = [
-            "btn btn--sm",
-            isFilled && "btn--answer",
-            isDone && "btn--quiet sig-done",
-            isPressed && "is-pressed",
-          ];
+          const classes = ["btn btn--sm", isFilled && "btn--answer", isPressed && "is-pressed"];
           return (
             <button
               key={action.id}

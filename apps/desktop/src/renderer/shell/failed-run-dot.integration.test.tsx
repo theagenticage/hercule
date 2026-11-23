@@ -1,6 +1,6 @@
 /**
  * Tests the sidebar's failed-run dot as the signed-in app renders it: the dot
- * on the Overview row in the Hercule face and on the Hercule segment in the
+ * on the Overview row in the Hercule face and on the Work segment in the
  * Threads face, what each opens, that the word on the segment still only
  * changes the face, and that the dot follows the controller's answer after a
  * push and after a reconnect.
@@ -64,12 +64,12 @@ const startApp = async (hasFailedRun: () => boolean, path = "/") => {
   return { calls, ...app };
 };
 
-const getSegment = (name: "Threads" | "Hercule"): HTMLElement =>
+const getSegment = (name: "Threads" | "Work"): HTMLElement =>
   within(screen.getByRole("tablist", { name: "Sidebar" })).getByRole("tab", { name });
 
 /** Returns the Overview row, once the Hercule face is showing. */
 const getOverviewRow = (): HTMLElement =>
-  within(screen.getByRole("navigation", { name: "Hercule" })).getByRole("link", {
+  within(screen.getByRole("navigation", { name: "Work" })).getByRole("link", {
     name: /^Overview/,
   });
 
@@ -78,7 +78,7 @@ const SEGMENT_DOT = { name: "A run failed. Open Work filtered to Failed." };
 describe("the failed-run dot on the Overview row", () => {
   it("shows no dot while no run has failed", async () => {
     await startApp(() => false, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     expect(getOverviewRow().querySelector(".nav-dot")).toBeNull();
     expect(getOverviewRow().getAttribute("aria-label")).toBeNull();
@@ -86,7 +86,7 @@ describe("the failed-run dot on the Overview row", () => {
 
   it("shows a dot with no number, named for a screen reader, while a run has failed", async () => {
     await startApp(() => true, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     const row = getOverviewRow();
     expect(row.querySelector(".nav-dot")?.textContent).toBe("");
@@ -96,7 +96,7 @@ describe("the failed-run dot on the Overview row", () => {
 
   it("opens Work with only the failed cards, and takes the request out of the address", async () => {
     const { router } = await startApp(() => true, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     await userEvent.click(getOverviewRow());
 
@@ -116,7 +116,7 @@ describe("the failed-run dot on the Overview row", () => {
   it("opens Work on what failed even when the Office was the view used last", async () => {
     localStorage.setItem(`overview-view:${CONTROLLER_URL}`, "office");
     const { router } = await startApp(() => true, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     await userEvent.click(getOverviewRow());
 
@@ -128,7 +128,7 @@ describe("the failed-run dot on the Overview row", () => {
 
   it("opens the Overview as before while nothing has failed", async () => {
     const { router } = await startApp(() => false, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     await userEvent.click(getOverviewRow());
 
@@ -142,7 +142,7 @@ describe("the failed-run dot on the Overview row", () => {
   });
 });
 
-describe("the failed-run dot on the Hercule segment", () => {
+describe("the failed-run dot on the Work segment", () => {
   it("shows no dot while no run has failed", async () => {
     await startApp(() => false, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
 
@@ -153,12 +153,12 @@ describe("the failed-run dot on the Hercule segment", () => {
     await startApp(() => true, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
 
     const dot = await screen.findByRole("button", SEGMENT_DOT);
-    expect(getSegment("Hercule").contains(dot)).toBe(false);
+    expect(getSegment("Work").contains(dot)).toBe(false);
     expect(
       within(screen.getByRole("tablist", { name: "Sidebar" })).queryByRole("button"),
     ).toBeNull();
 
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     expect(screen.queryByRole("button", SEGMENT_DOT)).toBeNull();
     expect(getOverviewRow().querySelector(".nav-dot")).not.toBeNull();
@@ -167,10 +167,10 @@ describe("the failed-run dot on the Hercule segment", () => {
   it("changes only the face when the word is clicked", async () => {
     const { router } = await startApp(() => true, `/threads/${FIXTURE_THREAD_IDS.flaky}`);
 
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    expect(getSegment("Hercule").getAttribute("aria-selected")).toBe("true");
+    expect(getSegment("Work").getAttribute("aria-selected")).toBe("true");
   });
 
   it("opens Work on what failed when the dot is clicked", async () => {

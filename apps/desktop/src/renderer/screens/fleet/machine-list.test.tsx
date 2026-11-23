@@ -86,7 +86,7 @@ describe("MachineList", () => {
     const [busy, draining] = rows();
 
     expect(within(busy!).getByText("21.5 GB").nextElementSibling?.textContent).toBe("free");
-    expect(within(draining!).getAllByText("Takes no new work")).toHaveLength(1);
+    expect(within(draining!).getAllByText("Takes no new sessions")).toHaveLength(1);
     // The cells are the dot, Machine, Sessions, Room: the fourth.
     expect(within(draining!).getAllByRole("cell")[3]?.textContent).toBe("–");
   });

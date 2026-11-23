@@ -240,7 +240,7 @@ const buildMenuTemplate = (options: {
           click: options.showThreadsFace,
         },
         {
-          label: "Hercule",
+          label: "Work",
           accelerator: "Alt+CmdOrCtrl+2",
           enabled: options.signedIn,
           click: options.showOrchestrationFace,

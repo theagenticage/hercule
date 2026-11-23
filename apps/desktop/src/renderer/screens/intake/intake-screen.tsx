@@ -167,7 +167,7 @@ export function IntakeScreen({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   // Tracking as last read gives what follows each read at once: the counts of
-  // the Hercule segment, Intake's row and the tabs, and To do clear. The rows
+  // the Work segment, Intake's row and the tabs, and To do clear. The rows
   // Tracking draws, its head's counts and the keys' walk use the held rows,
   // which lag the read while the pointer is on the list column.
   const readTrackingRows = useTrackingRows();

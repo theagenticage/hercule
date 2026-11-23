@@ -24,6 +24,15 @@
 .discussion-list.workflow-list--table .group-h.group-h--repo {
   padding-left: 36px;
 }
+/* A last Post written today is in the rows' ink; older ones keep the numbers' faint ink. End House's
+   ink is brighter than the ceiling the dark themes keep body text under (APCA Lc 95), so there it
+   takes the strongest text token under it, as the project headings do. */
+.discussion-list .table-num.is-today {
+  color: var(--ink);
+}
+[data-theme="end-house"] .discussion-list .table-num.is-today {
+  color: var(--muted-firm);
+}
 /* The mark of a Discussion's kind: two rings for an overlap, a speech bubble
    for a general one, in faint ink, in the mark's 14px slot. */
 .kind-mark {

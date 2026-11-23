@@ -450,7 +450,13 @@ describe("Settings > Providers > Models, profiles", () => {
       const field = screen.getByRole("textbox", { name: "Name of Main" });
       await userEvent.clear(field);
       await userEvent.type(field, "Work{Enter}");
-      await userEvent.click(screen.getByRole("tab", { name: /^Work/, selected: false }));
+      await userEvent.click(
+        // Inside the profiles' tabs: the sidebar's switch has a tab named Work too.
+        within(screen.getByRole("tablist", { name: "Profiles" })).getByRole("tab", {
+          name: /^Work/,
+          selected: false,
+        }),
+      );
 
       save.answer({
         status: 400,
@@ -473,7 +479,13 @@ describe("Settings > Providers > Models, profiles", () => {
       const field = screen.getByRole("textbox", { name: "Name of Main" });
       await userEvent.clear(field);
       await userEvent.type(field, "Daily{Enter}");
-      await userEvent.click(screen.getByRole("tab", { name: /^Work/, selected: false }));
+      await userEvent.click(
+        // Inside the profiles' tabs: the sidebar's switch has a tab named Work too.
+        within(screen.getByRole("tablist", { name: "Profiles" })).getByRole("tab", {
+          name: /^Work/,
+          selected: false,
+        }),
+      );
       await chooseTabMenuItem("Work", "Rename");
       const other = screen.getByRole("textbox", { name: "Name of Work" });
       await userEvent.clear(other);

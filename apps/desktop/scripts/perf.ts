@@ -708,11 +708,11 @@ const buildPageWaiter =
 /**
  * Switches the sidebar of the app's page, which `pageSocketUrl` connects to,
  * to its Hercule face, and returns once the face has rendered: the sidebar's
- * list is the `nav` named "Hercule". Fails when that has not happened by
+ * list is the `nav` named "Work". Fails when that has not happened by
  * `deadline`, in milliseconds since the epoch.
  *
  * Once the page shows the shell, main sends the page the
- * `showOrchestrationFace` menu command, View › Hercule, through main's
+ * `showOrchestrationFace` menu command, View › Work, through main's
  * inspector at `inspectorUrl`, without showing the window, as
  * `openSettingsSection` does. The connection to the page is closed before
  * the function returns.
@@ -735,7 +735,7 @@ async function showOrchestrationFace(
       `require("electron").BrowserWindow.getAllWindows()[0].webContents.send("menu.command", "showOrchestrationFace")`,
     );
     await waitInPage(
-      `document.querySelector('nav[aria-label="Hercule"]') !== null`,
+      `document.querySelector('nav[aria-label="Work"]') !== null`,
       "the sidebar did not show the Hercule face before memory was read",
     );
   } finally {

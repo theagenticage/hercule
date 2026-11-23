@@ -279,6 +279,32 @@ describe("an assistant's Conversation", () => {
     expect(search.get("sort")).toContain("desc");
   });
 
+  it("draws a notice a message follows as a quiet row, and the newest notice filled", async () => {
+    await openConversation({
+      messages: [
+        buildFixtureMessage(ADA, {
+          position: 1,
+          text: "Ada was interrupted: her turn failed.",
+          senderRole: "notice",
+          createdAt: "2026-09-09T16:00:00.000Z",
+        }),
+        buildFixtureMessage(ADA, { position: 2, text: "How did last night's backup go?" }),
+        buildFixtureMessage(ADA, {
+          position: 3,
+          text: "Ada could not answer: the runner is offline.",
+          senderRole: "notice",
+        }),
+      ],
+    });
+
+    const notices = [...findConversation().querySelectorAll(".notice")];
+    expect(notices.map((notice) => notice.classList.contains("is-past"))).toEqual([true, false]);
+    // The quiet row keeps the failed face, led by the alert icon; the newest notice has no icon.
+    expect(notices[0]!.querySelector(".cr")?.classList).toContain("cr--failed");
+    expect(notices[0]!.firstElementChild?.classList).toContain("ic");
+    expect(notices[1]!.querySelector(".ic")).toBeNull();
+  });
+
   it("ends with one notice when the controller sent a row the app cannot read, and keeps the messages drawn", async () => {
     const { live } = await openConversation({
       readSession: () => buildAdaSession({ status: "idle" }),

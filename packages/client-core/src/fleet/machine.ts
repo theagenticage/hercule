@@ -97,24 +97,28 @@ const canTakeNewSessions = (runner: Runner): boolean =>
   runner.connectivity === "online" && runner.lifecycle === "active" && !isDiskBelowLimit(runner);
 
 /**
- * Counts the sessions the machine can still start: the free slots under its
- * session cap. It is 0 when the machine cannot take new sessions.
+ * Counts the sessions the machine can still start: its session cap less the
+ * sessions running and the sessions already waiting for a slot, never below 0.
+ * The waiting sessions count because they take the next free slots before any
+ * new session does. It is 0 when the machine cannot take new sessions.
  */
 export const countRoom = (machine: FleetMachine): number =>
   canTakeNewSessions(machine.runner)
-    ? Math.max(0, machine.runner.maxConcurrentSessions - machine.running)
+    ? Math.max(0, machine.runner.maxConcurrentSessions - machine.running - machine.waiting)
     : 0;
 
 /**
- * Describes how much room an online machine has. `short` is the text of a card
- * or a list row ("Room for 4" or "Full"). `line` is the machine page's
- * sentence about it, in parts so the number can be drawn in bold. Returns
- * `null` while the machine is offline or unreachable, because the screen shows
- * that state instead.
+ * Describes how much room an online machine has, as `countRoom` counts it.
+ * `short` is the text of a card or a list row ("Room for 4" or "Full").
+ * `line` is the machine page's sentence about it, in parts so the number can
+ * be drawn in bold. Returns `null` while the machine is offline or
+ * unreachable, because the screen shows that state instead.
  *
- * - `short` is `null` while the machine is told to take no new work, because
- *   its status label already says so, and while its disk is below its limit,
- *   because the line of what needs the user already says so.
+ * - A full machine with sessions waiting says what takes its cap: "No room:
+ *   12 running and 5 waiting sessions take its cap of 16". With none waiting
+ *   it reads "No room: it runs its cap of 16 sessions".
+ * - `short` is `null` while the machine is told to take no new work or its
+ *   disk is below its limit, because its status label already says so.
  * - When the disk is below its limit and the machine is also set to take no
  *   new work, the line names the disk, because that is the one the user can
  *   fix by cleaning up.
@@ -134,14 +138,17 @@ export const describeRoom = (
     };
   }
   if (runner.lifecycle === "draining") {
-    return { short: null, line: [buildPlainPart("No room: it takes no new work")] };
+    return { short: null, line: [buildPlainPart("No room: it takes no new sessions")] };
   }
   if (room === 0) {
+    const { running, waiting } = machine;
     return {
       short: "Full",
       line: [
         buildPlainPart(
-          `No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`,
+          waiting === 0
+            ? `No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`
+            : `No room: ${String(running)} running and ${String(waiting)} waiting ${plural(running + waiting, "session", "sessions")} take its cap of ${String(cap)}`,
         ),
       ],
     };
@@ -162,14 +169,18 @@ const describeUnreachable = (seen: string | null): string =>
 
 /**
  * The status dot of a machine and the text beside it. `tone` is the dot:
- * `offline` for an offline or unreachable runner, `draining` for an online
- * runner told to take no new work, else `online`. `label` is "Online",
- * "Offline", "Not heard from since 09:12" (unreachable, or "Unreachable" when
- * it was never seen) or "Takes no new work". An offline machine is "Offline"
- * even when it is also draining.
+ * `offline` for an offline or unreachable runner, `no-new-sessions` for an
+ * online runner the controller places no new session on, else `online`.
+ * `label` is "Online", "Offline", "Not heard from since 09:12" (unreachable,
+ * or "Unreachable" when it was never seen) or "Takes no new sessions".
+ *
+ * An online machine takes no new sessions while the user has told it to take
+ * no new work (draining), and while its free disk is below its limit. Both
+ * read the same, so two machines that start nothing look alike. An offline
+ * machine is "Offline" even when it also takes no new sessions.
  */
 export interface MachineStatus {
-  readonly tone: "online" | "offline" | "draining";
+  readonly tone: "online" | "offline" | "no-new-sessions";
   readonly label: string;
 }
 
@@ -186,7 +197,9 @@ export const describeMachineStatus = (
       label: describeUnreachable(formatLastSeen(runner, timezone, today)),
     };
   }
-  if (runner.lifecycle === "draining") return { tone: "draining", label: "Takes no new work" };
+  if (runner.lifecycle === "draining" || isDiskBelowLimit(runner)) {
+    return { tone: "no-new-sessions", label: "Takes no new sessions" };
+  }
   return { tone: "online", label: "Online" };
 };
 
@@ -209,38 +222,47 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
   return isDesktopOs && facts.totalMemoryBytes >= DESKTOP_MEMORY_BYTES ? "desktop" : "laptop";
 };
 
-/** The most slots, and the most waiting sessions, the bar cuts one by one. */
-const MAX_SLOTS_CUT_ONE_BY_ONE = 16;
-
-/** How many sessions one cut of the bar stands for once it has more than 16 slots. */
-const SESSIONS_PER_WIDE_CUT = 10;
+/** The most slots the bar draws as cells, one per slot: above it, cells of 2px with 2px gaps no longer fit `SLOTS_WIDTH`. */
+const MAX_CELL_SLOTS = 30;
+/** The most waiting sessions the bar draws as cells. */
+const MAX_WAITING_CELLS = 16;
+/** The width of the bar's slots part, in CSS pixels: the cells and the gaps between them fit in it. */
+const SLOTS_WIDTH = 120;
+/** The gap between two cells, in CSS pixels. */
+const CELL_GAP = 2;
 
 /**
  * How to draw a machine's sessions against its cap, and the words drawn beside
- * it. Every machine draws the same bar. `running` slots are filled, `free`
- * slots are empty, and `waiting` is the number of sessions waiting for a slot,
- * drawn as a marigold part after the cap. The drawn total is
- * `max(cap, running) + waitingDrawn`: after the user lowers the cap below the
- * sessions running, `free` is 0 and `running` runs past the cap. The renderer
- * needs `cap` to mark where the cap ends in that case, and where the waiting
- * part starts.
+ * it. `running` slots are filled, `free` slots are empty, and `waiting` is the
+ * number of sessions waiting for a slot, drawn as a marigold part after the
+ * cap. The slots drawn are `max(cap, running)`: after the user lowers the cap
+ * below the sessions running, `free` is 0 and `running` runs past the cap. The
+ * renderer needs `cap` to mark where the cap ends in that case, and where the
+ * waiting part starts.
  *
- * `sessionsPerCut` is how many sessions each cut of the bar stands for: 1
- * while both the cap and the sessions running are at most 16, so the bar
- * still reads as slots, and 10 above that, so a cap of 100 stays countable.
+ * `cellWidth` says how the bar is drawn:
  *
- * `waitingDrawn` is how many of the `waiting` sessions the bar draws: at most
- * 16 while it is cut per slot, so a long queue cannot squeeze the cap's part
- * to nothing, and all of them when it is cut every 10. The words beside the
- * bar carry the count.
+ * - Up to 30 slots, every slot is one cell, `cellWidth` CSS pixels wide, with
+ *   a 2px gap between every two. The width is whole, the same for every cell,
+ *   and the largest that keeps the slots' part at most 120px: 4 slots are
+ *   28px cells, 8 are 13px, 16 are 5px, 24 are 3px, 30 are 2px. So one cell is
+ *   always one session, and no cell is ever drawn partly filled. The waiting
+ *   sessions are cells of the same width after the cap, at most 16 of them.
+ * - Above 30 slots `cellWidth` is `null`: the bar is one continuous fill,
+ *   120px wide, cut every 10 sessions, and the waiting part is a marigold fill
+ *   after the cap, of at most as many sessions as the slots.
+ *
+ * `waitingDrawn` is how many of the `waiting` sessions the bar draws, as the
+ * two cases above limit them, so a long queue cannot take over the bar. The
+ * words beside the bar carry the count.
  *
  * A machine that is `isAway` (offline or unreachable) runs nothing that can be
  * counted: `running` is 0 and every slot is `free`, and the renderer draws the
- * cap as an outline. Its `waiting` sessions stay, because the controller still
- * knows what waits for the machine.
+ * slots in the disabled tint. Its `waiting` sessions stay, because the
+ * controller still knows what waits for the machine.
  */
 export interface SessionsDrawing {
-  readonly sessionsPerCut: 1 | 10;
+  readonly cellWidth: number | null;
   readonly cap: number;
   readonly running: number;
   readonly free: number;
@@ -256,26 +278,28 @@ export interface SessionsDrawing {
 }
 
 /**
- * Returns the counts and words to draw a machine's sessions from: a bar cut
- * per slot while both the cap and the sessions running are at most 16, and
- * every 10 sessions otherwise. A cap lowered from 100 to 4 under 100 running
- * sessions is therefore cut every 10, not into 100 slots. A machine running
- * more sessions than its cap has 0 free slots, never a negative number. An
- * away machine counts as running none (see `SessionsDrawing`).
+ * Returns the counts and words to draw a machine's sessions from (see
+ * `SessionsDrawing`). The cells follow the larger of the cap and the sessions
+ * running, so a cap lowered from 100 to 4 under 100 running sessions is still
+ * drawn as one continuous fill. A machine running more sessions than its cap
+ * has 0 free slots, never a negative number. An away machine counts as
+ * running none.
  */
 export const buildSessionsDrawing = (machine: FleetMachine): SessionsDrawing => {
   const { runner, waiting } = machine;
   const isAway = runner.connectivity !== "online";
   const cap = runner.maxConcurrentSessions;
   const running = isAway ? 0 : machine.running;
-  const isCutPerSlot = cap <= MAX_SLOTS_CUT_ONE_BY_ONE && running <= MAX_SLOTS_CUT_ONE_BY_ONE;
+  const slots = Math.max(cap, running);
+  const cellWidth =
+    slots <= MAX_CELL_SLOTS ? Math.floor((SLOTS_WIDTH + CELL_GAP) / slots) - CELL_GAP : null;
   return {
-    sessionsPerCut: isCutPerSlot ? 1 : SESSIONS_PER_WIDE_CUT,
+    cellWidth,
     cap,
     running,
     free: Math.max(0, cap - running),
     waiting,
-    waitingDrawn: isCutPerSlot ? Math.min(waiting, MAX_SLOTS_CUT_ONE_BY_ONE) : waiting,
+    waitingDrawn: Math.min(waiting, cellWidth === null ? slots : MAX_WAITING_CELLS),
     isAway,
     runningText: isAway ? "–" : String(running),
     capText: ` of ${String(cap)}`,
@@ -597,9 +621,7 @@ export const decideMachineNeed = (
       kind: "disk-below-limit",
       hue: "fail",
       line:
-        diskPercent === undefined
-          ? "Disk below its limit. It takes no new sessions."
-          : `Disk ${String(diskPercent)}% full. It takes no new sessions.`,
+        diskPercent === undefined ? "Disk below its limit" : `Disk ${String(diskPercent)}% full`,
     };
   }
   const isCapHoldingSessionsBack =

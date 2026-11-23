@@ -116,6 +116,11 @@ describe("InboxAnswers", () => {
     expect(names).toEqual(["Approve↩", "Reply…", "Done"]);
   });
 
+  it("draws Done as an unfilled button like the other answers, not as quiet text", () => {
+    renderAnswers();
+    expect(screen.getByRole("button", { name: "Done" }).className).toBe("btn btn--sm");
+  });
+
   it("calls back with the answer pressed, and Done and a reply opening apart", async () => {
     const user = userEvent.setup();
     const calls = renderAnswers();

@@ -1,10 +1,9 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the
    meters, the text field, the switches and choices, the quiet text and
-   dots, the priority bars, the bar over the main pane, the tabs and the
-   section headings. The rules and
-   class names are the Bureau book's, as its system.css spells them. Each
-   departure from the book says why. */
+   dots, the bar over the main pane, the tabs and the section headings. The
+   rules and class names are the Bureau book's, as its system.css spells
+   them. Each departure from the book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -14,11 +13,12 @@
    - .btn--quiet   declines and dismissals: text until hovered.
    - .btn--danger  an answer that destroys or deletes: red ink on the neutral tablet. */
 .btn {
+  --btn-h: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  height: 30px;
+  height: var(--btn-h);
   padding: 0 12px;
   border-radius: var(--r-btn);
   font-weight: var(--w-medium);
@@ -26,7 +26,7 @@
   color: var(--ink);
   background: var(--btn-fill);
   box-shadow:
-    inset 0 0 0 1px var(--btn-rim),
+    inset 0 0 0 1px var(--control-edge),
     inset 0 1px 0 var(--glass-edge),
     0 1px 2px oklch(0 0 0 / calc(0.07 * var(--glass-level)));
   transition:
@@ -90,7 +90,8 @@
 /* A smaller button, for answers inside a row or a card, such as a queued
    message's Steer and Cancel. */
 .btn--sm {
-  height: 26px;
+  --btn-h: 26px;
+  height: var(--btn-h);
   padding: 0 10px;
   font-size: var(--t-12);
   gap: 5px;
@@ -100,16 +101,27 @@
 .btn .cr {
   margin-left: -6px;
 }
-/* A key at the end of a button, such as the Reply button's ⌘↩, sits closer
-   to the edge. The key's tint has padding of its own, so without this the gap
-   between the tint and the button's edge is much wider than the gap above and
-   below it. */
+/* A key in a button, such as the Reply button's ⌘↩, is an 18px tint: a whole
+   pixel tall, so its edges stay sharp, and at least as wide as it is tall, so
+   one-letter keys are all the same square. A button that ends with its key
+   keeps as much room to the key's right as above and below it, half of what
+   the button's height leaves around the key. A button whose height differs
+   from `.btn`'s sets `--btn-h` with it. */
 .btn kbd {
-  margin-right: -4px;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  height: 18px;
+  min-width: 18px;
+  line-height: 1;
+}
+.btn:has(> kbd:last-child) {
+  padding-right: calc((var(--btn-h) - 18px) / 2);
 }
 /* The large button that ends a step of the first run, such as Add project. */
 .btn--lg {
-  height: 38px;
+  --btn-h: 38px;
+  height: var(--btn-h);
   padding: 0 16px;
   font-size: var(--t-14);
 }
@@ -309,7 +321,11 @@
    button, such as the Text size steps. The radio gives the group its
    semantics and its arrow keys, and is drawn invisibly over its label, so the
    label looks exactly like a button. The checked radio is the value in use,
-   and a keyboard focus ring goes round its segment. */
+   and a keyboard focus ring goes round its segment.
+   The track's edge is the quiet chrome divider, not `--control-edge`: a 3:1
+   edge made a segmented control louder than the content around it, and the
+   selected segment's raised puck already tells the segments apart. Every
+   segmented control draws the same track, the sidebar's face switch too. */
 .seg {
   display: inline-flex;
   padding: 2px;
@@ -484,7 +500,7 @@ button.nav-row {
   padding: 0 11px;
   border-radius: var(--r-md);
   background: var(--field);
-  box-shadow: inset 0 0 0 1px var(--line-soft);
+  box-shadow: inset 0 0 0 1px var(--control-edge);
   color: var(--ink);
 }
 /* The book draws a field as a box around text. Here it is also a real text
@@ -870,44 +886,6 @@ input.field[type="password"]:not(:placeholder-shown) {
   }
 }
 
-/* ---------- Priority bars ---------- */
-/* Four bars rising left to right, filled up to the priority: one for low,
-   four for urgent. Urgent fills all four in the failure colour. */
-.bars {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 12px;
-}
-.bars i {
-  width: 3px;
-  border-radius: 1px;
-  background: var(--line);
-}
-.bars i:nth-child(1) {
-  height: 5px;
-}
-.bars i:nth-child(2) {
-  height: 7.5px;
-}
-.bars i:nth-child(3) {
-  height: 10px;
-}
-.bars i:nth-child(4) {
-  height: 12px;
-}
-.bars[data-p="1"] i:nth-child(-n + 1),
-.bars[data-p="2"] i:nth-child(-n + 2),
-.bars[data-p="3"] i:nth-child(-n + 3) {
-  background: var(--ink);
-}
-/* The book also lists urgent among the ink bars above, and overrides it
-   here with `!important`. Here urgent is left out above, so this rule has
-   nothing to override. */
-.bars[data-p="4"] i {
-  background: var(--fail);
-}
-
 /* ---------- The bar ---------- */
 /* The header over the main pane. */
 .bar {
@@ -976,7 +954,9 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 
 /* ---------- Section headings ---------- */
-/* A small bold heading over a group, with an icon before it. */
+/* A small bold heading over a group, with an icon before it. It sets no letter spacing: at 12px a
+   spacing of a fraction of a pixel is rounded glyph by glyph on Linux, which opened a gap inside
+   "from" in "Start from Intake". */
 .section-h {
   display: flex;
   align-items: center;
@@ -985,7 +965,6 @@ input.field[type="password"]:not(:placeholder-shown) {
   color: var(--muted);
   font-size: var(--t-12);
   font-weight: var(--w-bold);
-  letter-spacing: 0.005em;
 }
 .section-h .count {
   height: 17px;

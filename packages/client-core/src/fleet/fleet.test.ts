@@ -381,14 +381,14 @@ describe("decideMachineNeed", () => {
     });
   });
 
-  it("reports a disk below its limit by how full it is, in the words of a nearly full disk", () => {
+  it("reports a disk below its limit by how full it is alone, because the status says it takes no new sessions", () => {
     // 8 GB free of 1,000 GB is under the 10 GiB limit.
     const machine = buildMachine(withDisk(8e9));
 
     expect(findNeed(machine)).toEqual({
       kind: "disk-below-limit",
       hue: "fail",
-      line: "Disk 99% full. It takes no new sessions.",
+      line: "Disk 99% full",
     });
   });
 
@@ -400,7 +400,7 @@ describe("decideMachineNeed", () => {
     expect(findNeed(machine)).toEqual({
       kind: "disk-below-limit",
       hue: "fail",
-      line: "Disk below its limit. It takes no new sessions.",
+      line: "Disk below its limit",
     });
   });
 
@@ -652,6 +652,14 @@ describe("describeFleetPage lead", () => {
     );
   });
 
+  it("leaves the sessions waiting for a slot out of the room", () => {
+    const waitingMachine = buildMachine({ maxConcurrentSessions: 16 }, { running: 10, waiting: 4 });
+
+    expect(readText(describePage([waitingMachine]).lead.detail)).toBe(
+      "10 sessions running on 1 machine, 4 waiting. Room for 2 more right now.",
+    );
+  });
+
   it("says when there is no room", () => {
     const full = buildMachine({ maxConcurrentSessions: 2 }, { running: 2 });
 
@@ -726,6 +734,21 @@ describe("MachineSummary roomText", () => {
     expect(summarize({ maxConcurrentSessions: 16 }, { running: 16 }).roomText).toBe("Full");
   });
 
+  it("counts the sessions waiting for a slot as taking room", () => {
+    expect(summarize({ maxConcurrentSessions: 16 }, { running: 10, waiting: 2 }).roomText).toBe(
+      "Room for 4",
+    );
+    expect(summarize({ maxConcurrentSessions: 16 }, { running: 12, waiting: 4 }).roomText).toBe(
+      "Full",
+    );
+  });
+
+  it("is Full, never below no room, when the sessions running and waiting pass the cap", () => {
+    expect(summarize({ maxConcurrentSessions: 16 }, { running: 12, waiting: 5 }).roomText).toBe(
+      "Full",
+    );
+  });
+
   it("is not reduced by a reserved runner, labels, a runner that has not reported its disk or memory", () => {
     const texts = [
       summarize({ reserved: true, labels: ["gpu"] }),
@@ -761,9 +784,9 @@ describe("MachineSummary drawing", () => {
   const drawing = (cap: number, running: number, waiting = 0) =>
     summarize({ maxConcurrentSessions: cap }, { running, waiting }).drawing;
 
-  it("cuts the bar once per slot at a cap of 16", () => {
+  it("draws one cell per slot at a cap of 16", () => {
     expect(drawing(16, 12, 3)).toMatchObject({
-      sessionsPerCut: 1,
+      cellWidth: 5,
       cap: 16,
       running: 12,
       free: 4,
@@ -772,37 +795,49 @@ describe("MachineSummary drawing", () => {
     });
   });
 
-  it("cuts the bar every 10 sessions above a cap of 16", () => {
-    expect(drawing(17, 12, 3)).toMatchObject({
-      sessionsPerCut: 10,
-      cap: 17,
-      running: 12,
-      free: 5,
-      waiting: 3,
-      waitingDrawn: 3,
-    });
+  it.each([
+    [1, 120],
+    [4, 28],
+    [8, 13],
+    [16, 5],
+    [24, 3],
+    [30, 2],
+  ])(
+    "draws a cap of %i in cells of %ipx, the widest whole width that keeps the slots within 120px",
+    (cap, cellWidth) => {
+      const width = drawing(cap, 1).cellWidth;
+      expect(width).toBe(cellWidth);
+      expect(Number.isInteger(width)).toBe(true);
+      // The cells and the 2px gaps between them fit in 120px, and one more pixel per cell would not.
+      expect(cap * cellWidth + (cap - 1) * 2).toBeLessThanOrEqual(120);
+      expect(cap * (cellWidth + 1) + (cap - 1) * 2).toBeGreaterThan(120);
+    },
+  );
+
+  it("draws a cap above 30 as one continuous fill, with no cells", () => {
+    expect(drawing(31, 9, 3)).toMatchObject({ cellWidth: null, cap: 31, running: 9 });
+    expect(drawing(100, 9, 3)).toMatchObject({ cellWidth: null, cap: 100, running: 9 });
   });
 
-  it("cuts per slot for 16 sessions running past a lower cap, and every 10 for 17", () => {
-    expect(drawing(4, 16)).toMatchObject({ sessionsPerCut: 1, running: 16, free: 0 });
-    expect(drawing(4, 17)).toMatchObject({ sessionsPerCut: 10, running: 17, free: 0 });
-  });
-
-  it("cuts every 10 sessions when the cap was lowered under many running sessions", () => {
-    expect(drawing(4, 100)).toMatchObject({ sessionsPerCut: 10, cap: 4, running: 100, free: 0 });
+  it("sizes the cells by the sessions running when they run past a lower cap", () => {
+    expect(drawing(4, 16)).toMatchObject({ cellWidth: 5, running: 16, free: 0 });
+    expect(drawing(4, 30)).toMatchObject({ cellWidth: 2, running: 30, free: 0 });
+    expect(drawing(4, 31)).toMatchObject({ cellWidth: null, running: 31, free: 0 });
   });
 
   it("has no free slot when more sessions run than the cap allows", () => {
     expect(drawing(4, 6)).toMatchObject({ cap: 4, running: 6, free: 0 });
   });
 
-  it("draws at most 16 waiting sessions while cut per slot, and keeps the full count", () => {
+  it("draws at most 16 waiting cells, and keeps the full count", () => {
     expect(drawing(16, 16, 16)).toMatchObject({ waiting: 16, waitingDrawn: 16 });
     expect(drawing(16, 16, 40)).toMatchObject({ waiting: 40, waitingDrawn: 16 });
+    expect(drawing(24, 24, 40)).toMatchObject({ waiting: 40, waitingDrawn: 16 });
   });
 
-  it("draws every waiting session while cut every 10", () => {
-    expect(drawing(17, 17, 40)).toMatchObject({ waiting: 40, waitingDrawn: 40 });
+  it("draws at most as many waiting sessions as the slots in a continuous fill", () => {
+    expect(drawing(100, 100, 40)).toMatchObject({ waiting: 40, waitingDrawn: 40 });
+    expect(drawing(40, 40, 100)).toMatchObject({ waiting: 100, waitingDrawn: 40 });
   });
 
   it("words the sessions running against the cap, and the sessions waiting", () => {
@@ -847,8 +882,8 @@ describe("MachineSummary drawing", () => {
       });
     });
 
-    it("cuts per slot for a cap of 16, however many sessions it last ran", () => {
-      expect(awayDrawing(4, 100, 0)).toMatchObject({ sessionsPerCut: 1, running: 0, free: 4 });
+    it("draws one cell per slot for a cap of 4, however many sessions it last ran", () => {
+      expect(awayDrawing(4, 100, 0)).toMatchObject({ cellWidth: 28, running: 0, free: 4 });
     });
   });
 });
@@ -1061,11 +1096,26 @@ describe("MachineSummary status", () => {
     );
   });
 
-  it("says an online machine takes no new work while draining", () => {
+  it("says an online machine takes no new sessions while draining", () => {
     expect(summarize({ lifecycle: "draining" }).status).toEqual({
-      tone: "draining",
-      label: "Takes no new work",
+      tone: "no-new-sessions",
+      label: "Takes no new sessions",
     });
+  });
+
+  it("says an online machine takes no new sessions while its disk is below its limit", () => {
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+
+    expect(summarize({ metrics }).status).toEqual({
+      tone: "no-new-sessions",
+      label: "Takes no new sessions",
+    });
+  });
+
+  it("says Offline for an offline machine whose disk is below its limit", () => {
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+
+    expect(summarize({ connectivity: "offline", metrics }).status.label).toBe("Offline");
   });
 });
 

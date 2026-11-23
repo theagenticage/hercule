@@ -478,9 +478,9 @@ describe("Intake's list", () => {
     expect(screen.queryByText("Nothing on your list.")).toBeNull();
   });
 
-  it("puts Intake's To do count on its sidebar row and on the Hercule segment", async () => {
+  it("puts Intake's To do count on its sidebar row and on the Work segment", async () => {
     await openIntake();
-    const segment = screen.getByRole("tab", { name: "Hercule, 3 to do" });
+    const segment = screen.getByRole("tab", { name: "Work, 3 to do" });
     expect(segment.getAttribute("aria-selected")).toBe("true");
     const row = screen.getByRole("link", { name: /^Intake/ });
     expect(row.textContent).toBe("Intake3");

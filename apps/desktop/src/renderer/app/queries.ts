@@ -773,7 +773,7 @@ export const assistantsQuery = (client: HerculeClient) =>
  * the time the read started (`TrackingRead`). The rows are not built here:
  * a row also depends on the Requests and signals that wait on its Task, which
  * change on their own, so the app builds them from this read and those (see
- * `useTrackingRows`). The Hercule segment's count and Tracking's rows both
+ * `useTrackingRows`). The Work segment's count and Tracking's rows both
  * come from it, so it is shell data, kept for the life of the window.
  *
  * The key is stable, so the entry is the same whichever Tasks are tracked. A
@@ -842,7 +842,7 @@ const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
 
 /**
  * Reads Intake's To do list: every open signal that is not snoozed, read
- * whole, because every client counts it. The Hercule segment's count and
+ * whole, because every client counts it. The Work segment's count and
  * Intake's list both come from it, and a push on the `signal` topic reads it
  * again.
  *
@@ -2325,7 +2325,7 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
  * assistants and the current session of each one's main conversation, the
  * Connections, the signed-in user, Intake's To do list, whose count the
- * Hercule segment shows, the Tasks Tracking lists and their runs (the count
+ * Work segment shows, the Tasks Tracking lists and their runs (the count
  * takes in Tracking's waiting rows), the Tasks that To do's signals are
  * about (Your work, which makes a row Needs you), the Inbox's counts, and the
  * plugins that name each signal's source.

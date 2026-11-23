@@ -94,7 +94,7 @@ export function WorkSection(): JSX.Element {
       </Link>
       <InboxRow />
       {/* A screen reader reads the count with what it counts, as it does the
-          Hercule segment's: "Intake, 8 to do". */}
+          Work segment's: "Intake, 8 to do". */}
       <Link
         to="/intake"
         className="nav-row"

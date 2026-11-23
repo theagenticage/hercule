@@ -158,6 +158,26 @@ export const decideThreadRowEnd = (session: Session, runner: Runner | undefined)
  */
 export type ThreadRowStatus = "working" | "approval" | "question" | "queued" | "offline" | "age";
 
+/** A status that has words of its own, which is every status but `age`. */
+export type ThreadRowState = Exclude<ThreadRowStatus, "age">;
+
+/** The word the desktop app shows for each status but `age`. */
+const THREAD_ROW_STATE_WORDS: Readonly<Record<ThreadRowState, string>> = {
+  working: "Working",
+  approval: "Approval",
+  question: "Question",
+  queued: "Queued",
+  offline: "Offline",
+};
+
+/**
+ * Returns the word the desktop app shows for `state`: "Working", "Approval",
+ * "Question", "Queued" or "Offline". A sidebar row's second line starts with
+ * it, and the status slot of a session's line shows it.
+ */
+export const describeThreadRowState = (state: ThreadRowState): string =>
+  THREAD_ROW_STATE_WORDS[state];
+
 /**
  * Returns the status a desktop sidebar row shows for a thread, from the same
  * rules as `decideThreadRowEnd`, with the waiting mark split into an approval

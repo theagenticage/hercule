@@ -313,7 +313,7 @@ describe("a run's page", () => {
   it("shows the Hercule face with Workflows selected, as the book draws it", async () => {
     await openRun();
 
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const workflows = within(nav).getByRole("link", { name: "Workflows" });
     expect(workflows.getAttribute("aria-current")).toBe("page");
     expect(workflows.classList.contains("is-on")).toBe(true);

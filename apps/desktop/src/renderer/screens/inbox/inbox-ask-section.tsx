@@ -56,7 +56,7 @@ export interface InboxAskSectionHandle {
  * Renders the section of one open signal.
  *
  * - The head is a button that calls `onToggle`; it carries `aria-expanded`.
- * - `isCurrent` marks the ask that Return answers (`aria-current`) and draws its ink edge.
+ * - `isCurrent` marks the ask that Return answers (`aria-current`).
  * - A folded body is inert, so its buttons take no focus and no click.
  * - `body` is how far the signal's full read is: while it is on its way the
  *   body draws quiet shapes, and a read that failed says why in one line.
@@ -124,10 +124,9 @@ export function InboxAskSection({
     [],
   );
 
-  const classes = ["sig", isOpen && "is-open", isCurrent && "is-current-ask"];
   return (
     <section
-      className={classes.filter(Boolean).join(" ")}
+      className={isOpen ? "sig is-open" : "sig"}
       aria-current={isCurrent ? "true" : undefined}
     >
       <button

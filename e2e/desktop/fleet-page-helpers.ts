@@ -4,9 +4,9 @@
  */
 import type { Page } from "playwright";
 
-/** Returns the label of the sidebar's list, "Threads" or "Hercule": the face it shows. */
+/** Returns the label of the sidebar's list, "Threads" or "Work": the face it shows. */
 export function readSidebarList(page: Page): Promise<string | null> {
   return page
-    .locator('nav[aria-label="Threads"], nav[aria-label="Hercule"]')
+    .locator('nav[aria-label="Threads"], nav[aria-label="Work"]')
     .getAttribute("aria-label");
 }

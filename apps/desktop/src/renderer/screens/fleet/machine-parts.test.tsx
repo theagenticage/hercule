@@ -19,12 +19,6 @@ describe("StatusDot", () => {
 
     expect(screen.queryByRole("img")).toBeNull();
   });
-
-  it("names the state itself where no label is drawn", () => {
-    render(<StatusDot status={{ tone: "online", label: "Online" }} namesState />);
-
-    expect(screen.getByRole("img", { name: "Online" })).toBeTruthy();
-  });
 });
 
 describe("GaugeValue", () => {

@@ -261,12 +261,12 @@ describe("a machine's head", () => {
     expect(within(roomLine).getByText("4").tagName).toBe("B");
   });
 
-  it("names the state of a machine that takes no new work, in the head and in the room line", async () => {
+  it("names the state of a machine told to take no new work, in the head and in the room line", async () => {
     await openMachine({ runner: { ...ATLAS, lifecycle: "draining" } });
 
     const head = screen.getByRole("heading", { level: 2, name: "atlas" }).closest("header")!;
-    expect(within(head).getByText("Takes no new work")).toBeTruthy();
-    expect(screen.getByText("No room: it takes no new work")).toBeTruthy();
+    expect(within(head).getByText("Takes no new sessions")).toBeTruthy();
+    expect(screen.getByText("No room: it takes no new sessions")).toBeTruthy();
   });
 
   it("shows no update hint when the runner runs the controller's release", async () => {
@@ -1080,7 +1080,7 @@ describe("the Settings section", () => {
       ).toBe("true");
     });
     expect(readCalls(calls, "POST", `${RUNNER_PATH}/drain`)).toHaveLength(1);
-    expect(screen.getByText("No room: it takes no new work")).toBeTruthy();
+    expect(screen.getByText("No room: it takes no new sessions")).toBeTruthy();
 
     await userEvent.click(within(getSettings()).getByRole("switch", { name: "Stop new work" }));
 

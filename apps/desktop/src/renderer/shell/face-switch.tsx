@@ -7,11 +7,11 @@ import type { SidebarFace } from "./sidebar-face";
 /** The switch's segments, in order, with the label each one shows. */
 const SEGMENTS: ReadonlyArray<{ readonly face: SidebarFace; readonly label: string }> = [
   { face: "threads", label: "Threads" },
-  { face: "orchestration", label: "Hercule" },
+  { face: "orchestration", label: "Work" },
 ];
 
 /**
- * Renders the sidebar's face switch, Threads | Hercule: the book's segmented
+ * Renders the sidebar's face switch, Threads | Work: the book's segmented
  * control at the top of the sidebar, drawn as a tab list whose tabs control
  * the sidebar's list, the element with the id `listId`.
  *
@@ -19,12 +19,12 @@ const SEGMENTS: ReadonlyArray<{ readonly face: SidebarFace; readonly label: stri
  *   with its face.
  * - Only the selected segment is in the tab order. ← and → select the other
  *   segment and move the focus to it, as in any segmented control.
- * - The Hercule segment ends in Intake's To do count, in marigold, and its
- *   accessible name carries the count: "Hercule, 8 to do". The count is the
+ * - The Work segment ends in Intake's To do count, in marigold, and its
+ *   accessible name carries the count: "Work, 8 to do". The count is the
  *   open signals and the rows of Tracking that wait on the user. It is hidden
  *   at 0.
  * - While a run is failed on a Task and the Threads face shows, a 7px marigold
- *   dot sits at the end of the Hercule segment, as a button of its own beside
+ *   dot sits at the end of the Work segment, as a button of its own beside
  *   the tab list (it is not a tab). It is the only click here that opens Work
  *   on what failed: pressing the word still only changes the face, so nobody
  *   leaves a thread to glance at the other face. The Hercule face shows the
