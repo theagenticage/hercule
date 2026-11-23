@@ -6,10 +6,8 @@ import { readAcknowledgedInboxArrival, subscribeInboxArrival } from "../app/inbo
 import { readOverviewView, subscribeOverviewView } from "../app/overview-view";
 import { trackBody } from "../app/motion";
 import { inboxCountQuery, userQuery } from "../app/queries";
-import { useToDoCount } from "../app/tracking";
 import { DiscussionsIcon } from "../icons/discussions";
 import { InboxIcon } from "../icons/inbox";
-import { IntakeIcon } from "../icons/intake";
 import { OfficeIcon } from "../icons/office";
 import { OverviewIcon } from "../icons/overview";
 import { WikiIcon } from "../icons/wiki";
@@ -31,9 +29,6 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * - The Inbox, ending in a plain grey count of the cards with a clock on them,
  *   hidden at 0, and one small marigold dot while the Inbox holds an arrival
  *   this client has not shown the user yet (see `InboxRow`).
- * - Intake, which keeps its row until the Inbox takes it, ending in its To do
- *   count in marigold: the open signals and the rows of Tracking that wait on
- *   the user. The count is hidden at 0.
  * - Workflows, with no count: a total of the user's workflows gives the user
  *   nothing to act on. What a run waits on the user for shows in Waiting on
  *   you instead. The row is also selected on a run's page, because a run
@@ -41,15 +36,13 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * - Discussions and Wiki, with no count either.
  *
  * Each row draws an icon of its own, so no two places look alike: a grid for
- * Overview, the house for The office (as the shared row's Office button), the
- * tray for the Inbox and the tray with an arrow into it for Intake.
+ * Overview, the house for The office (as the shared row's Office button) and
+ * the tray for the Inbox.
  *
- * The shell's loader reads the To do list, Tracking's reads and the Inbox's
- * counts, and keeps them cached for the life of the window, so nothing here
- * waits in practice.
+ * The shell's loader reads the Inbox's counts and keeps them cached for the
+ * life of the window, so nothing here waits in practice.
  */
 export function WorkSection(): JSX.Element {
-  const toDoCount = useToDoCount();
   const runOpen =
     useMatch({ from: "/_connected/_shell/runs/$runId", shouldThrow: false }) !== undefined;
   const navigate = useNavigate();
@@ -93,18 +86,6 @@ export function WorkSection(): JSX.Element {
         <span>The office</span>
       </Link>
       <InboxRow />
-      {/* A screen reader reads the count with what it counts, as it does the
-          Work segment's: "Intake, 8 to do". */}
-      <Link
-        to="/intake"
-        className="nav-row"
-        activeProps={SELECTED_LINK_PROPS}
-        aria-label={toDoCount > 0 ? `Intake, ${String(toDoCount)} to do` : undefined}
-      >
-        <IntakeIcon />
-        <span>Intake</span>
-        {toDoCount > 0 && <b className="count count--you">{toDoCount}</b>}
-      </Link>
       <Link
         to="/workflows"
         className={runOpen ? "nav-row is-on" : "nav-row"}

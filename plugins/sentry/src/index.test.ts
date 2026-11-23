@@ -7,6 +7,7 @@ import { Effect, Result, Schema, SchemaAST } from "effect";
 import type {
   ConnectionTypeContribution,
   EventSourceContribution,
+  McpServerContribution,
   Plugin,
   RegistrationHost,
   WorkflowActionContribution,
@@ -30,10 +31,12 @@ const collectContributions = async (
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
   readonly sources: ReadonlyArray<EventSourceContribution>;
   readonly actions: ReadonlyArray<WorkflowActionContribution>;
+  readonly mcpServers: ReadonlyArray<McpServerContribution>;
 }> => {
   const types: Array<ConnectionTypeContribution> = [];
   const sources: Array<EventSourceContribution> = [];
   const actions: Array<WorkflowActionContribution> = [];
+  const mcpServers: Array<McpServerContribution> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) => Effect.sync(() => void types.push(contribution)),
@@ -42,9 +45,12 @@ const collectContributions = async (
     workflowActions: {
       register: (contribution) => Effect.sync(() => void actions.push(contribution)),
     },
+    mcpServers: {
+      register: (contribution) => Effect.sync(() => void mcpServers.push(contribution)),
+    },
   };
   await Effect.runPromise(plugin.register(host));
-  return { types, sources, actions };
+  return { types, sources, actions, mcpServers };
 };
 
 /** Returns the one connection type the plugin contributes. */
@@ -69,7 +75,14 @@ describe("what the sentry plugin registers", () => {
     expect(sentry.manifest).toMatchObject({
       id: "sentry",
       displayName: "Sentry",
-      capabilities: ["connections", "event-sources", "events", "entities", "workflow-actions"],
+      capabilities: [
+        "connections",
+        "event-sources",
+        "events",
+        "entities",
+        "workflow-actions",
+        "mcp-servers",
+      ],
     });
     expect(sentry.manifest.mark?.paths).toHaveLength(1);
     expect(sentry.manifest.mark?.hue).toBe(288);
@@ -120,6 +133,12 @@ describe("what the sentry plugin registers", () => {
       entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
     });
     expect(Object.keys(source?.kinds ?? {}).sort()).toEqual([...KINDS].sort());
+  });
+
+  it("contributes one MCP server", async () => {
+    const { mcpServers } = await collectContributions(sentry);
+
+    expect(mcpServers.map((server) => server.id)).toEqual(["sentry"]);
   });
 
   it("declares the Error kind, its saved query and a lookup", async () => {

@@ -28,14 +28,17 @@ import {
   type DisallowedTool,
   type ModelSelection,
   type HarnessEvent,
+  type McpServerWarningReason,
   type SubagentId,
 } from "@hercule/protocol";
 import {
   createNotFoundError,
   LIVE_SESSION_STATUSES,
   type NotFound,
+  type McpServerLeftOutReason,
   type Passage,
   type PermissionRequest,
+  type SessionMcpServer,
   type SessionArchived,
   type SessionKind,
   type SessionRequest,
@@ -53,12 +56,14 @@ import {
   buildKeyset,
   buildPage,
   uuidFromString,
+  uuidHexToString,
   uuidToString,
   type CursorError,
   type CursorScope,
   type Page,
 } from "../db";
 import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "../permissions";
+import type { NoGatewayReason } from "../mcp-servers";
 import { SessionLibrarySkill } from "../skills";
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
@@ -69,6 +74,11 @@ import { StoredTokenUsage, type StoredUsage } from "./usage";
 
 const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
+);
+
+/** What `sessions.mcp_gateway` holds: `given`, or the reason the start gave no gateway entry. */
+const decodeMcpGateway = Schema.decodeUnknownEffect(
+  Schema.Literals(["given", "runner-too-old", "harness-unsupported"]),
 );
 
 /**
@@ -198,6 +208,8 @@ export interface StoredSession {
    * may enforce what this one ignores.
    */
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
+  /** The session's own list of MCP Servers, in list order. Empty for a session that has none. */
+  readonly mcpServers: ReadonlyArray<SessionMcpServer>;
 }
 
 export interface NewSession {
@@ -331,6 +343,8 @@ interface SessionRow {
   readonly reopened_at: string | null;
   readonly input_waiting: number;
   readonly conversation_deleted: number;
+  /** A JSON array of `{ id, name, leftOut }`, in list order; `id` is the hex of the server's id. */
+  readonly mcp_servers: string;
 }
 
 /**
@@ -360,7 +374,12 @@ const buildColumnList = (): string =>
   "FROM session_subagents WHERE session_subagents.session_id = sessions.id " +
   "AND subagent_id IN (SELECT json_extract(value, '$.subagentId') " +
   "FROM json_each(sessions.open_requests))) AS subagent_names, " +
-  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests`;
+  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests, ` +
+  // The list is one subquery on the primary key, so a page of sessions costs one query.
+  "(SELECT json_group_array(json_object('id', hex(mcp_server_id), 'name', name, " +
+  "'leftOut', left_out)) FROM (SELECT entry.mcp_server_id, server.name, entry.left_out " +
+  "FROM session_mcp_servers AS entry JOIN mcp_servers AS server ON server.id = entry.mcp_server_id " +
+  "WHERE entry.session_id = sessions.id ORDER BY entry.position)) AS mcp_servers";
 
 /**
  * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
@@ -425,6 +444,17 @@ const toSession = (row: SessionRow): StoredSession => ({
     row.disallowed_tools === null
       ? []
       : (JSON.parse(row.disallowed_tools) as ReadonlyArray<DisallowedTool>),
+  mcpServers: (
+    JSON.parse(row.mcp_servers) as ReadonlyArray<{
+      readonly id: string;
+      readonly name: string;
+      readonly leftOut: McpServerLeftOutReason | null;
+    }>
+  ).map((entry) => ({
+    mcpServerId: uuidHexToString(entry.id),
+    name: entry.name,
+    leftOut: entry.leftOut,
+  })),
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -1080,7 +1110,7 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly last: number | null; readonly base: number }>`
           SELECT (SELECT MAX(runner_seq) FROM session_stream
-                  WHERE session_id = sessions.id) AS last,
+                  WHERE session_id = sessions.id AND runner_seq > 0) AS last,
                  stream_base AS base
           FROM sessions WHERE id = ${uuidFromString(sessionId)}
         `,
@@ -1121,24 +1151,27 @@ const make = Effect.gen(function* () {
     /**
      * Appends a `runtime.warning` event stamped `at`, which the controller
      * writes itself rather than a runner reporting it, at the next position
-     * of the session's stream, and
-     * moves the session's sequence offset (`stream_base`) past it. Both
-     * writes join the caller's transaction. The event's sequence number is
-     * one past the highest the session has used, and the offset becomes that
-     * same number.
+     * of the session's stream, and joins the caller's transaction.
      *
-     * Moving the offset is what keeps the runner's next event: the runner
-     * numbers a process's events from 1, and each is stored at the offset
-     * plus its number, so the first lands one past this row. Without the
-     * move, the runner's event would take this row's sequence number and be
-     * dropped as a replay by `append`. The session's cached ingest state
-     * still holds the old offset, so the caller must drop it once the
-     * transaction commits.
+     * The event takes a negative `runner_seq`: the first warning gets -1, the
+     * next -2, and so on. A runner numbers its events upward from 1, so the two
+     * number spaces never meet. This is what lets the controller write a
+     * warning at any moment, even while a runner's turn is running: the write
+     * cannot take the sequence number of a runner event that is folded but not
+     * yet written, and it leaves the session's sequence offset and its cached
+     * ingest state (the text held for open items) untouched.
+     *
+     * `mcpServers` is given when the warning is about MCP Servers: it names
+     * each server and why (spec 21 section 3.8).
      */
     appendRuntimeWarning: (
       sessionId: string,
       message: string,
       at: string,
+      mcpServers?: ReadonlyArray<{
+        readonly mcpServerId: string;
+        readonly reason: McpServerWarningReason;
+      }>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
@@ -1148,25 +1181,17 @@ const make = Effect.gen(function* () {
           sessionId,
           at,
           message,
+          ...(mcpServers === undefined ? {} : { mcpServers }),
         };
-        // Two scalar subqueries rather than one SELECT with both maxima:
-        // SQLite answers a lone MAX from the end of an index, and each
-        // subquery has its own, while a SELECT with two MAX columns scans
-        // every row of the session's stream.
         yield* sql`
           INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
           VALUES (
             ${id},
             COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
-            COALESCE((SELECT MAX(runner_seq) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+            COALESCE((SELECT MIN(runner_seq) FROM session_stream
+                      WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
             ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
           )
-        `;
-        yield* sql`
-          UPDATE sessions SET
-            stream_base = (SELECT MAX(runner_seq) FROM session_stream
-                           WHERE session_id = sessions.id)
-          WHERE id = ${id}
         `;
       }),
 
@@ -1263,6 +1288,40 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Records whether the start that was just claimed gave the harness the MCP
+     * Gateway's entry: `null` when it did, else the reason it did not. A start
+     * that goes back to the queue and is claimed again overwrites it. Does
+     * nothing for an unknown id.
+     */
+    recordMcpGateway: (
+      sessionId: string,
+      noGatewayReason: NoGatewayReason | null,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET mcp_gateway = ${noGatewayReason ?? "given"}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Returns what the session's last claimed start decided about the MCP
+     * Gateway's entry: `null` when it gave one, else the reason it gave none.
+     * Returns none when no start recorded it, which holds for a session that
+     * was started before the record existed, and for an unknown id.
+     */
+    readMcpGateway: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<NoGatewayReason | null>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly mcp_gateway: string | null }>`
+          SELECT mcp_gateway FROM sessions WHERE id = ${uuidFromString(sessionId)}
+        `;
+        const column = rows[0]?.mcp_gateway;
+        if (column == null) return Option.none();
+        const decided = yield* decodeMcpGateway(column).pipe(Effect.orDie);
+        return Option.some(decided === "given" ? null : decided);
+      }),
+
+    /**
      * Returns the library skills the session got at its last claimed start,
      * or none when no start was ever claimed or the id is unknown. Dies if the
      * stored JSON no longer matches the schema, which only a bug can cause.
@@ -1309,7 +1368,7 @@ const make = Effect.gen(function* () {
             spec = ${spec},
             open_requests = '[]',
             stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
-                           WHERE session_id = sessions.id)
+                           WHERE session_id = sessions.id AND runner_seq > 0)
           WHERE id = ${uuidFromString(sessionId)}
           RETURNING task_id
         `,
@@ -1476,6 +1535,96 @@ const make = Effect.gen(function* () {
         UPDATE sessions SET role = ${role}
         WHERE id = ${uuidFromString(sessionId)} AND role IS NULL
       `),
+
+    /**
+     * Replaces the session's list of MCP Servers with the servers given, in
+     * that order. A server that was already in the list keeps the `leftOut` it
+     * had, because a start writes that field and an edit does not. A new one
+     * gets `null`. It announces nothing: the caller announces the session once
+     * it has written everything.
+     */
+    replaceMcpServers: (
+      sessionId: string,
+      mcpServerIds: ReadonlyArray<string>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const session = uuidFromString(sessionId);
+        const kept = yield* sql<{
+          readonly mcp_server_id: Uint8Array;
+          readonly left_out: McpServerLeftOutReason | null;
+        }>`SELECT mcp_server_id, left_out FROM session_mcp_servers WHERE session_id = ${session}`;
+        const leftOutById = new Map(
+          kept.map((row) => [uuidToString(row.mcp_server_id), row.left_out]),
+        );
+        yield* sql`DELETE FROM session_mcp_servers WHERE session_id = ${session}`;
+        yield* Effect.forEach(
+          mcpServerIds,
+          (id, position) =>
+            sql`INSERT INTO session_mcp_servers (session_id, position, mcp_server_id, left_out)
+                VALUES (${session}, ${position}, ${uuidFromString(id)}, ${leftOutById.get(id) ?? null})`,
+          { discard: true },
+        );
+      }),
+
+    /** Returns the ids of the servers in the session's list, in list order. */
+    readMcpServerIds: (sessionId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly mcp_server_id: Uint8Array }>`SELECT mcp_server_id FROM session_mcp_servers
+           WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`,
+        (rows) => rows.map((row) => uuidToString(row.mcp_server_id)),
+      ),
+
+    /**
+     * Records why each listed server could not be called at the session's
+     * last start. `reasonsById` holds the reason of every server that was left
+     * out. A server in the session's list that it does not name is recorded as
+     * `null`: it could be called. An id that is not in the list is ignored. It
+     * writes one statement to clear the list and one for each reason that
+     * occurs, however long the list is.
+     */
+    recordLeftOut: (
+      sessionId: string,
+      reasonsById: ReadonlyMap<string, McpServerLeftOutReason>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const session = uuidFromString(sessionId);
+        const idsByReason = new Map<McpServerLeftOutReason, Array<Uint8Array>>();
+        for (const [id, reason] of reasonsById) {
+          idsByReason.set(reason, [...(idsByReason.get(reason) ?? []), uuidFromString(id)]);
+        }
+        yield* sql`UPDATE session_mcp_servers SET left_out = NULL WHERE session_id = ${session}`;
+        yield* Effect.forEach(
+          idsByReason,
+          ([reason, ids]) =>
+            sql`UPDATE session_mcp_servers SET left_out = ${reason}
+                WHERE session_id = ${session} AND mcp_server_id IN ${sql.in(ids)}`,
+          { discard: true },
+        );
+      }),
+
+    /**
+     * Removes the MCP Server from every session's list. The session's other
+     * entries keep their order. Returns each session that held the server, with
+     * the conversation it answers, so the caller can announce them.
+     */
+    removeMcpServer: (
+      mcpServerId: string,
+    ): Effect.Effect<ReadonlyArray<Pick<StoredSession, "id" | "conversationId">>, SqlError> =>
+      Effect.gen(function* () {
+        const server = uuidFromString(mcpServerId);
+        const held = yield* sql<{
+          readonly id: Uint8Array;
+          readonly conversation_id: Uint8Array | null;
+        }>`
+          SELECT id, conversation_id FROM sessions
+          WHERE id IN (SELECT session_id FROM session_mcp_servers WHERE mcp_server_id = ${server})
+          ORDER BY id`;
+        yield* sql`DELETE FROM session_mcp_servers WHERE mcp_server_id = ${server}`;
+        return held.map((row) => ({
+          id: uuidToString(row.id),
+          conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
+        }));
+      }),
 
     /**
      * Sets the Task the session belongs to, and announces the card of the Task

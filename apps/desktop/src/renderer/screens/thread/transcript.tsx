@@ -22,6 +22,7 @@
  * a screen reader.
  */
 import {
+  Suspense,
   useCallback,
   useImperativeHandle,
   useState,
@@ -49,6 +50,7 @@ import {
   WaitingNote,
   WorkDivider,
 } from "./blocks";
+import { LazyMcpWarningLine } from "./lazy-mcp-warning-line";
 
 /**
  * The attribute the embedded layout puts on the item that holds the user's
@@ -336,8 +338,8 @@ export function Transcript({
         );
       case "warning":
       case "runtime-notice":
-      case "error":
-        return (
+      case "error": {
+        const note = (
           <RuntimeNote
             kind={block.kind}
             message={block.message}
@@ -346,6 +348,22 @@ export function Transcript({
             today={today}
           />
         );
+        // A warning about MCP servers carries the buttons that fix them. Its code loads the
+        // first time one is drawn, and the line is the plain warning until then.
+        return block.kind === "warning" && block.mcpServers !== undefined ? (
+          <Suspense fallback={note}>
+            <LazyMcpWarningLine
+              entries={block.mcpServers}
+              message={block.message}
+              at={block.at}
+              timezone={timezone}
+              today={today}
+            />
+          </Suspense>
+        ) : (
+          note
+        );
+      }
     }
   };
 

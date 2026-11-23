@@ -119,25 +119,12 @@ describe("the HttpApi declaration", () => {
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
-  {
-    id: "task.queryTracking",
-    requires: "task.read",
-    method: "GET",
-    path: "/api/v1/tasks/tracking",
-  },
   { id: "task.queryBoard", requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
-  { id: "task.queryLegs", requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
   {
     id: "task.readAttention",
     requires: "task.read",
     method: "GET",
     path: "/api/v1/tasks/attention",
-  },
-  {
-    id: "task.readTracking",
-    requires: "task.read",
-    method: "GET",
-    path: "/api/v1/tasks/:id/tracking",
   },
   {
     id: "task.readDetail",
@@ -221,19 +208,6 @@ const NEW_OPERATIONS = [
     requires: "signal.write",
     method: "POST",
     path: "/api/v1/signals/mark-done",
-  },
-  { id: "signal.snooze", requires: "signal.write", method: "POST", path: "/api/v1/signals/snooze" },
-  {
-    id: "signal.unsnooze",
-    requires: "signal.write",
-    method: "POST",
-    path: "/api/v1/signals/unsnooze",
-  },
-  {
-    id: "signal.lowerPriority",
-    requires: "signal.write",
-    method: "POST",
-    path: "/api/v1/signals/lower-priority",
   },
   { id: "project.query", requires: "project.read", method: "GET", path: "/api/v1/projects" },
   { id: "project.read", requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },

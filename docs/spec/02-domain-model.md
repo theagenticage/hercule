@@ -65,6 +65,9 @@ erDiagram
   PROVIDER_ACCOUNT ||--o| ACCOUNT_USAGE : "reported"
   MODEL_PROFILE }o--o{ PROVIDER_ACCOUNT : "picks models from"
   PROJECT }o--o| MODEL_PROFILE : "modelProfileId (optional)"
+  PROJECT }o--o{ MCP_SERVER : "mcpServerIds (default for new threads)"
+  SESSION }o--o{ MCP_SERVER : "mcpServers (its own list)"
+  CONNECTION |o--o{ MCP_SERVER : "reached via (plugin servers)"
   ASSISTANT ||--|| AGENT : "specialization of"
   ASSISTANT ||--o{ CONVERSATION : "one per platform container"
   ASSISTANT ||--o{ CHANNEL_BINDING : "reached through"
@@ -81,7 +84,6 @@ erDiagram
   NOTIFICATION }o--o| SESSION : "about (optional)"
   SIGNAL }o--o| EVENT : "origin and resolution (optional)"
   SIGNAL }o--o| RUN : "raised by (optional)"
-  SIGNAL ||--o| SNOOZE : "hidden until (optional)"
   IGNORE_RULE ||--o{ IGNORE_RULE_CATCH : "caught"
   IGNORE_RULE_CATCH ||--|| EVENT : "eventId"
   SCREENING }o--|| EVENT : "one per event and kind"
@@ -96,7 +98,7 @@ erDiagram
   SKILL |o--o| SKILL_REVISION : "availableRevisionHash (optional)"
 ```
 
-*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
+*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)* *(Diagram amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is removed.)*
 
 *(Diagram amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665): Discussion, Post, Wiki Page and its revisions.)*
 
@@ -104,13 +106,15 @@ erDiagram
 
 *(Diagram amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406): Provider instance is replaced by Harness, Provider and Provider Account, with the account's Model Catalog and Account Usage, and Model Profiles that a Project may name; [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md).)*
 
+*(Diagram amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207): MCP Server, named by a Project as a default and by a Session as its own list, and reached through a Connection when a plugin offers it; [ADR 0059](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md).)*
+
 In prose, the model has ~~five~~ six clusters:
 
 - **Work triangle**: Task (intent), Run (execution of a plan), Session (agent conversation). Any two are linked only when the link is meaningful; links live on the Run and Session side, and a Task's runs and sessions are derived by query.
 - **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are ~~the output to the user~~ Hercule's own messages to the user, and Signals are what Intake asks of the user (*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*); Ignore Rules and Screenings decide which events become Signals.
 - **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Thread (a session the user drives with no Agent), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
 - **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them. *(Amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library holds Skills with their Skill Revisions.
-- **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), ~~Provider instances with Capability Snapshots~~ Harnesses, Providers and Provider Accounts (with Capability Snapshots, a Model Catalog and Account Usage), Model Profiles *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Plugins with their state, Connections, Secrets.
+- **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), ~~Provider instances with Capability Snapshots~~ Harnesses, Providers and Provider Accounts (with Capability Snapshots, a Model Catalog and Account Usage), Model Profiles *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Plugins with their state, Connections, MCP Servers *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)*, Secrets.
 - **Coordination** *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*: per repo Resource, Discussions with their Posts, and a Wiki of Wiki Pages with their revisions. Sessions that edit the same file meet in a Discussion ([19-agent-coordination.md](./19-agent-coordination.md)).
 
 ## Work
@@ -131,6 +135,7 @@ Fields (pinned):
 | `priority` | enum | `urgent` / `high` / `normal` / `low`; optional, default `normal`; user and agents write the same field through the same op |
 | `labels` | string[] | Bare strings, flat namespace, implicit creation |
 | `projectId` | Hercule id, optional | At most one project |
+| `mcpServers` | *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* the session's own list of MCP Servers ([MCP Server](#mcp-server), below): an array of `{ mcpServerId, name, leftOut }`, empty by default. `name` is the server's name when the entry was written; it never changes. `leftOut` is written only at a start. It is the reason the server was left out at the last start, an `McpServerLeftOutReason`: `"switched-off"`, `"checking"`, `"needs-sign-in"`, `"unreachable"`, `"error"`, `"runner-too-old"`, `"harness-unsupported"` or `"missing-grant"` (the session's profile lacks `mcp.use`). It is `null` when the server could be called at the last start, and also for an entry added since, which has not been checked at a start yet. [21-mcp.md](./21-mcp.md) section 3.8 has the precedence when several reasons apply. Every session kind has the field. Only a Thread's list can be non-empty in v1: the list of an Agent's session, a workflow step's session and an assistant's session is empty until [#222](https://github.com/theagenticage/hercule/issues/222). The list is the session's own copy (rule 9): changing a Project's list or the thread defaults later never touches it. It is not the `mcpServers` of `spec`: that field of the `SessionSpec` holds the one entry that points the harness at the MCP Gateway ([06-providers.md](./06-providers.md) section 4). The rules for who sets the list and what a new session starts with are in the Thread section, below. When `leftOut` is written, and what the gateway serves, is in [21-mcp.md](./21-mcp.md) |
 | `initiativeId` | Hercule id, optional | *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* At most one [Initiative](#initiative). A Task may also wait on other Tasks; that is the `task_blockers` relation below, not a field of the row |
 | `provenance` | Provenance entry[] | Entries are never edited or removed; a merge can move them to another Task ([09-tasks.md](./09-tasks.md#merging-tasks)) |
 | `createdAt`, `updatedAt`, `stageChangedAt`, `statusChangedAt` | timestamps | `stageChangedAt` moves only when `stage` changes, and `statusChangedAt` only when `status` changes |
@@ -366,6 +371,20 @@ Shape: a Session row with `agentId: null`. Nothing else distinguishes it: no thr
 
 *(Amended 2026-09-11, [#160](https://github.com/theagenticage/hercule/issues/160): the draft opens inside a Project, picked first, and the session carries it as `projectId`; the composer's placement choice is one **workspace** selector - the repo's primary Workspace ("Current checkout"), a new ephemeral one, an existing ephemeral one to join, or none - with the branch selector following it, so "checkout" is no longer a selector of its own; the composer carries no profile selector, a Thread always runs as `thread.profileId`; what locks at start is workspace, branch, runner, access mode and instance. The composer section of [14-web-app.md](./14-web-app.md) is normative for the shape.)*
 
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **The MCP Servers of a Thread.** A Thread has its own list ([Session](#session), `mcpServers`); the setting `thread.mcpServerIds` is one more thread default, listed beside `thread.profileId` above. It is an array of MCP Server ids, and unset or empty means no servers. What a new Thread starts with depends on who starts it:
+
+- **A Thread the user starts:** the spawn's `mcpServerIds` when it has them (an explicit empty list stays empty), else the list of its Project, else, for a Thread with no Project, the setting `thread.mcpServerIds`. A Thread in a Project never reads the setting. The composer on a draft Thread shows the list the Thread will start with, and the user changes it there ([14-web-app.md](./14-web-app.md)).
+- **A Thread a session starts, and a fork a session makes** (`session.continue`): a copy of the calling session's own list, when the call has no `mcpServerIds`. A session that holds `mcp.manage` may give an explicit list on `session.spawn`, as the user can.
+- **A fork the user makes:** a copy of its parent's list.
+- **An Agent's session, a workflow step's session and an assistant's session:** an empty list, until [#222](https://github.com/theagenticage/hercule/issues/222).
+
+Rules for every write of a list:
+
+- Every write needs the grant `mcp.manage`, checked inside the operation in addition to the operation's own grant: `project.create` and `project.update` with `mcpServerIds`, `session.spawn` and `session.update` with `mcpServerIds`, and `settings.update` of `thread.mcpServerIds`. `mcp.manage` is a grant only the user gives ([13-security.md](./13-security.md) section 6). A session holds it only when the user put it on the session's profile or approved a Permission Request for it.
+- No list holds two servers with the same name. A write that would make one is refused with `validation`, naming both servers. A write is also refused with `validation` when it names an id that is unknown or was deleted, when it names one id twice, and when it is `mcpServerIds` on a `session.spawn` with `agentId` (until [#222](https://github.com/theagenticage/hercule/issues/222)).
+- `session.update` with `mcpServerIds` works on a Thread that is queued, running or exited, and not on an archived one. It leaves the Thread's model selection alone. On a running session the gateway tells the harness that its tool list changed ([21-mcp.md](./21-mcp.md)).
+- The operations and their CLI flags are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
+
 Vocabulary: user-facing copy says "thread" ("Create new thread"). The bare word always means this concept; the harness-native "Codex thread" ([06-providers.md](./06-providers.md)) and the container level "Slack thread" ([12-assistants.md](./12-assistants.md)) are always qualified. "Chat", a non-agentic conversation surface, is a different, post-v1 concept.
 
 Status axis: the Session's.
@@ -387,7 +406,7 @@ Fields (pinned; defaults resolved 2026-09-01, [Domain model residue](https://git
 | `permissionProfileId` | required; shipped defaults: `worker` for agents used in workflow agent steps, `assistant` for assistants |
 | `accessMode` | optional, default `full-access` (agents work in the background; `approval-required` is unworkable there) |
 | `model` | optional `ModelSelection { model, options }`; effort, thinking and the other well-known option ids ride inside `options` ([06-providers.md](./06-providers.md)); absent = ~~the instance's default model from its Capability Snapshot~~ the provider's default model in the account's Model Catalog *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* |
-| ~~`mcpServers`~~ | ~~optional standing per-session MCP passthrough; nothing populates it in v1~~ deferred to [#222](https://github.com/theagenticage/hercule/issues/222); the Agent as shipped has no such field *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* |
+| ~~`mcpServers`~~ | ~~optional standing per-session MCP passthrough; nothing populates it in v1~~ deferred to [#222](https://github.com/theagenticage/hercule/issues/222); the Agent as shipped has no such field *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The row stays deferred, but what [#222](https://github.com/theagenticage/hercule/issues/222) now means has changed: an Agent, and a workflow step, will name MCP Servers by id, as a session's list does, and the list is copied onto the session at spawn (rule 9). No raw MCP server configuration is ever stored on an Agent or sent to a runner: the harness is given one entry, the MCP Gateway ([21-mcp.md](./21-mcp.md), [06-providers.md](./06-providers.md) section 4). Until then an Agent's session has an empty list |
 | `disallowedTools` | optional list of harness tool families to remove, in a small Hercule vocabulary ~~(`edit`, `write`, `shell`, `web`, ...)~~ each adapter maps to its harness: Claude `disallowedTools`, pi `excludeTools`; Codex declares it `unsupported` in its Capability Snapshot and the UI says so ([06-providers.md](./06-providers.md) section 3). *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* The vocabulary is the closed set `edit`, `write`, `shell`, `web-search`, `web-fetch`, and a value outside it is refused as `validation`. Claude maps all five; pi maps `edit`, `write` and `shell` onto `edit`, `write` and `bash` and has no web tool, so a web family is honoured by absence; Codex declares it unsupported. |
 | `createdAt`, `updatedAt` | |
 
@@ -478,6 +497,8 @@ Fields: `id`, `name`, token hash (opaque random; never a JWT), `createdAt`, `las
 Purpose: a grouping of related work and its materials; may span several resources.
 
 Fields (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): `id`, `name`, `description?` (markdown), `modelProfileId?` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `createdAt`, `updatedAt`, `deletedAt?`. Tasks reference a project through `projectId`; a project spans zero or more Resources through a join table, and a Resource may belong to any number of Projects. There is no default Connection: Resources carry the Connection that reaches them and Workspaces designate the git-identity one. A Project is a way to group information inside Hercule; it carries no behaviour~~.~~, with one exception, decided by Rogier on 2026-10-30 ([#406](https://github.com/theagenticage/hercule/issues/406), [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)): a Project may name one Model Profile, and a new Thread opened in the Project starts in that profile (Thread, above). It decides only where a Thread starts: changing or clearing it later changes no existing Thread, and Agents keep their own account and model. Soft-deleted like a Task (Deletion rules, below); its tasks keep their `projectId`.
+
+*(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **A Project holds two defaults for a new Thread in it:** the Model Profile it opens on (above) and the MCP Servers it starts with. Its field `mcpServerIds` is an array of MCP Server ids, empty by default. It is a default for new Threads only: changing it later never touches a Thread that exists, and changing a Thread's own list never touches the Project. A Project still carries no behaviour. Writing `mcpServerIds` needs the grant `mcp.manage` (Thread, above). Deleting an MCP Server removes it from every Project's list (MCP Server, below).
 
 Status axis: none.
 
@@ -652,7 +673,7 @@ Purpose: one message in a Discussion. It carries its author as `actor` only: a s
 
 ### Wiki Page
 
-Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
+Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* "Every write" means every write of a page's content, a create or an update. A page that no longer helps is archived, which writes no revision: it carries who archived it, when and why, leaves the listing and takes no update. Restoring it clears that. A page is read by its id in either state. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
 
 ### Edit
 
@@ -848,15 +869,15 @@ Delivery: the notification center always records; per-sink deliveries are outbox
 
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#388](https://github.com/theagenticage/hercule/issues/388) and [#392](https://github.com/theagenticage/hercule/issues/392); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*
 
-Purpose: one thing a person, a system or one of Hercule's agents asks of the user, shown on Intake. A Signal is never a Notification.
+Purpose: one thing a person, a system or one of Hercule's agents asks of the user, ~~shown on Intake~~ shown on the Inbox with the External Entity it is about *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the Intake screen is deleted; a Signal with no entity is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox)*. A Signal is never a Notification.
 
 Fields: owned by [10 section 9.1](./10-triage-intake-and-notifications.md#91-the-record). A plugin kind is qualified (`github/review-requested`); the core kinds are `proposal`, `offer`, `unsure` and `fyi`. A `proposal` carries the Task that Accept would create; no Task exists until then.
 
 Relationships: raised from one event, or through `signal.raise` by a run, an assistant or the user, naming the events behind it; resolved, optionally, by a later event on its source. The events it names stay alive under the retention rule ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)). Its answers are Bound Actions (above), allowed where an operation's `usableIn` lists `signal.answer`.
 
-Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. No operation deletes a Signal in v1.
+Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): nothing lowers a priority any more, since `signal.lowerPriority` is removed; a priority lowered before then stays lowered.)* No operation deletes a Signal in v1.
 
-**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.
+~~**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is retired. A migration drops its table, so a Signal that was snoozed is live again. Neither a Signal nor a Notification can be snoozed.)*
 
 ### Screening
 
@@ -874,7 +895,7 @@ Status axis: `pending` -> `yes` | `no` | `failed`. Pruned with its event, and ne
 
 Purpose: the user's rule that keeps Signals of one plugin kind, with given field values, from being raised. It never applies to a core kind.
 
-Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule, so Intake's Everything still says why.
+Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule~~, so Intake's Everything still says why~~ *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Everything is retired; `ignoreRule.query` still counts the catches)*.
 
 Status axis: none. A rule is never edited or paused: only the user creates or deletes one, and deleting it works forward only. A catch is pruned with its event, and never keeps that event alive.
 
@@ -884,17 +905,57 @@ Status axis: none. A rule is never edited or paused: only the user creates or de
 
 Purpose: what the controller persists about each installed plugin ([ADR 0006](../adr/0006-plugins-request-capabilities-and-register-contributions-in-code.md)).
 
-Per plugin (pinned): `id` (from the manifest), `enabled` flag, `config` (validated against the manifest's config schema; change or toggle = deactivate plus reactivate), the persisted **contribution catalog** written by `register()` at every boot for every installed plugin regardless of `enabled` (contribution ids per extension point: ~~provider,~~ harness, provider *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, channel, event source, workflow action), a namespaced **KV store** (string key to JSON value) inside the controller DB, and plugin-owned secrets (owner `plugin`).
+Per plugin (pinned): `id` (from the manifest), `enabled` flag, `config` (validated against the manifest's config schema; change or toggle = deactivate plus reactivate), the persisted **contribution catalog** written by `register()` at every boot for every installed plugin regardless of `enabled` (contribution ids per extension point: ~~provider,~~ harness, provider *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, channel, event source, workflow action, MCP server *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)*), a namespaced **KV store** (string key to JSON value) inside the controller DB, and plugin-owned secrets (owner `plugin`).
 
 Status axis: `enabled` / `disabled`. Disabling removes the plugin's contributions from use everywhere; workflows referencing them fail validation loudly.
 
 Identity: plugin id from the manifest; contributions are referenced by id across the system (a step names an action contribution, a binding names a channel contribution, a Connection names a connection type). A contribution id is the **qualified id** `<pluginId>/<word>`, minted by the host at registration ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)).
 
+### MCP Server
+
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* Purpose: a remote MCP server that offers tools to sessions, and what the controller reaches it with: a plugin's Connection, or its own sign-in when the user added it by URL ([GLOSSARY.md](../../GLOSSARY.md) MCP Server). It is a record on the controller and knows nothing about Projects or Threads: they name it, it does not name them. Sessions reach its tools through the MCP Gateway, never directly. The gateway, the status of a server, credentials for calls to it and its upstream sessions are in [21-mcp.md](./21-mcp.md); the operations are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md); the plugin side is in [05-plugins.md](./05-plugins.md) section 4.5. [ADR 0059](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md) holds the reasons.
+
+Fields:
+
+| Field | Notes |
+|---|---|
+| `id` | Hercule id |
+| `name` | an `McpServerName`, fixed at creation and never renamed. The rule is below |
+| `source` | where the server is reached from, one of two kinds: `{ kind: "plugin", contributionId, connectionId }`, a server a plugin offers, reached with the credential of one of its Connections; `contributionId` is the qualified id of the plugin's MCP server contribution ([05-plugins.md](./05-plugins.md) section 4.5). Or `{ kind: "url", url, signIn }`, a server the user added by its address, with `signIn` one of `"none"`, `"token"` or `"oauth"`. Servers added by URL are built by [#1210](https://github.com/theagenticage/hercule/issues/1210). *(Amended 2026-11-21, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* The URL source also has `signInOffered`: `"oauth"`, `"token"` or `null`, what the server's last 401 asked for (`oauth` for a `Bearer` challenge that names OAuth metadata), so a client knows which sign-in to offer ([21-mcp.md](./21-mcp.md#52-a-url-servers-sign-in)). `url` is the address the server is called at, as the URL standard writes it with a trailing host dot and escaped unreserved characters folded; ~~the record shows it with every query value hidden (`?api_key=…`)~~ ([21-mcp.md](./21-mcp.md#23-one-server-per-address-and-account)) *(Amended 2026-11-22, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* Decided by Rogier, 2026-11-22: (c). An address is not a secret: it is shown whole in the record to every reader with `mcp.read`, and in the audit entry to every reader with `event.read`, and nothing of it is removed from answers. A key belongs in the token. |
+| `enabled` | the user's switch. Off is `enabled: false`, never a delete |
+| `status` | `checking`, `ready`, `needs-sign-in`, `unreachable` or `error`. There is no `disabled` status: `enabled` says it, and a client shows "Off" when `enabled` is false. What each value means and what sets it is in [21-mcp.md](./21-mcp.md) |
+| `statusDetail` | `null`, or the reason for the status in words a person can act on |
+| `tools` | what the server listed when it was last checked successfully: an array of `{ name, title?, description }`. Read only |
+| `checkedAt` | `null`, or the time of the last successful list |
+| `createdAt`, `updatedAt` | |
+
+Two things are stored with the record but are not on it:
+
+- **Each tool's full definition** (input schema, output schema, annotations). The gateway answers `tools/list` from them.
+- **A URL server's sign-in** (a pasted token, or OAuth tokens). It is a secret owned by the MCP Server and is never part of the record (Secret, below).
+
+**The name.** An `McpServerName` is lowercase letters and digits with a single `_` between them (`^[a-z0-9]+(_[a-z0-9]+)*$`), 1 to 16 characters, and not `hercule`, which is kept for Hercule's own tools (not in v1). It has no `-` or `.`: Codex turns them into `_`, and a double underscore separates the name from the tool's name in the gateway's tool names. The default is the contribution's bare word for a plugin server (`sentry`), and for a URL server the name the user gives, or else the first label of the host that is not `mcp`, `www` or `api` (`notion`). Two servers may share a name, because a user may have a work and a hobby Sentry. One list never holds two servers of one name (Thread, above).
+
+**One server per address and external account:**
+
+- **A plugin server:** one per contribution and external account. The account is the Connection's `accountId` ([08-events-and-connections.md](./08-events-and-connections.md) section 8.1), not its id. A second one is refused with `conflict`, naming the existing server.
+- **A URL server:** one per normalized URL: the scheme and host in lower case, the default port dropped and a trailing `/` dropped, the path and the query kept. A second account at the same URL is not possible in v1.
+- **An address on a plugin's origin:** adding by URL an address on the `origin` of a plugin's MCP server contribution, such as any URL on `https://mcp.sentry.dev`, is refused with `conflict`. The message points at that Connection's row in Settings > MCP servers. ~~When the user has no Connection of that plugin, or the plugin is switched off, there is no such row: that case is open ([./21-mcp.md](./21-mcp.md#23-one-server-per-address-and-account), [#1210](https://github.com/theagenticage/hercule/issues/1210)).~~ *(Amended 2026-11-21, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* It is refused in every case. With no row, the message points at what makes one: Settings > Connections to connect, reconnect or switch on a Connection, or Settings > Plugins for a plugin that is switched off or failed to start ([./21-mcp.md](./21-mcp.md#23-one-server-per-address-and-account)).
+- **Replace:** when the user switches on a plugin's server while a URL server on the contribution's origin exists, the client offers "Replace". Replace is `mcpServer.update` with `source: { kind: "plugin", ... }` on the URL server. The record keeps its id, its name and every list that names it. It moves to the plugin's Connection, and its own sign-in secrets are deleted. When several URL servers sit on the plugin's origin, the Replace dialog lets the user pick one ([#1210](https://github.com/theagenticage/hercule/issues/1210)).
+
+**Open:** a second account at the same URL. Rogier made it a required follow-up: [#1218](https://github.com/theagenticage/hercule/issues/1218).
+
+Status axis: the `status` above; the owner of the behaviour is [21-mcp.md](./21-mcp.md).
+
+Relationships: a plugin server requires a Connection and the plugin's contribution; a URL server has neither. Named by Projects (`mcpServerIds`), by Sessions (`mcpServers`) and by the setting `thread.mcpServerIds`. Deleting one is in Deletion rules, below.
+
+Identity: Hercule id. The name is a label that can repeat; the uniqueness rule above is on the address and the account.
+
 ### Secret
 
 Purpose: one encrypted value in the owner-scoped secrets table ([ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)).
 
-Fields: `id`, `owner {kind: connection | plugin | runner | core | provider-account, id}` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `name`, ciphertext (encrypted per value under the machine's Master Key), `createdAt`, `rotatedAt?`. Entities reference secrets by id; values never leave the secrets service except to the consumer that needs them. Enumerable and extractable by the running controller for promotion export. Runner credentials are hashed tokens, not secrets rows; the `runner` owner kind is reserved for runner-scoped secrets. ~~The owner kind for provider-instance secrets is Open in [06-providers.md](./06-providers.md).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A Provider Account's key or token is a secret of owner kind `provider-account` ([13-security.md](./13-security.md)).
+Fields: `id`, `owner {kind: connection | plugin | runner | core | provider-account, id}` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `name`, ciphertext (encrypted per value under the machine's Master Key), `createdAt`, `rotatedAt?`. Entities reference secrets by id; values never leave the secrets service except to the consumer that needs them. Enumerable and extractable by the running controller for promotion export. Runner credentials are hashed tokens, not secrets rows; the `runner` owner kind is reserved for runner-scoped secrets. ~~The owner kind for provider-instance secrets is Open in [06-providers.md](./06-providers.md).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A Provider Account's key or token is a secret of owner kind `provider-account` ([13-security.md](./13-security.md)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A URL MCP Server's sign-in is a secret owned by that server, under the owner kind `mcp-server`, and is refused by the generic `secret.set` and `secret.delete` ([21-mcp.md](./21-mcp.md), [13-security.md](./13-security.md)).
 
 ## Deletion rules
 
@@ -906,16 +967,18 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 
 *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Provider Account joins that list: deleting one is refused with `invalid_state` while an Agent, an Assistant, the Text Generation setting, the thread defaults, or a `queued`, `starting`, `idle` or `busy` session names it; the message lists them. Model Profiles do not block it: the account leaves every profile that holds it. Exited sessions keep the id, and continuing one says the account was deleted. A Model Profile hard-deletes, except the last one, which is refused with `invalid_state`; a Project that named it falls back to the thread defaults ([06-providers.md](./06-providers.md)).
 
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **MCP Server** hard-deletes, and nothing refuses it. In the same transaction it is removed from every Project's `mcpServerIds` and every Session's `mcpServers`. The default list `thread.mcpServerIds` is not rewritten: it drops ids that no longer exist when it is read. Running sessions are told that their tool list changed ([21-mcp.md](./21-mcp.md)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **Connection** is also refused while an MCP Server uses it: the reference kind is `mcpServer`, and the message tells the user to remove the server first ([08-events-and-connections.md](./08-events-and-connections.md) section 8.3).
+
 *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* Permission Profile joins that list: deleting one is refused with `invalid_state` while an Agent names it, because an Agent without a profile has nothing to bound the sessions it spawns.
 
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The Intake records:
 
 - **Signal**: no operation deletes one in v1. A Signal leaves the user's list by resolving.
-- **Snooze**: deleted on unsnooze and when its Signal resolves.
+- ~~**Snooze**: deleted on unsnooze and when its Signal resolves.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is retired.)*
 - **Ignore Rule**: hard-deleted by the user, with nothing to refuse it; its catches stay and keep the rule's text.
 - **Screening** and **Ignore Rule catch**: pruned with their event ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)).
 
-*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2).
+*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2). *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* An archived Wiki Page is not deleted either: archiving only takes it out of the listing ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
 
 *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library:
 
@@ -945,6 +1008,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
 | Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
+| MCP Server *(added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207))* | `checking`, `ready`, `needs-sign-in`, `unreachable`, `error`; the user's switch is the separate field `enabled` | none | this document (behaviour in 21) |
 | Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Initiative, Resource, Checkout, ~~Provider instance~~ Provider Account, Model Profile *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
 
 ## Identity rules at a glance
@@ -962,6 +1026,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 - **Runner identity** is per enrollment: a re-enlisted machine is a new Runner; retired runners keep their records.
 - **Controller identity** is logical (id plus key material), never an address.
 - **Connection types and contributions** are identified by their qualified id `<pluginId>/<word>`, minted by the host ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)); the Connection itself is a Hercule id.
+- **An MCP Server is a Hercule id; its name is a label that can repeat.** *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A plugin server is unique on its contribution and the Connection's `accountId`, and a URL server on its normalized URL (MCP Server, above). No list holds two servers of one name.
 - **Workspace ids** are controller-side; the path behind a workspace id is a runner-owned fact.
 - **`dedupKey`** is a plugin-supplied idempotency key per Connection, not an identity.
 
@@ -978,7 +1043,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Permission Request *(added 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86))* | `permission.decided` | `{requestId, sessionId, grant, outcome, operation?}`; a platform event, not an audit entry only, so the asking session's `request` subscription receives it ([13-security.md](./13-security.md) section 11) |
 | Security (audit kinds) | login success/failure, token minted/revoked, permission request raised~~/decided~~ *(amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): decided is the platform event above)*, secret created/rotated | [13-security.md](./13-security.md) |
 
-No other entity emits platform events in v1; the set grows additively. *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* External Entities emit none: `reconcile` writes records and announces on the live topic only. Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
+No other entity emits platform events in v1; the set grows additively. *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* External Entities emit none: `reconcile` writes records and announces on the live topic only. *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* MCP Servers emit none either: a write announces on the live topic `mcpServer` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
 
 ## Post-v1
 
@@ -995,7 +1060,7 @@ No other entity emits platform events in v1; the set grows additively. *(Added 2
 - Presence-aware notification routing; the sink contract grows additively (device class, presence, receipts).
 - Feedback-driven triage learning feeding assistant memory.
 - Cross-assistant recall as agent-to-agent communication, never shared memory.
-- Custom tools on the Agent: when the agent-tools extension point arrives, custom tools become an Agent field copied into the `SessionSpec` and delivered as in-process MCP on Claude, `dynamicTools` / MCP on Codex, `registerTool` on pi. No v1 writer exists, so no v1 field.
+- Custom tools on the Agent: when the agent-tools extension point arrives, custom tools become an Agent field copied into the `SessionSpec` and delivered as in-process MCP on Claude, `dynamicTools` / MCP on Codex, `registerTool` on pi. No v1 writer exists, so no v1 field. *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The MCP half of the agent-tools extension point is built by [#1207](https://github.com/theagenticage/hercule/issues/1207) and [#1208](https://github.com/theagenticage/hercule/issues/1208): a plugin offers an MCP server, and sessions reach its tools through the MCP Gateway ([05-plugins.md](./05-plugins.md) section 4.5, [21-mcp.md](./21-mcp.md)). An Agent naming MCP Servers is [#222](https://github.com/theagenticage/hercule/issues/222) (Agent, above). Plugin-written custom tools and the skills half stay deferred.
 - Chat: a non-agentic conversation surface (talk to a model, no ability to change anything), distinct from a Thread.
 - Pruning soft-deleted Tasks and Projects outright, with their runs and events, after something like a year.
 
@@ -1028,6 +1093,7 @@ Tickets:
 - [Agent coordination: spec 19, ADR and glossary](https://github.com/theagenticage/hercule/issues/665)
 - [Hercule manages the user's skills, and every runner gets them](https://github.com/theagenticage/hercule/issues/312), written into the spec by [#731](https://github.com/theagenticage/hercule/issues/731)
 - [Write the provider remodel into the specs, CONTEXT.md and an ADR, and its build tickets](https://github.com/theagenticage/hercule/issues/406), deciding [#404](https://github.com/theagenticage/hercule/issues/404) and [#405](https://github.com/theagenticage/hercule/issues/405)
+- [MCP support through a gateway in the controller](https://github.com/theagenticage/hercule/issues/1207)
 
 ADRs:
 
@@ -1059,3 +1125,4 @@ ADRs:
 - [ADR 0043 Agents coordinate through shared Discussions and a per-repo Wiki](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)
 - [ADR 0045 Hercule owns the user's skills](../adr/0045-hercule-owns-the-users-skills.md)
 - [ADR 0048 Harnesses and provider accounts are separate](../adr/0048-harnesses-and-provider-accounts-are-separate.md)
+- [ADR 0059 Sessions reach MCP Servers through a gateway in the controller](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md)

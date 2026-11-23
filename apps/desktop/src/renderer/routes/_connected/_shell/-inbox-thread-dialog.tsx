@@ -24,7 +24,7 @@ import {
 } from "@hercule/client-core/inbox";
 import type { Workspace } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
-import { useDraftReads } from "../../../app/draft-thread";
+import { readCachedMcpServerIds, useDraftReads } from "../../../app/draft-thread";
 import { pluginsQuery, projectMatchQuery } from "../../../app/queries";
 import { readReason } from "../../../app/read-reason";
 import { readRecentModels } from "../../../app/recent-models";
@@ -297,7 +297,11 @@ function ThreadStartForm({
       return;
     }
     images.clearRefusal();
-    const { input } = buildSubmission(view.resolved, { text: current.text, attachments: shelf });
+    const { input } = buildSubmission(
+      view.resolved,
+      { text: current.text, attachments: shelf },
+      readCachedMcpServerIds(queryClient, client),
+    );
     const sent: SentThread = {
       draftKey,
       input: {

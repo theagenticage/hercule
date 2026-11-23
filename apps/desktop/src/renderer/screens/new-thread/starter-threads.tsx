@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   chooseStarterThreads,
-  describeEmptyIntake,
+  describeNoPlannedWork,
   filterGitHubConnections,
 } from "@hercule/client-core";
 import { connectionsQuery } from "../../app/queries";
@@ -11,7 +11,7 @@ import { CheckIcon } from "../../icons/check";
 import { EyeIcon } from "../../icons/eye";
 import { FileIcon } from "../../icons/file";
 import type { IconProps } from "../../icons/icon-frame";
-import { IntakeIcon } from "../../icons/intake";
+import { InboxIcon } from "../../icons/inbox";
 import { ListIcon } from "../../icons/list";
 import { SearchIcon } from "../../icons/search";
 import { SparkleIcon } from "../../icons/sparkle";
@@ -30,7 +30,7 @@ const STARTER_ICONS: Readonly<
 
 /**
  * Renders three starter threads under "Or start from one of these", for a
- * project whose Intake is empty, then a line that explains what fills Intake.
+ * project with no planned Task, then a line that says where work comes from.
  * A click hands the starter's message to `onStart`, which adds it to the
  * Message Draft without sending it, so the user can finish the sentence.
  *
@@ -77,9 +77,9 @@ export function StarterThreads({
           );
         })}
       </div>
-      <p className="intake-note">
-        <IntakeIcon size={14} />
-        {describeEmptyIntake(filterGitHubConnections(connections).length > 0)}
+      <p className="starters-note">
+        <InboxIcon size={14} />
+        {describeNoPlannedWork(filterGitHubConnections(connections).length > 0)}
       </p>
     </section>
   );

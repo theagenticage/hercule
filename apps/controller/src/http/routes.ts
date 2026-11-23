@@ -31,6 +31,13 @@ import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { SkillService, SkillServiceLayer } from "../skills";
+import { McpGatewayLayer } from "../mcp-gateway";
+import {
+  McpServerCallsLayer,
+  McpServerChecksLayer,
+  McpServerService,
+  McpServerServiceLayer,
+} from "../mcp-servers";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -78,6 +85,7 @@ import {
   SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
+  McpServerListHoldersLayer,
   Provisioning,
   ProvisioningLayer,
   TextGenerationLayer,
@@ -89,7 +97,7 @@ import {
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
   TaskServiceWithPortsLayer,
-  TaskTrackingRunsLayer,
+  TaskRunsLayer,
   TriggeredRunsLayer,
   WorkflowServiceWithPortsLayer,
   WorkspaceStepsLayer,
@@ -103,8 +111,6 @@ import {
   SignalRaisesLayer,
   SignalService,
   SignalServiceLayer,
-  YourWork,
-  YourWorkLayer,
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EntityLookupsLayer, EventKindCatalogLayer, Plugins } from "../plugins";
@@ -131,15 +137,7 @@ import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { RunnerMetricsService, RunnerMetricsServiceLayer } from "../runner-metrics";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
-import {
-  TaskBoard,
-  TaskBoardLayer,
-  TaskDetails,
-  TaskDetailsLayer,
-  TaskService,
-  TaskTracking,
-  TaskTrackingLayer,
-} from "../tasks";
+import { TaskBoard, TaskBoardLayer, TaskDetails, TaskDetailsLayer, TaskService } from "../tasks";
 import { User, UserLayer } from "../users";
 import {
   CronTriggerSchedulerLayer,
@@ -307,7 +305,6 @@ const initiativeRoutes = HttpApiBuilder.group(api, "initiative", (handlers) =>
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
-    const tracking = yield* TaskTracking;
     const board = yield* TaskBoard;
     const details = yield* TaskDetails;
     const runs = yield* RunService;
@@ -315,9 +312,6 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
       .handle("queryBoard", () => withApiErrors(board.query()))
       .handle("readAttention", () => withApiErrors(tasks.readAttention()))
-      .handle("queryTracking", () => withApiErrors(tracking.query()))
-      .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
-      .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
       .handle("readDetail", ({ params }) => withApiErrors(details.read(params.id)))
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
@@ -409,10 +403,8 @@ const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) 
 const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
   Effect.gen(function* () {
     const signals = yield* SignalService;
-    const yourWork = yield* YourWork;
     return handlers
       .handle("query", ({ query }) => withApiErrors(signals.query(query)))
-      .handle("queryYourWork", () => withApiErrors(yourWork.query()))
       .handle("read", ({ params }) => withApiErrors(signals.read(params.id)))
       .handle("raise", ({ payload }) => withApiErrors(signals.raise(payload)))
       .handle("act", ({ params, payload }) =>
@@ -424,10 +416,7 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
       )
-      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)))
-      .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
-      .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
-      .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
+      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)));
   }),
 );
 
@@ -512,6 +501,34 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
       .handle("create", ({ payload }) => withApiErrors(wiki.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(wiki.update({ ...params, ...payload })),
+      )
+      .handle("archive", ({ params, payload }) =>
+        withApiErrors(wiki.archive({ ...params, ...payload })),
+      )
+      .handle("restore", ({ params }) => withApiErrors(wiki.restore(params)));
+  }),
+);
+
+const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
+  Effect.gen(function* () {
+    const mcpServers = yield* McpServerService;
+    return handlers
+      .handle("query", () => withApiErrors(mcpServers.query()))
+      .handle("read", ({ params }) => withApiErrors(mcpServers.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(mcpServers.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(mcpServers.update({ ...params, ...payload })),
+      )
+      .handle("delete", ({ params }) => withApiErrors(mcpServers.delete(params.id)))
+      .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)))
+      .handle("setToken", ({ params, payload }) =>
+        withApiErrors(mcpServers.setToken({ ...params, ...payload })),
+      )
+      .handle("startSignIn", ({ params, payload }) =>
+        withApiErrors(mcpServers.startSignIn({ ...params, ...payload })),
+      )
+      .handle("finishSignIn", ({ params, payload }) =>
+        withApiErrors(mcpServers.finishSignIn({ ...params, ...payload })),
       );
   }),
 );
@@ -933,6 +950,8 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * plugins domain. The two are wired together here, where the whole controller
  * is assembled.
  */
+const McpServerCallsWithChangesLayer = McpServerCallsLayer.pipe(Layer.provide(LiveTopicsLayer));
+
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
 /**
@@ -971,7 +990,10 @@ const ExternalEntityDomainLayer = ExternalEntityServiceLayer.pipe(
  * Placement, provided the External Entity service it needs. It is one layer
  * so every group that uses placement shares one instance of it.
  */
-const PlacementDomainLayer = PlacementLayer.pipe(Layer.provide(ExternalEntityDomainLayer));
+const PlacementDomainLayer = PlacementLayer.pipe(
+  Layer.provide(ExternalEntityDomainLayer),
+  Layer.provide(SettingsOperationsLayer),
+);
 
 /**
  * The run service with the services it is built from.
@@ -1110,17 +1132,34 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
-  // Tracking's read gets each Task's newest runs from the runs repository,
-  // which the controller daemon connects to the tasks domain.
-  TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
-  // The board's read gets each Task's sessions and runs the same way.
+  // Deleting a server removes it from the lists that hold it, through the
+  // controller daemon, which reaches the Projects and Sessions the domain
+  // cannot import. The checks are merged into the output because the
+  // controller daemon's scheduler requests them too, and a check must be one
+  // instance to run at most once per server.
+  McpServerServiceLayer.pipe(
+    Layer.provideMerge(McpServerChecksLayer),
+    Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
+  ),
+  // The gateway's calls to outside MCP servers. They follow the committed
+  // changes of servers and Connections to close the sessions of a server that
+  // lost its destination.
+  McpServerCallsWithChangesLayer,
+  // The route `/mcp` hands every request to the gateway, which answers a
+  // session's harness from the session's list of servers.
+  McpGatewayLayer.pipe(
+    Layer.provide(LiveTopicsLayer),
+    Layer.provide(McpServerCallsWithChangesLayer),
+  ),
+  // The board's read gets each Task's sessions and runs from the runs and
+  // sessions repositories, which the controller daemon connects to the tasks
+  // domain.
   TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
   // The details pane's read gets the Task's sessions and runs the same way, and
   // the card's facts and the newest runs from the ports above.
   TaskDetailsLayer.pipe(
-    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
   ),
-  YourWorkLayer,
   // Taking an entity on makes a Task through the task service, and reading a
   // thing at its source goes through the plugin host's lookups.
   ExternalEntityDomainLayer,
@@ -1280,6 +1319,7 @@ export const handlerLayers = Layer.mergeAll(
   discussionRoutes,
   wikiPageRoutes,
   skillRoutes,
+  mcpServerRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

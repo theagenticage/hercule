@@ -167,10 +167,10 @@ interface Camera {
  * in more bytes. The page also settles sooner after a change, because
  * transitions have nothing to wait for.
  *
- * The text-resilience checks must not run while the page is stopped. On the
- * intake and tracking-pane screens a narrow window measured about 650 more
- * clipped characters with the motion stopped than with it running (the cause
- * was not tracked down), and the measure should be what a user sees. Call
+ * The text-resilience checks must not run while the page is stopped. On two
+ * screens, since removed, a narrow window measured about 650 more clipped
+ * characters with the motion stopped than with it running (the cause was not
+ * tracked down), and the measure should be what a user sees. Call
  * `release` before them. Fails when the browser refuses a debugging session.
  */
 async function stopPageMotion(page: Page): Promise<Camera> {

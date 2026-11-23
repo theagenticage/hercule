@@ -61,6 +61,8 @@ Keying by repository was a choice between three keys. A workflow's session has n
 
 ## Consequences
 
+**Amended 2026-11-20 ([#1223](https://github.com/theagenticage/hercule/issues/1223)):** a Wiki Page can be archived and restored. "No delete" stands: an archived page keeps every revision and is still read by its id, so the history that answers a planted page is whole. Archiving was added because pages had no way to leave: after five weeks the Wiki of this repository held 102 pages, 69 of them the worklog of one ticket each. The prompt now also says what the Wiki is not for (spec 19 §7.1). Deleting was rejected again, for the reason below. Refusing a page by the look of its title was left for later, by Rogier: a wrong refusal costs more than a worklog page that can be archived.
+
 - **Nothing enforces coordination.** An agent that ignores a Discussion Input, or never reads a Discussion, still edits and commits. Advisory is the point, and also the limit.
 - **Nobody knows yet whether agents coordinate.** No tool has measured whether told agents actually agree who changes what. The Discussions and the Wiki's history are the evidence, and the demo rehearsal ([#670](https://github.com/theagenticage/hercule/issues/670)) is partly an experiment.
 - **Shared knowledge can be poisoned.** A misled or careless session can write a wrong page or Post, and later agents may trust it. v1 answers with the actor and time on every Post and revision, a full history with no delete, and the prompt's rule that the repository's own docs win over the Wiki. No agent checks the Wiki for contradictions; that is post-v1.

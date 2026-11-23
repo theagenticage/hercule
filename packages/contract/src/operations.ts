@@ -17,9 +17,6 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import type { Grant } from "./grants";
 
-/** The prefix every route carries. */
-export const API_PREFIX = "/api/v1";
-
 /**
  * What a caller must hold. A grant always contains a dot, so the three markers
  * can never collide with one:
@@ -48,12 +45,20 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * `bound-operations.test.ts` refuses it when it is too dangerous for one click.
  * Which operations a workflow step may call is decided by the built-in
  * actions, not by this field.
+ *
+ * `carriesSecret` marks an operation whose input can carry a secret although
+ * its grant does not show it: the grant family of `requires` already says so
+ * for the `credential`, `secret` and `infra` families (see `canCarrySecrets`).
+ * `mcp.manage` also covers operations that carry none, so
+ * `mcpServer.create`, `mcpServer.setToken` and `mcpServer.finishSignIn`, which
+ * take a token or a sign-in code, set it.
  */
 interface OperationRow {
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
   readonly readOnly?: true;
+  readonly carriesSecret?: true;
   readonly usableIn?: readonly [AnswerPlace, ...ReadonlyArray<AnswerPlace>];
 }
 
@@ -136,29 +141,12 @@ const TABLE = {
   // `session.read` and `run.read`). A caller without them gets `Forbidden`,
   // not a thinner board. A GET only reads, so the row needs no `readOnly`.
   "task.queryBoard": { requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
-  // Reads the Tasks and the runs of the work handed off from Intake, so the
-  // service also needs `run.read`.
-  "task.queryTracking": {
-    requires: "task.read",
-    method: "GET",
-    path: "/api/v1/tasks/tracking",
-  },
-  // Reads the runs of the handed-off Tasks as well as the Tasks, so the service
-  // also needs `run.read`.
-  "task.queryLegs": { requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
-  // Reads the runs of one Task as well as the Task, so the service also needs
-  // `run.read`.
   // Reads whether any live Task has a failed run, so the service also needs
   // `run.query`.
   "task.readAttention": {
     requires: "task.read",
     method: "GET",
     path: "/api/v1/tasks/attention",
-  },
-  "task.readTracking": {
-    requires: "task.read",
-    method: "GET",
-    path: "/api/v1/tasks/:id/tracking",
   },
   // Reads a Task's sessions, their open Requests and its runs, so the service
   // also needs `session.query` and `run.query`, as `task.queryBoard` does.
@@ -273,12 +261,6 @@ const TABLE = {
   },
 
   "signal.query": { requires: "signal.read", method: "GET", path: "/api/v1/signals" },
-  // Reads Task titles, so the service also needs `task.read`.
-  "signal.queryYourWork": {
-    requires: "signal.read",
-    method: "GET",
-    path: "/api/v1/signals/your-work",
-  },
   "signal.read": { requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
   // Raising is a verb on signals with no signal to act on yet, so its path is
   // the collection's plus the verb, as `run.start`'s is.
@@ -296,23 +278,12 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/signals/:id/withdraw",
   },
-  // The four moves that send nothing to the source take a list of ids, so
-  // their paths are the collection's plus the verb.
+  // Done sends nothing to the source and takes a list of ids, so its path is
+  // the collection's plus the verb.
   "signal.markDone": {
     requires: "signal.write",
     method: "POST",
     path: "/api/v1/signals/mark-done",
-  },
-  "signal.snooze": { requires: "signal.write", method: "POST", path: "/api/v1/signals/snooze" },
-  "signal.unsnooze": {
-    requires: "signal.write",
-    method: "POST",
-    path: "/api/v1/signals/unsnooze",
-  },
-  "signal.lowerPriority": {
-    requires: "signal.write",
-    method: "POST",
-    path: "/api/v1/signals/lower-priority",
   },
   // An External Entity has no grant family of its own: the Inbox is the
   // user's view of what concerns them, and a card becomes a Task, so reading
@@ -886,6 +857,16 @@ const TABLE = {
   "wikiPage.read": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages/:id" },
   "wikiPage.create": { requires: "wiki.write", method: "POST", path: "/api/v1/wiki-pages" },
   "wikiPage.update": { requires: "wiki.write", method: "PATCH", path: "/api/v1/wiki-pages/:id" },
+  "wikiPage.archive": {
+    requires: "wiki.write",
+    method: "POST",
+    path: "/api/v1/wiki-pages/:id/archive",
+  },
+  "wikiPage.restore": {
+    requires: "wiki.write",
+    method: "POST",
+    path: "/api/v1/wiki-pages/:id/restore",
+  },
 
   "skill.query": { requires: "skill.read", method: "GET", path: "/api/v1/skills" },
   "skill.read": { requires: "skill.read", method: "GET", path: "/api/v1/skills/:name" },
@@ -915,6 +896,40 @@ const TABLE = {
     requires: "skill.apply",
     method: "POST",
     path: "/api/v1/skills/apply-updates",
+  },
+
+  "mcpServer.query": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers" },
+  "mcpServer.read": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.create": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers",
+  },
+  "mcpServer.update": { requires: "mcp.manage", method: "PATCH", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.delete": { requires: "mcp.manage", method: "DELETE", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.check": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/check",
+  },
+  "mcpServer.setToken": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/token",
+  },
+  "mcpServer.startSignIn": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/sign-in",
+  },
+  // The query holds the one-time `code` of the sign-in.
+  "mcpServer.finishSignIn": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/sign-in/finish",
   },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
@@ -1103,6 +1118,8 @@ export const ALL_OPERATIONS: ReadonlyArray<Operation> = Object.entries(TABLE).ma
 /** Checks whether the string is an operation id. */
 export const isOperationId = (id: string): id is OperationId => id in TABLE;
 
+const ROWS: Readonly<Record<OperationId, OperationRow>> = TABLE;
+
 /** Returns what a caller must hold to call the operation. */
 export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;
 
@@ -1116,7 +1133,8 @@ export const readRequirement = (id: OperationId): Requirement => TABLE[id].requi
  * - `connection.manage`, because a Connection is created with its
  *   credentials;
  * - no grant at all, before sign-in: `auth.login` and `setup.complete` carry
- *   a password.
+ *   a password;
+ * - a row that sets `carriesSecret`, which takes a token.
  *
  * Text that could hold such a value must not be copied into a record many
  * readers see, such as a notification or an event.
@@ -1127,6 +1145,7 @@ export const canCarrySecrets = (id: OperationId): boolean => {
     /^(credential|secret|infra)\./.test(requirement) ||
     requirement === "connection.manage" ||
     requirement === "unauthenticated" ||
-    requirement === "setup-token"
+    requirement === "setup-token" ||
+    ROWS[id].carriesSecret === true
   );
 };

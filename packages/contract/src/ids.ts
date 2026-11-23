@@ -62,7 +62,7 @@ const convertTimeWithOffset = (text: string): string | undefined => {
 };
 
 /**
- * An exact time an input takes, such as when a snoozed signal comes back. It
+ * An exact time an input takes, such as the start of a metrics window. It
  * accepts any ISO 8601 date and time with its offset or `Z`, and decodes to
  * the canonical UTC `Timestamp` the controller stores and compares. A time
  * without an offset is refused, because it could mean any of 24 instants.
@@ -201,3 +201,6 @@ export const ExternalRef = Schema.String.check(
 );
 
 export type ExternalRef = Schema.Schema.Type<typeof ExternalRef>;
+
+/** Checks whether `value` is an External Ref: the grammar above, at most `MAX_EXTERNAL_REF_LENGTH` characters. */
+export const isExternalRef = Schema.is(ExternalRef);

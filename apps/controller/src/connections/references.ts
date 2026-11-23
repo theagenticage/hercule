@@ -17,6 +17,9 @@ import type { Id } from "@hercule/contract";
  * - `step`: a workflow's action step acts through the Connection, because
  *   its `connection` param is the Connection's id. Without the Connection
  *   every run of the workflow would fail at that step.
+ * - `mcpServer`: an MCP Server calls the outside server with the Connection's
+ *   credentials. Without the Connection it could not authenticate, so the
+ *   user removes the server first.
  */
 export type ConnectionReference =
   | {
@@ -35,6 +38,11 @@ export type ConnectionReference =
       readonly workflowId: string;
       readonly stepId: string;
       readonly workflowName: string;
+    }
+  | {
+      readonly kind: "mcpServer";
+      readonly mcpServerId: string;
+      readonly mcpServerName: string;
     };
 
 /**
@@ -57,7 +65,7 @@ export class ConnectionReferences extends Context.Service<
   {
     /**
      * Returns every record that names the Connection: the resources first,
-     * then the triggers, then the steps, each sorted by name. Runs in the caller's
+     * then the triggers, then the steps, then the MCP Servers, each sorted by name. Runs in the caller's
      * transaction, so a delete that checks first sees the same rows as the
      * delete itself.
      */

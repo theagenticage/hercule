@@ -155,7 +155,7 @@ button.lip-pick:hover,
   color: var(--muted);
   font-size: var(--t-12);
 }
-.intake-note {
+.starters-note {
   display: flex;
   align-items: center;
   gap: 8px;

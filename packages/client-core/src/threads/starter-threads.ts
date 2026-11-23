@@ -37,15 +37,14 @@ const STARTER_THREADS: Readonly<
 };
 
 /**
- * Returns the line under the starters that explains what fills Intake:
- * Triage brings work from GitHub, so without a GitHub Connection the line
- * asks the user to connect GitHub. It names no time of day, because Triage does not run on a
- * schedule yet, and a time would be a promise nothing keeps.
+ * Returns the line under the starters, shown while the project has no planned
+ * Task: what needs work on GitHub shows on the Inbox, so without a GitHub
+ * Connection the line asks the user to connect GitHub.
  */
-export const describeEmptyIntake = (hasGitHubConnection: boolean): string =>
+export const describeNoPlannedWork = (hasGitHubConnection: boolean): string =>
   hasGitHubConnection
-    ? "Intake is empty for now. Triage reads GitHub and brings what needs work here."
-    : "Intake is empty for now. Connect GitHub, and Triage brings what needs work here.";
+    ? "Nothing planned yet. What needs work on GitHub shows on the Inbox."
+    : "Nothing planned yet. Connect GitHub, and what needs work there shows on the Inbox.";
 
 /**
  * Returns the three starters for a project: the code starters when the

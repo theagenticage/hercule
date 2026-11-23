@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import {
   MAX_TODO_STEPS,
+  MCP_GATEWAY_ENTRY_NAME,
   type ImageGenerationDetail,
   type ItemKind,
   type ItemStatus,
@@ -46,6 +47,7 @@ import { clampCount, buildEnvelope, buildRaw, toJson, type Envelope } from "../n
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { ensureId } from "../events";
 import { buildEditedPathFields } from "../edited-paths";
+import { splitGatewayToolName } from "../gateway-tool-name";
 import { requireText, truncateFact, truncateMessage } from "../text";
 import { buildUnknownItemLabel } from "../message-reporting";
 import type { NotificationFrame } from "./rpc";
@@ -277,6 +279,53 @@ const readEditedPaths = (
   });
 
 /**
+ * Cuts the text of a text block of an MCP result to the protocol's bound,
+ * because a tool may return a whole file. Any other block, such as an image
+ * reference, is passed on as it is. `raw` keeps the whole text.
+ */
+const truncateResultBlock = (block: unknown): unknown => {
+  if (typeof block !== "object" || block === null) return block;
+  const { type, text } = block as { readonly type?: unknown; readonly text?: unknown };
+  return type === "text" && typeof text === "string"
+    ? { ...block, text: truncateMessage(text) }
+    : block;
+};
+
+/**
+ * Builds the detail of an MCP tool call item. For a call through the MCP
+ * Gateway, Codex reports the gateway's entry as the server and
+ * `<server>__<tool>` as the tool. The detail shows the MCP Server behind the
+ * tool and the tool's own name instead, like Claude Code's item does. A call to
+ * any other MCP server is named `<server>/<tool>`, as is a gateway tool whose
+ * name has no server part.
+ *
+ * A completed item also shows what the call returned in `content`, as Claude
+ * Code's tool result does: the blocks of the result, or the error's message
+ * for a call that failed. An image block is already `unavailable` by the time
+ * it gets here (see `removeMediaBytes`).
+ */
+const buildMcpToolCallDetail = (
+  item: Extract<ThreadItem, { type: "mcpToolCall" }>,
+  phase: "started" | "completed",
+): Schema.Json => {
+  const gateway =
+    item.server === MCP_GATEWAY_ENTRY_NAME ? splitGatewayToolName(item.tool) : undefined;
+  const content =
+    phase === "started"
+      ? undefined
+      : item.error != null
+        ? truncateMessage(item.error.message)
+        : item.result?.content.map(truncateResultBlock);
+  return {
+    ...(gateway === undefined
+      ? { name: truncateFact(`${item.server}/${item.tool}`) }
+      : { name: truncateFact(gateway.tool), server: truncateFact(gateway.server) }),
+    kind: "mcp",
+    ...(content === undefined ? {} : { content: toJson(content) }),
+  };
+};
+
+/**
  * Builds an item's `detail`: the one thing a reader wants to see in a row,
  * such as the command that ran, the file a patch touched or an image view
  * read, or the tool that was called. Everything else stays in `raw`. A detail
@@ -304,7 +353,7 @@ const buildDetail = (
       return fields === undefined ? {} : { detail: fields };
     }
     case "mcpToolCall":
-      return { detail: { name: truncateFact(`${item.server}/${item.tool}`), kind: "mcp" } };
+      return { detail: buildMcpToolCallDetail(item, phase) };
     case "dynamicToolCall":
       return { detail: { name: truncateFact(item.tool), kind: "native" } };
     case "functionCallOutput":
@@ -1240,6 +1289,8 @@ const NOTIFICATION_DECISIONS = {
   "account/updated": "account state belongs in the capability snapshot, not in a session",
   "account/login/completed":
     "signing in is done by the runner's login flow, never during a session",
+  "account/gatewayOAuth/changed":
+    "signing in to a gateway provider is done by the runner's login flow, never during a session",
   "thread/started":
     "a thread is introduced by the first frame that names it, which the runner then reads with thread/read",
   "thread/status/changed": "the session's status comes from its turns",
@@ -1273,6 +1324,11 @@ const NOTIFICATION_DECISIONS = {
     "only marks where a new summary part starts; its text arrives as summary deltas",
   "model/verification": "tells Codex's own interface about a verification it asks of the user",
   "model/safetyBuffering/updated": "state for Codex's own interface, not session output",
+  "thread/attachment/updated": "Hercule does not use Codex thread attachments",
+  "thread/prediction/updated": "a suggested next prompt, for Codex's own interface",
+  "thread/readState/changed": "the unread marker of Codex's own interface, not session output",
+  "thread/search/partial": "answers a thread/search/stream request, which Hercule never makes",
+  "thread/section/changed": "Hercule does not use Codex thread sections",
   ...dropAll("Hercule never archives a Codex thread", ["thread/archived", "thread/unarchived"]),
   ...dropAll("Hercule does not use Codex thread goals", [
     "thread/goal/updated",

@@ -266,8 +266,8 @@ const make = Effect.gen(function* () {
      *
      * 1. checks the caller is the user and the entity exists;
      * 2. reads the boundary: the workflow's `answers`, and the ids of the open
-     *    signals on this exact ref whose kind is in them, snoozed ones
-     *    included. These are the only signals the handoff may end. A signal
+     *    signals on this exact ref whose kind is in them. These are the only
+     *    signals the handoff may end. A signal
      *    raised after this read stays open;
      * 3. claims those signals around the transaction (`SignalClaims`), so a
      *    plugin answer or a withdrawal that is still running refuses the

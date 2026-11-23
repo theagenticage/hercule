@@ -19,7 +19,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { buildAnnouncementRecorder } from "../db/testing";
 import { TaskBoardFactsLayer, TaskServicePortsLayer } from "../daemon/tasks";
-import { TaskTrackingRunsLayer } from "../daemon/runs";
+import { TaskRunsLayer } from "../daemon/runs";
 import { PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
@@ -30,7 +30,7 @@ import { taskRepository } from "./repository";
 import { A_MINUTE, USER } from "./testing";
 
 const reads = TaskBoardLayer.pipe(
-  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer)),
+  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer)),
   Layer.provideMerge(buildPluginStack()),
 );
 

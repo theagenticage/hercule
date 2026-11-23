@@ -11,10 +11,9 @@ describe("decideScreenFace", () => {
     expect(decideScreenFace(pathname)).toBe("threads");
   });
 
-  it("shows the orchestration face on Work, the Inbox, Intake, Workflows, a run's page, Discussions, the Wiki and Fleet", () => {
+  it("shows the orchestration face on Work, the Inbox, Workflows, a run's page, Discussions, the Wiki and Fleet", () => {
     expect(decideScreenFace("/work")).toBe("orchestration");
     expect(decideScreenFace("/inbox")).toBe("orchestration");
-    expect(decideScreenFace("/intake")).toBe("orchestration");
     expect(decideScreenFace("/workflows")).toBe("orchestration");
     expect(decideScreenFace("/workflows/wf_1")).toBe("orchestration");
     expect(decideScreenFace("/runs/run_1")).toBe("orchestration");

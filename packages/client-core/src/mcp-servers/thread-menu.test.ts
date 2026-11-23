@@ -1,0 +1,344 @@
+import { describe, expect, it } from "vitest";
+import type { McpServer } from "@hercule/contract";
+import { buildServerPicker, buildThreadServerMenu, orderMenuNames } from "./thread-menu";
+import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
+
+const buildMenu = (
+  views: ReturnType<typeof buildViews>,
+  mcpServerIds: string[],
+  order = orderMenuNames(views, mcpServerIds),
+  rememberedAccounts: Record<string, string> = {},
+) => buildThreadServerMenu({ views, mcpServerIds, order, rememberedAccounts });
+
+/** Returns `count` ready servers named `tool01`, `tool02`, ... */
+const buildManyServers = (count: number) =>
+  Array.from({ length: count }, (_, index) => {
+    const name = `tool${String(index + 1).padStart(2, "0")}`;
+    return buildServer(`s-${name}`, name, "c-linear");
+  });
+
+describe("orderMenuNames", () => {
+  it("puts the thread's own names first, then the names of servers switched on in Settings", () => {
+    const views = buildViews([
+      buildServer("s-a", "alpha", "c-linear"),
+      buildServer("s-b", "bravo", "c-linear"),
+      buildServer("s-c", "charlie", "c-linear"),
+    ]);
+
+    expect(orderMenuNames(views, ["s-c"])).toEqual(["charlie", "alpha", "bravo"]);
+  });
+
+  it("leaves out a name only switched-off servers have, unless the thread has one", () => {
+    const views = buildViews([
+      buildServer("s-a", "alpha", "c-linear", { enabled: false }),
+      buildServer("s-b", "bravo", "c-linear", { enabled: false }),
+      LINEAR,
+    ]);
+
+    expect(orderMenuNames(views, [])).toEqual(["linear"]);
+    expect(orderMenuNames(views, ["s-b"])).toEqual(["bravo", "linear"]);
+  });
+
+  it("lists a name once when two accounts have it", () => {
+    expect(orderMenuNames(buildViews([SENTRY_WORK, SENTRY_HOBBY]), [])).toEqual(["sentry"]);
+  });
+});
+
+describe("buildThreadServerMenu", () => {
+  const VIEWS = buildViews([LINEAR, SENTRY_WORK, SENTRY_HOBBY]);
+
+  it("shows one row for two accounts of a name, on with the thread's own account", () => {
+    const { rows } = buildMenu(VIEWS, ["s-work"]);
+
+    expect(rows.map((row) => row.name)).toEqual(["sentry", "linear"]);
+    expect(rows[0]).toMatchObject({ on: true, note: null, signIn: null });
+    expect(rows[0]?.shown.server.id).toBe("s-work");
+    expect(rows[0]?.accounts.map((view) => view.server.id)).toEqual(["s-hobby", "s-work"]);
+  });
+
+  it("shows the remembered account of a name that is off, else the first", () => {
+    const sentry = (remembered: Record<string, string>) =>
+      buildMenu(VIEWS, [], undefined, remembered).rows.find((row) => row.name === "sentry");
+
+    expect(sentry({})).toMatchObject({ on: false });
+    expect(sentry({})?.shown.server.id).toBe("s-hobby");
+    expect(sentry({ sentry: "s-work" })?.shown.server.id).toBe("s-work");
+  });
+
+  it("keeps a server that needs sign-in on, and says so with the button that fixes it", () => {
+    const views = buildViews([
+      buildServer("s-work", "sentry", "c-work", { status: "needs-sign-in" }),
+    ]);
+
+    expect(buildMenu(views, ["s-work"]).rows[0]).toMatchObject({
+      on: true,
+      note: "on, joins once you sign in",
+      signIn: { kind: "reconnect", connectionId: "c-work", label: "Reconnect Sentry · work" },
+    });
+    expect(buildMenu(views, []).rows[0]).toMatchObject({ on: false, note: "needs sign-in" });
+  });
+
+  it("offers a server switched off in Settings only to a thread that has it", () => {
+    const views = buildViews([
+      LINEAR,
+      buildServer("s-work", "sentry", "c-work", { enabled: false }),
+    ]);
+    const order = ["sentry", "linear"];
+
+    expect(buildMenu(views, [], order).rows.map((row) => row.name)).toEqual(["linear"]);
+    expect(buildMenu(views, ["s-work"], order).rows.map((row) => row.name)).toEqual([
+      "sentry",
+      "linear",
+    ]);
+  });
+
+  it("shows eight names and counts the rest, switched-off-only names included", () => {
+    const views = buildViews([
+      ...buildManyServers(9),
+      buildServer("s-off", "zulu", "c-linear", { enabled: false }),
+    ]);
+
+    const menu = buildMenu(views, []);
+
+    expect(menu.rows).toHaveLength(8);
+    expect(menu.moreCount).toBe(2);
+  });
+
+  it("shows every name of a thread that has more than eight servers, and no other", () => {
+    const servers = buildManyServers(10);
+    const views = buildViews(servers);
+    const nine = servers.slice(0, 9).map((server) => server.id);
+
+    const menu = buildMenu(views, nine);
+
+    expect(menu.rows).toHaveLength(9);
+    expect(menu.moreCount).toBe(1);
+  });
+
+  it("keeps the surviving rows in their order while the thread's list changes after the menu opened", () => {
+    const servers = buildManyServers(10);
+    const views = buildViews(servers);
+    const nine = servers.slice(0, 9).map((server) => server.id);
+    const order = orderMenuNames(views, nine);
+
+    const afterSwitchingOff = buildMenu(
+      views,
+      nine.filter((id) => id !== "s-tool03"),
+      order,
+    );
+
+    // The thread owns eight names now, so eight rows; the switched-off name gives way.
+    expect(afterSwitchingOff.rows.map((row) => row.name)).toEqual(
+      order.filter((name) => name !== "tool03").slice(0, 8),
+    );
+  });
+
+  it("appends a name the thread gained while the menu was open and the order lacks", () => {
+    const views = buildViews([LINEAR, SENTRY_WORK, buildServer("s-new", "zulu", "c-linear")]);
+    const order = ["sentry", "linear"];
+
+    const menu = buildMenu(views, ["s-new"], order);
+
+    expect(menu.rows.map((row) => row.name)).toEqual(["sentry", "linear", "zulu"]);
+    expect(menu.rows.at(-1)?.on).toBe(true);
+  });
+
+  it("shows a name the thread gets from the picker, though it was beyond the first eight", () => {
+    const views = buildViews(buildManyServers(10));
+    const order = orderMenuNames(views, []);
+
+    const menu = buildMenu(views, ["s-tool10"], order);
+
+    expect(menu.rows.map((row) => row.name)).toContain("tool10");
+  });
+
+  it("never shows nine rows for a thread that owns one server", () => {
+    const views = buildViews(buildManyServers(10));
+    const order = orderMenuNames(views, []);
+
+    const menu = buildMenu(views, ["s-tool10"], order);
+
+    expect(menu.rows).toHaveLength(8);
+    expect(menu.moreCount).toBe(2);
+  });
+
+  it("never shows nine rows when the owned name was added while the menu was open", () => {
+    const views = buildViews([...buildManyServers(8), buildServer("s-new", "zulu", "c-linear")]);
+    const order = orderMenuNames(views, []).filter((name) => name !== "zulu");
+
+    const menu = buildMenu(views, ["s-new"], order);
+
+    expect(menu.rows).toHaveLength(8);
+    expect(menu.rows.map((row) => row.name)).toContain("zulu");
+  });
+
+  it("drops the row of a name whose servers were all deleted since the menu opened", () => {
+    const order = orderMenuNames(buildViews([LINEAR, SENTRY_WORK]), []);
+
+    expect(buildMenu(buildViews([LINEAR]), [], order).rows.map((row) => row.name)).toEqual([
+      "linear",
+    ]);
+  });
+});
+
+/** A server added by URL, named `docs`, at `url`. */
+const buildUrlServer = (id: string, url: string, overrides: Partial<McpServer> = {}) =>
+  buildServer(id, "docs", "", {
+    source: { kind: "url", url, signIn: "token", signInOffered: "token" },
+    ...overrides,
+  });
+
+describe("a server added by URL in the submenu", () => {
+  it("offers the token form as the button of a server that needs sign-in, and never says Connection", () => {
+    const views = buildViews([
+      buildUrlServer("s-docs", "https://docs.example.com/mcp", { status: "needs-sign-in" }),
+    ]);
+
+    expect(buildMenu(views, ["s-docs"]).rows[0]).toMatchObject({
+      on: true,
+      note: "on, joins once you sign in",
+      signIn: { kind: "sign-in", mcpServerId: "s-docs", label: "Sign in…" },
+    });
+  });
+
+  it("offers the same sign-in button for a server that asks for OAuth, which the dialog answers with the browser first", () => {
+    const views = buildViews([
+      buildUrlServer("s-docs", "https://docs.example.com/mcp", {
+        status: "needs-sign-in",
+        source: {
+          kind: "url",
+          url: "https://docs.example.com/mcp",
+          signIn: "none",
+          signInOffered: "oauth",
+        },
+      }),
+    ]);
+
+    expect(buildMenu(views, []).rows[0]?.signIn).toEqual({
+      kind: "sign-in",
+      mcpServerId: "s-docs",
+      label: "Sign in…",
+    });
+  });
+});
+
+describe("buildServerPicker", () => {
+  const VIEWS = buildViews([
+    LINEAR,
+    SENTRY_WORK,
+    SENTRY_HOBBY,
+    buildServer("s-off", "alpha", "c-linear", { enabled: false }),
+  ]);
+  const build = (overrides: Partial<Parameters<typeof buildServerPicker>[0]> = {}) =>
+    buildServerPicker({
+      views: VIEWS,
+      mcpServerIds: [],
+      order: [],
+      rememberedAccounts: {},
+      filter: "",
+      ...overrides,
+    });
+
+  it("offers every name, switched-off ones too, with the names missing from the order last", () => {
+    expect(build({ order: ["sentry"] }).rows.map((row) => row.name)).toEqual([
+      "sentry",
+      "linear",
+      "alpha",
+    ]);
+  });
+
+  it("writes the second line, and the status word only for a server that needs the user or is off", () => {
+    const { rows } = build();
+
+    expect(rows.map((row) => [row.name, row.secondLine, row.statusWord])).toEqual([
+      ["linear", "Linear Connection", null],
+      ["sentry", "Sentry Connection · 2 accounts", null],
+      ["alpha", "Linear Connection", "off"],
+    ]);
+  });
+
+  it("names a server added by URL by its whole address, so two of one name on one host differ", () => {
+    const views = buildViews([
+      buildUrlServer("s-a", "https://mcp.example.com/team-a"),
+      buildUrlServer("s-b", "https://mcp.example.com/team-b"),
+    ]);
+    const { rows } = build({ views, rememberedAccounts: { docs: "s-b" } });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.secondLine).toBe("https://mcp.example.com/team-b · 2 accounts");
+    expect(rows[0]?.accounts.map((view) => view.account)).toEqual([
+      "https://mcp.example.com/team-a",
+      "https://mcp.example.com/team-b",
+    ]);
+    expect(build({ views, filter: "team-b" }).rows).toHaveLength(1);
+  });
+
+  it("writes the address of a lone server added by URL, and the type of a Connection's server beside it", () => {
+    const views = buildViews([
+      buildUrlServer("s-docs", "https://docs.example.com/mcp"),
+      buildServer("s-work", "sentry", "c-work"),
+    ]);
+
+    expect(build({ views }).rows.map((row) => [row.name, row.secondLine])).toEqual([
+      ["docs", "https://docs.example.com/mcp"],
+      ["sentry", "Sentry Connection"],
+    ]);
+  });
+
+  it("writes a group of a Connection's server and a server added by URL from the account shown", () => {
+    const views = buildViews([
+      buildServer("s-work", "docs", "c-work"),
+      buildUrlServer("s-docs", "https://docs.example.com/mcp"),
+    ]);
+
+    expect(build({ views, mcpServerIds: ["s-docs"] }).rows[0]?.secondLine).toBe(
+      "https://docs.example.com/mcp · 2 accounts",
+    );
+    expect(build({ views, mcpServerIds: ["s-work"] }).rows[0]?.secondLine).toBe(
+      "Sentry Connection · 2 accounts",
+    );
+  });
+
+  it.each([
+    ["ready", null],
+    ["checking", null],
+    ["needs-sign-in", "needs sign-in"],
+    ["unreachable", "unreachable"],
+    ["error", "error"],
+  ] as const)("writes the status word of a %s server as %s", (status, word) => {
+    const { rows } = build({
+      views: buildViews([buildServer("s-one", "linear", "c-linear", { status })]),
+    });
+
+    expect(rows[0]?.statusWord).toBe(word);
+  });
+
+  it("counts the chosen names, and a name with two accounts once", () => {
+    const picker = build({ mcpServerIds: ["s-hobby", "s-linear"] });
+
+    expect(picker.chosenCount).toBe(2);
+    expect(picker.rows.find((row) => row.name === "sentry")).toMatchObject({ chosen: true });
+    expect(picker.rows.find((row) => row.name === "sentry")?.shown.server.id).toBe("s-hobby");
+  });
+
+  it("keeps showing the remembered account of a name that was switched off", () => {
+    expect(
+      build({ rememberedAccounts: { sentry: "s-work" } }).rows.find((row) => row.name === "sentry")
+        ?.shown.server.id,
+    ).toBe("s-work");
+  });
+
+  it("filters by name or account in any case, and counts every chosen name whatever the filter", () => {
+    const picker = build({ mcpServerIds: ["s-linear"], filter: " WORK " });
+
+    expect(picker.rows.map((row) => row.name)).toEqual(["sentry"]);
+    expect(picker.chosenCount).toBe(1);
+    expect(build({ filter: "lin" }).rows.map((row) => row.name)).toEqual(["linear"]);
+  });
+
+  it("shows the filter field only for more than eight names", () => {
+    expect(build().showsFilter).toBe(false);
+    expect(build({ views: buildViews(buildManyServers(8)) }).showsFilter).toBe(false);
+    expect(build({ views: buildViews(buildManyServers(9)) }).showsFilter).toBe(true);
+  });
+});

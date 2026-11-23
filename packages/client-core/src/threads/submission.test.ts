@@ -93,6 +93,7 @@ const SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const MESSAGE = { text: "ship it", attachments: [] };
@@ -235,6 +236,47 @@ describe("buildSubmission: a draft thread", () => {
         permissionProfileId: "p-unrestricted",
       },
     });
+  });
+});
+
+describe("buildSubmission: the draft's list of MCP Servers", () => {
+  const pick = (projectId: string | null, mcpServerIds: string[]): ThreadPicks =>
+    applyThreadChoice(
+      {},
+      { kind: "mcpServers", projectId, decideMcpServerIds: () => mcpServerIds },
+    );
+  const KNOWN = new Set(["s-linear"]);
+  const send = (picks: ThreadPicks, projectId: string | null = null, known = KNOWN) =>
+    buildSubmission(
+      resolveThreadConfig(NO_CATALOGS, { kind: "draft", config: { ...CONFIG, projectId } }, picks),
+      MESSAGE,
+      known,
+    );
+  const sendBeforeServersAreRead = (picks: ThreadPicks) =>
+    buildSubmission(
+      resolveThreadConfig(NO_CATALOGS, { kind: "draft", config: CONFIG }, picks),
+      MESSAGE,
+    );
+
+  it("sends no list for an untouched draft, so the controller picks the project's or the default", () => {
+    const sent = send({});
+    expect(sent.input).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("sends the picked list, an empty one included", () => {
+    expect(send(pick(null, ["s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+    expect(send(pick(null, [])).input.mcpServerIds).toEqual([]);
+  });
+
+  it("sends no list once the draft moved to another project than the pick was made under", () => {
+    expect(send(pick("p-shop", ["s-linear"]), "p-blog").input).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("drops a server deleted since the pick, and nothing while the servers are not read", () => {
+    expect(send(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+    expect(sendBeforeServersAreRead(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(
+      ["s-gone", "s-linear"],
+    );
   });
 });
 

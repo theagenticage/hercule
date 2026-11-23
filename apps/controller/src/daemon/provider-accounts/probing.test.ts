@@ -812,11 +812,16 @@ describe("a sweep", () => {
             discard: true,
           }),
         );
-        // Nothing answers yet, so every probe the controller sent is still in flight.
+        // Nothing answers yet, so every probe the controller sent is still in
+        // flight. Wait until each runner has its two, which takes longer on a
+        // loaded machine, then give a third probe time to show up.
+        const countProbes = () =>
+          [first, second].map((runnerId) => sent.filter((one) => one.runnerId === runnerId).length);
+        for (let waited = 0; waited < 50 && countProbes().some((count) => count < 2); waited++) {
+          yield* Effect.sleep(Duration.millis(100));
+        }
         yield* Effect.sleep(Duration.millis(100));
-        const counts = [first, second].map(
-          (runnerId) => sent.filter((one) => one.runnerId === runnerId).length,
-        );
+        const counts = countProbes();
         yield* Deferred.succeed(gate, undefined);
         yield* Fiber.join(sweeps);
         return counts;

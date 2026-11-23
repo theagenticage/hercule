@@ -14,6 +14,8 @@
  * function that runs inside pi is the same function the adapter uses and the
  * tests cover.
  */
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import { SESSION_MARKS_DIR_VARIABLE, formatStartMark } from "../../edit-marks";
 import { requiresApproval } from "./policy";
 
@@ -67,6 +69,15 @@ export const SUBAGENTS_VARIABLE = "HERCULE_SUBAGENTS";
  * start with compaction off.
  */
 export const NO_AUTO_COMPACTION_VARIABLE = "HERCULE_NO_AUTO_COMPACTION";
+
+/**
+ * The environment variable that holds the MCP Gateway's URL. The adapter sets
+ * it for an agent whose session has the gateway, and the extension registers
+ * the gateway with pi from it. Without it the extension registers nothing.
+ * Both sides use this one constant, so a drifted spelling cannot leave pi
+ * without the gateway and with no message.
+ */
+export const MCP_GATEWAY_URL_VARIABLE = "HERCULE_MCP_GATEWAY_URL";
 
 /**
  * The title of the dialog the `subagent` tool opens to ask the runner for a
@@ -220,6 +231,39 @@ export default function (pi) {
     pi.on("session_before_compact", async (event) =>
       event.reason === "manual" ? undefined : { cancel: true },
     );
+  }
+  // The MCP Gateway is registered with pi's built-in MCP client, which the
+  // adapter loads with \`-e builtin:mcp\`. The header holds the name of the
+  // token variable, not the token: pi reads the variable when it connects, so
+  // the token is in no file and in no argument. The tools are \`deferred\`, so
+  // the model finds them with pi's \`tool_search\`. pi's default,
+  // \`codemode\`, would make them callable only from scripts the model writes,
+  // and needs a third built-in that Hercule does not load.
+  //
+  // A failed registration must not end the extension: this file also holds the
+  // approval hook below, and a factory that throws makes pi drop all of it. So
+  // the failure is kept and shown to the user once the session has started,
+  // because the UI cannot show anything while the extension loads.
+  let mcpFailure;
+  const mcpGatewayUrl = process.env.${MCP_GATEWAY_URL_VARIABLE};
+  if (mcpGatewayUrl) {
+    try {
+      pi.registerMcpServer("${MCP_GATEWAY_ENTRY_NAME}", {
+        url: mcpGatewayUrl,
+        headers: { Authorization: "Bearer \${${SESSION_TOKEN_VARIABLE}}" },
+        exposure: "deferred",
+      });
+    } catch (error) {
+      mcpFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (mcpFailure !== undefined) {
+    pi.on("session_start", async (_event, ctx) => {
+      ctx.ui.notify(
+        "pi could not register Hercule's MCP Gateway, so this thread has no MCP tools: " + mcpFailure,
+        "warning",
+      );
+    });
   }
   // With no marks to write, full access needs no handler: it asks about
   // nothing, so no tool call can wait for an answer that will never come.

@@ -47,6 +47,9 @@ export const GRANT_FAMILIES = {
   // file a proposed Skill Revision, which reaches no session until someone
   // applies it, and `apply` changes what every new Thread loads.
   skill: ["read", "write", "apply"],
+  // `use` is a call through the MCP Gateway, which is not an operation of the
+  // API, so no operation requires it. `manage` is a grant only the user gives.
+  mcp: ["read", "manage", "use"],
   permission: ["read", "write"],
   project: ["read", "write"],
   resource: ["read", "write"],
@@ -77,19 +80,30 @@ export const GrantSchema = Schema.Literals(ALL_GRANTS);
  * The grants that only the user gives, to a profile or through a Permission
  * Request. The shipped `unrestricted` profile is seeded without them.
  *
- * Each lets a session change the Skill Library, and a skill steers every
- * Thread that loads it. The shipped `unrestricted` profile is the default
- * profile of every Thread and holds `permission.write`, so without this rule
- * a Thread that read a hostile README could give itself either grant and then
- * change a skill (spec 13 section 6.2).
+ * - `skill.write` and `skill.apply` let a session change the Skill Library,
+ *   and a skill steers every Thread that loads it.
+ * - `mcp.manage` lets a session add an MCP Server or change which servers a
+ *   thread has, and a server's tool descriptions steer every thread that has
+ *   it.
+ *
+ * The shipped `unrestricted` profile is the default profile of every Thread
+ * and holds `permission.write`, so without this rule a Thread that read a
+ * hostile README could give itself one of these grants and then use it
+ * (spec 13 section 6.2).
  */
-export const GRANTS_ONLY_THE_USER_GIVES: ReadonlyArray<Grant> = ["skill.write", "skill.apply"];
+export const GRANTS_ONLY_THE_USER_GIVES: ReadonlyArray<Grant> = [
+  "skill.write",
+  "skill.apply",
+  "mcp.manage",
+];
 
 /**
  * `GRANTS_ONLY_THE_USER_GIVES` as a refusal message names them: each grant in
- * backticks, joined with "or". Built from the list, so a message never names
- * a different set of grants than the check refuses.
+ * backticks, joined with commas and a final "or", as in "`a`, `b` or `c`".
+ * Built from the list, so a message never names a different set of grants
+ * than the check refuses.
  */
-export const GRANTS_ONLY_THE_USER_GIVES_TEXT = GRANTS_ONLY_THE_USER_GIVES.map(
-  (grant) => `\`${grant}\``,
-).join(" or ");
+export const GRANTS_ONLY_THE_USER_GIVES_TEXT = (() => {
+  const quoted = GRANTS_ONLY_THE_USER_GIVES.map((grant) => `\`${grant}\``);
+  return `${quoted.slice(0, -1).join(", ")} or ${quoted.at(-1)}`;
+})();

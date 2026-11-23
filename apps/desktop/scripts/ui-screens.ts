@@ -141,34 +141,6 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     ],
   },
   {
-    name: "intake",
-    path: "intake.html",
-    contentSelector: 'section.asks-detail[aria-label="The open signal"] > *',
-    nonTextParts: [
-      { selector: ".asks-modes", kind: "boundary" },
-      // No checkbox (.ask-box): a row's checkbox is hidden until the pointer or the focus is
-      // on it, or the row is checked, and no row of this specimen is.
-      { selector: ".asks-sec .dot", kind: "mark" },
-      { selector: ".ask-mark:not(.ask-mark--face) svg", kind: "mark" },
-      { selector: ".ask-act svg", kind: "mark" },
-      { selector: ".asks-pane-btn svg", kind: "mark" },
-      { selector: ".b-change-checks .mark", kind: "mark" },
-    ],
-  },
-  {
-    name: "tracking-pane",
-    path: "intake.html?scene=tracking-pane-needs-you",
-    contentSelector: 'section.asks-detail[aria-label="The open Tracking row"] > *',
-    nonTextParts: [
-      { selector: ".asks-modes", kind: "boundary" },
-      { selector: ".ask-act svg", kind: "mark" },
-      { selector: ".tr-sec .mark", kind: "mark" },
-      { selector: ".tr-wait .mark", kind: "mark" },
-      { selector: ".tr-steps .mark", kind: "mark" },
-      { selector: ".tr-ask-q .mark", kind: "mark" },
-    ],
-  },
-  {
     name: "workflows",
     path: "workflows.html",
     contentSelector: 'nav[aria-label="Workflows"] .virtual-list-items > *',
@@ -361,6 +333,337 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "settings-skills.html?state=applied",
     contentSelector: ".skill-record .skill-rev",
     nonTextParts: [],
+  },
+  // Settings > MCP servers: the list with a server in each state, a server that needs sign-in, a
+  // server's Projects section with its refusal open, and the picker of the default list; then a
+  // server's page while it is checking, switched off, unreachable and in error, the list with no
+  // Connection that offers a server, and the list when the read of the servers fails.
+  {
+    name: "settings-mcp-servers",
+    path: "settings-mcp-servers.html",
+    contentSelector: ".mcp-list .mcp-row",
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+      { selector: ".mcp-status--fail .dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server",
+    path: "settings-mcp-servers.html?state=page",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-projects",
+    path: "settings-mcp-servers.html?state=projects",
+    contentSelector: ".mcp-proj-row .mcp-clash",
+    nonTextParts: [{ selector: ".mcp-proj-row .choice-box", kind: "boundary" }],
+  },
+  {
+    name: "settings-mcp-picker",
+    path: "settings-mcp-servers.html?state=picker",
+    contentSelector: "dialog.mcp-picker .mcp-pick-row",
+    nonTextParts: [
+      { selector: ".mcp-pick-row .choice-box", kind: "boundary" },
+      { selector: ".mcp-pick-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-checking",
+    path: "settings-mcp-servers.html?state=checking",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-off",
+    path: "settings-mcp-servers.html?state=off",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-unreachable",
+    path: "settings-mcp-servers.html?state=unreachable",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-error",
+    path: "settings-mcp-servers.html?state=error",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-servers-empty",
+    path: "settings-mcp-servers.html?state=empty",
+    contentSelector: ".mcp-group .set-empty",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-servers-failed",
+    path: "settings-mcp-servers.html?state=failed",
+    contentSelector: ".render-failure-headline",
+    nonTextParts: [],
+  },
+  // Servers added by URL: the list with its group, the Add by URL dialog at its token step, the dialog's
+  // refusal of an address added before, the Replace dialog, and the page of a server that needs sign-in.
+  {
+    name: "settings-mcp-urls",
+    path: "settings-mcp-servers.html?state=urls",
+    contentSelector: '.mcp-group[aria-label="Added by URL"] .mcp-row',
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+      { selector: ".mcp-status--fail .dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-add-token",
+    path: "settings-mcp-servers.html?state=add-token",
+    contentSelector: 'dialog.url-dialog input[type="password"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-duplicate",
+    path: "settings-mcp-servers.html?state=add-duplicate",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-replace",
+    path: "settings-mcp-servers.html?state=replace",
+    contentSelector: "dialog.confirm-dialog .url-replace",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-waiting",
+    path: "settings-mcp-servers.html?state=sign-in-waiting",
+    contentSelector: "dialog.url-dialog .hx-row",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-refused",
+    path: "settings-mcp-servers.html?state=sign-in-refused",
+    contentSelector: 'dialog.url-dialog [role="alert"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-url-page",
+    path: "settings-mcp-servers.html?state=url-page",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  // The other steps of the dialogs that write a server added by URL, and the pages and rows that open them.
+  {
+    name: "settings-mcp-add-empty",
+    path: "settings-mcp-servers.html?state=add-empty",
+    contentSelector: "dialog.url-dialog form",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-checking",
+    path: "settings-mcp-servers.html?state=add-checking",
+    contentSelector: "dialog.url-dialog .wait",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-ready",
+    path: "settings-mcp-servers.html?state=add-ready",
+    contentSelector: "dialog.url-dialog .url-tools",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-add-plugin-origin",
+    path: "settings-mcp-servers.html?state=add-plugin-origin",
+    contentSelector: "dialog.url-dialog .warn",
+    nonTextParts: [{ selector: "dialog.url-dialog .warn svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-choice",
+    path: "settings-mcp-servers.html?state=sign-in-choice",
+    contentSelector: "dialog.url-dialog .setup-acts .btn--accent",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-long-host",
+    path: "settings-mcp-servers.html?state=sign-in-long-host",
+    contentSelector: "dialog.url-dialog .hx-row",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-open-failed",
+    path: "settings-mcp-servers.html?state=sign-in-open-failed",
+    contentSelector: "dialog.url-dialog .url-waiting .fl-err",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-paste",
+    path: "settings-mcp-servers.html?state=sign-in-paste",
+    contentSelector: "dialog.url-dialog .url-paste",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-timed-out",
+    path: "settings-mcp-servers.html?state=sign-in-timed-out",
+    contentSelector: 'dialog.url-dialog [role="alert"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-token",
+    path: "settings-mcp-servers.html?state=token",
+    contentSelector: 'dialog.url-dialog input[type="password"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-several",
+    path: "settings-mcp-servers.html?state=replace-several",
+    contentSelector: "dialog.confirm-dialog .options",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-stale",
+    path: "settings-mcp-servers.html?state=replace-stale",
+    contentSelector: "dialog.confirm-dialog .fl-err",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-sign-in-opened",
+    path: "settings-mcp-servers.html?state=sign-in-opened",
+    contentSelector: "dialog.url-dialog .url-stuck",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-paste-opened",
+    path: "settings-mcp-servers.html?state=sign-in-paste-opened",
+    contentSelector: "dialog.url-dialog .url-paste",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-mcp-sign-in-ready",
+    path: "settings-mcp-servers.html?state=sign-in-ready",
+    contentSelector: "dialog.url-dialog .url-tools",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-writing",
+    path: "settings-mcp-servers.html?state=replace-writing",
+    contentSelector: 'dialog.confirm-dialog [role="status"]',
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-replace-unread",
+    path: "settings-mcp-servers.html?state=replace-unread",
+    contentSelector: "dialog.confirm-dialog .fl-err",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-url-page-none",
+    path: "settings-mcp-servers.html?state=url-page-none",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-url-page-long",
+    path: "settings-mcp-servers.html?state=url-page-long",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-url-page-token",
+    path: "settings-mcp-servers.html?state=url-page-token",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-url-page-oauth",
+    path: "settings-mcp-servers.html?state=url-page-oauth",
+    contentSelector: ".mcp-record .mcp-value",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-urls-long",
+    path: "settings-mcp-servers.html?state=urls-long",
+    contentSelector: '.mcp-group[aria-label="Added by URL"] .mcp-row',
+    nonTextParts: [
+      { selector: ".mcp-row .toggle", kind: "boundary" },
+      { selector: ".mcp-row .profile-mark svg", kind: "mark" },
+    ],
+  },
+  // The "agent tools" note of each Connection whose plugin offers an MCP server: on, off, and needs sign-in.
+  {
+    name: "settings-connections",
+    path: "settings-connections.html",
+    contentSelector: ".conn-tools",
+    nonTextParts: [
+      { selector: ".conn-tools.is-on .dot", kind: "mark" },
+      { selector: ".conn-tools.is-fail .dot", kind: "mark" },
+    ],
+  },
+  // The composer's `+` menu with the thread's MCP servers, on a started thread and on a Draft Thread, and the thread's
+  // lines about a server left out at the start and a refused call.
+  {
+    name: "thread-mcp-menu",
+    path: "thread-mcp.html",
+    contentSelector: ".plus-sub .plus-row",
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: ".plus-sub .toggle", kind: "boundary" },
+      { selector: ".plus-sub .field--select", kind: "boundary" },
+      { selector: ".plus-sub .plus-row-mark svg", kind: "mark" },
+      { selector: ".plus-dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "draft-mcp-menu",
+    path: "draft-mcp.html",
+    contentSelector: ".plus-sub .plus-row",
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: ".plus-sub .toggle", kind: "boundary" },
+      { selector: ".plus-sub .field--select", kind: "boundary" },
+      { selector: ".plus-sub .plus-row-mark svg", kind: "mark" },
+      { selector: ".plus-dot", kind: "mark" },
+    ],
+  },
+  {
+    name: "thread-mcp-lines",
+    path: "thread-mcp.html?state=lines",
+    contentSelector: ".error-note button",
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: ".error-note .dot", kind: "mark" },
+      { selector: ".plus-dot", kind: "mark" },
+    ],
   },
 ];
 

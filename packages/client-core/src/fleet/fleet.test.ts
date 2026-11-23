@@ -97,6 +97,7 @@ const buildSession = (runnerId: string, status: SessionStatus, kind: SessionKind
     exitedAt: null,
     lastActivityAt: "2026-11-02T09:00:00.000Z",
     unenforced: [],
+    mcpServers: [],
   } satisfies Session;
 };
 

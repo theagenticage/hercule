@@ -1,10 +1,9 @@
 /**
  * The signal operations: `signal.query`, `read`, `raise`, `act`, `handOff`
- * and `withdraw`, and the four moves that send nothing to the source:
- * `markDone`, `snooze`, `unsnooze` and `lowerPriority`.
+ * and `withdraw`, and `markDone`, which sends nothing to the source.
  *
- * A signal is what Intake puts in front of the user because a move is asked
- * of them. This service raises the core's four kinds (`proposal`, `offer`,
+ * A signal is what the core puts in front of the user because a move is
+ * asked of them. This service raises the core's four kinds (`proposal`, `offer`,
  * `unsure` and `fyi`) for any actor that holds `signal.write`, and lays out
  * the core's own actions beside the raiser's:
  *
@@ -24,8 +23,8 @@
  * checked, run and described through the `BoundOperations` port, which the
  * controller daemon implements.
  *
- * The four moves each take a list of ids, because one user action, such as a
- * bulk snooze, is one call. Each call:
+ * `markDone` takes a list of ids, because one user action, such as marking a
+ * selection Done, is one call. Each call:
  *
  * - fails as a whole with `NotFound` when an id names no signal;
  * - treats an id given twice as given once;
@@ -75,13 +74,9 @@ import {
   type SignalHandOffInput,
   type SignalFilter,
   type SignalIdsInput,
-  type SignalLowerPriorityResult,
   type SignalMarkDoneResult,
   type SignalOrigin,
   type SignalPage,
-  type SignalSnoozeInput,
-  type SignalSnoozeResult,
-  type SignalUnsnoozeResult,
   type SkippedSignal,
   type SignalRaiseInput,
   type SignalRaiseResult,
@@ -167,13 +162,6 @@ const ONLY_THE_USER =
 /** The refusal of `markDone` for a caller who is not the user. */
 const ONLY_THE_USER_MARKS_DONE =
   "only the user may mark a signal done: Done is the user's answer, so a session or a workflow step may not give it; ask the user instead";
-
-/**
- * The refusal of `lowerPriority` for a caller who is not the user. An agent
- * must not quietly lower what the user was told is urgent.
- */
-const ONLY_THE_USER_LOWERS_PRIORITY =
-  "only the user may move a signal out of Now: the user was told it is urgent, so a session or a workflow step may not lower it; ask the user instead";
 
 /** The resolution outcome of Done, which sends nothing to the source. */
 const DONE_OUTCOME = "Done, nothing sent";
@@ -738,12 +726,8 @@ const make = Effect.gen(function* () {
     /**
      * Returns one view of the signals, with the filters applied:
      *
-     * - `to-do`, the default: the open signals that are not snoozed, or
-     *   whose snooze ran out by now. The signals back from a snooze come
-     *   first, then the rest oldest first. The view is not paged: every
-     *   client counts the whole of To do.
-     * - `later`: the signals snoozed until a future time, soonest first,
-     *   one page at a time.
+     * - `to-do`, the default: the open signals, oldest first. The view is
+     *   not paged: every client counts the whole of To do.
      * - `done`: the resolved signals, newest resolution first, one page at a
      *   time.
      *
@@ -766,16 +750,13 @@ const make = Effect.gen(function* () {
           ...(filter.source === undefined ? {} : { source: filter.source }),
         };
         const request = { limit: filter.limit ?? DEFAULT_PAGE_LIMIT, cursor: filter.cursor };
-        const now = yield* nowIso;
         const listing = yield* refuseCursor(
-          filter.view === "later"
-            ? signals.listLater(listFilter, request, now)
-            : filter.view === "done"
-              ? signals.listDone(listFilter, request)
-              : Effect.map(signals.listToDo(listFilter, now), (items) => ({
-                  items,
-                  nextCursor: undefined,
-                })),
+          filter.view === "done"
+            ? signals.listDone(listFilter, request)
+            : Effect.map(signals.listToDo(listFilter), (items) => ({
+                items,
+                nextCursor: undefined,
+              })),
         );
         const described =
           caller._tag === "user" ? yield* addDescribeLines(listing.items) : listing.items;
@@ -922,8 +903,7 @@ const make = Effect.gen(function* () {
               payload: { signalId: input.id, reason: input.reason },
               at: resolution.at,
             });
-            // Read again rather than patched: resolving also deleted the
-            // signal's snooze.
+            // Read again rather than patched, so the reply is the stored record.
             return yield* readOrFail(input.id);
           }),
         );
@@ -1072,138 +1052,6 @@ const make = Effect.gen(function* () {
               });
             }
             return ended;
-          }),
-        );
-      }),
-
-    /**
-     * Snoozes open signals until `until`, and returns the ids it snoozed and
-     * the ones it skipped because they had already resolved. A signal that
-     * is already snoozed gets the new time. Any holder of `signal.write` may
-     * snooze, because a snooze is not an answer.
-     *
-     * Fails with `Validation` when `until` is not after now, and with
-     * `NotFound` when an id names no signal. Nothing is changed when the
-     * call fails.
-     */
-    snooze: (
-      input: SignalSnoozeInput,
-    ): Effect.Effect<
-      SignalSnoozeResult,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
-    > =>
-      Effect.gen(function* () {
-        const caller = yield* requireActor("signal.snooze");
-        const ids = removeDuplicateIds(input.signalIds);
-        const now = yield* nowIso;
-        // The contract decodes `until` to a canonical UTC timestamp, so two
-        // times compare as text.
-        if (input.until <= now) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["until"],
-                message: `The time ${input.until} is not in the future. Pick a time after ${now}.`,
-              },
-            ]),
-          );
-        }
-        const actor = buildActorStamp(caller);
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
-            const snoozed = open.map((signal) => signal.id);
-            if (snoozed.length > 0) {
-              yield* signals.snooze(snoozed, { until: input.until, snoozedAt: now, actor });
-              yield* audit.append({
-                kind: "signal.snoozed",
-                actor,
-                record: { topic: "signal", ids: snoozed },
-                payload: { signalIds: snoozed, until: input.until },
-                at: now,
-              });
-            }
-            return { snoozed, skipped };
-          }),
-        );
-      }),
-
-    /**
-     * Puts snoozed signals back on To do, and returns the ids it unsnoozed
-     * and the ones it skipped because they had already resolved. An open
-     * signal that is not snoozed is in neither list, and nothing is written
-     * for it. Any holder of `signal.write` may unsnooze.
-     *
-     * Fails with `NotFound` when an id names no signal, and then changes
-     * nothing.
-     */
-    unsnooze: (
-      input: SignalIdsInput,
-    ): Effect.Effect<SignalUnsnoozeResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      Effect.gen(function* () {
-        const caller = yield* requireActor("signal.unsnooze");
-        const ids = removeDuplicateIds(input.signalIds);
-        const actor = buildActorStamp(caller);
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
-            const deleted = yield* signals.unsnooze(open.map((signal) => signal.id));
-            const unsnoozed = ids.filter((id) => deleted.has(id));
-            if (unsnoozed.length > 0) {
-              yield* audit.append({
-                kind: "signal.unsnoozed",
-                actor,
-                record: { topic: "signal", ids: unsnoozed },
-                payload: { signalIds: unsnoozed },
-              });
-            }
-            return { unsnoozed, skipped };
-          }),
-        );
-      }),
-
-    /**
-     * Moves open `urgent` signals to `high` as the user, which takes them out
-     * of Now, and returns the ids it lowered and the ones it skipped because
-     * they had already resolved. An open signal of any other priority is in
-     * neither list. Each lowered signal is marked lowered, so the code that
-     * raises a replacement can read that mark through
-     * `isPriorityLowered` and keep the lower priority (issue #526).
-     *
-     * Fails with `Forbidden` for any caller but the user, and with
-     * `NotFound` when an id names no signal. Nothing is changed when the call
-     * fails.
-     */
-    lowerPriority: (
-      input: SignalIdsInput,
-    ): Effect.Effect<
-      SignalLowerPriorityResult,
-      Unauthenticated | Forbidden | NotFound | SqlError
-    > =>
-      Effect.gen(function* () {
-        const caller = yield* requireUserActor(
-          "signal.lowerPriority",
-          ONLY_THE_USER_LOWERS_PRIORITY,
-        );
-        const ids = removeDuplicateIds(input.signalIds);
-        const actor = buildActorStamp(caller);
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
-            const changed = yield* signals.lowerPriority(open.map((signal) => signal.id));
-            const lowered = ids.filter((id) => changed.has(id));
-            if (lowered.length > 0) {
-              yield* audit.append({
-                kind: "signal.priorityLowered",
-                actor,
-                record: { topic: "signal", ids: lowered },
-                payload: { signalIds: lowered },
-              });
-            }
-            return { lowered, skipped };
           }),
         );
       }),

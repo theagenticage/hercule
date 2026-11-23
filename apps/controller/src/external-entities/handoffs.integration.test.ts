@@ -342,7 +342,7 @@ const handOffWhileWriterHeld = async (
 };
 
 describe("the signals a handoff ends", () => {
-  it("ends the open signals of the kinds the workflow answers, snoozed ones too, and leaves the rest open", async () => {
+  it("ends the open signals of the kinds the workflow answers, and leaves the rest open", async () => {
     await withNorthwind(async (controller, northwind) => {
       const account = await createAccount(controller, "bot");
       const thing = await arrangeThing(controller, {
@@ -364,20 +364,13 @@ describe("the signals a handoff ends", () => {
       const arrange = (target: Thing, kind: string) =>
         arrangeSignal(controller, { thing: target, kind, connectionId: account, replyBody: "Hi" });
       const request = await arrange(thing, REVIEW_REQUESTED);
-      const snoozed = await arrange(thing, REVIEW_REQUESTED);
+      const second = await arrange(thing, REVIEW_REQUESTED);
       const mention = await arrange(thing, MENTIONED);
       const onOther = await arrange(elsewhere, REVIEW_REQUESTED);
-      const snooze = await post(
-        controller.base,
-        "/api/v1/signals/snooze",
-        { signalIds: [snoozed], until: "2099-01-01T00:00:00.000Z" },
-        controller.token,
-      );
-      expect(snooze.status).toBe(200);
 
       const result = await handOff(controller, thing, { workflowId });
 
-      for (const id of [request, snoozed]) {
+      for (const id of [request, second]) {
         expect((await readSignal(controller, id)).resolution, id).toMatchObject({
           kind: "decided",
           actionId: `hand-to-${workflowId}`,

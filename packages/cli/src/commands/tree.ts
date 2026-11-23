@@ -13,7 +13,9 @@
  * mapping would be a schema-to-flags compiler nobody asked for. The
  * exceptions the table opts into are a record of text values, given as
  * repeated `--<flag> <field>=<value>` (see `namedValues` on the row), and a
- * list of objects that a list positional fills one key of (see `itemKey`).
+ * list of objects that a list positional fills one key of (see `itemKey`), and
+ * an object, or one of several object shapes, that several flags fill one key
+ * each of, picked by which of those flags are given (see `oneOf`).
  *
  * A field whose row is `skillFolder` becomes the positional `<folder>`. The
  * command then reads that folder and sends one request per skill in it (see
@@ -30,11 +32,14 @@ import {
   type CliExample,
   type FieldRow,
   type Method,
+  type ObjectKeyRow,
+  type Operation,
   type OperationId,
   type Requirement,
   type ResolvingQuery,
 } from "@hercule/contract";
 import * as Schema from "effect/Schema";
+import type * as SchemaAST from "effect/SchemaAST";
 import * as HttpApi from "effect/http-api/HttpApi";
 
 /**
@@ -48,7 +53,10 @@ export type FieldKind = "string" | "number" | "boolean" | "json" | "namedValues"
 export type FieldCarrier = "path" | "payload" | "query";
 
 export interface Field {
-  /** The name the API knows the field by. */
+  /**
+   * The name the API knows the field by. For a flag that fills one key of an
+   * object field (see `within`), the name of that key.
+   */
   readonly name: string;
   /** The word after `--`, or the word inside `<>` for a positional. */
   readonly spelling: string;
@@ -89,6 +97,11 @@ export interface Field {
   /** Whether the value is read from stdin; there is no flag that takes it inline. */
   readonly stdin: boolean;
   /**
+   * Whether the value is a secret that must stay off every command line. Set
+   * by the row's `secret` marker.
+   */
+  readonly secret: boolean;
+  /**
    * Whether each value given is the path of an image file, which the CLI
    * uploads before the call and replaces with the returned attachment id.
    */
@@ -117,8 +130,8 @@ export interface Field {
   readonly resolves: OperationId | undefined;
   /**
    * The queries sent to the list operation in `resolves`, whose answers are
-   * read together to match a tail. One query such as `{ view: "later" }`
-   * matches among the snoozed signals; `[{}]`, the default, is the listing
+   * read together to match a tail. One query such as `{ closed: true }`
+   * matches among the closed initiatives; `[{}]`, the default, is the listing
    * as it comes, which holds the ids this field takes.
    */
   readonly resolvesQueries: ReadonlyArray<ResolvingQuery>;
@@ -127,7 +140,34 @@ export interface Field {
    * for a list of objects; absent when the list holds the words themselves.
    */
   readonly itemKey: string | undefined;
+  /**
+   * The name of the object field of the request that this flag fills one key
+   * of, when it does; `undefined` for every other field. Set by the row's
+   * `oneOf` form. A flag that several entries of the row declare is one field.
+   */
+  readonly within: string | undefined;
   readonly help: string;
+}
+
+/**
+ * A field that holds one of several object shapes, as the row's `oneOf`
+ * declares it. The command line picks the entry by its selector flag.
+ */
+export interface ObjectChoice {
+  /** The name of the object field in the request. */
+  readonly field: string;
+  /** The request may leave the field out, so no entry has to be picked. */
+  readonly optional: boolean;
+  readonly entries: ReadonlyArray<{
+    /** The line that leads the entry's flags in the help. */
+    readonly help: string;
+    /** The keys sent with these values, whatever the command line says. */
+    readonly fixed: Readonly<Record<string, string>>;
+    /** The flag that picks the entry. */
+    readonly selector: Field;
+    /** The flags of the entry, each with the help the entry gives it. */
+    readonly flags: ReadonlyArray<{ readonly field: Field; readonly help: string }>;
+  }>;
 }
 
 /** What an operation returns, as the help describes it. */
@@ -153,8 +193,13 @@ export interface Command {
    * `<folder>`.
    */
   readonly positionals: ReadonlyArray<Field>;
-  /** The payload fields given as `--<flag>`; payload positionals are not included. */
+  /**
+   * The payload fields given as `--<flag>`; payload positionals are not
+   * included. The keys of a `oneOf` field are included, one field each.
+   */
   readonly payload: ReadonlyArray<Field>;
+  /** The payload fields that hold one of several object shapes. */
+  readonly choices: ReadonlyArray<ObjectChoice>;
   /** The query fields other than the three paging fields, given as `--<flag>`. */
   readonly query: ReadonlyArray<Field>;
   /**
@@ -353,7 +398,7 @@ const listResolvingQueries = (
 const buildField = (
   name: string,
   ast: Ast,
-  row: Exclude<FieldRow, { readonly hidden: true }>,
+  row: Exclude<FieldRow, { readonly hidden: true } | { readonly oneOf: unknown }> | ObjectKeyRow,
   carriedIn: FieldCarrier,
   schema: unknown,
 ): Field => {
@@ -391,14 +436,138 @@ const buildField = (
     defaultText: "default" in row ? row.default : undefined,
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
+    secret: "secret" in row && row.secret === true,
     uploads: "upload" in row && row.upload === true,
     standsInForStdin: "standsInForStdin" in row && row.standsInForStdin === true,
     readsSkillFolder,
     resolves: "resolves" in row ? row.resolves : undefined,
     resolvesQueries: listResolvingQueries("resolvesQuery" in row ? row.resolvesQuery : undefined),
     itemKey,
+    within: undefined,
     help: row.help,
   };
+};
+
+/**
+ * Returns the type of one key of an object. Throws when the object has no
+ * such key, because the CLI table is wrong.
+ */
+const readObjectKey = (name: string, object: Ast, key: string): Ast => {
+  const property = object.propertySignatures?.find((one) => String(one.name) === key);
+  if (property === undefined) throw new Error(`${name}: ${key} is not a key of the object`);
+  return property.type;
+};
+
+/**
+ * Returns the keys of an object type that hold one string literal, with
+ * their values. In a union of objects these tell the members apart.
+ */
+const readLiteralKeys = (member: Ast): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    (member.propertySignatures ?? []).flatMap((property) =>
+      property.type._tag === "Literal" && typeof property.type.literal === "string"
+        ? [[String(property.name), property.type.literal]]
+        : [],
+    ),
+  );
+
+/** Checks whether two maps from key to text hold the same entries. */
+const hasSameEntries = (
+  left: Readonly<Record<string, string>>,
+  right: Readonly<Record<string, string>>,
+): boolean =>
+  Object.keys(left).length === Object.keys(right).length &&
+  Object.entries(left).every(([key, value]) => right[key] === value);
+
+/** Checks whether two keys of objects accept the same values and are both required or both optional. */
+const hasSameSchema = (left: Ast, right: Ast): boolean => {
+  // `Ast` is a narrow view of the real schema node, which is what the keys of
+  // a member are, so the cast only restores the full type.
+  const describe = (type: Ast): string =>
+    JSON.stringify(Schema.toJsonSchemaDocument(Schema.make(type as SchemaAST.AST)));
+  return (
+    left.context?.isOptional === right.context?.isOptional && describe(left) === describe(right)
+  );
+};
+
+/**
+ * Builds the fields of a `oneOf` row: one field for each key that any entry
+ * gives a flag, typed by the member of the union the entry stands for. A key
+ * that several entries give a flag is one field. Throws when the table is
+ * wrong:
+ *
+ * - the field is neither an object nor a union of objects;
+ * - an entry's `fixed` values are the literal keys of no member, or a member
+ *   has no entry;
+ * - an entry's selector is not one of its flags, a flag or a fixed value
+ *   names a key its member does not have, a key its member requires has
+ *   neither, or a flag's key holds a list;
+ * - a key shared by several entries has a different schema in them.
+ */
+const buildOneOfFields = (
+  name: string,
+  union: Ast,
+  row: Extract<FieldRow, { readonly oneOf: unknown }>,
+  carriedIn: FieldCarrier,
+): ReadonlyArray<Field> => {
+  const members = union._tag === "Union" ? (union.types ?? []) : [union];
+  if (members.some((member) => member._tag !== "Objects")) {
+    throw new Error(`${name}: a oneOf row needs a field that is an object or a union of objects`);
+  }
+  const literals = members.map(readLiteralKeys);
+  const membersByEntry = row.oneOf.map((entry) => {
+    const member = members[literals.findIndex((one) => hasSameEntries(one, entry.fixed))];
+    if (member === undefined) {
+      throw new Error(
+        `${name}: the fixed values ${JSON.stringify(entry.fixed)} are the literal keys of no member of the union`,
+      );
+    }
+    return member;
+  });
+  const unmatched = members.findIndex((member) => !membersByEntry.includes(member));
+  if (unmatched !== -1) {
+    throw new Error(
+      `${name}: no entry stands for the member ${JSON.stringify(literals[unmatched])} of the union`,
+    );
+  }
+
+  const keys = new Map<string, { readonly type: Ast; readonly field: Field }>();
+  for (const [index, entry] of row.oneOf.entries()) {
+    const member = membersByEntry[index]!;
+    for (const key of Object.keys(entry.fixed)) readObjectKey(name, member, key);
+    const uncovered = (member.propertySignatures ?? []).find(
+      (property) =>
+        property.type.context?.isOptional !== true &&
+        !Object.hasOwn(entry.fixed, String(property.name)) &&
+        !Object.hasOwn(entry.flags, String(property.name)),
+    );
+    if (uncovered !== undefined) {
+      throw new Error(
+        `${name}: ${String(uncovered.name)} is required by the object, but the row gives it neither a flag nor a fixed value`,
+      );
+    }
+    if (!Object.values(entry.flags).some((flag) => flag.flag === entry.selector)) {
+      throw new Error(`${name}: the selector --${entry.selector} is not a flag of its entry`);
+    }
+    for (const [key, keyRow] of Object.entries(entry.flags)) {
+      const type = readObjectKey(name, member, key);
+      const known = keys.get(key);
+      if (known === undefined) {
+        if (readElementType(type) !== undefined) {
+          throw new Error(`${name}: ${key} holds a list, and an object flag takes one value`);
+        }
+        keys.set(key, {
+          type,
+          field: { ...buildField(key, type, keyRow, carriedIn, undefined), within: name },
+        });
+      } else if (!hasSameSchema(known.type, type)) {
+        throw new Error(
+          `${name}: ${key} has a different schema in different entries, so one flag cannot fill it`,
+        );
+      }
+    }
+  }
+  return [...keys.values()].map((one) => one.field);
 };
 
 /**
@@ -408,6 +577,7 @@ const buildField = (
  * - A field with no row is missing from the contract's CLI table, so this
  *   throws rather than creating a flag with no name.
  * - A field whose row is hidden gets no flag.
+ * - A field whose row is `oneOf` becomes one field per flag of each entry.
  * - A field whose row asks for named values throws when its schema is not a
  *   record of text values, or when the row also makes it positional,
  *   because the table is wrong.
@@ -454,6 +624,7 @@ const buildFields = (
             `${id}: ${name} takes named values, but its schema is not a record of text`,
           );
         }
+        if ("oneOf" in row) return buildOneOfFields(name, type, row, carriedIn);
         return [buildField(name, type, row, carriedIn, readFieldSchema(name))];
       })
   );
@@ -565,6 +736,161 @@ const listPathParams = (path: string): ReadonlyArray<string> =>
 /** The CLI table, typed by its row type rather than by its literal type. */
 const TABLE: Record<OperationId, CliRow> = CLI;
 
+/**
+ * Lists the properties of a struct schema, or of a union of structs, as
+ * `[name, type]`, each name once.
+ */
+const readProperties = (schema: unknown): ReadonlyArray<readonly [string, Ast]> => {
+  const struct = schema as StructSchema | undefined;
+  return mergeProperties(struct?.members ?? (struct === undefined ? [] : [struct]));
+};
+
+/**
+ * Returns one choice for each `oneOf` row that has fields in the payload,
+ * with the entries' flags. `payloadSchema` tells whether the request may
+ * leave the field out.
+ */
+const buildChoices = (
+  rows: Record<string, FieldRow>,
+  payload: ReadonlyArray<Field>,
+  payloadSchema: unknown,
+): ReadonlyArray<ObjectChoice> =>
+  Object.entries(rows).flatMap(([name, row]) => {
+    if (!("oneOf" in row) || !payload.some((field) => field.within === name)) return [];
+    const keyField = (key: string): Field =>
+      payload.find((field) => field.within === name && field.name === key)!;
+    return [
+      {
+        field: name,
+        optional:
+          readProperties(payloadSchema).find(([property]) => property === name)?.[1].context
+            ?.isOptional === true,
+        entries: row.oneOf.map((entry) => {
+          const flags = Object.entries(entry.flags).map(([key, keyRow]) => ({
+            field: keyField(key),
+            help: keyRow.help,
+          }));
+          return {
+            help: entry.help,
+            fixed: entry.fixed,
+            selector: flags.find((flag) => flag.field.spelling === entry.selector)!.field,
+            flags,
+          };
+        }),
+      },
+    ];
+  });
+
+/** The schemas of one endpoint of the API, which a command is built from. */
+export interface EndpointSchemas {
+  readonly params?: unknown;
+  readonly query?: unknown;
+  readonly payload?: unknown;
+  readonly success?: unknown;
+  readonly error?: unknown;
+}
+
+/**
+ * Builds the command of one operation from its CLI row, its route and its
+ * schemas. Throws when the row and the schemas disagree: a field with no row,
+ * a row for a field the operation lacks, or a row form the field's schema
+ * cannot take. It is exported so a test can build a command from a schema it
+ * defines itself.
+ */
+export const buildCommand = (
+  id: OperationId,
+  row: Exclude<CliRow, { readonly hidden: true }>,
+  operation: Pick<Operation, "requires" | "method" | "path">,
+  each: EndpointSchemas,
+): Command => {
+  const payloadSchema = readPayloadSchema(each.payload);
+  // A row that lists a field the operation does not have is out of date,
+  // hidden or not. Throw here, as `buildFields` throws for a field with no
+  // row, so the CLI table and the schemas always list the same fields.
+  const taken = new Set(
+    [each.params, payloadSchema, each.query].flatMap((schema) =>
+      readProperties(schema).map(([name]) => name),
+    ),
+  );
+  const stale = Object.keys(row.fields).find((name) => !taken.has(name));
+  if (stale !== undefined) {
+    throw new Error(
+      `${id}: the CLI row lists the field ${stale}, but the operation has no such field`,
+    );
+  }
+
+  const params = new Map(
+    buildFields(id, each.params, row.fields, "path").map((field) => [field.name, field]),
+  );
+  const payload = buildFields(id, payloadSchema, row.fields, "payload");
+  const query = buildFields(id, each.query, row.fields, "query");
+  const inPath = listPathParams(operation.path);
+  // A route parameter the params schema does not declare is a mistake in
+  // the contract, not a string: the CLI would send a value nothing
+  // decodes. Payload positionals come after the route parameters, so a
+  // command whose only argument is its content takes it as a positional,
+  // not as a flag. A query field comes last, and is positional when its row
+  // says so: a skill folder, or the words of a search that is a GET.
+  const positionals = [
+    ...inPath.map((name) => params.get(name)!),
+    ...payload.filter((field) => field.positional),
+    ...query.filter((field) => field.positional),
+  ];
+  // A skill folder's archive is the whole request body, so a JSON field
+  // sent beside it would be dropped without a word. The command sends
+  // the skill's name in the query string and takes no other argument.
+  const folder = positionals.find((field) => field.readsSkillFolder);
+  if (
+    folder !== undefined &&
+    (folder.carriedIn !== "query" || positionals.length > 1 || payload.length > 0)
+  ) {
+    throw new Error(
+      `${id}: ${folder.name} reads a skill folder, so it must be a query field and the only positional, and the operation can have no payload fields`,
+    );
+  }
+  // A positional that may be left out must come after the required ones,
+  // or the words given could not tell which one they are.
+  const lateRequired = positionals.findIndex(
+    (field, index) => !field.optional && positionals.slice(0, index).some((one) => one.optional),
+  );
+  if (lateRequired !== -1) {
+    throw new Error(
+      `${id}: ${positionals[lateRequired]!.name} is required but follows an optional positional`,
+    );
+  }
+  // A list positional takes every word left, so a positional after it
+  // could never be given.
+  const early = positionals.slice(0, -1).find((field) => field.repeated);
+  if (early !== undefined) {
+    throw new Error(`${id}: ${early.name} takes a list, so it must be the last positional`);
+  }
+
+  return {
+    id,
+    words: row.command.split(" "),
+    spelling: row.command,
+    requires: operation.requires,
+    method: operation.method,
+    path: operation.path,
+    positionals,
+    payload: payload.filter((field) => !field.positional),
+    choices: buildChoices(row.fields, payload, payloadSchema),
+    query: query.filter((field) => !field.positional),
+    queryFieldNames: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast),
+    // `limit` and `cursor` always come together, and `sort` comes with
+    // them unless the list has one fixed order, so `limit` alone shows
+    // that the operation is paged.
+    paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("limit"),
+    sortFields: readSortFields(each.query),
+    pageQuery: readPageQuery(each.query),
+    help: row.help,
+    examples: row.examples,
+    codes: listErrorCodes(each.error),
+    meanings: row.errors ?? {},
+    returns: readReturns(each.success),
+  };
+};
+
 /** Builds every visible command from the API and the CLI table. Throws when the two disagree. */
 const buildCommands = (): ReadonlyArray<Command> => {
   const commands: Array<Command> = [];
@@ -575,104 +901,7 @@ const buildCommands = (): ReadonlyArray<Command> => {
       const id = `${group.identifier}.${endpoint.identifier}` as OperationId;
       const row = TABLE[id];
       if ("hidden" in row) return;
-
-      const operation = OPERATIONS[id];
-      const each = endpoint as {
-        params?: unknown;
-        query?: unknown;
-        payload?: unknown;
-        success?: unknown;
-        error?: unknown;
-      };
-      const payloadSchema = readPayloadSchema(each.payload);
-      // A row that lists a field the operation does not have is out of date,
-      // hidden or not. Throw here, as `buildFields` throws for a field with no
-      // row, so the CLI table and the schemas always list the same fields.
-      const taken = new Set(
-        [each.params, payloadSchema, each.query].flatMap((schema) => {
-          const struct = schema as StructSchema | undefined;
-          return mergeProperties(struct?.members ?? (struct === undefined ? [] : [struct])).map(
-            ([name]) => name,
-          );
-        }),
-      );
-      const stale = Object.keys(row.fields).find((name) => !taken.has(name));
-      if (stale !== undefined) {
-        throw new Error(
-          `${id}: the CLI row lists the field ${stale}, but the operation has no such field`,
-        );
-      }
-
-      const params = new Map(
-        buildFields(id, each.params, row.fields, "path").map((field) => [field.name, field]),
-      );
-      const payload = buildFields(id, payloadSchema, row.fields, "payload");
-      const query = buildFields(id, each.query, row.fields, "query");
-      const inPath = listPathParams(operation.path);
-      // A route parameter the params schema does not declare is a mistake in
-      // the contract, not a string: the CLI would send a value nothing
-      // decodes. Payload positionals come after the route parameters, so a
-      // command whose only argument is its content takes it as a positional,
-      // not as a flag. A query field comes last, and is positional when its row
-      // says so: a skill folder, or the words of a search that is a GET.
-      const positionals = [
-        ...inPath.map((name) => params.get(name)!),
-        ...payload.filter((field) => field.positional),
-        ...query.filter((field) => field.positional),
-      ];
-      // A skill folder's archive is the whole request body, so a JSON field
-      // sent beside it would be dropped without a word. The command sends
-      // the skill's name in the query string and takes no other argument.
-      const folder = positionals.find((field) => field.readsSkillFolder);
-      if (
-        folder !== undefined &&
-        (folder.carriedIn !== "query" || positionals.length > 1 || payload.length > 0)
-      ) {
-        throw new Error(
-          `${id}: ${folder.name} reads a skill folder, so it must be a query field and the only positional, and the operation can have no payload fields`,
-        );
-      }
-      // A positional that may be left out must come after the required ones,
-      // or the words given could not tell which one they are.
-      const lateRequired = positionals.findIndex(
-        (field, index) =>
-          !field.optional && positionals.slice(0, index).some((one) => one.optional),
-      );
-      if (lateRequired !== -1) {
-        throw new Error(
-          `${id}: ${positionals[lateRequired]!.name} is required but follows an optional positional`,
-        );
-      }
-      // A list positional takes every word left, so a positional after it
-      // could never be given.
-      const early = positionals.slice(0, -1).find((field) => field.repeated);
-      if (early !== undefined) {
-        throw new Error(`${id}: ${early.name} takes a list, so it must be the last positional`);
-      }
-
-      commands.push({
-        id,
-        words: row.command.split(" "),
-        spelling: row.command,
-        requires: operation.requires,
-        method: operation.method,
-        path: operation.path,
-        positionals,
-        payload: payload.filter((field) => !field.positional),
-        query: query.filter((field) => !field.positional),
-        queryFieldNames: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast),
-        // `limit` and `cursor` always come together, and `sort` comes with
-        // them unless the list has one fixed order, so `limit` alone shows
-        // that the operation is paged.
-        paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("limit"),
-        sortFields: readSortFields(each.query),
-        pageQuery: readPageQuery(each.query),
-        help: row.help,
-        examples: row.examples,
-        codes: listErrorCodes(each.error),
-        meanings: row.errors ?? {},
-        returns: readReturns(each.success),
-      });
+      commands.push(buildCommand(id, row, OPERATIONS[id], endpoint));
     },
   });
 

@@ -22,6 +22,7 @@ The words are defined in [GLOSSARY.md](../../GLOSSARY.md): **Edit Overlap**, **D
 Three points differ from the decisions of #663, each for a reason this document gives where it applies:
 
 - the operations follow the vocabulary of spec 11 (`discussion.query`, `wikiPage.create`; section 3);
+- *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* a Wiki Page can be archived and restored (sections 2.3 and 3.3), and a session that may write pages is told what belongs in the Wiki and what does not (section 7.1). #663 had no way for a page to leave the Wiki. After five weeks the Wiki of this repository held 102 pages, 69 of them named after a ticket, and none could be removed;
 - a Wiki revision records no commit (section 2.3);
 - the `assistant` profile holds the new grants too, so an assistant can still spawn a worker Agent (section 3.4).
 
@@ -34,7 +35,7 @@ Three points differ from the decisions of #663, each for a reason this document 
 - **Bounded attention.** *(Added 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744).)* A turn that began with a Discussion Input never ends in another one, so Discussions take at most one turn after each turn of other work, however many Discussions a session takes part in. A session that edits many files meets many sessions, and its task still comes first.
 - **Notes, not orders.** Posts and Wiki Pages are information other agents wrote. The prompt states this, and nothing in this document puts their text into another session's instructions unmarked.
 - **Small prompts.** A session gets a short paragraph and at most six short lines: one per repository for five of them, and one that counts the rest. It never gets the Wiki's index or any page's body.
-- **Stamped.** Every Post and every Wiki revision records its actor and its time, and none is ever edited or deleted. Shared knowledge can be wrong or planted; the record of who wrote what, and when, is the answer v1 gives (section 10).
+- **Stamped.** Every Post and every Wiki revision records its actor and its time, and none is ever edited or deleted. Shared knowledge can be wrong or planted; the record of who wrote what, and when, is the answer v1 gives (section 10). *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* A Wiki Page can be archived (section 2.3). An archived page is not deleted: its revisions stay as they are, and it is still read by its id.
 - **Ready for colleagues.** Nothing assumes one user. Rows are keyed by repository and stamped with actors, so sessions of other users can later join the same Discussions and Wiki without a new model.
 
 ## 2. Records
@@ -110,6 +111,13 @@ interface WikiPageSummary {        // a row of wikiPage.query
   updatedAt: string;               // the current revision's time
   updatedBy: Actor;                // the current revision's actor
   createdAt: string;
+  archived?: WikiPageArchived;     // set while the page is archived; absent otherwise
+}
+
+interface WikiPageArchived {
+  at: string;
+  by: Actor;
+  reason: string;                  // one line, at most 200 characters (MAX_WIKI_ARCHIVE_REASON_LENGTH)
 }
 
 interface WikiPage extends WikiPageSummary {       // wikiPage.read
@@ -127,9 +135,17 @@ interface WikiRevision {
 
 - **One Wiki per repository**: the set of Wiki Pages of one Resource. The Wiki is not a record of its own; it has no id and no settings.
 - **A slug is unique in its Wiki** and never changes.
-- **Every write is a revision.** A revision keeps the whole page as it was written: title, summary and body, with its actor and time. Revisions are numbered 1, 2, 3 per page, and are never changed or deleted.
-- **A Wiki holds at most 500 pages** (`MAX_WIKI_PAGES`). The 501st is refused as `cap_exceeded`, with the message "This wiki has 500 pages, the most it can hold. Update an existing page instead."
+- **Every write is a revision.** A revision keeps the whole page as it was written: title, summary and body, with its actor and time. Revisions are numbered 1, 2, 3 per page, and are never changed or deleted. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* "Every write" means every write of a page's content: a create or an update. Archiving and restoring store no revision.
+- **A Wiki holds at most 500 pages** (`MAX_WIKI_PAGES`). The 501st is refused as `cap_exceeded`, with the message ~~"This wiki has 500 pages, the most it can hold. Update an existing page instead."~~ "This wiki has 500 pages, the most it can hold. Update an existing page instead, or archive one that no longer helps with `hercule wiki-page archive`." *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* Archived pages are not counted.
 - **No delete.** A page that is wrong is rewritten; its history shows what it said before.
+- *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* **A page that no longer helps is archived.** `wikiPage.archive` marks the page with who archived it, when, and a one-line reason. The reason names the page that took over the subject when there is one, so a reader who reaches the archived page later is sent there. An archived page:
+  - is left out of `wikiPage.query` unless the query asks for archived pages, and is neither counted nor named on the prompt line (section 7.1);
+  - does not count towards the 500 pages;
+  - is still read by `wikiPage.read`, and carries its mark; every one of its revisions stays readable;
+  - takes no update;
+  - keeps its slug, so no new page can take it.
+
+  The table keeps the three parts of the mark together: a page has all of them or none. `wikiPage.restore` clears the mark, and the page is listed, counted and updated again. Archiving stores no revision: the page's `revision`, `updatedAt` and `updatedBy` stay those of its last write. Archive, not delete, because the history is what answers a planted page ([ADR 0043](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)): a deleted page would take with it the record of what it said and who wrote it.
 - **No commit.** A revision records no commit. Its actor names the session, and its time places it in `git log`. Asking every writer for the commit its checkout was on costs a step and is easily forgotten ([ADR 0043](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)).
 
 ### 2.4 Edit
@@ -151,7 +167,7 @@ Under unscoped grants, a caller holding `discussion.read` also learns which sess
 `discussion.query`, `discussion.create`, `wikiPage.query` and `wikiPage.create` take an optional `resourceId`.
 
 - **`discussion.create` and `wikiPage.create`** need a repository. When `resourceId` is absent and the caller is a session, the operation takes the one repository checked out in the session's workspace. A session with no repository checkout, or with several, is refused as `validation` at path `["resourceId"]`. The message lists the repositories checked out, each as its canonical remote and full id, and says to pass `--resource <id>`. A caller that is not a session must always give it.
-- **`discussion.query` and `wikiPage.query`** without `resourceId` list every repository's Discussions or pages, as every `query` with no filter lists everything ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3). The prompt line gives each repository's full id (section 7.1), so an agent can scope a listing without `resource.read`.
+- **`discussion.query` and `wikiPage.query`** without `resourceId` list every repository's Discussions or pages, as every `query` with no filter lists everything ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3). The prompt line gives each repository's full id (section 7.1), so an agent can scope a listing without `resource.read`. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* One filter has a default that is not "everything": `wikiPage.query` without `archived` lists only the pages that are not archived, as `initiative.query` without `closed` lists only the open Initiatives. Leaving archived pages out of the plain listing is what archiving is for. `archived: "include"` lists every page.
 - **Unknown or deleted repository.** A `resourceId` that names no Resource is `not_found` on `create`, and matches nothing on `query`. One that names a Resource whose kind is not `repo` is `validation`. `resource.delete` deletes no Discussion, Post or Wiki Page: they keep their `resourceId` and `repository`, as every historical reference keeps the id of a hard-deleted row ([./02-domain-model.md](./02-domain-model.md) Deletion rules), and stay readable.
 
 ### 3.3 The operation table
@@ -162,24 +178,29 @@ Under unscoped grants, a caller holding `discussion.read` also learns which sess
 | `discussion.read` | `{ discussionId, fromPostId? }` -> `{ discussion: Discussion, posts: Post[] }`, Posts oldest first; with `fromPostId`, only that Post and the ones after it | `discussion.read` | `GET /api/v1/discussions/{id}` |
 | `discussion.create` | `{ resourceId?, subject, text }` -> `{ discussion: Discussion, post: Post }`; `text` is the first Post | `discussion.write` | `POST /api/v1/discussions` |
 | `discussion.post` | `{ discussionId, text }` -> the `Post` | `discussion.write` | `POST /api/v1/discussions/{id}/post` |
-| `wikiPage.query` | `{ resourceId?, limit?, cursor?, sort? }` -> `items: WikiPageSummary[]`; sort fields `updatedAt`, `title`; newest `updatedAt` first by default | `wiki.read` | `GET /api/v1/wiki-pages` |
+| `wikiPage.query` | `{ resourceId?, archived?, limit?, cursor?, sort? }` -> `items: WikiPageSummary[]`; sort fields `updatedAt`, `title`; newest `updatedAt` first by default. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* `archived` is `"only"` or `"include"`: without it, only the pages that are not archived; with `only`, the archived pages; with `include`, every page. `createdAt` is a third sort field | `wiki.read` | `GET /api/v1/wiki-pages` |
 | `wikiPage.read` | `{ pageId, revision? }` -> `{ page: WikiPage, revisions: WikiRevision[] }`; the page as of `revision` when given, else the current one; `revisions` are the 50 newest, newest first | `wiki.read` | `GET /api/v1/wiki-pages/{id}` |
 | `wikiPage.create` | `{ resourceId?, slug, title, summary, body }` -> the `WikiPage`, revision 1 | `wiki.write` | `POST /api/v1/wiki-pages` |
 | `wikiPage.update` | `{ pageId, expectedRevision, title?, summary?, body }` -> the `WikiPage` | `wiki.write` | `PATCH /api/v1/wiki-pages/{id}` |
+| `wikiPage.archive` *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* | `{ pageId, expectedRevision, reason }` -> the `WikiPageSummary`, with its `archived` mark | `wiki.write` | `POST /api/v1/wiki-pages/{id}/archive` |
+| `wikiPage.restore` *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* | `{ pageId }` -> the `WikiPageSummary`, without the mark | `wiki.write` | `POST /api/v1/wiki-pages/{id}/restore` |
 
 - **`discussion.read` returns every Post, or the ones from `fromPostId` on.** A Discussion holds at most 200 counted and 200 system Posts of at most 8,000 characters, so the read is bounded without paging. A Discussion Input names the first Post the session has not been told about, so an agent reads only what is new. A `fromPostId` that names no Post of this Discussion is `validation`.
 - **`discussion.create`** makes the calling session a participant. It sends nothing to anyone, because a new general Discussion has no other participant. Other sessions find it with `discussion.query`.
 - **`discussion.post`** makes the calling session a participant, if it was not one. Then every other participant gets the new Post through its Discussion Input (section 5.3).
-- **`wikiPage.create`** is refused as `conflict` when the slug is taken, with the message "A page with this slug already exists: <id>. Read it with `hercule wiki-page read <id>`, then change it with `hercule wiki-page update`."
-- **`wikiPage.update`** writes revision `expectedRevision + 1`. When the page's current revision is not `expectedRevision`, it is refused as `conflict`, with the message "The page changed since you read it (now revision <current>). Read it again, merge your change into it, and update with `--expected-revision <current>`." Nothing is merged for the caller. `body` is always given whole; `title` and `summary` keep their values when absent. `expectedRevision` is spelled as memory's `expectedVersion` is, for the same check ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 6.4).
+- **`wikiPage.create`** is refused as `conflict` when the slug is taken, with the message "A page with this slug already exists: <id>. Read it with `hercule wiki-page read <id>`, then change it with `hercule wiki-page update`." *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* When the page that holds the slug is archived, the message is "A page with this slug already exists and is archived: <id>. Read it with `hercule wiki-page read <id>`, then bring it back with `hercule wiki-page restore <id>`, or choose another slug."
+- **`wikiPage.update`** writes revision `expectedRevision + 1`. When the page's current revision is not `expectedRevision`, it is refused as `conflict`, with the message "The page changed since you read it (now revision <current>). Read it again, merge your change into it, and update with `--expected-revision <current>`." Nothing is merged for the caller. `body` is always given whole; `title` and `summary` keep their values when absent. `expectedRevision` is spelled as memory's `expectedVersion` is, for the same check ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 6.4). *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* An update of an archived page is refused as `invalid_state`, with the message "This page is archived, and an archived page takes no update. Bring it back first with `hercule wiki-page restore <id>`."
+- *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* **`wikiPage.archive`** takes the revision the caller read, as an update does, so nobody archives a page for what it no longer says. When the page has moved past it, the archive is refused as `conflict`, with the message "The page changed since you read it (now revision <current>). Read it again, and archive it with `--expected-revision <current>` if it should still go." A page that is already archived is refused as `invalid_state`, and the message names who archived it and the reason. `reason` is one line, not blank, at most 200 characters.
+- *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* **`wikiPage.restore`** is refused as `invalid_state` when the page is not archived, and as `cap_exceeded` when the Wiki already holds 500 pages that are not archived.
 - **Validation.** Subjects, titles and summaries are one line and not blank. A Post's text and a page's body are not blank. Every length cap above is `validation`.
-- **Errors** follow the fixed order of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5: `forbidden`, then `validation`, then `not_found`, then `conflict` and `cap_exceeded`.
+- **Errors** follow the fixed order of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5: `forbidden`, then `validation`, then `not_found`, then `conflict` and `cap_exceeded`. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* For a Wiki Page, `invalid_state` comes after `conflict` and before `cap_exceeded`.
 - **Audit.** Each change writes an audit entry in its transaction, stamped with its actor ([./08-events-and-connections.md](./08-events-and-connections.md) section 3):
   - `discussion.created { discussionId, resourceId }`, written with the actor `system` when an Edit Overlap opens the Discussion;
   - `discussion.posted { discussionId, postId }`, for every Post, system Posts included;
-  - `wikiPage.written { pageId, resourceId, revision }`, for a create and for an update.
+  - `wikiPage.written { pageId, resourceId, revision }`, for a create and for an update;
+  - *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* `wikiPage.archived { pageId, resourceId }` and `wikiPage.restored { pageId, resourceId }`. Both announce the page on the `wikiPage` topic as updated.
 
-  An entry holds ids only, never a Post's text or a page's body. These entries are audit entries, never Platform Events: no trigger or subscription can fire on them, so a Post cannot start a run that posts again.
+  An entry holds ids only, never a Post's text, a page's body or an archive's reason. These entries are audit entries, never Platform Events: no trigger or subscription can fire on them, so a Post cannot start a run that posts again.
 - **Live topics.** Two new mutable topics, `discussion` and `wikiPage`, announce a created or changed Discussion or page by id after the commit. A new Post, a joined participant and a newly shared file announce their Discussion as updated. The topics are added to the table of [./14-web-app.md](./14-web-app.md); like every mutable topic they carry ids only and serve the user's own clients.
 
 ### 3.4 Grants and profiles
@@ -189,7 +210,9 @@ Two new grant families, owned by [./13-security.md](./13-security.md) section 6.
 | Family | Covers | Verbs |
 |---|---|---|
 | `discussion` | `discussion.*` | `read`, `write` (create, post) |
-| `wiki` | `wikiPage.*` | `read`, `write` (create, update) |
+| `wiki` | `wikiPage.*` | `read`, `write` (create, update; *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* archive, restore) |
+
+*(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* A write answers with the page it changed, also to a caller that holds `wiki.write` without `wiki.read`: `create` and `update` return the page, and `archive` and `restore` its summary. A refused second archive names who archived the page and the reason. No write returns a body the caller did not send.
 
 The `assistant`, `worker` and `unrestricted` profiles hold all four grants. #663 named only `worker` and `unrestricted`. The `assistant` profile needs them too, because a session may spawn from an Agent only when the Agent's profile grants nothing beyond its own ([./13-security.md](./13-security.md) section 6.3). An assistant without the grants could no longer spawn a worker Agent. The migrations that add the grants to existing databases are described in [./13-security.md](./13-security.md) section 6.2.
 
@@ -203,16 +226,19 @@ Each operation has its row in the contract's CLI table ([./11-public-api-and-age
 | `discussion.read` | `hercule discussion read <discussion-id> [--from <post-id>]` |
 | `discussion.create` | `echo "<first post>" \| hercule discussion create --subject "<subject>" [--resource <id>]` |
 | `discussion.post` | `echo "<text>" \| hercule discussion post <discussion-id>` |
-| `wikiPage.query` | `hercule wiki-page list [--resource <id>]` |
+| `wikiPage.query` | `hercule wiki-page list [--resource <id>] [--archived only\|include]` |
 | `wikiPage.read` | `hercule wiki-page read <page-id> [--revision <n>]` |
 | `wikiPage.create` | `hercule wiki-page create --slug <slug> --title "<title>" --summary "<summary>" [--resource <id>] < page.md` |
 | `wikiPage.update` | `hercule wiki-page update <page-id> --expected-revision <n> [--title "<title>"] [--summary "<summary>"] < page.md` |
+| `wikiPage.archive` *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* | `hercule wiki-page archive <page-id> --expected-revision <n> --reason "<reason>"` |
+| `wikiPage.restore` *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* | `hercule wiki-page restore <page-id>` |
 
 - The text of a Post and the body of a page come from stdin, by the one-content-channel rule.
-- A Discussion id and a page id take a full id or a tail of eight or more characters, resolved through `discussion.query` and `wikiPage.query`. A Post id (`--from`), a session id (`--session`) and a Resource id (`--resource`) take the full id: resolving a Resource's tail needs `resource.read`, which the `worker` profile lacks, and the prompt line and the Discussion Input print full ids.
+- A Discussion id and a page id take a full id or a tail of eight or more characters, resolved through `discussion.query` and `wikiPage.query`. A Post id (`--from`), a session id (`--session`) and a Resource id (`--resource`) take the full id: resolving a Resource's tail needs `resource.read`, which the `worker` profile lacks, and the prompt line and the Discussion Input print full ids. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* A page id's tail is matched in one listing of every page, archived or not (`archived: "include"`), for `read`, `update`, `archive` and `restore` alike. A tail then names the same page whatever the page's state, and the operation decides whether that state allows it. It is one listing, not one per state: a page archived or restored between two listings would be in neither, and a tail that two pages share would then match the other one alone. The listing is read in creation order, because a page's `createdAt` never changes while the pages are read, where an `updatedAt` does. The receipt of `archive` prints the restore command with the full id.
 - Human output prints each row's `repository`, never the Resource's id alone.
 - Human output of `discussion read` prints the Discussion's subject and repository, its shared files, then each Post as its actor (`session <id tail>`, `user`, `run <id tail>`, `plugin <id>` or `system`), its time and its text. Every Post's text is printed between the lines `--- post <id> by <actor> ---` and `--- end of post ---`, so an agent reads where another agent's words start and end.
-- Human output of `wiki-page read` prints the page's title, summary and revision, then its body between `--- wiki page <slug>, revision <n>, by <actor> ---` and `--- end of page ---`, then one line per revision.
+- Human output of `wiki-page read` prints the page's title, summary and revision, then its body between `--- wiki page <slug>, revision <n>, by <actor> ---` and `--- end of page ---`, then one line per revision. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* For an archived page, a line `archived` after the revision gives when it was archived, by whom and the reason.
+- *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* The help of `wiki-page create` and `wiki-page update` quotes the text of section 7.1 whole: the help is what an agent reads at the moment it writes.
 
 ## 4. Edit Overlaps
 
@@ -481,8 +507,16 @@ Each repository has a wiki that agents keep for the agents after them. The repos
 With `wiki.write` as well, added to the part above:
 
 ```text
-When you learn something a future agent on this repository would need, write it down. When a human allows an exception to a rule of the repository, record what was allowed, by whom and when.
+The wiki holds lasting knowledge about the repository, one page per subject: how something is run or checked, a trap in a tool, a fact about a machine or an outside service. Record what an agent doing different work here would need, even if you learned it while working on a ticket. It is not a worklog: leave out ticket, pull request and thread recaps, as well as dated entries. List the pages before you write. Add to the page on the subject, and create a page only when there is none. Name a page for its subject. A decision or a rule belongs in the repository's own docs, not in the wiki. When a human allows an exception to a rule of the repository, record what was allowed, by whom and when. Correct a page that is wrong, and archive one that no longer helps.
 ```
+
+*(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* It said: "When you learn something a future agent on this repository would need, write it down. When a human allows an exception to a rule of the repository, record what was allowed, by whom and when." That text never said what does not belong, nor to look for an existing page first. Sessions wrote one page per ticket ("The Inbox pane (#1123): where things are, and the traps"). Each new session was then shown five such titles on its repository's line and wrote one more.
+
+- **One text, quoted everywhere.** The contract holds it as `WIKI_WRITING_RULES`. This part of the paragraph, the `hercule` skill and the help of `wiki-page create` and `wiki-page update` quote it whole, so the rule cannot read differently in two places. To change the rule, change that text and this section.
+- **It asks for what was learned on a ticket, and refuses the ticket's recap.** A trap found while working on a ticket belongs in the Wiki when an agent doing other work would hit it. What was built, reviewed and left over does not.
+- **Wording is the only guard for now** (decided by Rogier, 2026-11-20). `wikiPage.create` refuses no title or slug for looking like a ticket or a date: a wrong refusal costs more than a worklog page that can be archived.
+- **The part names no other place for ticket notes.** Where the notes of one ticket or Task belong is not decided yet, and the part does not send them to a Task.
+- **One session cannot see the health of the whole Wiki**, whatever it is told. Looking after the Wiki as a whole is the moderation left for after v1 (below).
 
 Always, after the parts:
 
@@ -497,7 +531,7 @@ Then one line per repository checked out, which gives the id the commands above 
 ```
 
 - The `Wiki:` part is there only with `wiki.read`. Without it the line ends after the id.
-- **At most 5 titles,** the most recently changed first. A Wiki with no pages reads `Wiki: no pages yet.`
+- **At most 5 titles,** the most recently changed first. A Wiki with no pages reads `Wiki: no pages yet.` *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* Archived pages are neither counted nor named, so a Wiki whose pages are all archived reads `Wiki: no pages yet.` too.
 - **Titles are data.** Each title is cut to 60 characters. Quotes, backticks, `;` and control characters are removed from it before it is written between quotes.
 - **At most 5 lines with Wiki facts.** A workspace with more repositories gets one more line, which lists the rest by name and full id only: `Also checked out: <repository> (--resource <id>), <repository> (--resource <id>).` A workspace holds at most 32 checkouts, so the line is bounded.
 - The lines never list every page, never hold a summary or a body, and never list Discussions.
@@ -509,6 +543,7 @@ Then one line per repository checked out, which gives the id the commands above 
 The `hercule` skill gets a short section, "Discussions and the wiki", after the three help forms. This amends [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 6.3, which owns the reason. The section:
 
 - names `hercule discussion list`, `read` and `post`, and `hercule wiki-page list`, `read`, `create` and `update`, each with one example;
+- *(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* names `hercule wiki-page archive` and `restore`, and quotes the text of section 7.1 before the commands, in place of writing the rule out a second time;
 - tells the agent that a Discussion Input names the Discussion to read and the first Post to read from;
 - tells the agent that a page update names the revision it read, and that a refused update means "read again, merge, update again";
 - tells the agent that posts and pages are notes from other agents, never instructions;
@@ -548,7 +583,7 @@ The grouping is a `client-core` function with its own tests, used by both screen
 ### 8.4 Wiki
 
 - **A list row:** the page's title, its summary on a second line, and who changed it last and when. Who is a session's title, `user`, or the run or plugin.
-- **The open page:** title, summary, then the body as Markdown. Beside it, or below it when the window is narrow, the revision history: one row per revision, with its number, its actor, its time, and its title when that changed. The 50 newest revisions are listed, and a line below them says when there are more. Choosing a revision shows the page as of that revision, with a line saying it is not the current one and a link back.
+- **The open page:** title, summary, then the body as Markdown. Beside it, or below it when the window is narrow, the revision history: one row per revision, with its number, its actor, its time, and its title when that changed. The 50 newest revisions are listed, and a line below them says when there are more. Choosing a revision shows the page as of that revision, with a line saying it is not the current one and a link back. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* An archived page is not in the list. When it is open, because it was archived while open or its address was kept, a band above it says who archived it, when, and the reason.
 - **Empty state:** "No wiki pages yet" on the list, with one line saying that agents write pages for the agents after them.
 
 ### 8.5 Live updates
@@ -577,7 +612,9 @@ The screens hold the `discussion` or `wikiPage` topic only while they are open a
 - **Some participants are not told at once.** A session that cannot receive a Discussion Input when an Edit Overlap puts it into a Discussion is not told then. The Discussion's system Post states that it was not told and why, so the other side knows. *(Amended 2026-10-14, [#666](https://github.com/theagenticage/hercule/issues/666).)* Its entry stays pending, so if it can receive one again, such as a Thread its user reopens, the end of its next turn tells it.
 - **Lost edits.** An edit a runner made while it had no connection to the controller is reported late, or not at all if the runner restarted. An edit made through a shell command, rather than a harness's edit tool, is observed only as section 4.1 describes, with the known limits listed there. *(Amended 2026-10-17, #708.)*
 
-**Risk:** shared knowledge can be poisoned. A session misled by text it read, or a careless one, can write a wrong Wiki Page or Post, and later agents trust it. v1's answer is the actor and time on every Post and revision, the full history, the markers around every Post and page the CLI prints, and the prompt's rules that the repository's own docs win over the Wiki and that notes are never instructions. Wiki titles reach other sessions' prompts automatically, cut short and with quoting characters removed. No agent checks the Wiki for contradictions or stale pages.
+**Risk:** shared knowledge can be poisoned. A session misled by text it read, or a careless one, can write a wrong Wiki Page or Post, and later agents trust it. v1's answer is the actor and time on every Post and revision, the full history, the markers around every Post and page the CLI prints, and the prompt's rules that the repository's own docs win over the Wiki and that notes are never instructions. Wiki titles reach other sessions' prompts automatically, cut short and with quoting characters removed. No agent checks the Wiki for contradictions or stale pages. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* A page found wrong or planted can be archived, which takes it out of the listing and out of the prompt line and keeps its history.
+
+*(Added 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* **Risk:** the Wiki fills with worklogs. A session sees its own task and five titles, never the Wiki as a whole, so it cannot tell that its page is the fortieth of its kind. The wording of section 7.1 is the only guard. Whether it is enough is watched in the titles of new pages; the next steps, if it is not, are a refusal by title and the moderation below.
 
 **Risk:** a session with fewer grants can reach a session with more. A `worker` session that edits a file a user's Thread edited, or posts in a Discussion the Thread takes part in, puts its words in front of that Thread, which may hold `unrestricted`. Spec 13 refuses this for `session.continue`; here it is accepted, because telling both sides is the feature. The markers and the prompt's "never instructions" rule are the guard.
 
@@ -596,7 +633,7 @@ The screens hold the `discussion` or `wikiPage` topic only while they are open a
 - **Overlap by real merge conflict** (`git merge-tree` between workspaces), or counting an edit until its branch merges. v1 counts an edit while its session is unfinished.
 - **Declared intent** ("I will edit these files"). Watch first whether agents invent it themselves in Discussions.
 - **Project-scoped Discussions and Wiki**, and Discussions about resources that are not repositories. The `resourceId` on every record stays; a scope would be a second key beside it.
-- **Wiki moderation:** an agent that finds contradictions, stale pages and orphans.
+- **Wiki moderation:** an agent that finds contradictions, stale pages and orphans. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* And worklog pages: it reads the whole Wiki, which no working session does, moves what lasts to the page on its subject, and archives the rest.
 - **Taint marks on Posts and pages** written by a session that read third-party text, as assistant memory has ([./13-security.md](./13-security.md) section 10).
 - **Posting and editing from the desktop app, and web app screens.**
 - **An MCP server** for these operations, with the rest of the public API ([./01-overview-and-scope.md](./01-overview-and-scope.md)).

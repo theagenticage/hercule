@@ -3,7 +3,7 @@
  * Presentational.
  */
 import { useRef, type FormEvent, type JSX, type ReactNode } from "react";
-import { IntakeIcon } from "../../icons/intake";
+import { InboxIcon } from "../../icons/inbox";
 import { ServerIcon } from "../../icons/server";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
@@ -148,7 +148,7 @@ export function Welcome({
               Each agent works where you let it. Your own checkout, or a separate copy on its own
               branch.
             </Perk>
-            <Perk icon={<IntakeIcon />} title="Work arrives prepared">
+            <Perk icon={<InboxIcon />} title="Work arrives prepared">
               Triage reads what GitHub sends and brings you Proposals, not notifications.
             </Perk>
             <Perk icon={<Mark state="waiting" />} title="You keep the decisions">

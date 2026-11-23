@@ -132,14 +132,54 @@ export const DisallowedTool = Schema.String.check(
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
+ * The name of the MCP Gateway's entry in `SessionSpec.mcpServers`. A harness
+ * puts it in front of every tool name, so the model sees
+ * `mcp__tools__<server>__<tool>`, and the controller and the runner's adapters
+ * must spell it the same way.
+ */
+export const MCP_GATEWAY_ENTRY_NAME = "tools";
+
+/**
+ * What a harness puts in front of every tool name of the MCP Gateway:
+ * `mcp__tools__`. The controller counts it against a harness's name limit, and
+ * the runner's adapters strip it to read the tool back.
+ */
+export const MCP_GATEWAY_HARNESS_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
+
+/**
+ * The separator in a gateway tool name, `<server name>__<tool name>`. An MCP
+ * Server's name holds no double underscore (spec 21 section 2.2), so the first
+ * one ends the server's name.
+ */
+export const MCP_GATEWAY_TOOL_SEPARATOR = "__";
+
+/**
+ * The gateway's entry in `SessionSpec.mcpServers` (spec 06 section 4): the one
+ * MCP server the harness is given, the MCP Gateway in the controller. It holds
+ * a path and a word, never an address or a token: the runner binds `url`
+ * against the controller it is connected to, and `bearer` to the session's own
+ * token, at each start.
+ */
+export const HarnessMcpServer = Schema.Struct({
+  /** The name in front of every tool the model sees: `mcp__tools__<server>__<tool>`. */
+  name: Schema.Literal(MCP_GATEWAY_ENTRY_NAME),
+  type: Schema.Literal("http"),
+  /** A path on the controller, such as `/mcp`, resolved by the runner to an absolute URL. */
+  url: Fact,
+  /** Send the session's own token as `Authorization: Bearer <token>`. */
+  bearer: Schema.Literal("session-token"),
+});
+
+export type HarnessMcpServer = Schema.Schema.Type<typeof HarnessMcpServer>;
+
+/**
  * What the controller sends for one session: ids, never paths. A workspace's
  * path on disk belongs to the runner, and the controller never stores it. The
  * runner resolves the spec to a `HarnessRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, apart from `coordination`,
  * which is never stored. A field is added here only when something sends it.
- * `mcpServers`, the one field of spec 06 section 4 that is not here yet,
- * arrives with the feature that needs it.
+ * `mcpServers` is not stored either: it is added to the frame at each start.
  */
 export const SessionSpec = Schema.Struct({
   providerAccountId: ProviderAccountId,
@@ -172,6 +212,15 @@ export const SessionSpec = Schema.Struct({
    * runner that does not know this field ignores it.
    */
   coordination: Schema.optionalKey(Schema.String),
+  /**
+   * The one entry that points the harness at the MCP Gateway (spec 21 section
+   * 4.4). The controller adds it to the frame at each start, a resume
+   * included, and only for a runner that negotiated `buildMcpServersCapability`
+   * for the session's harness, and a harness that declares `mcpPassthrough: "native"`. It is never
+   * stored, so the stored spec has none. A runner that does not know this
+   * field ignores it.
+   */
+  mcpServers: Schema.optionalKey(Schema.Array(HarnessMcpServer)),
   /**
    * `false` turns off the harness's own automatic compaction. An assistant's
    * session sets it, because the controller rotates that session to a fresh
@@ -887,14 +936,70 @@ const SessionUsageUpdated = Schema.Union([
 ]);
 
 /**
+ * Why an MCP Server in a session's list could not be called at the session's
+ * last start (spec 21 section 3.8). The order is the order of precedence: when
+ * several reasons apply to one server, the first is the one recorded. The
+ * public API's `Session.mcpServers` uses this type for `leftOut`.
+ */
+export const McpServerLeftOutReason = Schema.Literals([
+  "harness-unsupported",
+  "runner-too-old",
+  "missing-grant",
+  "switched-off",
+  "checking",
+  "needs-sign-in",
+  "unreachable",
+  "error",
+]);
+
+export type McpServerLeftOutReason = Schema.Schema.Type<typeof McpServerLeftOutReason>;
+
+/**
+ * Why a `runtime.warning` names an MCP Server: a reason a start leaves a
+ * server out, or one of the two reasons only a refused call has (spec 21
+ * section 3.6):
+ *
+ * - `not-in-list`: the call named a server that is not in the session's list;
+ * - `timed-out`: the call ran past its deadline.
+ *
+ * The other refusals of a call reuse a left-out reason: the profile lacks the
+ * grant (`missing-grant`), the server is switched off (`switched-off`), the
+ * server is not ready or its sign-in failed (`checking`, `needs-sign-in`,
+ * `unreachable` or `error`). It is one union, so a client maps every reason to
+ * its button in one place.
+ */
+export const McpServerWarningReason = Schema.Literals([
+  ...McpServerLeftOutReason.literals,
+  "not-in-list",
+  "timed-out",
+]);
+
+export type McpServerWarningReason = Schema.Schema.Type<typeof McpServerWarningReason>;
+
+/** One MCP Server a `runtime.warning` names, and why. */
+const McpServerWarning = Schema.Struct({
+  mcpServerId: Fact,
+  reason: McpServerWarningReason,
+});
+
+/**
  * Something went wrong, but the session goes on, such as a retry or an event
  * the runner had to shrink. It may fire inside a turn or between turns, so the
  * turn id is optional.
+ *
+ * `mcpServers` is set by the controller, never by a runner, when the warning is
+ * about MCP Servers (spec 21 sections 3.6 and 3.8). Each entry names one
+ * server and why, so a client can offer the button that fixes it. A warning
+ * that is not about MCP Servers has no `mcpServers`. The field is optional, so
+ * a runner that never sets it needs no protocol version change.
  */
 const RuntimeWarning = defineEvent("runtime.warning", {
   ...attribution,
   turnId: Schema.optionalKey(Fact),
   message: Message,
+  mcpServers: Schema.optionalKey(
+    Schema.Array(McpServerWarning).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
 });
 
 /**
@@ -1444,6 +1549,61 @@ export type AccountUsageReported = Schema.Schema.Type<typeof AccountUsageReporte
  * copy of the token it got in `SessionStart`.
  */
 export const GITHUB_TOKEN_CAPABILITY = "github-token";
+
+/**
+ * The retired capability for MCP Servers in a start frame. A build that has
+ * only this string (the first MCP Gateway build) says that its runner hands
+ * the entry to Claude Code, the one harness it maps. It cannot say which
+ * harness, so a controller could not tell a runner that ignores the entry for
+ * Codex from one that delivers it. `buildMcpServersCapability` replaces it.
+ *
+ * Both sides still list it, so that a controller and a runner on different
+ * builds keep working while a fleet is upgraded. Only
+ * `readMcpServersHarnessIds` reads it. Delete it, and that function's
+ * fallback, once no runner or controller of the first build remains.
+ */
+export const MCP_SERVERS_CAPABILITY = "mcpServers";
+
+const MCP_SERVERS_CAPABILITY_PREFIX = `${MCP_SERVERS_CAPABILITY}:`;
+
+/**
+ * Returns the hello capability that stands for MCP Servers in the start frame
+ * of one harness, such as `mcpServers:claude-code/claude-code` for the
+ * qualified harness id `claude-code/claude-code` (spec 21 section 4.4).
+ *
+ * A runner lists one for each harness whose adapter hands the entry that
+ * points at the MCP Gateway (`SessionSpec.mcpServers`) to its harness. The
+ * controller lists one for each harness it has registered. It sends the entry
+ * only when the negotiated list holds the capability of the session's harness.
+ * A runner without it still gets the start, only without the entry, so every
+ * MCP Server in the session's list is left out with the reason
+ * `runner-too-old`.
+ *
+ * The capability is per harness because a runner build can map the entry for
+ * one harness and not yet for another.
+ */
+export const buildMcpServersCapability = (harnessId: string): string =>
+  `${MCP_SERVERS_CAPABILITY_PREFIX}${harnessId}`;
+
+/**
+ * Returns the qualified ids of the harnesses whose start frame a runner takes
+ * the MCP Gateway entry for, read from the negotiated capabilities.
+ *
+ * A runner of the first MCP Gateway build lists only the retired plain
+ * `MCP_SERVERS_CAPABILITY`, and its one adapter that maps the entry is Claude
+ * Code's. When the list holds that string and no per-harness capability, this
+ * returns Claude Code alone. This is the one place that names the harness id.
+ */
+export const readMcpServersHarnessIds = (
+  negotiatedCapabilities: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const harnessIds = negotiatedCapabilities
+    .filter((capability) => capability.startsWith(MCP_SERVERS_CAPABILITY_PREFIX))
+    .map((capability) => capability.slice(MCP_SERVERS_CAPABILITY_PREFIX.length));
+  return harnessIds.length === 0 && negotiatedCapabilities.includes(MCP_SERVERS_CAPABILITY)
+    ? ["claude-code/claude-code"]
+    : harnessIds;
+};
 
 /**
  * Sent by the runner when a session's `gh` command needs a GitHub token and

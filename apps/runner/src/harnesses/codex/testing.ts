@@ -11,7 +11,7 @@
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
-import type { HarnessRunnerContext } from "../index";
+import type { SessionStartContext } from "../index";
 import {
   CWD,
   createLines,
@@ -35,9 +35,10 @@ export {
 
 export const createCodexHome = (): string => createScratchHome("codex");
 
-export const buildContext = (home: string, cwd: string | null = null): HarnessRunnerContext => ({
+export const buildContext = (home: string, cwd: string | null = null): SessionStartContext => ({
   cwd,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
@@ -63,7 +64,7 @@ export const SPEC: SessionSpec = {
 
 /** `samples/probe-initialize.json`. The version lives inside the user agent. */
 export const INITIALIZE = {
-  userAgent: "hercule/0.154.0 (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)",
+  userAgent: "hercule/0.171.0 (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)",
   codexHome: "/private/tmp/ch.XXXX",
   platformFamily: "unix",
   platformOs: "macos",
@@ -197,6 +198,19 @@ const DEFAULT_ANSWERS: Answers = {
   // A session refuses to start without a login, so the default account is logged in.
   "account/read": () => CHATGPT,
   "model/list": () => MODELS,
+  // No layer of Codex's configuration sets anything. A real reply always lists
+  // at least one layer, here the user's `config.toml` with empty settings.
+  "config/read": () => ({
+    config: {},
+    origins: {},
+    layers: [
+      {
+        name: { type: "user", file: "/home/me/.codex/config.toml" },
+        version: "sha256:0",
+        config: {},
+      },
+    ],
+  }),
   "thread/start": () => ({ thread: { id: THREAD } }),
   "thread/resume": () => ({ thread: { id: RESUMED } }),
   "thread/fork": () => ({ thread: { id: FORKED } }),
@@ -312,7 +326,7 @@ export const createDriving = (
   cwd: string | null = CWD,
 ): {
   readonly adapter: ReturnType<typeof makeCodexAdapter>;
-  readonly ctx: HarnessRunnerContext;
+  readonly ctx: SessionStartContext;
   readonly spawns: Array<Spawn>;
   readonly requests: Array<Sent>;
   readonly answered: Array<Answered>;

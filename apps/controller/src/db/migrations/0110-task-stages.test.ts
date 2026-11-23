@@ -138,7 +138,12 @@ const AT = "2026-10-01T00:00:00.000Z";
 const insertPlannedTasks = Effect.gen(function* () {
   const projects = yield* projectRepository;
   const tasks = yield* taskRepository;
-  const project = yield* projects.insert({ name: "Website", description: undefined, at: AT });
+  const project = yield* projects.insert({
+    name: "Website",
+    description: undefined,
+    mcpServerIds: [],
+    at: AT,
+  });
   yield* Effect.forEach(["a", "b", "c"], (title) =>
     tasks.insert({
       title,

@@ -107,11 +107,19 @@ export const AUDIT_KINDS = [
   "memory.appended",
   "memory.deleted",
   "wikiPage.written",
+  "wikiPage.archived",
+  "wikiPage.restored",
   "skill.imported",
   "skill.proposed",
   "skill.applied",
   "skill.rejected",
   "skill.deleted",
+  "mcpServer.created",
+  "mcpServer.updated",
+  "mcpServer.deleted",
+  // One per tool call a session sends through the MCP Gateway. It names no
+  // record, so it announces no live topic.
+  "mcpTool.called",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
@@ -130,6 +138,7 @@ export const AUDIT_KINDS = [
   "session.reopened",
   "session.archived",
   "session.movedToTask",
+  "session.mcpServersChanged",
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
@@ -137,6 +146,9 @@ export const AUDIT_KINDS = [
   "signal.decided",
   "signal.withdrawn",
   "signal.markedDone",
+  // Nothing writes these three any more: snoozing and Not urgent are gone.
+  // They stay because the log still holds entries of them, and the log reads
+  // this list to tell an audit entry from an event it routes.
   "signal.snoozed",
   "signal.unsnoozed",
   "signal.priorityLowered",
@@ -232,6 +244,7 @@ const RECORD_KINDS = {
   "session.reopened": "updated",
   "session.archived": "updated",
   "session.movedToTask": "updated",
+  "session.mcpServersChanged": "updated",
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
@@ -239,7 +252,7 @@ const RECORD_KINDS = {
   "signal.decided": "updated",
   "signal.withdrawn": "updated",
   // One entry of these four kinds records one move on several signals, so it
-  // names every signal the move changed.
+  // names every signal the move changed. Only the first is still written.
   "signal.markedDone": "updated",
   "signal.snoozed": "updated",
   "signal.unsnoozed": "updated",
@@ -256,6 +269,10 @@ const RECORD_KINDS = {
   // One kind for a create and an update: either way the page's newest
   // revision is new, and a client reads the page again.
   "wikiPage.written": "updated",
+  // An archived or restored page is a changed page: a client reads the
+  // listing again and finds the page gone from it, or back in it.
+  "wikiPage.archived": "updated",
+  "wikiPage.restored": "updated",
   // A Skill is named by its name. An import that creates a Skill is recorded
   // as updated too: either way a client reads the Skill again.
   "skill.imported": "updated",
@@ -265,6 +282,9 @@ const RECORD_KINDS = {
   // a client reading it again finds it gone, as after a delete.
   "skill.rejected": "updated",
   "skill.deleted": "deleted",
+  "mcpServer.created": "created",
+  "mcpServer.updated": "updated",
+  "mcpServer.deleted": "deleted",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

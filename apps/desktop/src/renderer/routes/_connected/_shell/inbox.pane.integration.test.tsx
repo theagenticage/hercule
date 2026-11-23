@@ -59,7 +59,6 @@ const buildLine = (id: string, kind: string, say: string, createdAt: string): En
   status: "open",
   createdAt,
   say: { say, tone: "plain" },
-  snoozed: false,
   asks: true,
   asker: say.split(" ")[0]!,
 });

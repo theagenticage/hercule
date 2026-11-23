@@ -20,89 +20,6 @@ describe("workspace pushes", () => {
   });
 });
 
-describe("Tracking's key", () => {
-  it("is read again on every task push, with or without ids", () => {
-    for (const ids of [[], ["t1"]]) {
-      assert.isTrue(
-        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.tracking())),
-      );
-    }
-  });
-
-  it("is left to the run push's own rule, so no key maps it for a run push", () => {
-    for (const ids of [[], ["r1"]]) {
-      assert.isFalse(
-        buildQueryKeys("run", ids).some((key) => isPrefixOf(key, queryKeys.tracking())),
-      );
-    }
-  });
-
-  it("is apart from the task and run lists, so no filtered read shares it", () => {
-    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.tasks()));
-    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.runs()));
-  });
-});
-
-describe("a Task's Tracking detail key", () => {
-  it("is read again for the Tasks a task push names", () => {
-    const keys = buildQueryKeys("task", ["t1", "t2"]);
-    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.trackingDetail("t1"))));
-    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.trackingDetail("t2"))));
-  });
-
-  it("is not read again for a Task the push does not name", () => {
-    assert.isFalse(
-      buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.trackingDetail("t2"))),
-    );
-  });
-
-  it("is read again for every Task when a task push names no ids", () => {
-    assert.isTrue(
-      buildQueryKeys("task", []).some((key) => isPrefixOf(key, queryKeys.trackingDetail("t1"))),
-    );
-  });
-
-  it("is left to the run push's own rule, so no key maps it for a run push", () => {
-    for (const ids of [[], ["r1"]]) {
-      assert.isFalse(
-        buildQueryKeys("run", ids).some((key) => isPrefixOf(key, queryKeys.trackingDetail())),
-      );
-    }
-  });
-
-  it("is apart from Tracking's own read and from the task record", () => {
-    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.trackingDetail("t1")));
-    assert.isFalse(isPrefixOf(queryKeys.trackingDetail(), queryKeys.tracking()));
-    assert.isFalse(isPrefixOf(queryKeys.task("t1"), queryKeys.trackingDetail("t1")));
-  });
-});
-
-describe("Your work's key", () => {
-  it("is read again on every task push, with or without ids", () => {
-    for (const ids of [[], ["t1"]]) {
-      assert.isTrue(
-        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
-      );
-    }
-  });
-
-  it("is read again on every signal push, with or without ids", () => {
-    for (const ids of [[], ["s1"]]) {
-      assert.isTrue(
-        buildQueryKeys("signal", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
-      );
-    }
-  });
-
-  it("is not read again by a push that cannot change it", () => {
-    for (const topic of ["workflow", "connection", "plugin", "run"] as const) {
-      assert.isFalse(
-        buildQueryKeys(topic, ["x"]).some((key) => isPrefixOf(key, queryKeys.yourWork())),
-      );
-    }
-  });
-});
-
 describe("the merge checks' key", () => {
   it("is the prefix of every pair's check", () => {
     assert.isTrue(isPrefixOf(queryKeys.mergeCheck(), queryKeys.mergeCheck("a", "b")));
@@ -131,7 +48,7 @@ describe("the Work board's key", () => {
     }
   });
 
-  it("is, with the named Tasks' details, the only read of a derived task push, which leaves Tracking and Your work alone", () => {
+  it("is, with the named Tasks' details and the merge checks, the only read of a derived task push", () => {
     assert.deepStrictEqual(buildQueryKeys("task", [], undefined, true), [
       queryKeys.workBoard(),
       queryKeys.mergeCheck(),
@@ -210,25 +127,13 @@ describe("the Inbox's and the entities' keys", () => {
       name: "a signal push naming ids reads the Inbox, the open entity panes and the signal lists, not the board or the suggestions",
       topic: "signal",
       ids: ["s1"],
-      keys: [
-        queryKeys.signals(),
-        queryKeys.signal("s1"),
-        queryKeys.yourWork(),
-        ...inboxKeys,
-        queryKeys.externalEntity(),
-      ],
+      keys: [queryKeys.signals(), queryKeys.signal("s1"), ...inboxKeys, queryKeys.externalEntity()],
     },
     {
       name: "a signal push naming no ids",
       topic: "signal",
       ids: [],
-      keys: [
-        queryKeys.signals(),
-        queryKeys.signal(),
-        queryKeys.yourWork(),
-        ...inboxKeys,
-        queryKeys.externalEntity(),
-      ],
+      keys: [queryKeys.signals(), queryKeys.signal(), ...inboxKeys, queryKeys.externalEntity()],
     },
     {
       name: "a plain task push reads the entity panes and the suggestions",
@@ -237,9 +142,6 @@ describe("the Inbox's and the entities' keys", () => {
       keys: [
         queryKeys.tasks(),
         queryKeys.task("t1"),
-        queryKeys.tracking(),
-        queryKeys.trackingDetail("t1"),
-        queryKeys.yourWork(),
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.entitySuggestions(),
@@ -253,9 +155,6 @@ describe("the Inbox's and the entities' keys", () => {
       keys: [
         queryKeys.tasks(),
         queryKeys.task(),
-        queryKeys.tracking(),
-        queryKeys.trackingDetail(),
-        queryKeys.yourWork(),
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.entitySuggestions(),
@@ -425,7 +324,6 @@ describe("signal pushes", () => {
       queryKeys.signals(),
       queryKeys.signal("first"),
       queryKeys.signal("second"),
-      queryKeys.yourWork(),
       queryKeys.inbox(),
       queryKeys.inboxCount(),
       queryKeys.externalEntity(),
@@ -449,7 +347,6 @@ describe("signal pushes", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", []), [
       queryKeys.signals(),
       queryKeys.signal(),
-      queryKeys.yourWork(),
       queryKeys.inbox(),
       queryKeys.inboxCount(),
       queryKeys.externalEntity(),
@@ -613,6 +510,37 @@ describe("skill pushes", () => {
     const diff = queryKeys.skillDiff("grilling", "e".repeat(64));
     assert.isTrue(buildQueryKeys("skill", ["grilling"]).some((key) => isPrefixOf(key, diff)));
     assert.isFalse(buildQueryKeys("skill", ["teach"]).some((key) => isPrefixOf(key, diff)));
+  });
+});
+
+describe("MCP server pushes", () => {
+  it("invalidates the list and the named servers' pages, never another server's", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"], undefined, undefined, "updated");
+    assert.deepStrictEqual(keys, [queryKeys.mcpServers(), queryKeys.mcpServer("a")]);
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.mcpServer("b"))));
+  });
+
+  it("invalidates every server's page after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("mcpServer", [], undefined, undefined, "updated"), [
+      queryKeys.mcpServers(),
+      queryKeys.mcpServer(),
+    ]);
+  });
+
+  it("leaves the projects and the settings alone on a status change, a creation and the first push", () => {
+    for (const kind of ["updated", "created", undefined] as const) {
+      for (const ids of [["a"], []]) {
+        const keys = buildQueryKeys("mcpServer", ids, undefined, undefined, kind);
+        assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+        assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
+      }
+    }
+  });
+
+  it("reads the projects and the settings again on a delete, since the server leaves their lists", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"], undefined, undefined, "deleted");
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
   });
 });
 

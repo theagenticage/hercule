@@ -17,7 +17,16 @@ export {
   type StoredConnection,
 } from "./repository";
 export { OAuthCallbackRouteLayer } from "./route";
-export { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
+export {
+  computeCredentialsIdentity,
+  ConnectionCannotRefresh,
+  ConnectionCredentialsUnavailable,
+  ConnectionTypes,
+  ConnectionTypesLayer,
+  type ConnectionCredentialsForUse,
+  type RefreshGuard,
+  type RegisteredConnectionType,
+} from "./runtime";
 export {
   ConnectionService,
   ConnectionServiceLayer,

@@ -323,6 +323,7 @@ const withLegacyController = async (
             reopened_at: null,
             process_started_at: null,
             library_skills: null,
+            mcp_gateway: null,
             role: null,
             tainted: 0,
             kind: "thread",
@@ -485,7 +486,6 @@ describe("pre-change controller and provider-state upgrade", () => {
         expect(existsSync(join(fixture.primary, ".git", "objects"))).toBe(true);
       });
     },
-    30_000,
   );
 
   it("creates new local work from the bound standalone main after migration while retaining the old cache worktree", async () => {
@@ -562,5 +562,5 @@ describe("pre-change controller and provider-state upgrade", () => {
       expect(hashContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
       expect(hashContents(fixture.providerHome)).toBe(fixture.before.provider);
     });
-  }, 30_000);
+  });
 });

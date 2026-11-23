@@ -85,11 +85,11 @@ One reporter's word that two External Refs are related: `part-of`, from a child 
 _Avoid_: edge (the drawn step of a path), link (bare), hierarchy, parent (bare: there can be many)
 
 **Session**:
-One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
+One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A session also has its own list of MCP Servers, which the MCP Gateway serves it; only a Thread's list can hold servers until [#222](https://github.com/theagenticage/hercule/issues/222). Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
-A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). Nothing outlives it, nothing about it is named or reusable. A Thread always belongs to a Task. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* Its list of MCP Servers starts the same way: one the user starts takes the list chosen on its Draft Thread, else its Project's, else the default list in Settings; one a session starts copies the calling session's list ([spec 21](./docs/spec/21-mcp.md)). Nothing outlives it, nothing about it is named or reusable. A Thread always belongs to a Task. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Role**:
@@ -170,7 +170,7 @@ _Avoid_: existing thread, materialized thread, live thread
 
 **Done (Thread)**:
 A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. It is not the Task's `done` stage: the two are separate acts, and neither changes the other. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
-_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), a Task at stage `done`, archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
+_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), a Task at stage `done`, archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves the Inbox rather than a project list)
 
 **Archived (Thread)**:
 A final state the user puts a Thread in when they want it gone (`session.archive`), recording when and by whom. An archived Thread can never be resumed, sent input or reopened; its transcript stays readable on the controller. Archiving marks the Thread Done first. Once every Thread of a workspace is archived, its Agent sessions are archived too, so a sidebar row goes whole, and automatic cleanup may remove the workspace. An archived Thread leaves the sidebar and the Done shelf. Only the user archives, and a working Thread (queued, starting or busy) cannot be archived. There is no undo.
@@ -287,7 +287,7 @@ _Avoid_: timer, alarm
 ### Organization
 
 **Project**:
-A grouping of related work and its materials, a way to organise information inside Hercule: no behaviour, and one default only, the Model Profile a new thread in it opens on ([ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)). May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
+A grouping of related work and its materials, a way to organise information inside Hercule: no behaviour, and ~~one default only, the Model Profile a new thread in it opens on~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* two defaults only for a new thread in it: the Model Profile it opens on ([ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)) and the MCP Servers it starts with ([ADR 0059](./docs/adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md)). Changing the project's MCP Servers later never touches a thread that exists. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:
@@ -360,11 +360,11 @@ The Queued Input, with the source `discussion`, that the controller sends to tel
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:
-The set of Wiki Pages of one repository, which agents keep for the agents after them. The repository's own docs win over it. The Wiki is not a record of its own.
-_Avoid_: knowledge base, memory (an assistant's), docs
+The set of Wiki Pages of one repository, which agents keep for the agents after them: lasting knowledge about the repository, one page per subject. It is not a worklog of tickets. The repository's own docs win over it. The Wiki is not a record of its own.
+_Avoid_: knowledge base, memory (an assistant's), docs, worklog
 
 **Wiki Page**:
-One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused.
+One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused. A page is never deleted. One that no longer helps is **archived**, with who archived it, when and why: it leaves the listing and takes no update, is still read by its id, and can be restored.
 _Avoid_: note (an assistant's memory has notes), article, document
 
 ### Infrastructure
@@ -503,7 +503,7 @@ A self-contained unit of functionality that extends Hercule by requesting plugin
 _Avoid_: extension, addon, integration
 
 **Extension Point**:
-A typed slot plugins contribute into. The v1 set is fixed: harness, provider, channel, event source, workflow action. Plugins cannot define new extension points.
+A typed slot plugins contribute into. The v1 set is fixed: harness, provider, channel, event source, ~~workflow action.~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* workflow action, MCP server. Plugins cannot define new extension points.
 _Avoid_: hook
 
 **Contribution**:
@@ -522,6 +522,14 @@ The surface a plugin programs against: capability-sliced services handed to the 
 
 **Manifest**:
 A plugin's static self-description: identity, host API version, requested plugin capabilities, config schema. Deliberately coarse; contributions are not in it.
+
+**MCP Server**:
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A record on the controller: a remote MCP server that offers tools to sessions, and what it is reached with: a plugin's Connection, or its own sign-in when the user added it by URL. A plugin registers the server of its service as a contribution, and the record exists once the user switches it on. It knows nothing about projects or threads. A Project names the MCP Servers a new thread starts with, and a session keeps its own list.
+_Avoid_: tool server, connector, integration. Not the MCP Gateway.
+
+**MCP Gateway**:
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The controller's one MCP endpoint, `<controller>/mcp`, that the harness of every session on a runner and harness that support it is given as its one MCP server, with the session's own Session Token. It answers with the tools of the session's MCP Servers and forwards each call with a credential the controller holds, so no vendor token reaches a runner.
+_Avoid_: proxy, bridge. Not an MCP Server (a record it serves from).
 
 ### Automation
 
@@ -655,8 +663,8 @@ A trigger's limit on how many runs it may spawn per window. Exceeding it trips t
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
-A persisted message from Hercule to its user about Hercule itself ("run failed", "trigger paused", "agent needs a decision"), shown in Check-in and never on Intake. Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
-_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer); signal (what Intake holds is a **Signal**, its own record)
+A persisted message from Hercule to its user about Hercule itself ("run failed", "trigger paused", "agent needs a decision"), shown in Check-in and never on the Inbox. Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
+_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer); signal (what asks the user for a move is a **Signal**, its own record)
 
 **Bound Action**:
 One choice laid out for the user on a decision Notification or a Signal, ready to run: a label, an optional note from whoever laid it out, and at most one operation whose input is already filled in and frozen ("bound"). Laying it out does nothing. Only when the user picks it does it run, as the user; the pick is the user's answer. A choice with no operation (Dismiss, Done) closes the item and runs nothing. Each choice shows a **Describe Line**, written by the core, saying what the click will do. An operation can be bound only where it declares itself usable (`notification.answer`, `signal.answer`).
@@ -667,15 +675,15 @@ The line the core writes under a Bound Action to say what taking it does to the 
 _Avoid_: summary, preview, action description (the producer's own `description` of what an answer means)
 
 **Intake**:
-Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, with Tracking at the foot of To do, and Everything over the events behind them. On To do, the Signals about one External Entity are grouped under it, and a Signal with no entity stands alone.
-_Avoid_: command center, dashboard, inbox (the Inbox is a place of its own, over External Entities, not over Signals); the empty To do is **To do clear**, never "inbox zero"; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
+Which events can become something for the user to deal with: which event kinds triage may read, and which signal kinds are on. The plugin sets both per kind, with your overrides for the plugin and per Connection. The events triage may read are Intake's events (`event.query --intake`); the full event stream is never shown to triage. The API keeps the word (`plugin.updateIntake`, the `intake` field of a Connection), and the UI shows these settings in Settings › Signals. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The Intake screen is retired: To do, Later, Done, Everything and Tracking are deleted. A Signal about an External Entity is seen on the Inbox; a Signal with no entity is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox.
+_Avoid_: command center, dashboard; Intake for a screen or a list the user works through (retired: the Inbox is that place); To do, Later, Everything and **To do clear** as screens or states (retired with the Intake screen); "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
 
 **Inbox**:
-The desktop page of everything out there that concerns the user, before they take it on: External Entities with a current Concern, an open signal or a live Task, as one list of rows with a pane beside it. What is on it is worked out on read, and its sidebar number counts what has a clock on it. A Task taken from a row is an ordinary Task on Work. Things that are linked to each other, by a source or by the user, are drawn together as one group, named after the group's most lasting thing; the UI says Link, never "bundle". A signal that lands while the page is open waits behind a bar and never moves a row. Not Intake: Intake holds Signals, and the two sit side by side.
-_Avoid_: Intake, To do, queue, feed, notifications; "inbox zero" (the empty To do is **To do clear**, and the Inbox's own empty page is the sunrise)
+The desktop page of everything out there that concerns the user, before they take it on: External Entities with a current Concern, an open signal or a live Task, as one list of rows with a pane beside it. What is on it is worked out on read, and its sidebar number counts what has a clock on it. A Task taken from a row is an ordinary Task on Work. Things that are linked to each other, by a source or by the user, are drawn together as one group, named after the group's most lasting thing; the UI says Link, never "bundle". A signal that lands while the page is open waits behind a bar and never moves a row. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* It is where the user sees the Signals about an External Entity; the Intake screen that listed every Signal is retired. A Signal with no entity has no place on it yet.
+_Avoid_: Intake (the settings for which events triage may read), To do, queue, feed, notifications; "inbox zero" (the Inbox's own empty page is the sunrise)
 
 **Signal**:
-Something put in front of the user on Intake because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, snooze it, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. A Signal about an External Entity that has a card attaches to it by its thread ref, on read, and shows there as well as on Intake: one record, one resolution. The Signal can end while the entity stays, and acting on the card (taking it on, dismissing it) ends no Signal it did not answer. Its own record, never a Notification.
+Something put in front of the user because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. A Signal about an External Entity attaches to it by its thread ref, on read, and shows on the Inbox with that entity: one record, one resolution. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* A Signal with no entity (the core's kinds, and any signal whose entity is missing or cannot be read) has no place on the desktop for now: it is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox. The Signal can end while the entity stays, and acting on the card (taking it on, dismissing it) ends no Signal it did not answer. Its own record, never a Notification.
 _Avoid_: ask, item, request (a Permission Request or an agent's request); "signal" for any incoming event (that is an **Event**; a signal trigger is a workflow concept)
 
 **Block**:
@@ -683,8 +691,8 @@ One part of a Signal's body: data a producer fills, drawn by each app in its own
 _Avoid_: widget, card, section
 
 **Snooze**:
-Hiding an open Signal from To do until a chosen time, when it comes back marked "Back". Snoozing is not an answer: the signal stays open and its source is told nothing. Only Signals are snoozed, never Notifications.
-_Avoid_: remind me, defer, park
+Retired. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* Snoozing hid an open Signal from Intake's To do until a chosen time. It went with the Intake screen, and a Signal that was snoozed is live again. Nothing hides a Signal for a while any more; Not urgent, which lowered a Signal's priority, is retired the same way.
+_Avoid_: snooze, Later, Not urgent, remind me, defer, park
 
 **Screener**:
 The shipped, editable workflow that reads one event when a signal kind's rule answers *undecided*, and decides whether it becomes a Signal of that kind, using the guidance the kind declares. Unlike Triage, it sees one event at a time, and it writes no content: the signal's body comes from the plugin.
@@ -695,20 +703,20 @@ One request for the Screener to decide whether one event becomes a signal of one
 _Avoid_: review, check
 
 **Ignore Rule**:
-The user's rule that keeps signals of one kind, with given field values, from being raised ("review requests from dependabot in webshop"). Made by the user from a signal, or accepted from a suggestion Hercule offers after the user marked several such signals done without answering. Never edited, only deleted; always visible in Intake settings. The events it catches still show in Everything, with the rule named.
+The user's rule that keeps signals of one kind, with given field values, from being raised ("review requests from dependabot in webshop"). Made by the user with `hercule ignore-rule create`, or accepted from a suggestion Hercule offers after the user marked several such signals done without answering (an `offer` Signal, answered with the CLI). Never edited, only deleted; always listed in Settings › Signals, where it can be deleted. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The desktop no longer makes one from a signal, and Everything, which showed the events a rule caught, is retired.
 _Avoid_: filter, mute (a Notification delivery setting)
 
 **Handoff**:
-Handing work to an agent, as the user, with the work put on a Task. It starts one of two ways. From a standalone Signal on Intake, it is the user's pick of a Hand to an agent answer: it resolves the signal and continues the active Task of the signal's thread ref, or creates one. From a card on the Inbox, it is the user's pick of a workflow on the card (the card's *workflow offers*, not an Offer): it ends only the open signals of the kinds that workflow answers, and continues the active Task of the card's ref, or creates one. The Task's provenance records it as one entry naming the run it started, and the signal too when it came from Intake. A handoff from a card can be taken back (Undo) only while nothing of its run has started and nothing has joined or moved the Task. Each handoff is one leg of the Task's trip: its run and that run's re-runs. A run started any other way is not a handoff.
+Handing work to an agent, as the user, with the work put on a Task. It starts one of two ways. From a thing on the Inbox, it is the user's pick of a workflow on the thing (its *workflow offers*, not an Offer): it ends only the open signals of the kinds that workflow answers, and continues the active Task of the thing's ref, or creates one. From a Signal, it is the user's pick of a Hand to an agent answer (`signal.handOff`): it resolves the signal and continues the active Task of the signal's thread ref, or creates one. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The desktop no longer offers the second way, because the Intake screen is retired; the CLI and stored answers still take it. The Task's provenance records it as one entry naming the run it started, and the signal too when it came from a Signal's answer. A handoff from the Inbox can be taken back (Undo) only while nothing of its run has started and nothing has joined or moved the Task. Each handoff is one leg of the Task's trip: its run and that run's re-runs. A run started any other way is not a handoff.
 _Avoid_: delegation, dispatch; "handoff" for a Migration
 
 **Tracking**:
-The section at the foot of To do that lists the Tasks the user handed off from Intake, until they mark one done or cancel it. A view over Tasks, not a record, and never called a Task on screen. Each row is in one state, worked out on read, highest first: Needs you (a Request, or an open signal that names the Task), Failed, Working, Finished (the agent is done and the user has not ticked it off) or Stopped. The rows that wait on the user count toward To do.
-_Avoid_: follow-up (the harness's word for queued input), out with agents, handed off; "Back" for a finished row (that is a snooze that ran out)
+Retired. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* Tracking was the section at the foot of Intake's To do that listed the Tasks the user handed off from Intake. It went with the Intake screen. A Task handed off from the Inbox is an ordinary Task on Work.
+_Avoid_: Tracking for any view of Tasks; follow-up (the harness's word for queued input), out with agents, handed off
 
 **Handling**:
-What came of an event in Intake, or what is still to come: raised a signal, ended one, caught by an Ignore Rule, evidence for triage's signals, on a Task, known work, pending triage, or no action. Worked out when read, never stored. Shown to the user as "What came of it".
-_Avoid_: stamp, outcome (a resolved signal's line), result
+Retired. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* A handling was what came of an event in Intake (raised a signal, ended one, caught by an Ignore Rule, and so on), worked out on read and shown on Everything as "What came of it". It went with Everything.
+_Avoid_: handling, stamp, outcome (a resolved signal's line), result
 
 **Proposal**:
 A `proposal` Signal: work an agent prepared and asks the user to accept or dismiss. No Task exists until the user accepts; Accept creates the Task and leaves it in the backlog, and starting it is a separate act. Dismiss runs nothing.
@@ -719,7 +727,7 @@ An `offer` Signal: an immediate action proposed with no task behind it ("merge t
 _Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
-A label that groups Tasks: a Connection may carry a topic its events file into, and triage puts a topic on the Task a proposal would create (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined; a label, never a domain state. Intake's tabs are its sources, not topics.
+A label that groups Tasks: a Connection may carry a topic its events file into, and triage puts a topic on the Task a proposal would create (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined; a label, never a domain state.
 _Avoid_: category, area, folder
 
 ### Office

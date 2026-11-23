@@ -60,7 +60,7 @@ import {
   TaskDetailFactsLayer,
   TaskServicePortsLayer,
 } from "../daemon/tasks";
-import { TaskTrackingRunsLayer } from "../daemon/runs";
+import { TaskRunsLayer } from "../daemon/runs";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabaseWriter } from "../db/testing";
 import { isCountingOnly, recordSpeedCount } from "../db/speed-counts.testing";
@@ -394,7 +394,7 @@ const judge = (value: number, target: number) => (value < target ? "yes" : "NO")
  */
 const buildLayer = () => {
   const reads = Layer.mergeAll(TaskBoardLayer, TaskDetailsLayer).pipe(
-    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
     Layer.provideMerge(buildPluginStack()),
   );
   const service = TaskServiceLayer.pipe(

@@ -1129,7 +1129,11 @@ const openThreadDialog = async (page: Document, needles: ReadonlyArray<string>):
 /**
  * Starts the thread from the dialog that `openThreadDialog` opened, and
  * returns once the first message shows each thing as a card read from the
- * controller.
+ * controller, with the undo line ("Started a thread on ...") held up.
+ *
+ * The line hides itself after 8 seconds by a real timer, which the fixed clock
+ * does not stop, so a slow capture would find it gone and measure a different
+ * page. A pointer over the line keeps it, the way a user's pointer would.
  */
 const startDialogThread = async (page: Document): Promise<void> => {
   await openThreadDialog(page, DIALOG_THINGS);
@@ -1142,6 +1146,9 @@ const startDialogThread = async (page: Document): Promise<void> => {
   ) {
     await nextFrame();
   }
+  const line = await waitFor(page, ".undo-line.is-on");
+  line.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  await nextFrame();
 };
 
 /** The states of the page, in the order the capture takes them. */

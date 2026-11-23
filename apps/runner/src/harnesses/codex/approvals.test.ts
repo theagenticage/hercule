@@ -1,5 +1,5 @@
 /**
- * Tests for every server-to-client request codex 0.154.0 declares, each sent
+ * Tests for every server-to-client request Codex declares (as of 0.171.0), each sent
  * to the scripted app-server: what the user is shown, what is sent back for
  * each decision, and what happens to a request the user never resolves. A
  * request with no reply leaves the turn hanging forever with no error, so the
@@ -19,7 +19,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { AnswerNotDelivered } from "@hercule/protocol";
+import { AnswerNotDelivered, MAX_FACT_LENGTH } from "@hercule/protocol";
 import type { ApprovalDecision, HarnessEvent, QuestionAnswers } from "@hercule/protocol";
 import {
   type Answered,
@@ -159,8 +159,8 @@ const FILE_CHANGE_PARAMS = {
 };
 
 /**
- * At 0.154.0 the paths are not in the request params. They are in the file
- * change item, which arrives before the request.
+ * The request's params carry no paths (see `FileChangeRequestApprovalParams`).
+ * They are in the file change item, which arrives before the request.
  */
 const FILE_ITEM_STARTED = {
   method: "item/started",
@@ -297,6 +297,24 @@ const ELICITATION_PARAMS = {
   requestedSchema: { type: "object", properties: {}, required: [] },
 };
 
+/** The question Codex asks before it runs a tool of an MCP server, as seen on Codex 0.171.0. */
+const TOOL_CALL_ELICITATION_PARAMS = {
+  threadId: THREAD,
+  turnId: TURN,
+  serverName: "tools",
+  mode: "form",
+  _meta: {
+    codex_approval_kind: "mcp_tool_call",
+    tool_name: "sentry__search_issues",
+    tool_description: "Searches Sentry issues",
+    tool_params: {},
+    tool_params_display: [],
+    tool_annotations: { readOnlyHint: true },
+  },
+  message: 'Allow the tools MCP server to run tool "sentry__search_issues"?',
+  requestedSchema: { type: "object", properties: {} },
+};
+
 const ELICITATION_ANSWERS: ReadonlyArray<readonly [ApprovalDecision, unknown]> = [
   ["allow", { action: "accept", content: null }],
   ["deny", { action: "decline" }],
@@ -323,6 +341,195 @@ describe("an MCP server asking its own question", () => {
       expect(listResolutions(run)).toEqual([decision]);
     });
   }
+});
+
+describe("Codex asking to run a tool of an MCP server", () => {
+  it("shows a tool approval named as the model sees the tool, with no allow_always", async () => {
+    const run = await pushServerRequest(ELICITATION, TOOL_CALL_ELICITATION_PARAMS);
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("tool_approval");
+    expect(opened.request.detail).toEqual({ toolName: "mcp__tools__sentry__search_issues" });
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
+  });
+
+  it("shows a tool whose name has a hash ending, as the gateway names it", async () => {
+    // Codex puts the gateway's own tool name in `_meta.tool_name`, not the spelling it shows the model.
+    for (const tool of ["notion__search_pages_f33805", "notion__search_pages_52ac82"]) {
+      const run = await pushServerRequest(ELICITATION, {
+        ...TOOL_CALL_ELICITATION_PARAMS,
+        _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: tool },
+      });
+
+      const opened = await awaitOpenedRequest(run);
+      expect(opened.request.detail).toEqual({ toolName: `mcp__tools__${tool}` });
+    }
+  });
+
+  it("shows a tool of another server as server/tool, not as a gateway tool", async () => {
+    // A repository's own server `tools__sentry` must not look like the gateway's Sentry tool.
+    const run = await pushServerRequest(ELICITATION, {
+      ...TOOL_CALL_ELICITATION_PARAMS,
+      serverName: "tools__sentry",
+      _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "whoami" },
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.detail).toEqual({ toolName: "tools__sentry/whoami" });
+  });
+
+  it("shows a tool name that is too long cut to the protocol's limit", async () => {
+    const run = await pushServerRequest(ELICITATION, {
+      ...TOOL_CALL_ELICITATION_PARAMS,
+      _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "x".repeat(10_000) },
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    const toolName = (opened.request.detail as { readonly toolName: string }).toolName;
+    expect(toolName.startsWith("mcp__tools__xxx")).toBe(true);
+    expect(toolName.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
+  });
+
+  it("shows a question whose `_meta` names no tool as its server", async () => {
+    // The tool is named only inside `message`, which is prose and is not parsed.
+    const run = await pushServerRequest(ELICITATION, {
+      threadId: THREAD,
+      turnId: TURN,
+      serverName: "tools",
+      mode: "form",
+      _meta: {
+        codex_approval_kind: "mcp_tool_call",
+        tool_description: "Searches Sentry issues.",
+        tool_params: {},
+        tool_params_display: [],
+      },
+      message: 'Allow the tools MCP server to run tool "sentry__search_issues"?',
+      requestedSchema: { type: "object", properties: {} },
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("tool_approval");
+    expect(opened.request.detail).toEqual({ toolName: "tools" });
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
+  });
+
+  /** Starts the MCP tool call item Codex reports just before it asks about the call. */
+  const startMcpCall = (run: Run, itemId: string, tool: string, server = "tools"): void =>
+    run.server.push({
+      method: "item/started",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: STARTED_AT,
+        item: {
+          type: "mcpToolCall",
+          id: itemId,
+          server,
+          tool,
+          status: "inProgress",
+          arguments: {},
+          appContext: null,
+        },
+      },
+    });
+
+  const askAboutCall = async (calls: ReadonlyArray<readonly [string, string]>, params: unknown) => {
+    const run = await startBusySession();
+    for (const [itemId, tool] of calls) startMcpCall(run, itemId, tool);
+    run.server.push({ id: ID, method: ELICITATION, params });
+    return (await awaitOpenedRequest(run)).request;
+  };
+
+  it("files the question under the one running call that matches the tool it names", async () => {
+    const request = await askAboutCall(
+      [
+        ["call-other", "sentry__whoami"],
+        ["call-search", "sentry__search_issues"],
+      ],
+      TOOL_CALL_ELICITATION_PARAMS,
+    );
+
+    expect(request.itemId).toBe("call-search");
+  });
+
+  it("files the question under the call of the tool with the hash ending, not under its sibling that reads alike", async () => {
+    const request = await askAboutCall(
+      [
+        ["call-underscore", "notion__search_pages"],
+        ["call-hashed", "notion__search_pages_f33805"],
+      ],
+      {
+        ...TOOL_CALL_ELICITATION_PARAMS,
+        _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "notion__search_pages_f33805" },
+      },
+    );
+
+    expect(request.itemId).toBe("call-hashed");
+  });
+
+  it("files a question that names no tool under its turn, because no call can be matched to it", async () => {
+    const request = await askAboutCall([["call-search", "sentry__search_issues"]], {
+      ...TOOL_CALL_ELICITATION_PARAMS,
+      _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: undefined },
+    });
+
+    expect(request.itemId).toBe(TURN);
+  });
+
+  it("files the question under its turn when two running calls match, because a guess would mark the wrong item", async () => {
+    const request = await askAboutCall(
+      [
+        ["call-1", "sentry__search_issues"],
+        ["call-2", "sentry__search_issues"],
+      ],
+      TOOL_CALL_ELICITATION_PARAMS,
+    );
+
+    expect(request.itemId).toBe(TURN);
+  });
+
+  it("files the question under its turn when no running call matches", async () => {
+    const request = await askAboutCall(
+      [["call-other", "sentry__whoami"]],
+      TOOL_CALL_ELICITATION_PARAMS,
+    );
+
+    expect(request.itemId).toBe(TURN);
+  });
+
+  it("does not file the question under a call that already completed", async () => {
+    const run = await startBusySession();
+    startMcpCall(run, "call-done", "sentry__search_issues");
+    run.server.push({
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        completedAtMs: STARTED_AT,
+        item: {
+          type: "mcpToolCall",
+          id: "call-done",
+          server: "tools",
+          tool: "sentry__search_issues",
+          status: "completed",
+          arguments: {},
+          appContext: null,
+        },
+      },
+    });
+    run.server.push({ id: ID, method: ELICITATION, params: TOOL_CALL_ELICITATION_PARAMS });
+
+    expect((await awaitOpenedRequest(run)).request.itemId).toBe(TURN);
+  });
+
+  it("files a form question under its turn even when a call of its server is running", async () => {
+    const request = await askAboutCall([["call-search", "sentry__search_issues"]], {
+      ...ELICITATION_PARAMS,
+      serverName: "tools",
+    });
+
+    expect(request.itemId).toBe(TURN);
+  });
 });
 
 const USER_INPUT = "item/tool/requestUserInput";

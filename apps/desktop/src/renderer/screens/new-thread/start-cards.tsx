@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildStartCards } from "@hercule/client-core";
 import { startTasksQuery } from "../../app/queries";
-import { IntakeIcon } from "../../icons/intake";
+import { InboxIcon } from "../../icons/inbox";
 import { GitHubMark } from "../../logos";
 
 // The starters show only while a project has no planned task, so they load the
@@ -15,11 +15,11 @@ const StarterThreads = lazy(() =>
 
 /**
  * Renders the start cards under a Draft Thread's composer, as the Bureau
- * book's `session-empty` page draws them: "Start from Intake" and a note that
+ * book's `session-empty` page draws them: "Start from Work" and a note that
  * says what a click does, then up to three planned tasks of the project, most
  * urgent first. Each card shows where the task came from (the GitHub mark, or
- * else Intake's icon), its priority in words alone ("Urgent" in the failure
- * hue), and its title.
+ * else the heading's Inbox icon), its priority in words alone ("Urgent" in the
+ * failure hue), and its title.
  *
  * While the project has no planned task, three starter threads take the cards'
  * place, see `StarterThreads`.
@@ -59,8 +59,8 @@ export function StartCards({
     <section aria-labelledby={headingId}>
       <div className="starts-h starts-head">
         <h2 className="section-h" id={headingId}>
-          <IntakeIcon size={14} />
-          Start from Intake
+          <InboxIcon size={14} />
+          Start from Work
         </h2>
         <span className="starts-note">Puts the Task in your message</span>
       </div>
@@ -75,7 +75,7 @@ export function StartCards({
             }}
           >
             <span className="start-top">
-              {card.source === "github" ? <GitHubMark size={14} /> : <IntakeIcon size={14} />}
+              {card.source === "github" ? <GitHubMark size={14} /> : <InboxIcon size={14} />}
               <span className={card.priority === "urgent" ? "start-priority is-urgent" : undefined}>
                 {card.priorityText}
               </span>

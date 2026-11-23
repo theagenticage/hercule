@@ -19,8 +19,12 @@ export const ConnectionStatus = Schema.Literals(["connected", "needs-reauth", "e
 export type ConnectionStatus = Schema.Schema.Type<typeof ConnectionStatus>;
 
 /**
- * One secret the user pastes: a name for the secrets store, and a label for
- * the form.
+ * One value the user pastes: a name for the secrets store, and a label for
+ * the form. `secret: true` marks a value that must never reach an agent, such
+ * as a token or a key. A value that only names something, such as an
+ * organization slug or a URL, stays unmarked. The MCP Gateway removes the
+ * marked values from every answer it relays, at any length, and removes no
+ * other value of the Connection.
  *
  * The value is stored under the name, and the store binds a value to
  * `<kind>|<id>|<name>`, so a name containing the separator would be ambiguous.
@@ -36,6 +40,7 @@ export const CredentialField = Schema.Struct({
   ),
   label: Schema.String,
   help: Schema.optionalKey(Schema.String),
+  secret: Schema.optionalKey(Schema.Boolean),
 });
 
 export type CredentialField = Schema.Schema.Type<typeof CredentialField>;

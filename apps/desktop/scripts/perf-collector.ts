@@ -1,6 +1,6 @@
 /**
  * Records what the app's page sends and receives over the network, for the
- * perf scenarios that count reads and pushes (Tracking is the first). It uses
+ * perf scenarios that count reads and pushes, such as Work and Fleet. It uses
  * the Chrome DevTools Protocol's Network domain, which sees every HTTP request
  * to the controller, with timings and body size, and every frame of the live
  * WebSocket, parsed into pushes by topic.

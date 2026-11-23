@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseStarterThreads, describeEmptyIntake } from "./starter-threads";
+import { chooseStarterThreads, describeNoPlannedWork } from "./starter-threads";
 
 describe("chooseStarterThreads", () => {
   it("offers code starters, named after the project, when it has a repository", () => {
@@ -22,16 +22,16 @@ describe("chooseStarterThreads", () => {
   });
 });
 
-describe("describeEmptyIntake", () => {
-  it("says Triage reads GitHub once there is a GitHub Connection, and names no time", () => {
-    expect(describeEmptyIntake(true)).toBe(
-      "Intake is empty for now. Triage reads GitHub and brings what needs work here.",
+describe("describeNoPlannedWork", () => {
+  it("points at the Inbox once there is a GitHub Connection", () => {
+    expect(describeNoPlannedWork(true)).toBe(
+      "Nothing planned yet. What needs work on GitHub shows on the Inbox.",
     );
   });
 
   it("says to connect GitHub when there is no GitHub Connection", () => {
-    expect(describeEmptyIntake(false)).toBe(
-      "Intake is empty for now. Connect GitHub, and Triage brings what needs work here.",
+    expect(describeNoPlannedWork(false)).toBe(
+      "Nothing planned yet. Connect GitHub, and what needs work there shows on the Inbox.",
     );
   });
 });

@@ -64,8 +64,8 @@ export interface SidebarRecords {
   /** The assistants, each with the current session of its main conversation. None when absent. */
   readonly assistants?: readonly AssistantRecords[];
   /**
-   * The signals the controller holds, open and resolved. Each view of
-   * Intake reads its own of them (see `answerSignalQuery`). None when absent.
+   * The signals the controller holds, open and resolved. Each listing reads
+   * its own of them (see `answerSignalQuery`). None when absent.
    */
   readonly signals?: readonly Signal[];
   /** The installed plugins. None when absent. */
@@ -164,9 +164,7 @@ const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
  * Answers a signal listing from `signals` as the controller does, in one page
  * with no cursor to a next one:
  *
- * - `to-do`, the default: the open signals not snoozed, or whose snooze has
- *   run out by now;
- * - `later`: the open signals snoozed until after now, soonest first;
+ * - `to-do`, the default: the open signals;
  * - `done`: the resolved signals, newest first.
  *
  * A `source` keeps the signals of that plugin's kinds, and a `kind` keeps the
@@ -177,9 +175,6 @@ export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answe
   const view = query.get("view") ?? "to-do";
   const source = query.get("source");
   const kind = query.get("kind");
-  const now = Date.now();
-  const snoozed = (signal: Signal): boolean =>
-    signal.snooze !== undefined && Date.parse(signal.snooze.until) > now;
   const fromSource = signals.filter(
     (signal) =>
       (source === null || signal.kind.startsWith(`${source}/`)) &&
@@ -190,11 +185,7 @@ export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answe
       ? fromSource
           .filter((signal) => signal.status === "resolved")
           .toSorted((a, b) => (b.resolution?.at ?? "").localeCompare(a.resolution?.at ?? ""))
-      : view === "later"
-        ? fromSource
-            .filter((signal) => signal.status === "open" && snoozed(signal))
-            .toSorted((a, b) => a.snooze!.until.localeCompare(b.snooze!.until))
-        : fromSource.filter((signal) => signal.status === "open" && !snoozed(signal));
+      : fromSource.filter((signal) => signal.status === "open");
   return { body: { items } };
 };
 
@@ -238,16 +229,12 @@ export const buildSidebarHandlers = (
   "GET /api/v1/settings": { body: { controller: {}, user: {} } },
   "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/tasks": { body: { items: [] } },
-  // The shell reads what Tracking follows, for the To do count.
-  "GET /api/v1/tasks/tracking": { body: { rows: [] } },
   // A draft's composer reads the skills a start would have, for its `$` list.
   "GET /api/v1/sessions/preview-skills": { body: { items: [], skipped: [] } },
   // The shell reads the Connections, for New project and the starter threads.
   "GET /api/v1/connections": { body: { items: [] } },
-  // The shell reads To do for Intake's count, and the plugins for its sources.
+  // The shell reads the open signals, for the urgent ones' notifications.
   "GET /api/v1/signals": (call) => answerSignalQuery(records.signals ?? [], call),
-  // The shell reads the Tasks the signals on To do are about (Your work).
-  "GET /api/v1/signals/your-work": { body: { tasks: [] } },
   // The shell reads whether a run failed on a Task, for the sidebar's dot.
   "GET /api/v1/tasks/attention": { body: { anyFailure: false } },
   // The shell reads the Inbox's counts, for the Inbox row.
@@ -259,11 +246,13 @@ export const buildSidebarHandlers = (
     body: buildInboxOutline(),
   },
   "GET /api/v1/plugins": { body: records.plugins ?? [] },
-  // Settings > Intake reads the Ignore Rules each time it opens.
+  // Settings > Signals reads the Ignore Rules each time it opens.
   "GET /api/v1/ignore-rules": { body: [] },
   // Settings > Connections reads the event counts each time it opens.
   "GET /api/v1/events/counts": { body: { connections: [] } },
-  // Intake reads the workflows, whose names label the signals their runs raised.
+  // Settings > Connections and Settings > MCP servers read the MCP servers.
+  "GET /api/v1/mcp-servers": { body: { items: [] } },
+  // The Workflows page reads the workflows.
   "GET /api/v1/workflows": { body: { items: [] } },
   // The Office reads the runs that are running and those that are pending,
   // and as it opens, the runs that had not ended a minute before.

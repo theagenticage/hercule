@@ -33,6 +33,7 @@ import { findCommandByWords, listWordsAfter, type Command } from "./commands/tre
 import { CredentialError, resolveCredential, resolveUrl } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, getLoginHelp } from "./login";
+import { SIGN_IN_HELP, signInMcpServer } from "./mcp-sign-in";
 import { processIo, type Io } from "./io";
 
 /** Returns what `hercule setup-url` prints, or fails with the reason there is nothing to print. */
@@ -67,14 +68,20 @@ const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
  * the caller wrote it.
  */
 const toUsageError = (error: RequestError, command: Command): UsageError => {
+  // A flag that fills one key of an object field is found by the path of that
+  // key, such as `source.connectionId`.
   const named = new Map(
     [...command.positionals, ...command.payload, ...command.query].map((field) => [
-      field.name,
+      field.within === undefined ? field.name : `${field.within}.${field.name}`,
       formatFieldName(field),
     ]),
   );
   const refused = error.issues.map((issue) => {
-    const label = issue.path[0] === undefined ? undefined : named.get(issue.path[0]);
+    const label =
+      issue.path[0] === undefined
+        ? undefined
+        : (named.get(`${String(issue.path[0])}.${String(issue.path[1])}`) ??
+          named.get(String(issue.path[0])));
     return label === undefined ? issue.message : `${label}: ${issue.message}`;
   });
   return new UsageError(refused.join("; "), command.spelling);
@@ -99,13 +106,18 @@ const buildStdinReader = (
   return () => {
     const fields = command.payload.filter((field) => field.stdin);
     const names = fields.map((field) => field.name);
-    const asked =
+    const subject =
       names.length === 1
-        ? `${names[0]} is read from stdin, and stdin is a terminal. Pipe it in:`
-        : `${names.join(" and ")} are read from stdin, and stdin is a terminal. Pipe them in:`;
+        ? `${names[0]} is read from stdin, and stdin is a terminal.`
+        : `${names.join(" and ")} are read from stdin, and stdin is a terminal.`;
+    const pronoun = names.length === 1 ? "it" : "them";
+    // A secret must not be typed on the command line, where the shell keeps it in its history.
+    const instruction = fields.some((field) => field.secret)
+      ? `Give ${pronoun} from a file, or pipe ${pronoun} in from a password manager, so no secret is typed on the command line:`
+      : `Pipe ${pronoun} in:`;
     throw new UsageError(
       [
-        asked,
+        `${subject} ${instruction}`,
         ...buildShellExample(command, tokens, names.map((name) => `<${name}>`).join("\n")),
       ].join("\n"),
       command.spelling,
@@ -323,11 +335,18 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
 
   if ("command" in found) {
     const tokens = rest.slice(found.taken);
+    // The one command the table-driven executor cannot run: it listens for the
+    // browser. The table still gives it its spelling and help.
+    const runsByHand = found.command.id === "mcpServer.startSignIn";
     if (wantsHelp(tokens)) {
-      for (const line of buildCommandHelp(found.command)) io.out(line);
+      for (const line of buildCommandHelp(found.command, runsByHand ? SIGN_IN_HELP : undefined)) {
+        io.out(line);
+      }
       return EXIT.ok;
     }
-    return runOperation(found.command, tokens, home, io);
+    return runsByHand
+      ? signInMcpServer(found.command, tokens, home, io)
+      : runOperation(found.command, tokens, home, io);
   }
 
   const valid = listWordsAfter(words.slice(0, found.prefix));

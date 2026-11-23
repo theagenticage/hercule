@@ -6,7 +6,7 @@
  */
 import type { EntityRecord, EntityStatus, ExternalEntityDetail } from "@hercule/contract";
 import { buildLinkedRows, type PlaceRow } from "../desk/relation-rows";
-import type { PluginName } from "../intake";
+import type { PluginName } from "../plugin-names";
 import { describeAge, formatAge } from "../threads/age";
 import { decideOpenCardFace, type CardFact } from "./card-face";
 

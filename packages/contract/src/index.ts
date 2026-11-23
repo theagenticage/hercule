@@ -29,9 +29,10 @@ export {
   type SkillReference,
 } from "@hercule/protocol";
 
+export { API_PREFIX } from "./api-prefix";
+
 export {
   ALL_OPERATIONS,
-  API_PREFIX,
   OPERATIONS,
   canCarrySecrets,
   isOperationId,
@@ -83,6 +84,8 @@ export {
   type CliRow,
   type FieldRow,
   type NounRow,
+  type ObjectFlagsRow,
+  type ObjectKeyRow,
   type ResolvingQuery,
 } from "./cli";
 
@@ -121,6 +124,7 @@ export {
   type CapDetails,
   ShrinkDetails,
   InvalidStateDetails,
+  ConflictDetails,
   type ErrorCode,
 } from "./errors";
 
@@ -164,6 +168,14 @@ export {
 } from "./agent-text";
 
 export { appendPromptContext, splitPromptContext } from "./prompt-context";
+
+export {
+  parseCallbackQuery,
+  readApprovalHost,
+  readAuthorizationState,
+  type ParsedCallback,
+  type RefusedCallback,
+} from "./sign-in-callback";
 export type {
   PromptContextBlock,
   PromptContextInput,
@@ -181,6 +193,7 @@ export {
   ExternalRef,
   Id,
   IdOrMe,
+  isExternalRef,
   isId,
   isQualifiedId,
   MAX_EXTERNAL_REF_LENGTH,
@@ -435,11 +448,17 @@ export {
   requiresShrinkConfirmation,
 } from "./groups/memory";
 export {
+  MAX_WIKI_ARCHIVE_REASON_LENGTH,
   MAX_WIKI_PAGES,
   MAX_WIKI_REVISIONS_LISTED,
+  WIKI_PAGE_ARCHIVE_FIELDS,
   WIKI_PAGE_SORT_FIELDS,
   WIKI_PAGE_UPDATE_FIELDS,
+  WIKI_WRITING_RULES,
   WikiPage,
+  WikiPageArchived,
+  WikiPageArchivedFilter,
+  WikiPageArchiveInput,
   WikiPageCreateInput,
   WikiPageFilter,
   WikiPageSummary,
@@ -486,6 +505,25 @@ export {
   SkillUpdate,
   type SkillFile,
 } from "./groups/skill";
+export {
+  MAX_MCP_SERVER_NAME_LENGTH,
+  McpServer,
+  McpServerCreateInput,
+  McpServerFinishSignInInput,
+  McpServerIds,
+  McpServerLeftOutReason,
+  McpServerName,
+  McpServerSetTokenInput,
+  McpServerSignInRedirectUri,
+  McpServerSignInStart,
+  McpServerSource,
+  McpServerStartSignInInput,
+  McpServerStatus,
+  McpServerTool,
+  McpServerToken,
+  McpServerUpdateInput,
+  SessionMcpServer,
+} from "./groups/mcp-server";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,
@@ -551,16 +589,12 @@ export {
 export {
   BOARD_STAGES,
   BoardStage,
-  HandoffLeg,
-  HandoffLegs,
   Label,
   MAX_BOARD_CARDS,
   MAX_BOARD_STACK_CANDIDATES,
   MAX_CARD_QUESTION,
   MAX_DETAIL_SESSIONS,
   MAX_FILTER_VALUES,
-  MAX_LEG_LIVE_RUNS,
-  MAX_LEG_QUERY_RUNS,
   MAX_LABEL_LENGTH,
   MAX_PROVENANCE_APPEND,
   MAX_SUMMARY_LEFT,
@@ -582,6 +616,7 @@ export {
   TaskCreateInput,
   TaskCreatedEventPayload,
   TaskDetail,
+  TaskDetailRun,
   TaskDetailSession,
   TaskEntityChangedEventPayload,
   TaskEntityLinkInput,
@@ -601,25 +636,9 @@ export {
   TaskUpdateInput,
   TaskUpdatedEventPayload,
   MAX_STAGE_CAUSE_TEXT,
-  MAX_TRACKING_DETAIL_RUNS,
-  MAX_TRACKING_FAILURE_CAUSE,
-  MAX_TRACKING_HANDOFFS,
-  MAX_TRACKING_OUTPUT_FIELDS,
-  MAX_TRACKING_OUTPUT_LABEL,
-  MAX_TRACKING_OUTPUT_TEXT,
-  MAX_TRACKING_OUTPUT_VALUE,
-  MAX_TRACKING_STEP_NAME,
+  MAX_DETAIL_RUNS,
+  MAX_FAILURE_CAUSE,
   TaskAttention,
-  TaskTracking,
-  TrackingDetail,
-  TrackingDetailRun,
-  TrackingHandoff,
-  TrackingHandoffWithWorkflow,
-  TrackingOutput,
-  TrackingOutputField,
-  TrackingOutputValue,
-  TrackingRun,
-  TrackingTask,
   TryAgainUndo,
   WorkBoard,
   WorkCard,
@@ -725,7 +744,6 @@ export {
   SignalHandOffInput,
   SignalIdsInput,
   SignalKind,
-  SignalLowerPriorityResult,
   SignalMarkDoneResult,
   SignalMatch,
   SignalOrigin,
@@ -733,19 +751,13 @@ export {
   SignalRaiseResult,
   SignalResolution,
   SignalPage,
-  SignalSnooze,
-  SignalSnoozeInput,
-  SignalSnoozeResult,
   SignalStatus,
-  SignalUnsnoozeResult,
   SignalView,
   SignalWithdrawInput,
-  SignalYourWork,
   SkippedSignal,
   TextBlock,
   ThreadMessage,
   UnknownBlock,
-  YourWorkTask,
   type CoreSignalKind,
 } from "./groups/signal";
 export {
@@ -981,16 +993,10 @@ export {
 export {
   ConnectionEventCounts,
   EVENT_COUNT_HOURS,
-  EVENT_HANDLINGS,
   EventCountsByConnection,
-  EventFacts,
-  EventResolvedSignalFact,
-  EventIgnoredByFact,
-  EventHandling,
   EventKnownByFact,
   EventSignalFact,
-  EventTaskFact,
-  EventWithFacts,
+  ListedEvent,
   MAX_EVENT_SOURCE_LENGTH,
   RUNNER_ACTIVITY_KINDS,
   type RunnerActivityKind,

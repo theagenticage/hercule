@@ -11,6 +11,7 @@ import {
   collectSenderSessionIds,
   describeSender,
   readInputSender,
+  readUserSender,
   readSenderSession,
 } from "./sender";
 import { buildSession } from "./workspaces.testing";
@@ -201,5 +202,16 @@ describe("collectSenderSessionIds", () => {
     ];
 
     expect(collectSenderSessionIds(rows, [])).toEqual([]);
+  });
+});
+
+describe("readUserSender", () => {
+  it("returns the sending session's id, and undefined when the message has no sender", () => {
+    expect(readUserSender({ text: "Rebase on main", senderSessionId: "s-sender" })).toBe(
+      "s-sender",
+    );
+    expect(readUserSender({ text: "Fix the login bug" })).toBeUndefined();
+    expect(readUserSender({ text: "Fix the login bug", senderSessionId: "" })).toBeUndefined();
+    expect(readUserSender(undefined)).toBeUndefined();
   });
 });

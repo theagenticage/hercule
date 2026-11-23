@@ -11,7 +11,7 @@ import {
   type InboxBrowseValue,
   type InboxOutline,
 } from "@hercule/contract";
-import { namePlugin, type PluginName } from "../intake";
+import { namePlugin, type PluginName } from "../plugin-names";
 
 /** What the Inbox list is on: a saved query, or a Browse value. */
 export type InboxScope =

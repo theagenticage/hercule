@@ -17,9 +17,11 @@ import type { MarkState } from "../marks";
 /**
  * An icon, by the name of its component: `plus` is `PlusIcon`. The Bureau
  * book's crew.js uses the same names, except that it calls `workspace`
- * `worktree`, `chevron-left` `chev-l`, `chevron-right` `chev-r` and `inbox`
- * `intake`. The book does not draw `intake` and `overview`: the reference
- * sheet draws them from the app's outlines, in the book's frame.
+ * `worktree`, `chevron-left` `chev-l` and `chevron-right` `chev-r`. The cell
+ * `intake` is drawn by `InboxIcon`: the book drew the Inbox's tray for Intake,
+ * which the Inbox replaced, and the cell keeps the book's name. The book does
+ * not draw `overview`: the reference sheet draws it from the app's outlines,
+ * in the book's frame.
  */
 export type IconName =
   | "agent"
@@ -48,7 +50,6 @@ export type IconName =
   | "globe"
   | "heart"
   | "id"
-  | "inbox"
   | "intake"
   | "key"
   | "laptop"
@@ -145,7 +146,6 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["globe", [12]],
   ["heart", [15]],
   ["id", []],
-  ["inbox", []],
   ["intake", [13, 14]],
   ["key", [14]],
   ["laptop", [13]],

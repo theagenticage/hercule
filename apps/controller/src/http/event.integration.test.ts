@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { EventCountsByConnection, EventWithFacts, type Task } from "@hercule/contract";
+import { EventCountsByConnection, ListedEvent, type Task } from "@hercule/contract";
 import { ingestEvent } from "../daemon/testing";
 import { uuidFromString, withTransaction } from "../db";
 import { createIntakeFixture, INTAKE_FIXTURE } from "../plugins/testing";
@@ -79,7 +79,7 @@ describe("the event log over HTTP", () => {
 
       // Every row decodes as the contract's Event, actor included.
       for (const item of page.items) {
-        const decoded = Schema.decodeUnknownExit(EventWithFacts)(item);
+        const decoded = Schema.decodeUnknownExit(ListedEvent)(item);
         expect(decoded._tag, JSON.stringify(item)).toBe("Success");
       }
     });
@@ -186,7 +186,7 @@ describe("the event log over HTTP", () => {
       });
       // A listed event carries no `raw`, and reading it by id still returns it.
       expect(page.items[0]).not.toHaveProperty("raw");
-      expect(Schema.decodeUnknownExit(EventWithFacts)(page.items[0])._tag).toBe("Success");
+      expect(Schema.decodeUnknownExit(ListedEvent)(page.items[0])._tag).toBe("Success");
       const read = await get(base, `/api/v1/events/${String(page.items[0]!.id)}`, token);
       expect(await read.json()).toMatchObject({ raw: { raw: true } });
     });
@@ -311,7 +311,7 @@ describe("a failed login in the log", () => {
 
       // The contract's Event decodes the null; the row is not special-cased
       // on the way out.
-      const decoded = Schema.decodeUnknownExit(EventWithFacts)(row);
+      const decoded = Schema.decodeUnknownExit(ListedEvent)(row);
       expect(decoded._tag).toBe("Success");
 
       // Also read through the writer, so the test cannot pass just because
@@ -325,32 +325,17 @@ describe("a failed login in the log", () => {
 });
 
 describe("the Intake filters over HTTP", () => {
-  it("takes intake, text, source and a repeated handling, and returns each event with its fact lists", async () => {
+  it("takes intake, text and source, and returns each event with its facts", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "readable");
 
       const all = await listEvents(base, token, "?kind=task.created");
-      expect(all.items[0]).toMatchObject({
-        signals: [],
-        resolvedSignals: [],
-        tasks: [],
-        knownBy: [],
-        ignoredBy: null,
-      });
-
-      const noAction = await listEvents(
-        base,
-        token,
-        "?source=platform&handling=no-action&handling=known-work",
-      );
-      expect(noAction.items.length).toBeGreaterThan(0);
+      expect(all.items[0]).toMatchObject({ signals: [], knownBy: [] });
+      expect((await listEvents(base, token, "?source=platform")).items.length).toBeGreaterThan(0);
       // Platform events come through no Connection, so none is one of Intake's.
       expect((await listEvents(base, token, "?intake=true")).items).toEqual([]);
       expect((await listEvents(base, token, "?text=nothing-matches-this")).items).toEqual([]);
-
-      const refused = await get(base, "/api/v1/events?handling=pending-triage", token);
-      expect(refused.status).toBe(400);
     });
   });
 });

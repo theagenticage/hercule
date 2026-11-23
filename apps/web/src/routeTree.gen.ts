@@ -42,6 +42,8 @@ import { Route as ShellThreadsNewRouteImport } from './routes/_shell/threads/new
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell/workflows/index'
 import { Route as ShellWorkflowsWorkflowIdRouteImport } from './routes/_shell/workflows/$workflowId'
 import { Route as ShellWorkflowsNewRouteImport } from './routes/_shell/workflows/new'
+import { Route as ShellSettingsMcpServersIndexRouteImport } from './routes/_shell/settings/mcp-servers/index'
+import { Route as ShellSettingsMcpServersIdRouteImport } from './routes/_shell/settings/mcp-servers/$id'
 import { Route as ShellThreadsSessionIdIndexRouteImport } from './routes/_shell/threads/$sessionId/index'
 import { Route as ShellThreadsSessionIdSubagentsSubagentIdRouteImport } from './routes/_shell/threads/$sessionId/subagents/$subagentId'
 
@@ -213,6 +215,18 @@ const ShellWorkflowsNewRoute = ShellWorkflowsNewRouteImport.update({
   path: '/workflows/new',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellSettingsMcpServersIndexRoute =
+  ShellSettingsMcpServersIndexRouteImport.update({
+    id: '/mcp-servers/',
+    path: '/mcp-servers/',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
+const ShellSettingsMcpServersIdRoute =
+  ShellSettingsMcpServersIdRouteImport.update({
+    id: '/mcp-servers/$id',
+    path: '/mcp-servers/$id',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
 const ShellThreadsSessionIdIndexRoute =
   ShellThreadsSessionIdIndexRouteImport.update({
     id: '/',
@@ -259,6 +273,8 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof ShellSettingsIndexRoute
   '/tasks/': typeof ShellTasksIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
+  '/settings/mcp-servers/$id': typeof ShellSettingsMcpServersIdRoute
+  '/settings/mcp-servers/': typeof ShellSettingsMcpServersIndexRoute
   '/threads/$sessionId/': typeof ShellThreadsSessionIdIndexRoute
   '/threads/$sessionId/subagents/$subagentId': typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
 }
@@ -293,6 +309,8 @@ export interface FileRoutesByTo {
   '/settings': typeof ShellSettingsIndexRoute
   '/tasks': typeof ShellTasksIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
+  '/settings/mcp-servers/$id': typeof ShellSettingsMcpServersIdRoute
+  '/settings/mcp-servers': typeof ShellSettingsMcpServersIndexRoute
   '/threads/$sessionId': typeof ShellThreadsSessionIdIndexRoute
   '/threads/$sessionId/subagents/$subagentId': typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
 }
@@ -331,6 +349,8 @@ export interface FileRoutesById {
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/tasks/': typeof ShellTasksIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
+  '/_shell/settings/mcp-servers/$id': typeof ShellSettingsMcpServersIdRoute
+  '/_shell/settings/mcp-servers/': typeof ShellSettingsMcpServersIndexRoute
   '/_shell/threads/$sessionId/': typeof ShellThreadsSessionIdIndexRoute
   '/_shell/threads/$sessionId/subagents/$subagentId': typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
 }
@@ -369,6 +389,8 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/tasks/'
     | '/workflows/'
+    | '/settings/mcp-servers/$id'
+    | '/settings/mcp-servers/'
     | '/threads/$sessionId/'
     | '/threads/$sessionId/subagents/$subagentId'
   fileRoutesByTo: FileRoutesByTo
@@ -403,6 +425,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/workflows'
+    | '/settings/mcp-servers/$id'
+    | '/settings/mcp-servers'
     | '/threads/$sessionId'
     | '/threads/$sessionId/subagents/$subagentId'
   id:
@@ -440,6 +464,8 @@ export interface FileRouteTypes {
     | '/_shell/settings/'
     | '/_shell/tasks/'
     | '/_shell/workflows/'
+    | '/_shell/settings/mcp-servers/$id'
+    | '/_shell/settings/mcp-servers/'
     | '/_shell/threads/$sessionId/'
     | '/_shell/threads/$sessionId/subagents/$subagentId'
   fileRoutesById: FileRoutesById
@@ -685,6 +711,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellWorkflowsNewRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/settings/mcp-servers/': {
+      id: '/_shell/settings/mcp-servers/'
+      path: '/mcp-servers'
+      fullPath: '/settings/mcp-servers/'
+      preLoaderRoute: typeof ShellSettingsMcpServersIndexRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/mcp-servers/$id': {
+      id: '/_shell/settings/mcp-servers/$id'
+      path: '/mcp-servers/$id'
+      fullPath: '/settings/mcp-servers/$id'
+      preLoaderRoute: typeof ShellSettingsMcpServersIdRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/threads/$sessionId/': {
       id: '/_shell/threads/$sessionId/'
       path: '/'
@@ -713,6 +753,8 @@ interface ShellSettingsRouteChildren {
   ShellSettingsSystemRoute: typeof ShellSettingsSystemRoute
   ShellSettingsThreadsRoute: typeof ShellSettingsThreadsRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
+  ShellSettingsMcpServersIdRoute: typeof ShellSettingsMcpServersIdRoute
+  ShellSettingsMcpServersIndexRoute: typeof ShellSettingsMcpServersIndexRoute
 }
 
 const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
@@ -726,6 +768,8 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsSystemRoute: ShellSettingsSystemRoute,
   ShellSettingsThreadsRoute: ShellSettingsThreadsRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
+  ShellSettingsMcpServersIdRoute: ShellSettingsMcpServersIdRoute,
+  ShellSettingsMcpServersIndexRoute: ShellSettingsMcpServersIndexRoute,
 }
 
 const ShellSettingsRouteWithChildren = ShellSettingsRoute._addFileChildren(

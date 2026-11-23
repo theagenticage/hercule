@@ -59,6 +59,15 @@ export interface StoredConnection {
    * where they differ from the plugin's level.
    */
   readonly intake: IntakeOverrides;
+  /**
+   * A counter that starts at 0 and goes up each time the user replaces the
+   * Connection's credentials: pasting new ones or signing in again. An
+   * ordinary token refresh never moves it, so a change tells a caller that
+   * the credentials may now point at another destination, and no change
+   * tells it they are still the same grant. Two replacements always differ,
+   * even within one millisecond.
+   */
+  readonly credentialsGeneration: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -90,6 +99,12 @@ export interface ConnectionEdit {
   readonly statusDetail?: string | null;
   /** `null` clears the warning, as when new credentials come back without one. */
   readonly warning?: string | null;
+  /**
+   * Set to `true` when the user's action replaced the credentials, and never
+   * by a token refresh. Adds one to the credentials generation in the same
+   * statement as the other columns.
+   */
+  readonly replacesCredentials?: true;
 }
 
 /** A field a connection listing can be sorted by. */
@@ -122,13 +137,14 @@ interface ConnectionRow {
   readonly config: string;
   readonly feed_intervals: string;
   readonly intake: string;
+  readonly credentials_generation: number;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
 const COLUMNS =
   "id, plugin_id, type, label, display_name, account_id, status, status_detail, warning, labels, " +
-  "config, feed_intervals, intake, created_at, updated_at";
+  "config, feed_intervals, intake, credentials_generation, created_at, updated_at";
 
 /** How a connection listing sorts by each of its sortable fields. */
 const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConnection>> = {
@@ -172,6 +188,7 @@ const toConnection = (row: ConnectionRow): Effect.Effect<StoredConnection> =>
       config: parseJson<Record<string, Schema.Json>>(row.config),
       feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
       intake,
+      credentialsGeneration: row.credentials_generation,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }),
@@ -190,6 +207,26 @@ const make = Effect.gen(function* () {
 
   return {
     one,
+
+    /**
+     * Returns each Connection that exists, by its id, using one query. An id
+     * with no Connection is missing from the map.
+     */
+    readMany: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, StoredConnection>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.flatMap(
+            sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
+                               WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) =>
+              Effect.map(
+                Effect.forEach(rows, toConnection),
+                (connections) =>
+                  new Map(connections.map((connection) => [connection.id, connection])),
+              ),
+          ),
 
     /**
      * Returns a map from Connection id to its qualified type, using one query.
@@ -234,6 +271,7 @@ const make = Effect.gen(function* () {
           config: connection.config,
           feedIntervals: {},
           intake: NO_INTAKE_OVERRIDES,
+          credentialsGeneration: 0,
           createdAt: connection.at,
           updatedAt: connection.at,
         };
@@ -253,6 +291,9 @@ const make = Effect.gen(function* () {
       if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
       if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
       if (edit.warning !== undefined) sets.push(sql`warning = ${edit.warning}`);
+      if (edit.replacesCredentials) {
+        sets.push(sql`credentials_generation = credentials_generation + 1`);
+      }
       return Effect.asVoid(
         sql`UPDATE connections SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );

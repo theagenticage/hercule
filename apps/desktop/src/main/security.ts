@@ -7,24 +7,38 @@
 import { shell, type Session, type WebContents } from "electron";
 import * as Effect from "effect/Effect";
 import { isHttpUrl } from "../ipc/http-url";
+import type { LinkOpenOutcome } from "../ipc/contract";
 
 /**
- * Opens an `http:` or `https:` URL in the default browser, and ignores any
- * other URL. A URL the browser cannot open is logged as a warning; the
- * returned effect never fails.
+ * Opens an `http:` or `https:` URL in the default browser. Returns `Opened`,
+ * or `NotOpened` with a sentence for the user when the URL is not a web
+ * address or the system could not open it. The returned effect never fails.
+ *
+ * A URL can carry the one-time `state` of a sign-in in its query, so neither
+ * the returned reason nor the log line holds more than the scheme and host,
+ * and neither holds the system's own error message, which may repeat the URL.
  *
  * `shell.openExternal` is read when a link is opened, not when this module
  * loads, so an end-to-end test can replace it and see the URL without a
  * browser opening.
  */
-export const openInBrowser = (url: string): Effect.Effect<void> =>
+export const openInBrowser = (url: string): Effect.Effect<LinkOpenOutcome> =>
   isHttpUrl(url)
     ? Effect.tryPromise(() => shell.openExternal(url)).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning(`Could not open ${url} in the browser: ${error.message}`),
+        Effect.as({ _tag: "Opened" } as const),
+        Effect.catch(() =>
+          Effect.logWarning(`Could not open a link to ${new URL(url).origin} in the browser.`).pipe(
+            Effect.as({
+              _tag: "NotOpened",
+              reason: "The system could not open your default browser. Check that one is set.",
+            } as const),
+          ),
         ),
       )
-    : Effect.void;
+    : Effect.succeed({
+        _tag: "NotOpened",
+        reason: "Only a web address opens in the browser.",
+      } as const);
 
 /**
  * Installs the security hooks on `contents`, a web contents just created:
@@ -50,11 +64,11 @@ export const secureWebContents = (
 ): void => {
   contents.on("will-navigate", (event) => {
     event.preventDefault();
-    runEffect(openInBrowser(event.url));
+    runEffect(Effect.asVoid(openInBrowser(event.url)));
   });
   contents.on("will-redirect", (event) => event.preventDefault());
   contents.setWindowOpenHandler(({ url }) => {
-    runEffect(openInBrowser(url));
+    runEffect(Effect.asVoid(openInBrowser(url)));
     return { action: "deny" };
   });
 };

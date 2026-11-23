@@ -7,15 +7,14 @@
  *
  * - **Visible now** (`buildEligibleEntities`): the thing is on the Inbox. A
  *   full record of a work kind that concerns the user, has a live Task, or
- *   holds a live signal (open and not snoozed now), and that is not dismissed.
- *   A dismissed thing comes back when an ask is raised after the dismissal.
- *   A snooze ends with time, so every read takes `now`.
+ *   holds an open signal, and that is not dismissed. A dismissed thing comes
+ *   back when an ask is raised after the dismissal.
  * - **Retained while open** (`RETAINED_ROOT_REFS_SQL`): the daily sweep keeps
  *   the record. Any concern, any Task link (finished ones too) and any open
- *   signal, snoozed or not, holds it.
+ *   signal holds it.
  * - **Wanted by a Connection** (`WANTED_REFS_SQL`): a poll reads the ref
  *   again. Concerns, live Tasks and open signals on a work record hold it,
- *   snoozed or not, and so does everything above and next to them.
+ *   and so does everything above and next to them.
  *
  * `makeInboxPopulation` builds the reads over the first question that the
  * write path needs: which refs are on the Inbox, and the arrival number a
@@ -36,7 +35,7 @@ import { buildEligibleEntities, CONCERNED_REFS_SQL, type InboxMembership } from 
  * The refs the daily sweep keeps a record for, and keeps whatever sits above
  * them: refs that concern the user, refs any Task links (finished Tasks too,
  * because a finished Task still names its things), refs of open signals,
- * snoozed or not, and context records (a project, a team) that a Connection's
+ * and context records (a project, a team) that a Connection's
  * latest inventory lists, because the known values of a Facet come from them
  * and a listed project with no issues must not be deleted and recreated every
  * month. A listed work record with no concern is not kept: a call that cuts its
@@ -59,9 +58,8 @@ export const RETAINED_ROOT_REFS_SQL = `
  * common table expressions. `wanted` holds:
  *
  * - the roots: refs that concern the user (`CONCERNED_REFS_SQL`), refs a
- *   live Task links, and refs of full work records that hold an open signal
- *   (snoozed or not, because a snoozed signal still needs its card kept
- *   current). A signal on a ref with no such record makes nothing wanted
+ *   live Task links, and refs of full work records that hold an open signal.
+ *   A signal on a ref with no such record makes nothing wanted
  *   here: `listWanted` adds those for the Connection the signal came through;
  * - everything above the roots, up to `MAX_CONTEXT_DEPTH` levels of
  *   `part-of`, even where no record exists. A thing contributes its first
@@ -120,7 +118,7 @@ export const WANTED_REFS_SQL = `
  */
 export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
   /**
-   * Reads which of `refs` are eligible for the Inbox at `now`, and whether each
+   * Reads which of `refs` are eligible for the Inbox, and whether each
    * has an ask (the one definition in `buildEligibleEntities`). One statement,
    * none for no refs.
    */
@@ -166,7 +164,7 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
   /**
    * Runs `write`, which changes what the Inbox holds of `refs`, and returns
    * its result. A ref arrives, and takes a number of the arrival counter
-   * stamped at `membership.now`, when after the write it is on the Inbox and
+   * stamped at `now`, when after the write it is on the Inbox and
    * either it was not held before (not on the Inbox, not concerning the user),
    * or it has an ask now that it had none before. So a thing that came back
    * after a dismissal arrives, and so does a thing that begins to ask. A concern
@@ -179,6 +177,7 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
   const recordArrivalsAfter = <A, E, R>(
     refs: ReadonlyArray<string>,
     membership: InboxMembership,
+    now: string,
     write: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | SqlError, R> =>
     Effect.gen(function* () {
@@ -194,7 +193,7 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
         if (wasHeld && !(after.asks && before?.asks !== true)) continue;
         yield* sql`
           UPDATE external_entities
-          SET arrival_sequence = ${yield* takeArrivalSequence}, updated_at = ${membership.now}
+          SET arrival_sequence = ${yield* takeArrivalSequence}, updated_at = ${now}
           WHERE ref = ${ref}`;
       }
       return written;
@@ -221,17 +220,19 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
       now: string,
       write: Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E | SqlError, R> =>
-      recordArrivalsAfter(refs, { now, askingKinds: [] }, write),
+      recordArrivalsAfter(refs, { askingKinds: [] }, now, write),
 
     /**
      * Runs `write`, which writes an open signal on the thread `ref`, and
-     * records the arrival it causes (see `recordArrivalsAfter`). `membership`
-     * names the kinds that ask, so a signal that begins an ask is an arrival.
+     * records the arrival it causes at `now` (see `recordArrivalsAfter`).
+     * `membership` names the kinds that ask, so a signal that begins an ask
+     * is an arrival.
      */
     recordArrivalAfterSignal: <A, E, R>(
       ref: string,
       membership: InboxMembership,
+      now: string,
       write: Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E | SqlError, R> => recordArrivalsAfter([ref], membership, write),
+    ): Effect.Effect<A, E | SqlError, R> => recordArrivalsAfter([ref], membership, now, write),
   };
 };

@@ -108,24 +108,47 @@
   color: var(--faint);
   font-size: var(--t-12);
 }
-/* An older revision: one neutral band above the page, with the way back to the current one. */
-.old-rev {
+/* A band above the open page, which says something about the whole page: it
+   is an older revision, or it is archived. One neutral bar, 36px tall around
+   a small button: the 5px above and below also keep text that wraps in a
+   narrow window off the band's edges. */
+.page-band {
   display: flex;
   align-items: center;
   gap: 10px;
   max-width: 700px;
   min-height: 36px;
   margin: 2px 0 14px;
-  padding: 0 6px 0 12px;
+  padding: 5px 6px 5px 12px;
   border-radius: var(--r-md);
   background: var(--sunken);
   box-shadow: inset 0 0 0 1px var(--divider);
   color: var(--muted);
   font-size: var(--t-13);
 }
-.old-rev .ic {
+.page-band .ic {
   color: var(--faint);
 }
-.old-rev > span {
+.page-band > span {
   flex: 1;
+}
+/* The band above an archived page. Its reason can run to several lines, and
+   no button ends it, so it gets the same room on both sides, and room above
+   and below its text that makes a one-line band as tall as the band over an
+   older revision. */
+.page-band--archived {
+  padding: calc((36px - 1lh) / 2) 12px;
+}
+/* A reason may be one long word, such as a path. It breaks inside the band
+   rather than pushing the band wider than the page. */
+.page-band--archived > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The icon stays beside the first line of a reason that wraps, centred on
+   that line. */
+.page-band--archived .ic {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-block: calc((1lh - 14px) / 2);
 }

@@ -204,6 +204,34 @@ describe("PromotionState", () => {
     expect(ran).toBe("inner");
   });
 
+  it("refuses a new outside request from admitted work once frozen, where whenServing lets it through", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const state = yield* PromotionState;
+        const release = yield* Deferred.make<void>();
+        const request = yield* Effect.forkChild(
+          state.admit(
+            Effect.andThen(
+              Deferred.await(release),
+              Effect.all({
+                strict: readErrorCode(state.refuseUnlessServing),
+                counted: state.whenServing(Effect.succeed("let through")),
+              }),
+            ),
+          ),
+        );
+        yield* awaitRunningWork(state, 1);
+        const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
+        yield* awaitFrozen;
+        yield* Deferred.succeed(release, undefined);
+        const inside = yield* Fiber.join(request);
+        yield* Fiber.join(freeze);
+        return inside;
+      }),
+    );
+    expect(outcome).toEqual({ strict: "promotion_in_progress", counted: "let through" });
+  });
+
   it("holds work a fiber starts after the admitted work it was forked in has ended", async () => {
     const seen = await run(
       Effect.gen(function* () {

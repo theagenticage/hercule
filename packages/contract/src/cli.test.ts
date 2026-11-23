@@ -18,6 +18,12 @@ interface FieldRow {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly oneOf?: ReadonlyArray<ObjectRow & { readonly help?: string }>;
+}
+
+interface ObjectRow {
+  readonly fixed: Record<string, string>;
+  readonly flags: Record<string, FieldRow>;
 }
 
 interface Row {
@@ -41,13 +47,25 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
 /**
  * Returns every field that a visible row puts on the command line, as
  * `[operation id, field name, row]`, so the name of a failing test includes the
- * field. Hidden fields are left out, like hidden rows.
+ * field. Hidden fields are left out, like hidden rows. A field filled from
+ * several flags is listed once per flag, named `<field>.<key>`, and so is a
+ * field of several shapes, once per flag of each entry.
  */
 const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
-      .map(([name, field]) => [id, name, field] as [string, string, FieldRow]),
+      .flatMap(([name, field]): Array<[string, string, FieldRow]> => {
+        return field.oneOf === undefined
+          ? [[id, name, field]]
+          : field.oneOf.flatMap((object) =>
+              Object.entries(object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
+                id,
+                `${name}.${key}`,
+                keyRow,
+              ]),
+            );
+      }),
   );
 
 /** Returns the `resolves` value of every visible field, keyed `<operation> <field>`. */
@@ -72,6 +90,7 @@ const HIDDEN = [
   "externalEntity.readCards",
   "externalEntity.undoTakeOn",
   "externalEntity.undoTakeOnTogether",
+  "mcpServer.finishSignIn",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -101,11 +120,8 @@ const COMMANDS: Record<string, string> = {
 
   "task.query": "task list",
   "task.queryBoard": "task board",
-  "task.queryTracking": "task tracking",
-  "task.queryLegs": "task legs",
   "task.read": "task read",
   "task.readDetail": "task details",
-  "task.readTracking": "task read-tracking",
   "task.create": "task create",
   "task.update": "task update",
   "task.move": "task move",
@@ -125,16 +141,12 @@ const COMMANDS: Record<string, string> = {
   "permission.request": "permission request",
   "notification.act": "notification act",
   "signal.query": "signal list",
-  "signal.queryYourWork": "signal your-work",
   "signal.read": "signal read",
   "signal.raise": "signal raise",
   "signal.act": "signal act",
   "signal.handOff": "signal hand-off",
   "signal.withdraw": "signal withdraw",
   "signal.markDone": "signal done",
-  "signal.snooze": "signal snooze",
-  "signal.unsnooze": "signal unsnooze",
-  "signal.lowerPriority": "signal lower-priority",
   "externalEntity.queryInbox": "entity list",
   "externalEntity.read": "entity read",
   "externalEntity.readInboxGroup": "entity group",
@@ -290,6 +302,8 @@ const COMMANDS: Record<string, string> = {
   "wikiPage.read": "wiki-page read",
   "wikiPage.create": "wiki-page create",
   "wikiPage.update": "wiki-page update",
+  "wikiPage.archive": "wiki-page archive",
+  "wikiPage.restore": "wiki-page restore",
 
   "skill.query": "skill list",
   "skill.read": "skill read",
@@ -301,6 +315,15 @@ const COMMANDS: Record<string, string> = {
   "skill.apply": "skill apply",
   "skill.reject": "skill reject",
   "skill.applyUpdates": "skill apply-updates",
+
+  "mcpServer.query": "mcp-server list",
+  "mcpServer.read": "mcp-server read",
+  "mcpServer.create": "mcp-server create",
+  "mcpServer.update": "mcp-server update",
+  "mcpServer.delete": "mcp-server delete",
+  "mcpServer.check": "mcp-server check",
+  "mcpServer.setToken": "mcp-server set-token",
+  "mcpServer.startSignIn": "mcp-server sign-in",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -367,6 +390,8 @@ const STDIN_FIELDS = [
   "session.continue prompt",
   "session.input text",
   "input.update text",
+  "mcpServer.create source.token",
+  "mcpServer.setToken token",
   "plugin.configure config",
   "providerAccount.create credentials",
   "providerAccount.update credentials",
@@ -389,7 +414,6 @@ const RESOLVES: Record<string, string> = {
   "profile.delete id": "profile.query",
 
   "task.read id": "task.query",
-  "task.readTracking id": "task.query",
   "task.update id": "task.query",
   "task.readDetail id": "task.query",
   "task.linkEntity id": "task.query",
@@ -410,7 +434,6 @@ const RESOLVES: Record<string, string> = {
   "task.checkMerge id": "task.query",
   "task.checkMerge intoTaskId": "task.query",
   "task.delete id": "task.query",
-  "task.queryLegs runIds": "run.query",
 
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",
@@ -421,9 +444,6 @@ const RESOLVES: Record<string, string> = {
   "signal.handOff workflowId": "workflow.query",
   "signal.withdraw id": "signal.query",
   "signal.markDone signalIds": "signal.query",
-  "signal.snooze signalIds": "signal.query",
-  "signal.unsnooze signalIds": "signal.query",
-  "signal.lowerPriority signalIds": "signal.query",
   "externalEntity.handOff workflowId": "workflow.query",
   "externalEntity.handOff connectionId": "connection.query",
   "externalEntity.undoHandOff runId": "run.query",
@@ -445,6 +465,8 @@ const RESOLVES: Record<string, string> = {
   "project.delete id": "project.query",
   "project.create modelProfileId": "modelProfile.query",
   "project.update modelProfileId": "modelProfile.query",
+  "project.create mcpServerIds": "mcpServer.query",
+  "project.update mcpServerIds": "mcpServer.query",
 
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
@@ -535,6 +557,17 @@ const RESOLVES: Record<string, string> = {
   "memory.delete id": "assistant.query",
   "wikiPage.read id": "wikiPage.query",
   "wikiPage.update id": "wikiPage.query",
+  "wikiPage.archive id": "wikiPage.query",
+  "wikiPage.restore id": "wikiPage.query",
+
+  "mcpServer.create source.connectionId": "connection.query",
+  "mcpServer.read id": "mcpServer.query",
+  "mcpServer.update id": "mcpServer.query",
+  "mcpServer.update source.connectionId": "connection.query",
+  "mcpServer.delete id": "mcpServer.query",
+  "mcpServer.check id": "mcpServer.query",
+  "mcpServer.setToken id": "mcpServer.query",
+  "mcpServer.startSignIn id": "mcpServer.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",
@@ -553,6 +586,8 @@ const RESOLVES: Record<string, string> = {
   "session.spawn projectId": "project.query",
   "session.spawn runnerId": "runner.query",
   "session.spawn taskId": "task.query",
+  "session.spawn mcpServerIds": "mcpServer.query",
+  "session.update mcpServerIds": "mcpServer.query",
   "session.read id": "session.query",
   "session.querySubagents id": "session.query",
   "session.querySkills id": "session.query",
@@ -808,7 +843,6 @@ const USER_ONLY = [
   "signal.act",
   "signal.handOff",
   "signal.markDone",
-  "signal.lowerPriority",
   "task.merge",
   "initiative.create",
   "initiative.update",

@@ -2,7 +2,7 @@ import { useId, type JSX } from "react";
 import "./intake-settings.css";
 
 /**
- * Renders one Ignore Rule of Settings > Intake: the rule's text, what it
+ * Renders one Ignore Rule of Settings > Signals: the rule's text, what it
  * caught under it, and a Delete button that calls `onDelete`. The markup is
  * the book's `set-row`, like a kind's row, so the rule list lines up with
  * the lists above it. A long text wraps, so the whole rule always shows.

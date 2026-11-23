@@ -24,15 +24,12 @@
  * own clock, and no operation sets it. So before each launch,
  * `prepareLaunch` stops the controller, writes the idle threads' last
  * activity into its database, and starts it again on the same port. It sets
- * the time each open signal was raised the same way, for Intake's age
- * labels, the title, author and arrival time of every event, for
- * Everything's rows, the time of each Discussion and Post, for the Discussion
+ * the time of each Discussion and Post the same way, for the Discussion
  * list's age labels, and on request spreads one workflow's finished runs over
- * a day, for the Runs tab's timeline, and makes some open signals signals
- * about a thread, for Your work. Those are the only things written to
- * the database directly: the threads, and every state they are in, come from
- * the fleet, the signals from `signal.raise`, the events from `event.emit`,
- * and the runs from `run.start`.
+ * a day, for the Runs tab's timeline. Those are the only things the fixture
+ * writes to the database directly, besides what a scenario writes through
+ * `writeDatabase`: the threads, and every state they are in, come from the
+ * fleet, and the runs from `run.start`.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -145,22 +142,6 @@ const TWO_MINUTES_MS = 120_000;
  * these are older than any idle thread (at most 6 hours and 31 minutes).
  */
 const OTHER_PROJECTS_BACK_MS = 7 * HOUR_MS;
-
-/**
- * How far back the newest open signal is set, and how far apart the oldest
- * and the newest may be (see `backdateOpenSignals`).
- */
-const NEWEST_SIGNAL_BACK_MS = 2.5 * HOUR_MS;
-const SIGNALS_BACK_SPREAD_MS = 10 * 60_000;
-
-/**
- * How far back `titleEvents` spreads the events: the oldest one is set this
- * long ago, inside Everything's 90-day horizon.
- */
-const EVENTS_BACK_MS = 80 * 24 * HOUR_MS;
-
-/** The authors `titleEvents` hands out in turn. */
-const EVENT_AUTHORS = ["Marta", "Jonas", "Priya", "Tomas", "Ines"] as const;
 
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
@@ -564,17 +545,13 @@ export interface ThreadFixture {
    * the thread was created, and a header tab's the time since its last
    * activity, so both are set. With `twoMinuteRow`, one idle thread in the
    * first project is set only two minutes back instead, so exactly one row on
-   * screen shows minutes. Every open signal is set hours back too (see
-   * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
+   * screen shows minutes. With `spreadRuns`, the runs of one workflow are
    * spread over a span of time too (see `spreadRuns`). With `connections`,
    * the controller holds the fixture's Connections for the launch, and
    * without it none (see `FIXTURE_CONNECTIONS`). With `providerAccounts`,
    * the controller holds the fixture's Provider Accounts for the launch, and
    * without it only the Anthropic account the fleet makes, with no identity
-   * (see `buildProviderAccountFixtures`). With `signalsAboutThreads`,
-   * that many of the oldest open signals become signals of a plugin's event,
-   * each about a thread (see `makeSignalsAboutThreads`). With
-   * `writeDatabase`, that function runs on the stopped controller's database
+   * (see `buildProviderAccountFixtures`). With `writeDatabase`, that function runs on the stopped controller's database
    * last, for a scenario that seeds what no operation makes, such as Runner
    * Metrics history. Fails when a thread is not in its expected state
    * afterwards.
@@ -584,7 +561,6 @@ export interface ThreadFixture {
     readonly spreadRuns?: RunSpread;
     readonly connections?: boolean;
     readonly providerAccounts?: boolean;
-    readonly signalsAboutThreads?: number;
     readonly writeDatabase?: (database: DatabaseSync) => void;
   }) => Promise<void>;
   /**
@@ -894,14 +870,12 @@ export async function runWithThreadFixture<T>(
         spreadRuns: spread,
         connections = false,
         providerAccounts = false,
-        signalsAboutThreads = 0,
         writeDatabase,
       }: {
         readonly twoMinuteRow: boolean;
         readonly spreadRuns?: RunSpread;
         readonly connections?: boolean;
         readonly providerAccounts?: boolean;
-        readonly signalsAboutThreads?: number;
         readonly writeDatabase?: (database: DatabaseSync) => void;
       }) => {
         // A Request is answered before the restart and opened again after it,
@@ -942,15 +916,11 @@ export async function runWithThreadFixture<T>(
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
         backdateDone(home, oldDoneIds);
-        backdateOpenSignals(home);
-        if (signalsAboutThreads > 0) makeSignalsAboutThreads(home, signalsAboutThreads);
-        backdateTrackedRuns(home);
-        titleEvents(home);
         backdateDiscussions(home);
         if (spread !== undefined) spreadRuns(home, spread);
         // Only the launch with Settings › Connections open has Connections, so
         // every other launch measures what it measured before Connections
-        // were built: a GitHub Connection adds a segment to Settings › Intake,
+        // were built: a GitHub Connection adds a segment to Settings › Signals,
         // and one that needs sign-in puts a dot on the Settings row.
         replaceConnections(home, connections ? FIXTURE_CONNECTIONS : []);
         // Only the launch with Settings › Providers open has the accounts of
@@ -1104,143 +1074,6 @@ export async function runWithThreadFixture<T>(
   }
 }
 
-/**
- * Sets every open signal in the stopped controller's database in the Home
- * `home` raised between 2 h 30 min and 2 h 40 min back, in the order they
- * were raised. Intake's rows then all show "2h", and the next label change
- * is 20 minutes or more away, so no label changes during a launch.
- *
- * Each open signal is set one second before the next, oldest first, so To
- * do keeps its order. At most 600 signals fit in those 10 minutes, and the
- * function fails with more.
- */
-function backdateOpenSignals(home: string): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const ids = database
-      .prepare("SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id")
-      .all()
-      .map((row) => row["id"] as Uint8Array);
-    if (ids.length > SIGNALS_BACK_SPREAD_MS / 1_000) {
-      throw new Error(
-        `the fixture backdates at most ${String(SIGNALS_BACK_SPREAD_MS / 1_000)} open signals, not ${String(ids.length)}`,
-      );
-    }
-    const update = database.prepare("UPDATE signals SET created_at = ? WHERE id = ?");
-    const newest = Date.now() - NEWEST_SIGNAL_BACK_MS;
-    database.exec("BEGIN");
-    for (const [index, id] of ids.entries()) {
-      const back = (ids.length - 1 - index) * 1_000;
-      update.run(new Date(newest - back).toISOString(), id);
-    }
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * The id of the Connection the signals made by `makeSignalsAboutThreads` name.
- * No such Connection exists, and reading the signals does not need one. The id
- * has the form of a UUID version 7, because the contract refuses any other.
- */
-const THREAD_SIGNALS_CONNECTION_ID = "0199c0ff-8888-7000-8000-000000000001";
-
-/**
- * Builds the External Ref of the thread the `index`th signal made by
- * `makeSignalsAboutThreads` is about, counting from the oldest. A Task that
- * carries this ref in its provenance is Your work for that signal.
- */
-export const buildSignalThreadRef = (index: number): string =>
-  `github:pull-request:acme/payments-api#${String(1_000 + index)}`;
-
-/**
- * Turns the `count` oldest open signals in the stopped controller's database
- * in the Home `home` into signals of a plugin's event, each about its own
- * thread (`buildSignalThreadRef`). `signal.raise` can only make signals of the
- * core, which are about no thread, and a plugin's event needs a Connection the
- * fixture does not run; but only a signal about a thread can be matched to
- * Tasks as Your work. The signal's kind and text stay as they were.
- */
-function makeSignalsAboutThreads(home: string, count: number): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const ids = database
-      .prepare("SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id LIMIT ?")
-      .all(count)
-      .map((row) => row["id"] as Uint8Array);
-    if (ids.length < count) {
-      throw new Error(`the fixture has ${String(ids.length)} open signals, not ${String(count)}`);
-    }
-    const update = database.prepare(
-      "UPDATE signals SET origin = ?, connection_id = ?, thread_ref = ? WHERE id = ?",
-    );
-    database.exec("BEGIN");
-    for (const [index, id] of ids.entries()) {
-      const threadRef = buildSignalThreadRef(index);
-      const origin = {
-        type: "event",
-        eventId: index + 1,
-        connectionId: THREAD_SIGNALS_CONNECTION_ID,
-        threadRef,
-      };
-      update.run(
-        JSON.stringify(origin),
-        Buffer.from(THREAD_SIGNALS_CONNECTION_ID.replaceAll("-", ""), "hex"),
-        threadRef,
-        id,
-      );
-    }
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/** How far back `backdateTrackedRuns` moves the runs it finds. */
-const TRACKED_RUNS_BACK_MS = 3 * HOUR_MS;
-
-/**
- * Moves every run that works on a Task, and its steps, written in the last
- * hour, in the stopped controller's database in the Home `home`, back by
- * `TRACKED_RUNS_BACK_MS`. A row of Tracking shows how long ago its run ended
- * or started, so left alone its rows would show minutes and change during a
- * launch. Each time of a run moves by the same amount, so a run keeps the
- * times it took. A run already moved is older than an hour, so a second call
- * leaves it where it is.
- *
- * A run that is still live moves too. Its `wait` step counts from its start,
- * and a day-long wait that started three hours back still has twenty-one
- * hours to go.
- */
-function backdateTrackedRuns(home: string): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const recent = new Date(Date.now() - HOUR_MS).toISOString();
-    const shift = (column: string) =>
-      `strftime('%Y-%m-%dT%H:%M:%fZ', ${column}, '-${String(TRACKED_RUNS_BACK_MS / HOUR_MS)} hours')`;
-    database.exec("BEGIN");
-    // The steps first: they are found through their runs, which still hold their recent times.
-    database
-      .prepare(
-        `UPDATE run_steps SET created_at = ${shift("created_at")}, ` +
-          `started_at = ${shift("started_at")}, finished_at = ${shift("finished_at")} ` +
-          `WHERE run_id IN (SELECT id FROM runs WHERE task_id IS NOT NULL AND created_at > ?)`,
-      )
-      .run(recent);
-    database
-      .prepare(
-        `UPDATE runs SET created_at = ${shift("created_at")}, ` +
-          `started_at = ${shift("started_at")}, finished_at = ${shift("finished_at")} ` +
-          `WHERE task_id IS NOT NULL AND created_at > ?`,
-      )
-      .run(recent);
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
 /** How far back `backdateDiscussions` moves the Discussions and Posts it finds. */
 const DISCUSSIONS_BACK_MS = 3 * HOUR_MS;
 
@@ -1270,44 +1103,6 @@ function backdateDiscussions(home: string): void {
         `UPDATE discussion_posts SET created_at = ${shift("created_at")} WHERE created_at > ?`,
       )
       .run(recent);
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * Gives every event in the stopped controller's database in the Home `home`
- * a title, an author and an arrival time, oldest first, spread evenly over
- * the `EVENTS_BACK_MS` before now. `event.emit` sets none of the three, and
- * only a plugin's ingest does, so without this Everything's rows would be
- * untitled and all received at once, which no real log is.
- *
- * The full-text index over titles and authors is rebuilt afterwards, because
- * the controller keeps it current only for events as they are inserted.
- */
-function titleEvents(home: string): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const ids = database
-      .prepare("SELECT id FROM events ORDER BY id")
-      .all()
-      .map((row) => row["id"] as number);
-    const update = database.prepare(
-      "UPDATE events SET title = ?, author = ?, received_at = ? WHERE id = ?",
-    );
-    const now = Date.now();
-    database.exec("BEGIN");
-    for (const [index, id] of ids.entries()) {
-      const back = ((ids.length - 1 - index) / Math.max(ids.length - 1, 1)) * EVENTS_BACK_MS;
-      update.run(
-        `Pull request #${String(1_000 + index)} needs a review`,
-        EVENT_AUTHORS[index % EVENT_AUTHORS.length]!,
-        new Date(now - back).toISOString(),
-        id,
-      );
-    }
-    database.exec("INSERT INTO events_fts (events_fts) VALUES ('rebuild')");
     database.exec("COMMIT");
   } finally {
     database.close();

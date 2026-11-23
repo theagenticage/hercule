@@ -31,6 +31,7 @@ const REFUNDS: Initiative = {
 const buildProject = (id: string, name: string): Project => ({
   id,
   name,
+  mcpServerIds: [],
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });

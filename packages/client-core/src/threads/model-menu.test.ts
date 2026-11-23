@@ -815,6 +815,7 @@ describe("buildModelMenu for a draft with several profiles", () => {
       {
         id: "p-1",
         name: "mono",
+        mcpServerIds: [],
         createdAt: "2026-09-05T09:00:00.000Z",
         updatedAt: "2026-09-05T09:00:00.000Z",
         ...(modelProfileId === undefined ? {} : { modelProfileId }),

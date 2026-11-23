@@ -1,6 +1,6 @@
 /**
- * The plugins the specimens install, as `plugin.query` would list them. Intake
- * names each signal's source by its plugin, and the open workflow draws an
+ * The plugins the specimens install, as `plugin.query` would list them. The
+ * Inbox names each thing's source by its plugin, and the open workflow draws an
  * action step with the mark of the plugin whose action it calls.
  */
 import type { PluginDetail, PluginMark } from "@hercule/contract";

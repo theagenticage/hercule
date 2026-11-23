@@ -31,7 +31,7 @@ import {
   type Plugin,
   type SignalDraft,
 } from "@hercule/plugin-host";
-import { withTransaction } from "../../../db";
+import { uuidFromString, withTransaction } from "../../../db";
 import { del, get, post, send } from "../../../http/testing";
 import { freezeController, requestTransfer } from "../../../promotion/testing";
 import { IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../../plugins/testing";
@@ -352,7 +352,7 @@ describe("raising a plugin's signals from its events", () => {
     });
   });
 
-  it("keeps Not urgent on the signal that replaces a lowered one", async () => {
+  it("keeps a lowered priority on the signal that replaces a lowered one", async () => {
     await withDeskController({ build: "draft", urgent: true }, async (controller, connectionId) => {
       const first = await emitDeskEvent(controller, connectionId, "desk.asked", {
         thread: "t-3",
@@ -361,13 +361,17 @@ describe("raising a plugin's signals from its events", () => {
       });
       const older = await waitForSignalFrom(controller, ASKED_KIND, first);
       expect(older.priority).toBe("urgent");
-      const lowered = await post(
-        controller.base,
-        "/api/v1/signals/lower-priority",
-        { signalIds: [older.id] },
-        controller.token,
+      // Lowered as the removed Not urgent did, which a database upgraded from
+      // before its removal can still hold.
+      await runEffect(
+        withTransaction(
+          controller.harness.sql,
+          controller.harness.sql`
+        UPDATE signals SET priority = 'high', priority_lowered = 1
+        WHERE id = ${uuidFromString(older.id)}
+      `,
+        ),
       );
-      expect(lowered.ok, await lowered.clone().text()).toBe(true);
 
       const second = await emitDeskEvent(controller, connectionId, "desk.asked", {
         thread: "t-3",

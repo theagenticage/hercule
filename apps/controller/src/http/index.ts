@@ -7,4 +7,5 @@
  */
 export { buildPerimeterWarning } from "./perimeter";
 export { operationLayers } from "./routes";
+export { closeMcpStreams } from "./mcp";
 export { listenerOptions, serve, webBundle } from "./server";

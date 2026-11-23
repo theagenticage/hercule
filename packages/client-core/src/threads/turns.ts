@@ -28,8 +28,10 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import type { AgentState } from "./agent-state";
 import { findFirstMessageItemId, splitSentText } from "./first-message";
+import { readUserSender } from "./sender";
 import {
   describeCompactionTarget,
   describeWaitDuration,
@@ -119,16 +121,6 @@ const readUserSkills = (detail: unknown): readonly string[] => {
 };
 
 /**
- * Returns the id of the session whose agent sent a `user_message`, from its
- * detail's `senderSessionId`. Returns `undefined` for a message the session's
- * owner sent, which carries no sender.
- */
-export const readUserSender = (detail: unknown): string | undefined => {
-  const sender = readJsonObject(detail)?.senderSessionId;
-  return typeof sender === "string" && sender !== "" ? sender : undefined;
-};
-
-/**
  * Checks whether a `user_message` was steered into a turn that was already
  * running, from its detail's `steered`. Returns `false` for a message that
  * opened its turn.
@@ -193,6 +185,11 @@ export interface RuntimeNote {
   readonly severity: "error" | "warning" | "notice";
   readonly message: string;
   readonly at: string;
+  /**
+   * The MCP Servers a warning is about and why, as the controller wrote them.
+   * Absent for every note that is not a warning about MCP Servers.
+   */
+  readonly mcpServers?: readonly McpServerWarningEntry[];
 }
 
 /**
@@ -624,7 +621,13 @@ const buildRuntimeNote = (
     case "runtime.error":
       return { key, severity: "error", message: event.message ?? event.class, at: event.at };
     case "runtime.warning":
-      return { key, severity: "warning", message: event.message, at: event.at };
+      return {
+        key,
+        severity: "warning",
+        message: event.message,
+        at: event.at,
+        ...(event.mcpServers === undefined ? {} : { mcpServers: event.mcpServers }),
+      };
     case "runtime.notice":
       return { key, severity: "notice", message: event.message, at: event.at };
     case "unknown":

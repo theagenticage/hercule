@@ -777,14 +777,27 @@ const at = "2026-09-10T09:00:00.000Z";
 const WEBSHOP_PROJECT: Project = {
   id: "p-webshop",
   name: "webshop",
+  mcpServerIds: [],
   createdAt: at,
   updatedAt: at,
 };
 
-const OPS_PROJECT: Project = { id: "p-ops", name: "ops", createdAt: at, updatedAt: at };
+const OPS_PROJECT: Project = {
+  id: "p-ops",
+  name: "ops",
+  mcpServerIds: [],
+  createdAt: at,
+  updatedAt: at,
+};
 
 /** A project with no repos. */
-const EMPTY_PROJECT: Project = { id: "p-empty", name: "sandbox", createdAt: at, updatedAt: at };
+const EMPTY_PROJECT: Project = {
+  id: "p-empty",
+  name: "sandbox",
+  mcpServerIds: [],
+  createdAt: at,
+  updatedAt: at,
+};
 
 /**
  * Returns a repo resource, with both the remote and the canonical remote given
@@ -924,6 +937,7 @@ const buildThread = (id: string, title: string): Session => ({
   exitedAt: null,
   lastActivityAt: at,
   unenforced: [],
+  mcpServers: [],
 });
 
 const SESSIONS = [

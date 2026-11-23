@@ -4,7 +4,7 @@
  * plugin.
  */
 export { EventKindCatalogLayer } from "./event-kinds";
-export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
+export { PluginConfigsLayer, PluginHost, PluginHostLayer, type LoadedPlugin } from "./host";
 export {
   computeIngestFingerprint,
   IngestLoops,
@@ -12,6 +12,7 @@ export {
   type RunningIngest,
 } from "./ingest";
 export type { RegisteredHarness } from "./harnesses";
+export type { RegisteredMcpServer } from "./mcp-servers";
 export { decideProviderAccountHarness, listCredentialVariables } from "./harness-support";
 export { findAccountKind, findCredentialSecretName, type RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";

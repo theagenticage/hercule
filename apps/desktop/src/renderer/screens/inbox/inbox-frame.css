@@ -71,8 +71,8 @@
   height: var(--bar-h);
 }
 /* The bar floats in the window's top 52px, which drags the window: its controls take the pointer
-   and the gaps between them stay part of the drag strip. */
-.ib-pill,
+   and the gaps between them stay part of the drag strip. The pill holds no control, so it drags
+   the window too. */
 .ib-bar > .tool,
 .ib-search > *,
 .ib-end > * {
@@ -81,6 +81,11 @@
 .ib-pill {
   justify-self: start;
   margin-left: 14px;
+}
+/* The pill holds the page's name alone, so the name sits 14px from both of
+   its ends, as the Overview's name sits from its pill's start. */
+.ib-pill > .pill-title {
+  padding: 0 10px;
 }
 .ib-search {
   display: grid;
@@ -187,7 +192,7 @@
   overflow: clip;
 }
 
-/* ---- Under 900px of window (628px of room): the pill gives way; Intake stays in the sidebar ---- */
+/* ---- Under 900px of window (628px of room): the pill gives way; the Inbox stays in the sidebar ---- */
 .ib.is-pill-gone .ib-pill {
   display: none;
 }

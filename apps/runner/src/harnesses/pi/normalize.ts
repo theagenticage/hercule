@@ -30,6 +30,7 @@ import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize
 import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
 import { buildEditedPathFields } from "../edited-paths";
+import { splitPrefixedGatewayToolName } from "../gateway-tool-name";
 import { requireText, truncateFact, truncateMessage } from "../text";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { resolvePiPath } from "./edited-path";
@@ -519,6 +520,9 @@ export const readFactArg = (
  * - A file change shows the edited path in the fixed field `path`, whole and
  *   as pi reads it (see `resolvePiPath`). When the path is missing or
  *   longer than the fact bound, it shows the tool's name instead.
+ * - A tool of the MCP Gateway shows the MCP Server and the tool, as the other
+ *   harnesses do. Its arguments belong to an outside server, so a `command`
+ *   or `path` among them is not shown as a shell command or a workspace file.
  * - Any other tool shows its command, else its file path, else its name.
  */
 const buildToolDetail = (
@@ -548,6 +552,14 @@ const buildToolDetail = (
     const fields =
       typeof edited === "string" ? buildEditedPathFields([resolvePiPath(edited, home)]) : undefined;
     return fields ?? { name: truncateFact(toolName) };
+  }
+  const gateway = splitPrefixedGatewayToolName(toolName);
+  if (gateway !== undefined) {
+    return {
+      name: truncateFact(gateway.tool),
+      server: truncateFact(gateway.server),
+      kind: "mcp",
+    };
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
@@ -848,6 +860,24 @@ const announceTurn = (state: Normalizing): HarnessEvent => {
     ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
   };
 };
+
+/**
+ * Builds the events of an input that pi handled itself, as a pi command
+ * (`/mcp`) or an extension's input hook: no agent run started, so pi will
+ * never send `agent_settled` to end the turn. Returns `turn.started`, then
+ * `inputEvents` (the input's own events, which belong inside the turn), then
+ * the closing events and `turn.completed` of the turn.
+ *
+ * Returns `inputEvents` alone when pi has already announced the turn: a run is
+ * in flight then, and its `agent_settled` ends the turn.
+ */
+export const buildHandledInputEvents = (
+  state: Normalizing,
+  inputEvents: ReadonlyArray<HarnessEvent>,
+): ReadonlyArray<HarnessEvent> =>
+  state.announced || state.turnId === undefined
+    ? inputEvents
+    : [announceTurn(state), ...inputEvents, ...endTurn(state)];
 
 /**
  * Returns a turn an item can go in, with the events that announce it, which is

@@ -26,6 +26,7 @@ import {
   createUnauthenticatedError,
   createValidationError,
   isOperationId,
+  isQualifiedId,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -58,6 +59,11 @@ import { permissionRequestSubscriptions } from "../../subscriptions";
 const ONLY_A_SESSION_ASKS =
   "only a session can ask for a grant, because a Permission Request widens one " +
   "session's grants; the user already holds every grant";
+
+/** Returns why a request cannot carry an operation that does not exist. */
+const describeUnknownOperation = (op: string): string =>
+  `There is no operation named ${JSON.stringify(op)}. Name a contract operation id, such as ` +
+  "run.start, or a plugin action's qualified id, such as github/pr.merge.";
 
 /** Returns why a request cannot carry this operation: its input may hold a secret. */
 const describeSecretOperation = (op: string): string =>
@@ -144,8 +150,9 @@ const make = Effect.gen(function* () {
      *
      * Fails with:
      *
-     * - `Validation` when the caller is not a session, or when `operation`
-     *   names an operation whose input can carry a secret;
+     * - `Validation` when the caller is not a session, when `operation` names
+     *   neither a contract operation nor a plugin action, or when it names an
+     *   operation whose input can carry a secret;
      * - `InvalidState` when the session already holds the grant, so it should
      *   retry its call, already waits on a request for the same grant, or has
      *   exited. The grants are read inside the transaction, so a grant given
@@ -168,6 +175,16 @@ const make = Effect.gen(function* () {
         // Refused rather than stripped, so the agent learns why the user
         // does not see the call it named.
         const op = input.operation?.op;
+        // The request schema leaves `op` as any text, so the table is not part
+        // of the web app's first paint; this is where an unknown name is refused.
+        if (op !== undefined && !isOperationId(op) && !isQualifiedId(op)) {
+          return yield* Effect.fail(
+            createValidationError(
+              [{ path: ["operation", "op"], message: describeUnknownOperation(op) }],
+              describeUnknownOperation(op),
+            ),
+          );
+        }
         if (op !== undefined && isOperationId(op) && canCarrySecrets(op)) {
           return yield* Effect.fail(
             createValidationError(
@@ -260,7 +277,7 @@ const make = Effect.gen(function* () {
      *
      * Fails with `NotFound` when there is no such request, with `Forbidden`
      * when a session decides a request for a grant only the user gives
-     * (`skill.write` or `skill.apply`), whatever the outcome, and with
+     * (one of `GRANTS_ONLY_THE_USER_GIVES`), whatever the outcome, and with
      * `InvalidState` when:
      *
      * - it was already decided or was withdrawn;

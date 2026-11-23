@@ -39,6 +39,7 @@ import {
 import { Actor, Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
+import { McpServerIds, SessionMcpServer } from "./mcp-server";
 import { PermissionRequest } from "./permission";
 import { SessionSkillList } from "./session-skill";
 import { TaskTitle } from "./task-title";
@@ -429,6 +430,13 @@ export const Session = Schema.Struct({
    * is read.
    */
   unenforced: Schema.Array(UnenforcedSpecField),
+  /**
+   * The session's own list of MCP Servers, in the order it was given: empty
+   * for a session that has none, and always empty for a session that is not a
+   * Thread. Changing a Project's list or the thread default later never
+   * touches it.
+   */
+  mcpServers: Schema.Array(SessionMcpServer),
 });
 
 export type Session = Schema.Schema.Type<typeof Session>;
@@ -744,6 +752,14 @@ export const SessionSpawnInput = closedStruct({
    * actor and per operation.
    */
   dedupKey: Schema.optionalKey(DedupKey),
+  /**
+   * The MCP Servers the Thread starts with, in place of its default list; an
+   * empty list is kept as empty. Needs `mcp.manage` as well as
+   * `session.spawn`. Refused `validation` when an id is unknown or deleted,
+   * names a server twice, or when two servers share a name, and with
+   * `agentId`.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
 }).check(refuseEmptySpawnPrompt, refuseNewTaskWithTaskOrAgent);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
@@ -780,7 +796,15 @@ export const SESSION_INPUT_FIELDS = {
   ...SESSION_SELECTION_FIELDS,
 } as const;
 
-export const SESSION_UPDATE_FIELDS = SESSION_SELECTION_FIELDS;
+export const SESSION_UPDATE_FIELDS = {
+  ...SESSION_SELECTION_FIELDS,
+  /**
+   * Replaces the session's list of MCP Servers. Needs `mcp.manage` as well as
+   * `session.steer`. Refused `validation` for the same reasons as on
+   * `session.spawn`.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
+} as const;
 
 export const SessionUpdateInput = closedStruct(SESSION_UPDATE_FIELDS);
 

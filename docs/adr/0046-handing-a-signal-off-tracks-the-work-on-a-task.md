@@ -4,7 +4,7 @@ Date: 2026-10-19
 
 ## Status
 
-Accepted. Decided in the map [Tracking: follow handed-off work in Intake (#797)](https://github.com/theagenticage/hercule/issues/797), from the prototypes on the branch [`prototype/stay-in-the-loop`](https://github.com/theagenticage/hercule/tree/prototype/stay-in-the-loop/docs/design/stay-in-the-loop). Its slices write it into specs 02, 07, 09, 10, 11 and 17. Amends [spec 10 §9.4](../spec/10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent): the core's Hand to an agent answers bind `signal.handOff` in place of `run.start`. Keeps [ADR 0019](./0019-the-task-model-is-thin-workflows-own-task-semantics.md) and [ADR 0040](./0040-intake-holds-signals-notifications-are-hercules-own-messages.md).
+Accepted. Decided in the map [Tracking: follow handed-off work in Intake (#797)](https://github.com/theagenticage/hercule/issues/797), from the prototypes on the branch [`prototype/stay-in-the-loop`](https://github.com/theagenticage/hercule/tree/prototype/stay-in-the-loop/docs/design/stay-in-the-loop). Its slices write it into specs 02, 07, 09, 10, 11 and 17. Amends [spec 10 §9.4](../spec/10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent): the core's Hand to an agent answers bind `signal.handOff` in place of `run.start`. Keeps [ADR 0019](./0019-the-task-model-is-thin-workflows-own-task-semantics.md) and [ADR 0040](./0040-intake-holds-signals-notifications-are-hercules-own-messages.md). *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Tracking and the desktop's way to hand a signal off are deleted with the Intake screen; the Task that holds the chain stays. See the last amendment.)*
 
 ## Context
 
@@ -70,5 +70,22 @@ Four designs were prototyped. The one chosen, Round Trip, brought each result ba
 - **The core never moves a stage on its own.** A handoff decides `building` only from `exploring` or `planned`. At any other stage, such as `in-review`, the Task is not moved back. The stage is still written as a decision every time, so a later Undo can tell that someone decided after the handoff ([spec 09 §A handoff from a card](../spec/09-tasks.md#a-handoff-from-a-card)).
 - **Acting never ends a signal it did not answer.** A handoff from a card ends only the open signals of the kinds its workflow's entity input lists in `answers`. A mention on the same pull request stays open on the card. The ending is the Hand to an agent resolution, "Handed to *X*", with no source action and no Ignore Rule suggestion ([spec 10 §9.6](../spec/10-triage-intake-and-notifications.md#96-when-a-signal-leaves)).
 - **A handoff from a card can be taken back, as far as is safe.** Cancelling a run is not a rollback, so the handoff keeps a record of what it did and Undo reverses the Task only while nothing of the run has started and nothing has joined or moved the Task since. Otherwise the run is asked to stop and the Task stays. Signals the handoff ended stay ended.
-- **Intake's Hand to an agent and Tracking stay as they are,** and keep working until [#1048](https://github.com/theagenticage/hercule/issues/1048) removes them, on Rogier's word. Until then the same thing can be handed off from both places, under the shared rules above.
+- ~~**Intake's Hand to an agent and Tracking stay as they are,** and keep working until [#1048](https://github.com/theagenticage/hercule/issues/1048) removes them, on Rogier's word. Until then the same thing can be handed off from both places, under the shared rules above.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): both are gone from the desktop, below.)*
 - **Not changed:** the Task model stays thin (ADR 0019), workflows stay generic, and failures stay Notifications. A failed run on a Task now also reaches the user from any screen, as a dot on the desktop's sidebar ([spec 17](../spec/17-desktop-app.md#a-failed-run-from-any-screen)).
+
+## Amendment: Tracking and Intake's hand-off are deleted (2026-11-21)
+
+*(Added 2026-11-21, [Delete the Intake screen and the code only it uses (#1243)](https://github.com/theagenticage/hercule/issues/1243), on Rogier's word of that day.)* The desktop Intake screen is deleted ([ADR 0040](./0040-intake-holds-signals-notifications-are-hercules-own-messages.md)'s amendment), and with it what this ADR built on it. This does what [#1048](https://github.com/theagenticage/hercule/issues/1048) planned for Tracking, and more.
+
+What goes:
+
+- **Tracking.** The section at the bottom of To do, its states (Needs you, Failed, Working, Finished, Stopped) and its count toward To do are deleted. So are the operations that fed it, with their CLI rows: `task.queryTracking`, `task.readTracking` and `task.queryLegs`. The run history that survives them is renamed for what it is: `TaskTrackingRuns` becomes `TaskRuns`.
+- **Handing a signal off on the desktop.** The desktop's Hand to an agent on a signal went with the screen. The Inbox's hand-off from a card (`externalEntity.handOff`) is now the desktop's only way to hand work to an agent.
+
+What stays:
+
+- **The Task holds the chain.** A handoff, from a card or from a signal, still puts the work on the active Task of the ref and appends a provenance entry. A handed-off Task is an ordinary Task on Work, where its runs, its failure and its stage show.
+- **`signal.handOff` stays,** with its CLI row `hercule signal hand-off`, for the CLI and for the Hand to an agent answers already stored on a signal, which bind it. The provenance entry's `signalId`, `run.taskId` and `task.query`'s `handedOff` filter stay as well.
+- **Failures stay Notifications,** and a failed run on a Task still shows as the sidebar's dot and on Work's Failed filter, which replace Tracking's Failed row.
+
+Two consequences above no longer hold: "The desktop app's Tracking section is the first Task UI on desktop" (Work is), and "The To do count includes the Tracking rows" (To do has no count on the desktop any more).

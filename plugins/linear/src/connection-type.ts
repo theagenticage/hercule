@@ -355,6 +355,7 @@ export const connectionType: ConnectionTypeContribution = {
         {
           name: "apiKey",
           label: "Personal API key",
+          secret: true,
           help: "A personal API key from Linear's account settings, under Security & access. It works at any controller address.",
         },
       ],

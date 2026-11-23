@@ -141,7 +141,11 @@ export const withSetUpController = (
   additionalPlugins: ReadonlyArray<Plugin> = [],
   timings: Pick<
     ServerOptions,
-    "eventRoutingInterval" | "schedulerInterval" | "ingestReconcileInterval"
+    | "eventRoutingInterval"
+    | "schedulerInterval"
+    | "ingestReconcileInterval"
+    | "mcpServerCheckInterval"
+    | "mcpServerCheckDeadline"
   > = {},
 ): Promise<void> =>
   withServer(

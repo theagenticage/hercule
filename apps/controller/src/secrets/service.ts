@@ -8,7 +8,7 @@
  *
  * The transport cannot enforce these two rules, so this service does:
  *
- * - **`core`, `connection` and `provider-account` are not writable.** A set or
+ * - **`core`, `connection`, `provider-account` and `mcp-server` are not writable.** A set or
  *   delete for any of them fails with `validation` on the `ownerKind` field:
  *   - The `core` owner holds the controller's own key material - its Ed25519
  *     signing key is `core`/`controller.signing-key` - and overwriting it
@@ -21,6 +21,9 @@
  *   - A Provider Account's key is replaced with `providerAccount.update`,
  *     which stores only the fields the account's kind declares and probes the
  *     account again. Its Secrets are deleted with `providerAccount.delete`.
+ *   - An MCP Server's sign-in (a pasted token or OAuth tokens) is written
+ *     by the server's own operations, which also restart its checks and end
+ *     its upstream sessions. Its Secrets are deleted with `mcpServer.delete`.
  *
  *   Their references are still listed: hiding a row that exists would be
  *   worse than showing one the API does not let you change.
@@ -102,6 +105,8 @@ const REFUSAL_BY_OWNER_KIND: Partial<Record<OwnerKind, string>> = {
     "a Connection's credentials are not writable through the secret operations, because new credentials must be checked to belong to the same account; replace them with `connection.setCredentials` or by reconnecting the Connection, and remove them by deleting the Connection",
   "provider-account":
     "a Provider Account's credentials are not writable through the secret operations, because the account's kind decides which fields it takes; replace them with `hercule provider-account update <account-id> --credentials-stdin`, and remove them by deleting the account",
+  "mcp-server":
+    "an MCP Server's sign-in is not writable through the secret operations, because the server's own operations also restart its checks and end its upstream sessions; set a token with `hercule mcp-server set-token <id>` or by signing in to the server, and remove the sign-in by deleting the server",
 };
 
 /** Succeeds when the API may write secrets of this owner kind, and fails with `validation` when it may not. */

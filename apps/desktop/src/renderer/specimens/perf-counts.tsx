@@ -7,31 +7,22 @@
  * really sends.
  *
  * `?screen=inbox` opens the Inbox on 300 waiting things; `?screen=work` opens
- * Work on 300 Tasks in 10 Projects. The page exposes `window.perfCounts`
+ * Work on 300 Tasks in 10 Projects; `?screen=mcp` opens Settings > MCP servers
+ * on three servers, with a thread that has them (perf-counts-mcp-world.ts).
+ * The page exposes `window.perfCounts`
  * (`PerfCountsPage`) for the check to read the counters and to change the
  * world and push, as the controller would.
  *
- * Two things differ from the app on purpose:
- *
- * - no `StrictMode`, which renders every component twice in development and
- *   would double every render count;
- * - the clock is stopped (./fixed-clock), so an age label never changes during
- *   a step and no read goes stale on its own.
+ * The app boots through ./production-page, which leaves out `StrictMode` (it
+ * renders every component twice in development and would double every render
+ * count). The clock is stopped (./fixed-clock), so an age label never changes
+ * during a step and no read goes stale on its own.
  */
 // The probe comes first, so it is in place before React loads; the fixed clock
 // next, because the app's age clock reads the time as soon as its module loads.
 import { hasPendingWork, readProbe } from "./perf-probe";
 import "./fixed-clock";
-import "../styles/base-layer.css";
-import { createRoot } from "react-dom/client";
-import { RouterProvider } from "@tanstack/react-router";
-import {
-  createApiStub,
-  stubWebSocketInto,
-  type Call,
-  type Handler,
-  type StubSocket,
-} from "@hercule/client-core/testing";
+import type { Call, Handler } from "@hercule/client-core/testing";
 import {
   answerFakeInboxQuery,
   buildFakeInboxDetail,
@@ -49,12 +40,11 @@ import {
   type Task,
   type WorkCard,
 } from "@hercule/contract";
-import type { Bridge } from "../../ipc/bridge";
 import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
-import { buildRouterContext } from "../app/context";
 import { BOOT_HANDLERS, buildSidebarHandlers, SIDEBAR_FIXTURE } from "../app/fake-controller";
-import { createAppRouter } from "../app/router";
+import { buildMcpWorld, MCP_THREAD } from "./perf-counts-mcp-world";
 import type { PerfCountsPage } from "./perf-counts-page";
+import { mountProductionApp } from "./production-page";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
 
 declare global {
@@ -62,9 +52,6 @@ declare global {
     perfCounts?: PerfCountsPage;
   }
 }
-
-/** The address of the fake controller. Nothing listens there: the page's `fetch` answers. */
-const CONTROLLER_URL = "http://controller.invalid";
 
 /** How many things the Inbox holds, and how many Tasks Work holds. */
 const WORLD_SIZE = 300;
@@ -295,71 +282,37 @@ function buildWorkWorld(): {
   };
 }
 
-/**
- * The bridge the page passes to the app: main's answers for a user signed in
- * to the fake controller, with the default Appearance on a Mac. What the shell
- * sends main (the Go menu, the dock badge, the notifications) is accepted and
- * ignored, and every other call fails, because the steps the check drives
- * never make one.
- */
-const refuse = (call: string) => (): Promise<never> =>
-  Promise.reject(new Error(`The counts page does not answer ${call}.`));
-const BRIDGE: Bridge = {
-  platform: "mac",
-  hiddenWindowDraws: true,
-  controllerUrl: {
-    read: () => Promise.resolve(CONTROLLER_URL),
-    save: refuse("controllerUrl.save"),
-  },
-  token: { read: () => Promise.resolve("bearer"), write: () => Promise.resolve(undefined) },
-  runnerIdentity: { read: () => Promise.resolve(null) },
-  firstScreen: { report: () => Promise.resolve(undefined) },
-  goMenu: { set: () => Promise.resolve(undefined) },
-  waiting: { set: () => Promise.resolve(undefined) },
-  urgentSignals: { set: () => Promise.resolve(undefined) },
-  localController: { find: refuse("localController.find"), start: refuse("localController.start") },
-  logsFolder: { show: refuse("logsFolder.show") },
-  setupToken: { read: refuse("setupToken.read") },
-  macUser: { read: () => Promise.resolve({ username: SIDEBAR_FIXTURE.username }) },
-  folder: { pick: refuse("folder.pick") },
-  skillFolders: { pick: refuse("skillFolders.pick") },
-  skillArchive: { build: refuse("skillArchive.build") },
-  firstRunProgress: { read: () => Promise.resolve(null), save: refuse("firstRunProgress.save") },
-  appearance: { read: () => DEFAULT_APPEARANCE, save: refuse("appearance.save") },
-  link: { open: refuse("link.open") },
-  menu: { onCommand: () => () => undefined },
-  destination: { onOpen: () => () => undefined },
-};
-
 const screenName = new URLSearchParams(location.search).get("screen");
-const worlds = { inbox: buildInboxWorld, work: buildWorkWorld } as const;
-if (screenName !== "inbox" && screenName !== "work") {
+const worlds = {
+  inbox: buildInboxWorld,
+  work: buildWorkWorld,
+  mcp: () => ({ handlers: buildMcpWorld(), changes: {} as Record<string, () => void> }),
+} as const;
+/** The address each screen opens at. */
+const START_PATHS = { inbox: "/inbox", work: "/work", mcp: "/settings/mcp-servers" } as const;
+if (screenName !== "inbox" && screenName !== "work" && screenName !== "mcp") {
   throw new Error(
-    `Unknown screen "${String(screenName)}" in the URL. Use ?screen=inbox or ?screen=work.`,
+    `Unknown screen "${String(screenName)}" in the URL. Use ?screen=inbox, ?screen=work or ?screen=mcp.`,
   );
 }
 const world = worlds[screenName]();
 const handlers: Record<string, Handler> = {
   ...BOOT_HANDLERS,
-  ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+  // The thread of the MCP world is the sidebar's own, with its three servers.
+  ...buildSidebarHandlers({
+    ...SIDEBAR_FIXTURE,
+    threads: SIDEBAR_FIXTURE.threads.map((thread) =>
+      screenName === "mcp" && thread.id === MCP_THREAD.id ? MCP_THREAD : thread,
+    ),
+  }),
   ...world.handlers,
 };
-const { fetch, calls } = createApiStub(handlers);
-globalThis.fetch = fetch as typeof globalThis.fetch;
-const sockets: StubSocket[] = [];
-const dial = stubWebSocketInto(sockets);
-// A function called with `new` that returns an object gives that object, so `new WebSocket(url)` returns the stub.
-globalThis.WebSocket = function (url: string) {
-  return dial(url);
-} as unknown as typeof WebSocket;
-
-const context = await buildRouterContext(BRIDGE);
-const router = createAppRouter(context);
-router.history.replace(`/${screenName}`);
-await router.load();
-const root = document.getElementById("root");
-if (root === null) throw new Error("perf-counts.html is missing #root");
-createRoot(root).render(<RouterProvider router={router} />);
+const { calls, sockets, context } = await mountProductionApp({
+  handlers,
+  path: START_PATHS[screenName],
+  username: SIDEBAR_FIXTURE.username,
+  appearance: DEFAULT_APPEARANCE,
+});
 
 window.perfCounts = {
   listRequests: () => calls.map((call) => `${call.method} ${call.path}`),

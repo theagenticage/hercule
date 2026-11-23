@@ -143,6 +143,9 @@ const quoteShellArg = (text: string): string => {
  * examples, and by the error shown when a command would read stdin from a
  * terminal. The stdin value decides the form:
  *
+ * - a command with a secret stdin field reads it from a file, whatever the
+ *   example's value is, because the shell keeps an echoed value in its
+ *   history. The file is named after the field, such as `token.txt`;
  * - a one-line value is piped in with `echo`;
  * - a value with a newline needs a heredoc. Its body and terminator stay at
  *   the left margin, because a shell takes the body literally and ends it
@@ -155,6 +158,8 @@ export const buildShellExample = (
 ): ReadonlyArray<string> => {
   const invocation = ["hercule", ...command.words, ...args.map(quoteShellArg)].join(" ");
   if (stdin === undefined) return [`  ${invocation}`];
+  const secret = command.payload.find((field) => field.stdin && field.secret);
+  if (secret !== undefined) return [`  ${invocation} < ${secret.name}.txt`];
   if (!stdin.includes("\n")) return [`  echo ${quoteShellArg(stdin)} | ${invocation}`];
   return [`  ${invocation} <<'EOF'`, ...stdin.split("\n"), "EOF"];
 };
@@ -220,14 +225,67 @@ const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
   return found;
 };
 
-/** Builds the help of one command: `hercule <noun>... <verb> --help`. */
-export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
-  const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
+/** One row of the flags section: the flag with its placeholder, what kind of flag it is, and what it does. */
+export interface FlagRow {
+  readonly label: string;
+  readonly notes: string;
+  readonly help?: string;
+}
+
+/** Builds the row of one flag in the flags section: its label, its notes and the `help` shown for it. */
+const buildFlagRow = (
+  field: Field,
+  help: string,
+): { label: string; notes: string; help: string } => {
+  const notes = [field.optional ? "optional" : "required"];
+  if (field.repeated) notes.push("repeatable");
+  if (field.choices !== undefined) notes.push(`one of: ${[...field.choices.keys()].join(", ")}`);
+  if (field.defaultText !== undefined) notes.push(`default: ${field.defaultText}`);
+  if (field.nullable) notes.push("`null` clears it");
+  return {
+    label: `--${field.spelling} ${buildPlaceholder(field)}`,
+    notes: notes.join("; "),
+    help,
+  };
+};
+
+/**
+ * What a hand-written command adds to the help of its table row: the flags it
+ * takes beyond the ones its operation's fields give, and what it prints. A
+ * hand-written command may print something else than its operation returns.
+ */
+export interface HandWrittenHelp {
+  readonly flags: ReadonlyArray<FlagRow>;
+  /** Replaces the `returns:` section, which otherwise lists the operation's answer. */
+  readonly prints: string;
+}
+
+/**
+ * Builds the help of one command: `hercule <noun>... <verb> --help`. A
+ * hand-written command passes its `HandWrittenHelp`, so its help shows its
+ * flags with the others and says what it prints.
+ */
+export const buildCommandHelp = (
+  command: Command,
+  handWritten?: HandWrittenHelp,
+): ReadonlyArray<string> => {
+  const extraFlags = handWritten?.flags ?? [];
+  // The keys of a `oneOf` field are listed in a group for each entry, not
+  // among the other flags.
+  const flags = [
+    ...command.payload.filter((field) => !field.stdin && field.within === undefined),
+    ...command.query,
+  ];
   const onStdin = command.payload.filter((field) => field.stdin);
   const shape = command.positionals.map(formatPositionalShape).join(" ");
   const lines: Array<string> = [...wrapParagraph(command.help, "")];
 
-  const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
+  const takesFlags =
+    flags.length > 0 ||
+    command.choices.length > 0 ||
+    command.paged ||
+    extraFlags.length > 0 ||
+    command.requires === "setup-token";
   lines.push(
     "",
     ["usage: hercule", command.spelling, shape, takesFlags ? "[flags]" : ""]
@@ -257,19 +315,8 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   if (takesFlags) {
     // Collect every row before printing any, so the label column is exactly as
     // wide as the widest label shown.
-    const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) => {
-      const notes = [field.optional ? "optional" : "required"];
-      if (field.repeated) notes.push("repeatable");
-      if (field.choices !== undefined)
-        notes.push(`one of: ${[...field.choices.keys()].join(", ")}`);
-      if (field.defaultText !== undefined) notes.push(`default: ${field.defaultText}`);
-      if (field.nullable) notes.push("`null` clears it");
-      return {
-        label: `--${field.spelling} ${buildPlaceholder(field)}`,
-        notes: notes.join("; "),
-        help: field.help,
-      };
-    });
+    const rows: Array<FlagRow> = flags.map((field) => buildFlagRow(field, field.help));
+    rows.push(...extraFlags);
     if (command.requires === "setup-token") {
       rows.push({
         label: "--setup-token <token>",
@@ -305,11 +352,37 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       });
     }
 
-    const width = Math.max(...rows.map((row) => row.label.length));
+    // Each entry of a `oneOf` field has a lead line and its own flags. A
+    // flag read from stdin is listed by its marker only: the stdin section
+    // below says what it holds.
+    const groups = command.choices.flatMap((choice) =>
+      choice.entries.map((entry) => ({
+        lead: entry.help,
+        rows: entry.flags.map(({ field, help }) =>
+          field.stdin
+            ? {
+                label: `--${field.spelling}-stdin`,
+                notes: `${field.optional ? "optional" : "required"}; read from stdin`,
+              }
+            : buildFlagRow(field, help),
+        ),
+      })),
+    );
+    const width = Math.max(
+      ...[...rows, ...groups.flatMap((group) => group.rows)].map((row) => row.label.length),
+    );
+    const printRows = (shown: ReadonlyArray<FlagRow>) => {
+      for (const row of shown) {
+        lines.push(...formatLabelledText(row.label, width, row.notes));
+        if (row.help !== undefined) lines.push(...wrapParagraph(row.help, "      "));
+      }
+    };
     lines.push("", "flags:");
-    for (const row of rows) {
-      lines.push(...formatLabelledText(row.label, width, row.notes));
-      if (row.help !== undefined) lines.push(...wrapParagraph(row.help, "      "));
+    printRows(rows);
+    for (const group of groups) {
+      if (lines.at(-1) !== "flags:") lines.push("");
+      lines.push(...wrapParagraph(group.lead, "  "));
+      printRows(group.rows);
     }
   }
 
@@ -352,7 +425,9 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
 
   lines.push("", "returns:");
   const { fields, items } = command.returns;
-  if (items === undefined) {
+  if (handWritten !== undefined) {
+    lines.push(...wrapParagraph(handWritten.prints, "  "));
+  } else if (items === undefined) {
     lines.push(...wrapParagraph(fields.join(", ") || "only the status", "  "));
   } else {
     // A page has an `items` field; a small fixed list is returned as a bare array.

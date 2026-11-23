@@ -56,6 +56,7 @@ const BASE: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const buildSession = (overrides: Partial<Session> & { id: string }): Session => ({

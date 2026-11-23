@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { MAX_FILTER_VALUES, MAX_PROVENANCE_APPEND, MAX_TASK_LABELS } from "../index";
 import {
-  HandoffLeg,
-  MAX_LEG_LIVE_RUNS,
-  MAX_LEG_QUERY_RUNS,
   TASK_STAGES,
   TaskCreateInput,
   TaskEntityLinkInput,
@@ -107,53 +104,6 @@ describe("the signal a provenance entry records", () => {
       "Failure",
     );
     expect(decodeOutcome(TaskUpdateInput, { provenance })).toBe("Failure");
-  });
-});
-
-describe("the leg of a handoff", () => {
-  const ID = "0199e0e7-0006-7000-8000-000000000000";
-  const run = {
-    id: ID,
-    workflowId: null,
-    workflowName: "Triage",
-    status: "completed",
-    createdAt: "2026-09-04T10:00:00.000Z",
-    awaitedSignalIds: [],
-  };
-  const leg = {
-    runId: ID,
-    signalId: ID,
-    taskId: ID,
-    taskStatus: "in-progress",
-    workflowId: null,
-    workflowName: "Triage",
-    rerunCount: 0,
-    latestRun: run,
-    liveRunIds: [],
-  };
-
-  it("needs no next handoff, and refuses a negative re-run count", () => {
-    expect(decodeOutcome(HandoffLeg, leg)).toBe("Success");
-    expect(decodeOutcome(HandoffLeg, { ...leg, rerunCount: -1 })).toBe("Failure");
-  });
-
-  it("lists at most MAX_LEG_LIVE_RUNS live run ids", () => {
-    const ids = (count: number) => Array.from({ length: count }, () => ID);
-    expect(decodeOutcome(HandoffLeg, { ...leg, liveRunIds: ids(MAX_LEG_LIVE_RUNS) })).toBe(
-      "Success",
-    );
-    expect(decodeOutcome(HandoffLeg, { ...leg, liveRunIds: ids(MAX_LEG_LIVE_RUNS + 1) })).toBe(
-      "Failure",
-    );
-  });
-
-  it("is asked for with one to MAX_LEG_QUERY_RUNS run ids", () => {
-    const query = task.endpoints.queryLegs.query as Schema.Codec<unknown, unknown>;
-    const ids = (count: number) => Array.from({ length: count }, () => ID);
-    expect(decodeOutcome(query, { runIds: ids(0) })).toBe("Failure");
-    expect(decodeOutcome(query, { runIds: ids(1) })).toBe("Success");
-    expect(decodeOutcome(query, { runIds: ids(MAX_LEG_QUERY_RUNS) })).toBe("Success");
-    expect(decodeOutcome(query, { runIds: ids(MAX_LEG_QUERY_RUNS + 1) })).toBe("Failure");
   });
 });
 

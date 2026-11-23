@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import { CODEX_VERSION } from "@hercule/home/version";
 import { withTransaction } from "../db";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { findModels, findRunnerRefusal, ProviderAccountRunners } from "./account-runners";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
 import {
@@ -214,6 +216,56 @@ describe("ProviderAccountRunners.list", () => {
 
     expect(available.runnerIds).toEqual([]);
     expect(available.noRunnerMessage).toContain("Acme does not allow Subscription accounts");
+  });
+});
+
+describe("a Codex below the version this build supports", () => {
+  const CODEX_HARNESS_ID = "codex/codex";
+  const plugins = [
+    buildPluginWithProviderPerHarness("codex", [
+      { ...buildHarnessDefinition("codex"), displayName: "Codex" },
+    ]),
+  ];
+
+  /** Lists where a Codex account can run, on a runner whose probe found Codex at `version`. */
+  const listWithCodexAt = (version: string) =>
+    runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({
+          providerId: CODEX_HARNESS_ID,
+          kind: MACHINE_KIND,
+          defaultHarnessId: CODEX_HARNESS_ID,
+        });
+        const laptop = yield* addRunner("laptop", { adapters: [CODEX_HARNESS_ID] });
+        yield* addSnapshot(account.id, CODEX_HARNESS_ID, laptop, {
+          ...SIGNED_IN,
+          harnessVersion: version,
+        });
+        const available = yield* Effect.flatMap(ProviderAccountRunners, (runners) =>
+          runners.list(account.id, CODEX_HARNESS_ID),
+        );
+        return { available, laptop };
+      }),
+      undefined,
+      plugins,
+    );
+
+  it("refuses 0.169.0, and tells the user to update Codex, whether Hercule chooses the runner or the caller names it", async () => {
+    const { available, laptop } = await listWithCodexAt("0.169.0");
+
+    expect(available.runnerIds).toEqual([]);
+    expect(available.noRunnerMessage).toBe(
+      `Codex is older than this version of Hercule supports on every machine that has it; update it to ${CODEX_VERSION} or newer`,
+    );
+    expect(findRunnerRefusal(available, laptop)).toBe(
+      `Codex on laptop is older than Hercule supports; update it to ${CODEX_VERSION} or newer`,
+    );
+  });
+
+  it("accepts the floor itself", async () => {
+    const { available, laptop } = await listWithCodexAt(CODEX_VERSION);
+
+    expect(available.runnerIds).toEqual([laptop]);
   });
 });
 

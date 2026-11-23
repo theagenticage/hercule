@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import intakeStyles from "../intake/intake.css?raw";
+import inboxBlockStyles from "../inbox/inbox-blocks.css?raw";
 import { Markdown } from "./markdown";
 
 /** Renders `text` as markdown in a message body, and returns the body. */
@@ -116,21 +116,23 @@ describe("Markdown", () => {
   });
 
   describe("the size of an inline image", () => {
-    // jsdom cannot lay out a page, so this asks whether intake's stylesheet
-    // has a rule that sets `height: auto` and matches the image. `auto`
+    // jsdom cannot lay out a page, so this asks whether the stylesheet of the
+    // Inbox's blocks has a rule that sets `height: auto` and matches the image. `auto`
     // replaces the HTML `height` attribute, because any CSS beats an
     // attribute, so an image that asks for a height alone must match none.
     // An Electron measurement drew a 100 x 100 image at 10 x 10 for a height
     // alone, and at 100 x 100 when `auto` matched it.
     const matchesAutoHeight = (html: string): boolean => {
       const style = document.createElement("style");
-      style.textContent = intakeStyles;
+      style.textContent = inboxBlockStyles;
       document.head.append(style);
       try {
         const { container } = render(
-          <div className="b-words">
-            <Markdown text={html} inlineImages />
-          </div>,
+          <section className="bk">
+            <div className="bk-text b-words">
+              <Markdown text={html} inlineImages />
+            </div>
+          </section>,
         );
         const image = container.querySelector("img")!;
         return [...document.styleSheets].some((sheet) =>

@@ -11,8 +11,8 @@
  *
  * The start cards are three Tasks, most urgent first. The book draws the first
  * two as Proposals, which the app no longer has. The app draws a card's source
- * as the GitHub mark or, for any other source, the tasks glyph, and names the
- * priority in words, where the book draws bars:
+ * as the GitHub mark or, for any other source, the heading's Inbox tray, and
+ * names the priority in words, where the book draws bars:
  *
  * - the book's Sentry card came from a GitHub issue here, and is urgent, the
  *   book's four bars;
@@ -20,12 +20,12 @@
  *   book's two bars;
  * - the book's Task has no source and no bars, and is low here.
  *
- * The book's page has two more states, for a fresh install whose Intake is
- * still empty, and the specimen is opened with the same `?state=`:
+ * The book's page has two more states, for a fresh install with no planned
+ * task yet, and the specimen is opened with the same `?state=`:
  *
  * - `first`: the same draft, with no planned task and a GitHub Connection, so
- *   the starters are about code and the line under them says that Triage
- *   reads GitHub;
+ *   the starters are about code and the line under them points at the
+ *   Inbox;
  * - `first-no-repo`: webshop has no repo and nothing is connected, so the
  *   draft works without a checkout, the starters are about knowledge work,
  *   and the line under them asks the user to connect GitHub.

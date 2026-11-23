@@ -683,8 +683,8 @@
   cursor: default;
 }
 
-/* "Marked done" with Undo, after a thread is marked done: Intake's toast,
-   over the list's bottom edge. The anchor takes no height, so the list
+/* "Marked done" with Undo, after a thread is marked done: a toast over the
+   list's bottom edge. The anchor takes no height, so the list
    does not move when the toast comes and goes. */
 .side-toast-anchor {
   position: relative;
@@ -725,10 +725,10 @@
 .side-toast button:hover {
   background: color-mix(in oklab, var(--surface) 14%, transparent);
 }
-/* A Done move that failed, in the toast's place, as Intake draws one: the
-   mark in the failure colour, beside the first line, and the text wrapping
-   instead of being cut short, because the reason it failed is at the end.
-   It has no Undo, so its padding is Intake's toast's, not the button's. */
+/* A Done move that failed, in the toast's place: the mark in the failure
+   colour, beside the first line, and the text wrapping instead of being cut
+   short, because the reason it failed is at the end. It has no Undo, so its
+   padding is the toast's own, not the button's. */
 .side-toast[role="alert"] {
   align-items: flex-start;
   padding: 9px 12px;
@@ -795,7 +795,7 @@
   color: var(--muted);
   font-size: var(--t-12);
 }
-/* The book draws a "more" row as a link, which leads to Intake. Here it
+/* The book draws a "more" row as a link to another page. Here it
    expands its section in place and goes nowhere, so it is a button, drawn as
    the link is: the full width, the text at the start, and the page's text
    rendering, where Chromium gives a button its own. The "Show fewer" row that

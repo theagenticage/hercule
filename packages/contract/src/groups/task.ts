@@ -24,7 +24,7 @@ import {
   Validation,
 } from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
-import { DEFAULT_PAGE_LIMIT, page, pageParams } from "../pagination";
+import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import {
@@ -162,7 +162,7 @@ export const ProvenanceEntry = Schema.Struct({
   /**
    * The signal the user handed to an agent, when this entry records that
    * handoff. Only `signal.handOff` writes it, so a task with such an entry is
-   * work the user handed off from Intake.
+   * work the user handed to an agent.
    */
   signalId: Schema.optionalKey(Id),
   /**
@@ -574,34 +574,21 @@ export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS 
 export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;
 
 /**
- * The most handoffs a Tracking row holds. A Task that was handed more than
- * this many signals returns its newest ones, so the reply does not grow with a
- * Task's history.
+ * The most characters of why a run failed (`TaskDetailRun.failureCause`, and a
+ * card's `failure.cause`). A longer cause is cut to this many, "…" included.
+ * The cause is an error message, which is as long as whatever produced it.
  */
-export const MAX_TRACKING_HANDOFFS = 10;
+export const MAX_FAILURE_CAUSE = 300;
+
+/** The most runs `task.readDetail` lists: the Task's newest ones. */
+export const MAX_DETAIL_RUNS = 20;
 
 /**
- * One handoff of a signal to the Task's workflow: the signal the user handed
- * off, the run that started, and when. It is a provenance entry that names a
- * signal.
+ * One run of a Task as the details pane lists it: a run summary's fields plus
+ * `failureCause`, so no row needs a `run.read`, and the session of the run's
+ * last agent step, which holds the run's thread.
  */
-export const TrackingHandoff = Schema.Struct({ signalId: Id, runId: Id, at: Timestamp });
-
-export type TrackingHandoff = Schema.Schema.Type<typeof TrackingHandoff>;
-
-/**
- * The most characters of why a run failed (`TrackingRun.failureCause`). A
- * longer cause is cut to this many, "…" included. The cause is an error
- * message, which is as long as whatever produced it.
- */
-export const MAX_TRACKING_FAILURE_CAUSE = 300;
-
-/**
- * What a client needs to know about one run of a tracked Task to work out
- * where the work stands. It holds a run summary's fields plus `failureCause`,
- * so no row needs a `run.read`.
- */
-export const TrackingRun = Schema.Struct({
+export const TaskDetailRun = Schema.Struct({
   id: Id,
   /** `null` for a run of a workflow that was sent with the run and never stored. */
   workflowId: Schema.NullOr(Id),
@@ -622,243 +609,12 @@ export const TrackingRun = Schema.Struct({
    * error of the step that failed, else the failure reason in plain words.
    * Present only for a failed run.
    */
-  failureCause: Schema.optionalKey(bounded(0, MAX_TRACKING_FAILURE_CAUSE)),
-});
-
-export type TrackingRun = Schema.Schema.Type<typeof TrackingRun>;
-
-/** One Task that Tracking follows, with the facts its state is worked out from. */
-export const TrackingTask = Schema.Struct({
-  taskId: Id,
-  title: Schema.String,
-  /**
-   * The Task's newest handoffs, newest first, at most `MAX_TRACKING_HANDOFFS`.
-   * A client that waits for its own handoff to show looks for the receipt
-   * here; an older handoff has no bearing on where the work stands.
-   */
-  handoffs: atMost(TrackingHandoff, MAX_TRACKING_HANDOFFS),
-  /** The Task's newest run, by creation time. */
-  latestRun: TrackingRun,
-  /** The Task's newest run that is pending or running, when one is. */
-  latestLiveRun: Schema.optionalKey(TrackingRun),
-  /**
-   * The ids of every run of the Task that is pending or running, newest first,
-   * so the first is `latestLiveRun`'s. Empty when no run is live. A Task can
-   * have more than one live run: a second handoff on the same Task starts a
-   * new run while the first still goes on. A client that asks whether any
-   * live run of the Task is waiting on the user, for example through an open
-   * Request of its session, looks for the run among these ids.
-   */
-  liveRunIds: Schema.Array(Id),
-});
-
-export type TrackingTask = Schema.Schema.Type<typeof TrackingTask>;
-
-/** What `task.queryTracking` returns: every Task Tracking follows. */
-export const TaskTracking = Schema.Struct({ rows: Schema.Array(TrackingTask) });
-
-export type TaskTracking = Schema.Schema.Type<typeof TaskTracking>;
-
-/** The most runs `task.readTracking` lists: the Task's newest ones. */
-export const MAX_TRACKING_DETAIL_RUNS = 20;
-
-/** The most characters of a text output. A longer text is cut to this many, "…" included. */
-export const MAX_TRACKING_OUTPUT_TEXT = 1000;
-
-/** The most fields of a fields output. The schema's later properties are left out. */
-export const MAX_TRACKING_OUTPUT_FIELDS = 12;
-
-/** The most characters of one string value of a fields output. A longer one is cut to this many, "…" included. */
-export const MAX_TRACKING_OUTPUT_VALUE = 300;
-
-/** The most characters of the label of a field. A longer label is cut to this many, "…" included. */
-export const MAX_TRACKING_OUTPUT_LABEL = 80;
-
-/**
- * The most characters of the name of a step, as the pane shows it: the step
- * that produced the output, and the action step the newest run ended on. A
- * longer name is cut to this many, "…" included. A workflow may give a step a
- * name of any length, and so a step's own id.
- */
-export const MAX_TRACKING_STEP_NAME = 80;
-
-/**
- * One run of a Task as the Tracking pane lists it: the facts of a Tracking
- * row's run, and the session of the run's last agent step, which holds the
- * run's thread.
- */
-export const TrackingDetailRun = Schema.Struct({
-  ...TrackingRun.fields,
+  failureCause: Schema.optionalKey(bounded(0, MAX_FAILURE_CAUSE)),
   /** The session of the run's last agent step. Absent for a run that never started one. */
   sessionId: Schema.optionalKey(Id),
 });
 
-export type TrackingDetailRun = Schema.Schema.Type<typeof TrackingDetailRun>;
-
-/**
- * The value of one field of a fields output. A string longer than
- * `MAX_TRACKING_OUTPUT_VALUE` is cut. An array and an object are not sent,
- * only how many items or fields they hold, so a reply never grows with the
- * output.
- */
-export const TrackingOutputValue = Schema.Union([
-  Schema.String,
-  Schema.Number,
-  Schema.Boolean,
-  Schema.Null,
-  Schema.Struct({ items: Schema.Int }),
-  Schema.Struct({ fields: Schema.Int }),
-]);
-
-export type TrackingOutputValue = Schema.Schema.Type<typeof TrackingOutputValue>;
-
-/** One top-level field of a structured output, with the label a person reads. */
-export const TrackingOutputField = Schema.Struct({
-  /**
-   * The `title` of the field's property in the step's output schema, else the
-   * property's name, at most `MAX_TRACKING_OUTPUT_LABEL` characters.
-   */
-  label: bounded(0, MAX_TRACKING_OUTPUT_LABEL),
-  value: TrackingOutputValue,
-});
-
-export type TrackingOutputField = Schema.Schema.Type<typeof TrackingOutputField>;
-
-/**
- * What a run's last agent step produced, shaped to be drawn: free text for a
- * step with no output schema, fields for a step with one. The text and every
- * value are cut, so the reply does not grow with the output.
- */
-export const TrackingOutput = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("text"),
-    /** The step's `name`, else its id, at most `MAX_TRACKING_STEP_NAME` characters. */
-    stepName: bounded(0, MAX_TRACKING_STEP_NAME),
-    /** The session that ran the step: its thread. */
-    sessionId: Schema.optionalKey(Id),
-    /** The `text` of the step's output, at most `MAX_TRACKING_OUTPUT_TEXT` characters. */
-    text: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("fields"),
-    stepName: bounded(0, MAX_TRACKING_STEP_NAME),
-    sessionId: Schema.optionalKey(Id),
-    /** The output's top-level fields in the output schema's property order, at most `MAX_TRACKING_OUTPUT_FIELDS`. */
-    fields: atMost(TrackingOutputField, MAX_TRACKING_OUTPUT_FIELDS),
-  }),
-]);
-
-export type TrackingOutput = Schema.Schema.Type<typeof TrackingOutput>;
-
-/**
- * One handoff of a Task together with the name of the workflow it handed the
- * signal to, which a client cannot read from other runs it holds when the
- * handoff's run is older than the newest ones. The Tracking pane draws the
- * Task's oldest handoff this way (`TrackingDetail.firstHandoff`), and a leg
- * names the handoff that follows it this way (`HandoffLeg.next`).
- */
-export const TrackingHandoffWithWorkflow = Schema.Struct({
-  ...TrackingHandoff.fields,
-  /** The name of the workflow of the handoff's run, as it was when that run started. */
-  workflowName: Schema.String,
-});
-
-export type TrackingHandoffWithWorkflow = Schema.Schema.Type<typeof TrackingHandoffWithWorkflow>;
-
-/** What `task.readTracking` returns: what the Tracking pane of one Task draws. */
-export const TrackingDetail = Schema.Struct({
-  /** The Task's oldest handoff: the signal the user first handed to an agent. */
-  firstHandoff: TrackingHandoffWithWorkflow,
-  /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */
-  runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
-  /**
-   * What the newest run's last completed agent step (by `finishedAt`)
-   * produced. Absent when the run has completed no agent step, or the step
-   * left nothing to show.
-   */
-  output: Schema.optionalKey(TrackingOutput),
-  /**
-   * The name of the action step the newest run ended on: its `name`, else its
-   * action's id. Present only when the newest run completed and its last
-   * completed step is an action step, so it finished after the agent step
-   * `output` comes from. A run that is live or failed has not ended on a
-   * step, so it has none. At most `MAX_TRACKING_STEP_NAME` characters.
-   */
-  endingActionStepName: Schema.optionalKey(bounded(0, MAX_TRACKING_STEP_NAME)),
-});
-
-export type TrackingDetail = Schema.Schema.Type<typeof TrackingDetail>;
-
-/**
- * The most run ids one `task.queryLegs` call takes. It is the size of a page of
- * Done signals, so a client asks for the legs of one page in one call.
- */
-export const MAX_LEG_QUERY_RUNS = DEFAULT_PAGE_LIMIT;
-
-/**
- * The most ids `HandoffLeg.liveRunIds` lists. The ids are a sample of the
- * leg's live runs, newest first: a leg is not expected to have more runs
- * going at once, and the cap keeps the reply from growing with them.
- */
-export const MAX_LEG_LIVE_RUNS = 20;
-
-/**
- * One handoff of a signal to a Task's workflow, with where the work it
- * started stands: the handoff's run and every run that re-runs it (a "leg").
- * A client draws the line "handed to X, tried again twice, finished" from it
- * without reading the Task's whole history.
- */
-export const HandoffLeg = Schema.Struct({
-  /** The run the handoff started: the handoff entry's `runId`. */
-  runId: Id,
-  /** The signal the user handed off. */
-  signalId: Id,
-  /** The Task the handoff belongs to. */
-  taskId: Id,
-  /** The Task's status now. */
-  taskStatus: TaskStatus,
-  /** The workflow of the handoff's run. `null` for a run of a workflow that was sent with the run and never stored. */
-  workflowId: Schema.NullOr(Id),
-  /** The name of the workflow of the handoff's run, as it was when that run started. */
-  workflowName: Schema.String,
-  /**
-   * How many runs re-run the handoff's run. A re-run of a re-run counts, and
-   * each run counts once. The runs are those the leg holds, as `latestRun`
-   * describes.
-   */
-  rerunCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  /**
-   * The newest run of the leg, by creation time and then id. It is the
-   * handoff's run when nothing re-ran it. A leg holds the handoff's run and
-   * every run that can be reached from it through the run it re-runs, however
-   * many re-runs deep, and that belongs to the same Task. It never holds a run
-   * only because it started around the same time.
-   *
-   * Only its id and status: they are all a client reads, to name how the leg
-   * stands and to open the run. A client that wants more of the run reads the
-   * run itself.
-   */
-  latestRun: Schema.Struct({ id: Id, status: RunStatus }),
-  /**
-   * The ids of the leg's runs that are pending or running, newest first, at
-   * most `MAX_LEG_LIVE_RUNS`. Empty when no run of the leg is live.
-   */
-  liveRunIds: atMost(Id, MAX_LEG_LIVE_RUNS),
-  /**
-   * The Task's next handoff: the handoff entry that follows this one by time,
-   * then by the order it was appended, whichever signal it handed off. Absent
-   * when this is the Task's newest handoff. It marks the end of this leg's
-   * story: the user handed the Task on.
-   */
-  next: Schema.optionalKey(TrackingHandoffWithWorkflow),
-});
-
-export type HandoffLeg = Schema.Schema.Type<typeof HandoffLeg>;
-
-/** What `task.queryLegs` returns: the leg of each handoff that was asked for, in the order asked. */
-export const HandoffLegs = Schema.Struct({ legs: Schema.Array(HandoffLeg) });
-
-export type HandoffLegs = Schema.Schema.Type<typeof HandoffLegs>;
+export type TaskDetailRun = Schema.Schema.Type<typeof TaskDetailRun>;
 
 /** The most cards one board read returns. The reply says when there were more. */
 export const MAX_BOARD_CARDS = 1000;
@@ -970,7 +726,7 @@ export const WorkCard = Schema.Struct({
     Schema.Struct({
       runId: Id,
       workflowName: Schema.String,
-      cause: bounded(0, MAX_TRACKING_FAILURE_CAUSE),
+      cause: bounded(0, MAX_FAILURE_CAUSE),
     }),
   ),
   /**
@@ -1128,8 +884,8 @@ export const TaskDetail = Schema.Struct({
    * the session list filtered by `taskId`.
    */
   sessionCount: Schema.Int,
-  /** At most `MAX_TRACKING_DETAIL_RUNS` runs of the Task, as Tracking lists them. */
-  runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
+  /** At most `MAX_DETAIL_RUNS` runs of the Task: its newest, oldest first. */
+  runs: atMost(TaskDetailRun, MAX_DETAIL_RUNS),
   /** How many runs the Task has, with a link to `run.query` by `taskIds`, the same way. */
   runCount: Schema.Int,
   /**
@@ -1281,12 +1037,6 @@ export const task = HttpApiGroup.make("task")
       success: page(Task),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
-    // A static path beside `/tasks/:id`: the router prefers it, and "tracking"
-    // is not an id.
-    HttpApiEndpoint.get("queryTracking", "/tasks/tracking", {
-      success: TaskTracking,
-      error: [Unauthenticated, Forbidden, Internal],
-    }),
     /**
      * Returns every unfinished Task as a card, at the five board stages, with
      * what each card shows: an open question, a failure, a live session. A
@@ -1295,47 +1045,21 @@ export const task = HttpApiGroup.make("task")
      * The reply is capped at `MAX_BOARD_CARDS`, and `truncated` says when
      * Tasks were left out.
      */
-    // A static path beside `/tasks/:id`, for the same reason as `/tasks/tracking`:
-    // the router prefers it, and "board" is not an id.
+    // A static path beside `/tasks/:id`: the router prefers it, and "board" is
+    // not an id.
     HttpApiEndpoint.get("queryBoard", "/tasks/board", {
       success: WorkBoard,
       error: [Unauthenticated, Forbidden, Internal],
     }),
     /**
-     * Returns the leg of each given run that is the run of a handoff of a
-     * Task: the handoff, the runs that re-ran it, and where they stand. Each
-     * id is looked up on its own. An id that is not the run of a handoff of a
-     * Task that exists is left out of the reply, so the reply may hold fewer
-     * legs than ids: an unknown run, a run of no Task, a run of a deleted Task,
-     * and a run that only re-runs a handoff's run. The legs come in the order
-     * of the ids. Each leg is a fixed size, so the reply does not grow with a
-     * Task's history.
-     */
-    // A static path beside `/tasks/:id`, for the same reason as `/tasks/tracking`:
-    // the router prefers it, and "legs" is not an id.
-    HttpApiEndpoint.get("queryLegs", "/tasks/legs", {
-      query: Schema.Struct({
-        runIds: atMost(Id, MAX_LEG_QUERY_RUNS).check(Schema.isMinLength(1)),
-      }),
-      success: HandoffLegs,
-      error: [Unauthenticated, Forbidden, Validation, Internal],
-    }),
-    /**
      * Returns whether any live Task has a failed run, for the sidebar's dot on
      * every screen. Needs `task.read` and `run.query`.
      */
-    // A static path beside `/tasks/:id`, for the same reason as `/tasks/tracking`:
+    // A static path beside `/tasks/:id`, for the same reason as `/tasks/board`:
     // the router prefers it, and "attention" is not an id.
     HttpApiEndpoint.get("readAttention", "/tasks/attention", {
       success: TaskAttention,
       error: [Unauthenticated, Forbidden, Internal],
-    }),
-    // `/tasks/:id/tracking` has one more segment than `/tasks/:id`, so the
-    // router never takes it for that route.
-    HttpApiEndpoint.get("readTracking", "/tasks/:id/tracking", {
-      params: { id: Id },
-      success: TrackingDetail,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     // `/tasks/:id/detail` has one more segment than `/tasks/:id`, so the router
     // never takes it for that route.

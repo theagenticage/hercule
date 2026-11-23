@@ -299,7 +299,7 @@ jobs:
   # It runs on Linux in Playwright's Chromium, with no Electron and no
   # controller, so it needs no macOS runner. Its budget is 3 minutes of
   # wall-clock time per shard: it must add nothing to the longest job of this
-  # workflow. The themes are split over two shards that run in parallel, each
+  # workflow. The themes are split over three shards that run in parallel, each
   # a runner of its own, and each shard compares only the baseline keys of its
   # themes. The first shard holds the first theme, which also measures the
   # metrics of the whole run (`run/...`), so every key is checked on every
@@ -318,15 +318,18 @@ jobs:
     strategy:
       # A failure in one shard must not hide the numbers of the other.
       fail-fast: false
-      # Three themes each. The first shard also measures the run-wide
-      # metrics, and on 2026-10-26 a split of three and two took 99 s and
-      # 50 s to measure. With six themes, run on one machine on 2026-10-28,
-      # each shard took 36 s. A test (scripts/ui-screens.test.ts) fails
-      # unless every theme is in exactly one shard.
+      # Two themes each. The first shard also measures the run-wide metrics.
+      # With two shards of three themes, the measuring step took about 400 s
+      # on 2026-11-22, once the app had 38 screens, and a shard on `main`
+      # reached this job's 10 minutes and was cancelled. Two themes take
+      # about two thirds of that. A test
+      # (apps/desktop/scripts/ui-screens.test.ts) fails unless every theme is
+      # in exactly one shard.
       matrix:
         themes:
-          - whitehaven,styles,blue-train
-          - orient-express,nile,end-house
+          - whitehaven,styles
+          - blue-train,orient-express
+          - nile,end-house
     steps:
       - uses: actions/checkout@v7
         with:

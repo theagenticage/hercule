@@ -216,7 +216,6 @@ export {
   describeHeldEvents,
   describeTrigger,
   describeTriggerOn,
-  HELD_EVENT_PREVIEW_LIMIT,
   type TriggerReading,
 } from "./trigger-display";
 export {
@@ -292,6 +291,7 @@ export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
 export { joinCommand } from "./join-command";
+export { buildPastedRedirectUri } from "./mcp-server-sign-in";
 export {
   buildRetireQuestion,
   findRunnerConflictField,
@@ -357,7 +357,7 @@ export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
 export { isAnswerSendRunning, isMutationRunning } from "./mutation-running";
-export { queryKeys, buildQueryKeys, type EventListFilter, type LiveQueryKey } from "./live/keys";
+export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
   buildBoundActionRows,
@@ -370,7 +370,6 @@ export {
   isNotificationMuted,
   parseMuteKind,
   toggleMuteKey,
-  UNSEEN_COUNT_READ_LIMIT,
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
@@ -383,105 +382,6 @@ export {
   UNKNOWN_BLOCK_TEXT,
 } from "./signal-blocks";
 export {
-  buildHandlingLabels,
-  buildInitials,
-  buildIntakeTabs,
-  buildSignalAnswers,
-  computeEventHorizonStart,
-  countToDo,
-  cutHandlingLabels,
-  DEFAULT_INTAKE_LIST_WIDTH,
-  decidePluginColor,
-  decidePluginMark,
-  describeAnswerKey,
-  describeBuildFailure,
-  describeEventHorizon,
-  describeEventListEnd,
-  describeEventSystem,
-  describeEventTitle,
-  describeHandlingCaption,
-  describeNotScreened,
-  describeOrchestrationSegment,
-  describeResolvedElsewhere,
-  describeSignalAsker,
-  describeSignalOutcome,
-  describeSignalOutcomeMoment,
-  describeSignalKindAndPlace,
-  describeSignalProvenance,
-  describeSignalRow,
-  EVENT_HANDLING_OPTIONS,
-  findReplyAnswer,
-  findSuggestedAnswer,
-  fitIntakeListWidth,
-  fitsIntakePane,
-  groupEventsByDay,
-  groupSignalsByDay,
-  groupSignalsIntoSections,
-  isBackFromSnooze,
-  listUrgentSignals,
-  MIN_INTAKE_LIST_WIDTH,
-  MIN_INTAKE_PANE_WIDTH,
-  moveEventSelection,
-  moveSignalSelection,
-  namePlugin,
-  nameSignalSource,
-  parseIntakeListWidth,
-  trimAnswerEllipsis,
-  type EventDaySection,
-  type EventHandlingLabel,
-  type IntakeSection,
-  type IntakeTab,
-  type IntakeTabPlugin,
-  type IntakeView,
-  type PluginIdentity,
-  type PluginColorDrawing,
-  type PluginMarkDrawing,
-  type PluginName,
-  type RaiserName,
-  type SignalAnswer,
-  type SignalAnswerStyle,
-  type SignalOutcome,
-  type SignalRaiserNames,
-  type UrgentSignal,
-} from "./intake";
-export {
-  buildTrackingRows,
-  canMarkTrackingRowDone,
-  countWaitingTrackingRows,
-  decideTrackingRowPose,
-  decideTrackingStatePose,
-  describeTrackingLine,
-  findTrackingTasksAffectedByRunPush,
-  groupTrackingRows,
-  listRecentTrackingRows,
-  nameTrackingState,
-  readTrackingFaceSeed,
-  type TrackingDestination,
-  type TrackingGroup,
-  type TrackingLine,
-  type TrackingRead,
-  type TrackingRow,
-  type TrackingState,
-} from "./tracking";
-export {
-  describeHandoffTrip,
-  isAnyLegAffectedByRunPush,
-  isAnyLegAffectedByTaskPush,
-  type HandoffTrip,
-  type HandoffTripDestination,
-} from "./handoff-leg";
-export {
-  describeTrackingOutputValue,
-  describeTrackingStanding,
-  describeTrackingTrip,
-  findNextTrackingElapsedChange,
-  listTrackingAnswers,
-  readTrackingRunStart,
-  type TrackingAnswer,
-  type TrackingTrip,
-  type TrackingTripRun,
-} from "./tracking-pane";
-export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
   DEFAULT_SIDEBAR_WIDTH,
@@ -492,69 +392,25 @@ export {
   type SidebarLayout,
 } from "./sidebar-layout";
 export {
-  canIgnoreSignal,
-  describeIgnoreDialogEffect,
-  describeIgnoreRuleCatches,
-  describeOfferedRuleMatchCount,
-  describeRuleMatchesTakenOff,
-  isIgnoreRuleOffer,
-  KIND_SWITCH_OFF_LINE,
-  LAST_MATCH_VALUE_REASON,
-  listDeclaredMatchValues,
-  listPluginIgnoreRules,
-  listSignalsMatchedByRule,
-  readSignalKindLabels,
-} from "./ignore-rules";
+  CORE_SOURCE_NAME,
+  decidePluginColor,
+  decidePluginMark,
+  namePlugin,
+  type PluginColorDrawing,
+  type PluginIdentity,
+  type PluginMarkDrawing,
+  type PluginName,
+} from "./plugin-names";
+export { nameSignalKind } from "./signal-kinds";
 export {
-  applySignalMove,
-  buildSnoozeChoices,
-  countClearedToday,
-  countClearedTodayByPlugin,
-  decideSignalPaneMoves,
-  decideSignalRowControls,
-  describeBulkDoneTitle,
-  describeDoneRowOutcome,
-  describeIntakeFoot,
-  describeMoveToast,
-  describeSnoozeLine,
-  hasDoneAction,
-  isMoveLeavingView,
-  listBulkMoves,
-  parsePickedSnoozeTime,
-  planSignalMove,
-  reachesBeforeToday,
-  SIGNAL_MOVE_LABELS,
-  toggleSignalCheck,
-  type PluginClearedToday,
-  type SignalMove,
-  type SignalMovePlan,
-  type SignalPaneMove,
-} from "./intake-moves";
-export {
-  dropOwnChanges,
-  followListedSignals,
-  recordOwnChanges,
-  startHeldSignals,
-  switchHeldScope,
-  updateHolding,
-  type HeldSignals,
-} from "./held-signals";
-export {
-  dropTrackingHandoff,
-  dropTrackingRowTakenOff,
-  followListedTrackingRows,
-  followTrackingRead,
-  isTrackingHandoffAcknowledged,
-  recordTrackingHandoff,
-  recordTrackingHandoffCommitted,
-  recordTrackingRowTakenOff,
-  startHeldTrackingRows,
-  updateTrackingRowsHolding,
-  type HeldTrackingRows,
-} from "./held-tracking-rows";
-export { describeToDoClearLine, type ToDoClearLine } from "./to-do-clear";
-export { matchYourWork, type YourWork } from "./your-work";
-export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
+  buildSignalAnswers,
+  findSuggestedAnswer,
+  trimAnswerEllipsis,
+  type SignalAnswer,
+  type SignalAnswerStyle,
+} from "./signal-answers";
+export { listUrgentSignals, type UrgentSignal } from "./urgent-signals";
+export { describeIgnoreRuleCatches, listPluginIgnoreRules } from "./ignore-rules";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export {
@@ -709,7 +565,6 @@ export {
   formatDay,
   formatDayStamp,
   formatPreciseStamp,
-  formatRelativeMoment,
   formatSince,
   formatStamp,
   formatTimeContext,
@@ -1106,7 +961,7 @@ export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {
   chooseStarterThreads,
-  describeEmptyIntake,
+  describeNoPlannedWork,
   type StarterThread,
 } from "./threads/starter-threads";
 export { buildDraftConfig, computeThreadDefaults } from "./threads/thread-defaults";
@@ -1134,6 +989,7 @@ export {
   type SenderReading,
   waitForOptionalReads,
 } from "./threads/sender";
+export { HELD_EVENT_PREVIEW_LIMIT, UNSEEN_COUNT_READ_LIMIT } from "./read-limits";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

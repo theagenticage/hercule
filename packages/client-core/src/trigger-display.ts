@@ -7,14 +7,13 @@
 import {
   ANY_CONNECTION,
   isSchedule,
-  type EventWithFacts,
+  type ListedEvent,
   type Trigger,
   type TriggerFiresOn,
   type TriggerOn,
   type Workflow,
   toIdTail,
 } from "@hercule/contract";
-import { describeEventTitle } from "./intake";
 import {
   describeBoundUse,
   describeStartTriggerStatus,
@@ -77,13 +76,6 @@ export interface TriggerReading {
   readonly toggle: "pause" | "resume" | undefined;
   readonly isPausedByBreaker: boolean;
 }
-
-/**
- * How many held events a trigger's row lists. The rest are counted in one
- * line, because the count, not the list, tells the user how many events wait,
- * and the oldest few show what the trigger matched.
- */
-export const HELD_EVENT_PREVIEW_LIMIT = 3;
 
 /**
  * The held events a trigger's row lists, and the line that counts the rest.
@@ -212,7 +204,7 @@ export const describeTrigger = (
  * be formatted in that timezone is shown as the timestamp the controller sent.
  */
 export const describeHeldEvents = (
-  events: ReadonlyArray<EventWithFacts>,
+  events: ReadonlyArray<ListedEvent>,
   heldCount: number,
   timezone: string,
 ): HeldEventsReading => {
@@ -220,7 +212,8 @@ export const describeHeldEvents = (
   return {
     rows: events.map((event) => ({
       id: event.id,
-      title: describeEventTitle(event),
+      // The one-line title the event's source set, or its kind when it set none.
+      title: event.title ?? event.kind,
       isKindTitle: event.title === null,
       author: event.author ?? undefined,
       receivedText: formatStamp(new Date(event.receivedAt), timezone) ?? event.receivedAt,

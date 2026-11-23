@@ -10,7 +10,7 @@
  * docs/design/crew-bureau-2.
  */
 import "./sheet.css";
-import { INTAKE_ICON_OUTLINES, OVERVIEW_ICON_OUTLINES } from "../icons/app-icon-outlines";
+import { OVERVIEW_ICON_OUTLINES } from "../icons/app-icon-outlines";
 import { SHEET, type IconName, type Piece } from "./cells";
 import { applySheetAppearance, buildBookLook, markSheetReady, readCrew } from "./sheet-page";
 
@@ -20,13 +20,11 @@ const crew = readCrew();
 const BOOK_ICON_NAMES: Partial<Record<IconName, string>> = {
   "chevron-left": "chev-l",
   "chevron-right": "chev-r",
-  inbox: "intake",
   workspace: "worktree",
 };
 
 // The icons the book does not draw, by their outlines in the app.
 const APP_ICON_OUTLINES: Partial<Record<IconName, ReadonlyArray<string>>> = {
-  intake: INTAKE_ICON_OUTLINES,
   overview: OVERVIEW_ICON_OUTLINES,
 };
 

@@ -4,7 +4,7 @@ Date: 2026-10-10
 
 ## Status
 
-Accepted by [Write the Intake changes and the build tickets (#395)](https://github.com/theagenticage/hercule/issues/395) and the map [Intake v1: from the Asks prototype to a buildable spec (#380)](https://github.com/theagenticage/hercule/issues/380). Decided in [#384](https://github.com/theagenticage/hercule/issues/384), [#388](https://github.com/theagenticage/hercule/issues/388), [#389](https://github.com/theagenticage/hercule/issues/389), [#391](https://github.com/theagenticage/hercule/issues/391) and [#392](https://github.com/theagenticage/hercule/issues/392). Supersedes the Proposal as "a Task labelled `proposed` plus its decision Notification" in specs 02, 09 and 10, and the triage Notification kinds (`triage.proposal`, `triage.offer`, `triage.unsure`, `triage.fyi`). Amends [ADR 0011](./0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md) (plugin rules and the Screener), [ADR 0022](./0022-proposing-is-not-doing.md) (bound actions also sit on Signals), [ADR 0023](./0023-chat-messages-are-conversation-input-not-events.md) (a Slack event source may sit beside the Slack channel), [ADR 0027](./0027-a-decision-resolves-when-its-question-is-answered-wherever.md) (snooze on Signals only) and [ADR 0034](./0034-a-catalog-contribution-is-identified-by-its-qualified-id.md) (signal kinds are qualified). Keeps [ADR 0012](./0012-notifications-are-core-routed-sinks-are-dumb.md): Notifications are still routed by the core, and Signals are not delivered to chat sinks in v1.
+Accepted by [Write the Intake changes and the build tickets (#395)](https://github.com/theagenticage/hercule/issues/395) and the map [Intake v1: from the Asks prototype to a buildable spec (#380)](https://github.com/theagenticage/hercule/issues/380). Decided in [#384](https://github.com/theagenticage/hercule/issues/384), [#388](https://github.com/theagenticage/hercule/issues/388), [#389](https://github.com/theagenticage/hercule/issues/389), [#391](https://github.com/theagenticage/hercule/issues/391) and [#392](https://github.com/theagenticage/hercule/issues/392). Supersedes the Proposal as "a Task labelled `proposed` plus its decision Notification" in specs 02, 09 and 10, and the triage Notification kinds (`triage.proposal`, `triage.offer`, `triage.unsure`, `triage.fyi`). Amends [ADR 0011](./0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md) (plugin rules and the Screener), [ADR 0022](./0022-proposing-is-not-doing.md) (bound actions also sit on Signals), [ADR 0023](./0023-chat-messages-are-conversation-input-not-events.md) (a Slack event source may sit beside the Slack channel), [ADR 0027](./0027-a-decision-resolves-when-its-question-is-answered-wherever.md) (snooze on Signals only) and [ADR 0034](./0034-a-catalog-contribution-is-identified-by-its-qualified-id.md) (signal kinds are qualified). Keeps [ADR 0012](./0012-notifications-are-core-routed-sinks-are-dumb.md): Notifications are still routed by the core, and Signals are not delivered to chat sinks in v1. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the Intake screen is deleted. The Signal record and this decision stand; see the amendment at the end.)*
 
 ## Context
 
@@ -44,3 +44,23 @@ The model is written in [spec 10 §9](../spec/10-triage-intake-and-notifications
 - Check-in and Intake never filter one table by kind, so their counts cannot disagree.
 - The triage Notification kinds, the `proposed` label, "Needs a call" and Intake's "since you last checked" are retired.
 - Intake is no longer built only on primitives. A future surface that wants its own record must still make the case this ADR made.
+
+## Amendment: the Intake screen is deleted (2026-11-21)
+
+*(Added 2026-11-21, [Delete the Intake screen and the code only it uses (#1243)](https://github.com/theagenticage/hercule/issues/1243), on Rogier's word of that day.)* The Inbox of External Entities ([spec 20](../spec/20-external-entities.md), [ADR 0054](./0054-external-entities-are-durable-records-kept-true-by-polls.md)) took over what the user works through: a signal about a pull request or an issue shows inside that thing's row. So the desktop Intake screen is deleted, with every view on it: To do, Later, Done, Everything and Tracking.
+
+What goes:
+
+- **The screen and its moves.** Snooze, Not urgent, Your work, the Ignore dialog and To do clear go with it.
+- **The operations only the screen used,** with their CLI rows: `signal.queryYourWork`, `signal.snooze`, `signal.unsnooze`, `signal.lowerPriority`, the `later` view of `signal.query`, and Tracking's `task.queryTracking`, `task.readTracking` and `task.queryLegs`. So do `event.query`'s `handling` filter and the per-event facts behind "What came of it" ([spec 11](../spec/11-public-api-and-agent-surface.md#event)).
+- **Snoozes.** A migration drops the snooze table, so a signal that was snoozed is live again after the upgrade. The stored `priority_lowered` override is kept, so an old Not urgent choice still holds for a replacement signal, but nothing can set it any more.
+
+What stays:
+
+- **The decision of this ADR.** A Signal is its own record, never a Notification. Notifications are still Hercule's own messages, shown in Check-in and never beside Signals. `signal.query` (its to-do and done views), `read`, `raise`, `act`, `withdraw`, `markDone` and `handOff` all stay. So do Ignore Rules and the intake settings: which events triage may read, and which signal kinds are on. The word Intake now names only those settings, and Settings › Intake is renamed Settings › Signals.
+
+What it costs:
+
+- **A signal with no External Entity has no place on the desktop for now.** That covers the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) and any signal whose entity is missing or cannot be read. Such a signal stays open and is reachable with `hercule signal list`; follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox. Until then, a proposal from triage is accepted from the CLI, and so is Hercule's offer of an Ignore Rule.
+- **Ignore Rules are created only from the CLI,** with `hercule ignore-rule create` or by taking the offer's Ignore with `hercule signal act`. Settings › Signals lists and deletes them.
+- **An urgent signal with no entity shows no native notification.** One with an entity opens the Inbox with that thing in the pane.

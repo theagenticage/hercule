@@ -15,10 +15,18 @@
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Nine paths are not derived from the contract's HttpApi declaration. None
+ * Ten paths are not derived from the contract's HttpApi declaration. None
  * of them reaches steps 6 and 7 or gets the span of step 5, and they differ
  * in which of the two gates they pass:
  *
+ * - The MCP Gateway at `POST`, `GET` and `DELETE /mcp` (`./mcp.ts`) is
+ *   matched before step 1, so it passes none of the wrappers: not CORS (no
+ *   browser may call it), not the envelope, not the body limit and not the
+ *   compression of answers, which would hold a stream back. It checks the
+ *   `Origin` header, the method and the Session Token itself, before it reads
+ *   any JSON. It passes neither gate: `tools/list` must keep answering while
+ *   the controller is frozen, so the gateway admits each `tools/call` through
+ *   the promotion state itself.
  * - The live socket at `GET /ws` passes both gates. It then authenticates in
  *   its own first frame, because a browser cannot put a credential on a
  *   WebSocket handshake.
@@ -106,6 +114,7 @@ import {
   recordDeparturesAfterThaws,
   runAccountUsageReadingLoop,
   runAttachmentSweepLoop,
+  runMcpServerChecksScheduler,
   runIngestReconciler,
   runHarnessReleaseCheckLoop,
   runClaimResolverLoop,
@@ -116,11 +125,13 @@ import {
   runTaskSummaryLoop,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
-  TaskTrackingRunsLayer,
+  TaskRunsLayer,
   thawExpiredFreezes,
 } from "../daemon";
 import { stopWrites } from "../db";
 import { ClaimResolutionLayer } from "../external-entities";
+import { runMcpGatewayFollower } from "../mcp-gateway";
+import { runConnectionFollower } from "../mcp-servers";
 import { EntityLookupsLayer } from "../plugins";
 import { TaskSummariesLayer } from "../tasks";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
@@ -133,6 +144,7 @@ import {
   RunnerSocketRouteLayer,
 } from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
+import { withMcpRoute } from "./mcp";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -438,10 +450,12 @@ const buildApplication = (bundle: WebBundle | undefined) =>
       ),
     ),
     (routes) =>
-      compressJsonAnswers(
-        withCors(
-          limitRequestBody(
-            withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
+      withMcpRoute(
+        compressJsonAnswers(
+          withCors(
+            limitRequestBody(
+              withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
+            ),
           ),
         ),
       ),
@@ -480,6 +494,14 @@ export const serve = (bundle: WebBundle | undefined) =>
     // nobody is running a session for is read, each at most once per 15
     // minutes. It needs the runners, so it starts beside the probing.
     yield* Effect.forkScoped(runAccountUsageReadingLoop);
+    // The MCP Servers' status follows their Connections and plugins, and the
+    // tools of every enabled server are listed again once a day, with retries
+    // for a server that cannot be reached.
+    yield* Effect.forkScoped(runConnectionFollower);
+    yield* Effect.forkScoped(runMcpServerChecksScheduler);
+    // The MCP Gateway tells each session's open streams when the tools it is
+    // served change, and forgets the Session Tokens that ended.
+    yield* Effect.forkScoped(runMcpGatewayFollower);
     // A runner that connects is sent the work owed to it: its pending
     // provisioning and its running workspace steps. Forked before the
     // listener binds, like the probing, so no arrival is missed.
@@ -497,9 +519,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // call reads the Task's runs through the port the tasks domain declares,
     // which only the controller daemon can answer.
     yield* Effect.forkScoped(
-      runTaskSummaryLoop.pipe(
-        Effect.provide(Layer.mergeAll(TaskTrackingRunsLayer, TaskSummariesLayer)),
-      ),
+      runTaskSummaryLoop.pipe(Effect.provide(Layer.mergeAll(TaskRunsLayer, TaskSummariesLayer))),
     );
     // External Entities nothing needs are deleted once a day.
     yield* Effect.forkScoped(runEntityPruneLoop);

@@ -59,7 +59,13 @@ import {
 import { MasterKey } from "./masterKey";
 
 /** The kind of owner a secret belongs to. */
-export type SecretOwnerKind = "connection" | "plugin" | "runner" | "core" | "provider-account";
+export type SecretOwnerKind =
+  | "connection"
+  | "plugin"
+  | "runner"
+  | "core"
+  | "provider-account"
+  | "mcp-server";
 
 /**
  * The owning entity: its kind, and its canonical id string. `core` has no

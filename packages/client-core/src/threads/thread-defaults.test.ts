@@ -378,6 +378,7 @@ describe("a new thread in a project with a Model Profile", () => {
   const buildProject = (id: string, modelProfileId?: string): Project => ({
     id,
     name: id,
+    mcpServerIds: [],
     createdAt: AT,
     updatedAt: AT,
     ...(modelProfileId === undefined ? {} : { modelProfileId }),

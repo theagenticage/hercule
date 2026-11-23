@@ -78,6 +78,7 @@ const WORK: ModelProfile = buildModelProfile(
 const buildProject = (id: string, name: string, modelProfileId?: string): Project => ({
   id: `01a06d02-8000-7000-8000-0000000000${id}`,
   name,
+  mcpServerIds: [],
   ...(modelProfileId === undefined ? {} : { modelProfileId }),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
@@ -88,20 +89,25 @@ const buildProject = (id: string, name: string, modelProfileId?: string): Projec
  * profiles `initial`. A create is refused `validation` for a name another
  * profile has, a delete is refused `invalid_state` for the last profile, and
  * a delete clears the choice of the projects that named the profile.
- * `read` and `readProjects` return what is stored.
+ * `read` and `readProjects` return what is stored. The first rename is
+ * stored only when `holdFirstRename` settles, so a test can have a rename
+ * on its way while it does something else.
  */
 const playProfiles = (
   initial: ModelProfile[],
   initialProjects: Project[] = [],
   holdFirstCreate?: Promise<void>,
+  holdFirstRename?: Promise<void>,
 ) => {
   let stored = initial;
   let creates = 0;
+  let renames = 0;
   let projects = initialProjects;
   const newIds = [...NEW_IDS];
   const patch =
     (id: string): Handler =>
-    (call) => {
+    async (call) => {
+      if (renames++ === 0) await holdFirstRename;
       const input = call.body as { name: string; expectedRevision: number };
       if (stored.some((each) => each.id !== id && each.name === input.name)) {
         return { status: 400, body: buildErrorBody("validation", "A profile called that exists.") };
@@ -164,6 +170,7 @@ const openModels = async ({
   path = "/settings/providers",
   handlers = {},
   holdFirstCreate,
+  holdFirstRename,
 }: {
   readonly profiles: ModelProfile[];
   readonly projects?: Project[];
@@ -171,8 +178,9 @@ const openModels = async ({
   readonly path?: string;
   readonly handlers?: Record<string, Handler>;
   readonly holdFirstCreate?: Promise<void>;
+  readonly holdFirstRename?: Promise<void>;
 }) => {
-  const controller = playProfiles(profiles, projects, holdFirstCreate);
+  const controller = playProfiles(profiles, projects, holdFirstCreate, holdFirstRename);
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
@@ -470,11 +478,16 @@ describe("Settings > Providers > Models, profiles", () => {
     });
 
     it("renames another profile while the first rename's save is pending, and both end correct", async () => {
-      const save = holdAnswer();
-      const { calls, read } = await openModels({
+      let answerFirstRename: () => void = () => undefined;
+      const { calls, read, live } = await openModels({
         profiles: [MAIN, WORK],
-        handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
+        holdFirstRename: new Promise<void>((resolve) => {
+          answerFirstRename = resolve;
+        }),
       });
+      // The first pushes re-read the profiles from the controller. One that
+      // landed after a rename was stored would put the old name back.
+      await live.waitForFirstPushes();
       await chooseTabMenuItem("Main", "Rename");
       const field = screen.getByRole("textbox", { name: "Name of Main" });
       await userEvent.clear(field);
@@ -493,13 +506,13 @@ describe("Settings > Providers > Models, profiles", () => {
 
       expect(listTabNames()).toEqual(["Daily", "Jobs"]);
 
-      save.answer({ body: { ...MAIN, name: "Daily", revision: MAIN.revision + 1 } });
+      answerFirstRename();
 
       await waitFor(() => {
         expect(getCalls(calls, "PATCH", `/api/v1/model-profiles/${WORK_ID}`)).toHaveLength(1);
       });
       await waitFor(() => {
-        expect(read().map(({ name }) => name)).toEqual(["Main", "Jobs"]);
+        expect(read().map(({ name }) => name)).toEqual(["Daily", "Jobs"]);
       });
       expect(listTabNames()).toEqual(["Daily", "Jobs"]);
       expect(screen.queryByRole("alert")).toBeNull();

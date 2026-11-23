@@ -18,8 +18,9 @@
  * - sets an `error` Connection back to `connected` once every feed has polled
  *   successfully since the open. A successful open alone does not, because
  *   it proves nothing about the feeds;
- * - sets it to `needs-reauth` and stops at the first `AuthError`, because
- *   retrying with rejected credentials cannot help.
+ * - sets it to `needs-reauth`, which raises its Notification, and stops at
+ *   the first `AuthError`, because retrying with rejected credentials cannot
+ *   help.
  *
  * Closing a Connection interrupts its feed timers, waits for them to finish,
  * then calls the handle's `close` once, giving it 10 seconds. The controller
@@ -280,31 +281,34 @@ const make = Effect.gen(function* () {
       /**
        * Sets the Connection to `needs-reauth` after an `AuthError`, unless its
        * credentials changed since the attempt started, and returns whether
-       * it did. A reconnect while a poll runs replaces the rejected
+       * it did. The core raises the Connection's Notification with the status
+       * change. A reconnect while a poll runs replaces the rejected
        * credentials; marking the Connection then would flag credentials that
        * may well work.
+       *
+       * The check runs under the Connection's refresh permit. A refresh in
+       * flight may have made the provider reject the old token before its
+       * new token is stored, and the poll then fails with the refresh's
+       * doing: once the permit is held, the new token is stored and the
+       * check sees it.
        */
       const markNeedsReauth = (
         credentialsVersion: string,
         cause: Cause.Cause<AuthError | PluginError>,
       ): Effect.Effect<boolean> =>
-        writeStatus((at) =>
-          Effect.gen(function* () {
-            const current = yield* connectionTypes.readCredentialsVersion(connection.id);
-            if (current !== credentialsVersion) return false;
-            if (
-              yield* connections.changeStatusFrom(
+        connectionTypes.withRefreshPermit(
+          connection.id,
+          writeStatus(() =>
+            Effect.gen(function* () {
+              const current = yield* connectionTypes.readCredentialsVersion(connection.id);
+              if (current !== credentialsVersion) return false;
+              yield* connectionTypes.setNeedsReauthInTransaction(
                 connection.id,
-                ["connected", "error"],
-                "needs-reauth",
                 summarizeCause(cause),
-                at,
-              )
-            ) {
-              yield* announceConnection;
-            }
-            return true;
-          }),
+              );
+              return true;
+            }),
+          ),
         );
 
       /**

@@ -38,6 +38,7 @@ import { Duration, Effect, Fiber, Option, Redacted, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   FILES_EDITED_CAPABILITY,
+  buildMcpServersCapability,
   GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   MAX_FRAME_BYTES,
@@ -871,6 +872,46 @@ describe("the liveness check", () => {
       },
       { pings: FAST },
     );
+  });
+});
+
+describe("what the controller logs when a connection closes", () => {
+  it("logs no error for a runner that closes without naming a code", async () => {
+    // The controller logs through Effect's default logger, which writes to the
+    // console. The test reads what reaches it.
+    const written: string[] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        written.push(args.map(String).join(" "));
+      }),
+    );
+    try {
+      await withServer(async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        // `close()` with no code arrives at the controller as 1005.
+        wire.send({ _tag: "goodbye" });
+        wire.close();
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "offline",
+        );
+      });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    expect(written.filter((line) => line.includes("connection ended in an error"))).toEqual([]);
   });
 });
 
@@ -1973,18 +2014,20 @@ describe("probing a runner's provider accounts", () => {
     });
 
   /**
-   * Waits until the controller has sent `count` probe requests, answering each
-   * one as it arrives except those for the account `hold`. A sweep sends a
-   * runner at most two probes at once, so a test that expects more than two
-   * has to answer the ones it does not care about.
+   * Answers every probe request as it arrives, except those for the account
+   * `hold`, until `isDone` accepts the requests sent so far. Returns those
+   * requests. A sweep sends a runner at most two probes at once, so a test
+   * that waits for more than two has to answer the ones it does not care
+   * about.
    */
-  const answerProbeRequests = (
+  const answerProbeRequestsUntil = (
     wire: RunnerSocket,
-    count: number,
+    description: string,
+    isDone: (asked: ReadonlyArray<ProbeRequest>) => boolean,
     hold?: string,
   ): Promise<ReadonlyArray<ProbeRequest>> => {
     const answered = new Set<string>();
-    return waitUntil(`asked for ${String(count)} probes`, () => {
+    return waitUntil(description, () => {
       const asked = listProbeRequests(wire);
       for (const request of asked) {
         const { providerAccountId } = request.harnessAccount;
@@ -1997,9 +2040,22 @@ describe("probing a runner's provider accounts", () => {
           result: buildProbeResult("2.1.263"),
         });
       }
-      return asked.length >= count ? asked : undefined;
+      return isDone(asked) ? asked : undefined;
     });
   };
+
+  /** Waits until the controller has sent `count` probe requests, answering them as `answerProbeRequestsUntil` does. */
+  const answerProbeRequests = (
+    wire: RunnerSocket,
+    count: number,
+    hold?: string,
+  ): Promise<ReadonlyArray<ProbeRequest>> =>
+    answerProbeRequestsUntil(
+      wire,
+      `asked for ${String(count)} probes`,
+      (asked) => asked.length >= count,
+      hold,
+    );
 
   /**
    * The facts of a runner that could run all three harnesses: an adapter for
@@ -2335,13 +2391,22 @@ describe("probing a runner's provider accounts", () => {
         const all = await listAccounts(harness.base, token);
         const { wire } = await greetEveryHarness(harness.base, joined.credential);
         try {
-          // The probes after the hello, then the tick's: every account again,
-          // not just the one somebody last looked at.
-          await answerProbeRequests(wire, all.length * 2);
-          const second = listProbeRequests(wire).slice(all.length, all.length * 2);
-          expect(
-            [...second].map((request) => request.harnessAccount.providerAccountId).sort(),
-          ).toEqual([...all].map((one) => one.id).sort());
+          // The probes the hello causes and the tick's overlap in time, and
+          // the hello's catalog reads are probes too, so no position in the
+          // list belongs to one round. The hello asks each account at most
+          // twice: once in its sweep, once to read its Model Catalog. An
+          // account asked a third time was probed again by the tick.
+          const PROBES_FROM_HELLO = 2;
+          await answerProbeRequestsUntil(
+            wire,
+            "asked every account again after the hello",
+            (requests) =>
+              all.every(
+                (account) =>
+                  requests.filter((one) => one.harnessAccount.providerAccountId === account.id)
+                    .length > PROBES_FROM_HELLO,
+              ),
+          );
         } finally {
           wire.close();
         }
@@ -2772,6 +2837,24 @@ describe("signing a runner in to a provider account", () => {
       const { wire, answer } = await greet(harness.base, joined.credential);
       try {
         expect(answer.capabilities).toContain(GITHUB_TOKEN_CAPABILITY);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("offers the MCP Servers capability of each registered harness at hello", async () => {
+    await withRegistry(async (harness) => {
+      const joined = await enlist(harness);
+      const { wire, answer } = await greet(harness.base, joined.credential);
+      try {
+        expect(answer.capabilities).toEqual(
+          expect.arrayContaining(
+            ["claude-code/claude-code", "codex/codex", "pi/pi"].map(buildMcpServersCapability),
+          ),
+        );
+        // The retired plain form stays, for a runner of the first MCP Gateway build.
+        expect(answer.capabilities).toContain("mcpServers");
       } finally {
         wire.close();
       }

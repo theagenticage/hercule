@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema, Stream } from "effect";
 import {
   query as sdkQuery,
@@ -45,21 +45,48 @@ import { prepareTooling } from "../sessions/tooling";
 import { claudeCode, makeClaudeCodeAdapter } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
-import type { HarnessRunnerContext } from "./index";
+import type { SessionStartContext } from "./index";
 import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "./testing";
 import { ensureRootBoundary } from "../workspaces";
 
 const binary = Bun.which("claude") ?? undefined;
 
+/** The folders the running test made. `afterEach` removes them, so a run that dies later leaves none behind. */
 const homes: Array<string> = [];
 
-afterAll(() => {
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+/** Every folder any test made, so `afterAll` can remove what a Claude Code process wrote into one later. */
+const madeHomes: Array<string> = [];
+
+/** The folder of the plugin directory `prepareTool` makes once for the whole file. `afterAll` removes it. */
+let toolHome: string | undefined;
+
+/**
+ * Removes a folder with its contents. It retries, because a Claude Code
+ * process that is still shutting down can write into the folder while it is
+ * being removed, and one folder that cannot be removed must not leave the
+ * others behind.
+ */
+const removeFolder = (folder: string): void =>
+  rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+
+afterEach(() => {
+  for (const home of homes.splice(0)) removeFolder(home);
+});
+
+afterAll(async () => {
+  // A session that was stopped can leave its Claude Code process running for a
+  // moment, and the process then creates its cache folder again under the
+  // `HOME` it was given, inside a folder `afterEach` already removed. Waiting
+  // lets it finish, and then those folders go too.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  for (const home of madeHomes.splice(0)) removeFolder(home);
+  if (toolHome !== undefined) removeFolder(toolHome);
 });
 
 const createTemporaryHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-claude-probe-"));
   homes.push(home);
+  madeHomes.push(home);
   return home;
 };
 
@@ -71,10 +98,11 @@ const createTemporaryHome = (): string => {
  * The directory is created on first use, so a run that skips every test here
  * writes nothing.
  */
-let tool: HarnessRunnerContext["herculeTool"] | undefined;
-const prepareTool = (): HarnessRunnerContext["herculeTool"] => {
+let tool: SessionStartContext["herculeTool"] | undefined;
+const prepareTool = (): SessionStartContext["herculeTool"] => {
   if (tool === undefined) {
-    const under = createTemporaryHome();
+    const under = mkdtempSync(join(tmpdir(), "hercule-claude-probe-"));
+    toolHome = under;
     const {
       herculeTool: { claudePluginDir },
     } = prepareTooling({
@@ -115,9 +143,10 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
   it(
     "reports an empty config directory as not logged in, with the machine's version and models",
     async () => {
-      const context: HarnessRunnerContext = {
+      const context: SessionStartContext = {
         cwd: null,
         attachmentsDir: null,
+        mcpServers: [],
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: createTemporaryHome(),
@@ -328,10 +357,11 @@ const waitForTranscript = async (nativeSessionId: string): Promise<string | unde
  */
 const buildContext = (
   cwd: string,
-  herculeTool: HarnessRunnerContext["herculeTool"] = prepareTool(),
-): HarnessRunnerContext => ({
+  herculeTool: SessionStartContext["herculeTool"] = prepareTool(),
+): SessionStartContext => ({
   cwd,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: CONFIG_DIR,
@@ -809,9 +839,10 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       },
       run: runProcess,
     });
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       cwd: repository?.checkout ?? scratch,
       attachmentsDir: null,
+      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home,
@@ -903,6 +934,126 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     Duration.toMillis(PROBE_DEADLINE) * 2,
   );
 });
+
+/**
+ * Checks that the Session Token reaches the MCP Gateway but no file under the
+ * session's folders. With `DEBUG_CLAUDE_AGENT_SDK` set, the SDK appends the
+ * CLI's whole launch command, `--mcp-config` included, to a debug file under
+ * its config directory, and the CLI is started in debug mode. A token in the
+ * config would stay on disk, so the config names `HERCULE_TOKEN` and the CLI
+ * expands it from its environment. The variable is set in the session's
+ * environment and in the test process, because the SDK decides from its own
+ * process whether to write a debug file; the SDK is loaded under a fresh URL,
+ * because it decides once per process. The scan covers the whole temporary
+ * root: the SDK's config directory, the Harness Home, the scratch directory and
+ * the user's home (where the CLI keeps its MCP logs). The SDK passes the CLI
+ * `--debug-file` for the same file, so the CLI's own debug log is in it. (On
+ * 2.1.329 the CLI shows an `Authorization` header there as `[REDACTED]`, but
+ * its launch arguments are written whole.)
+ */
+describe.skipIf(binary === undefined)(
+  "the MCP Gateway's token in a real Claude Code session",
+  () => {
+    const SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff40";
+    const SYNTHETIC_TOKEN = "synthetic-session-token-0123456789";
+
+    const readFilesUnder = (folder: string): ReadonlyArray<string> =>
+      readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(entry.parentPath, entry.name);
+        return entry.isDirectory() ? readFilesUnder(path) : [path];
+      });
+
+    // The CLI removes some of its own files (a pid file, a lock) while it stops.
+    const readIfStillThere = (file: string): string => {
+      try {
+        return readFileSync(file, "utf8");
+      } catch {
+        return "";
+      }
+    };
+
+    it(
+      "sends the token to the gateway and writes it to no file",
+      async () => {
+        const root = createTemporaryHome();
+        const debugConfigDir = join(root, "sdk-config");
+        const home = join(root, "harness-home");
+        const scratch = join(root, "scratch");
+        mkdirSync(home);
+        mkdirSync(scratch);
+        const authorizations: Array<string | null> = [];
+        const gateway = Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            authorizations.push(request.headers.get("authorization"));
+            return new Response("not a gateway", { status: 500 });
+          },
+        });
+        vi.stubEnv("DEBUG_CLAUDE_AGENT_SDK", "1");
+        vi.stubEnv("CLAUDE_CONFIG_DIR", debugConfigDir);
+        const sdkUrl = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
+        const { query: freshQuery } = (await import(`${sdkUrl}?debug-file`)) as {
+          readonly query: typeof sdkQuery;
+        };
+        const adapter = makeClaudeCodeAdapter({
+          stream: ({ options, input }) => {
+            const started = freshQuery({ prompt: input, options });
+            return {
+              [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+              interrupt: () => started.interrupt().then(() => undefined),
+              setModel: (model) => started.setModel(model),
+              stopTask: (taskId) => started.stopTask(taskId),
+              close: () => void started.return(undefined).catch(() => undefined),
+            };
+          },
+          query: () => {
+            throw new Error("this test starts a session, not a probe");
+          },
+          run: runProcess,
+        });
+        const context: SessionStartContext = {
+          cwd: scratch,
+          attachmentsDir: null,
+          mcpServers: [{ name: "tools", url: `http://127.0.0.1:${gateway.port}/mcp` }],
+          editMarks: null,
+          attachmentUploader: NO_CONTROLLER_UPLOADER,
+          home,
+          binary: binary!,
+          // The session's own environment, as the runner builds it: it holds the
+          // token, and it turns on the CLI's debug output as well.
+          env: {
+            PATH: process.env["PATH"] ?? "",
+            HOME: join(root, "user"),
+            ANTHROPIC_API_KEY: "sk-ant-placeholder",
+            HERCULE_TOKEN: SYNTHETIC_TOKEN,
+            DEBUG_CLAUDE_AGENT_SDK: "1",
+          },
+          modelArgument: "{model}",
+          credentialVariables: [],
+          herculeTool: prepareTool(),
+        };
+
+        try {
+          await Effect.runPromise(adapter.startSession(SESSION_ID, SPEC, context));
+          await vi.waitUntil(() => authorizations.length > 0, { timeout: 30_000, interval: 100 });
+        } finally {
+          await Effect.runPromise(adapter.stopSession(SESSION_ID, "stopped"));
+          await gateway.stop(true);
+          vi.unstubAllEnvs();
+        }
+
+        expect(authorizations[0]).toBe(`Bearer ${SYNTHETIC_TOKEN}`);
+        // The SDK's debug file exists, so the scan is not vacuous.
+        const files = readFilesUnder(root);
+        expect(readFilesUnder(join(debugConfigDir, "debug")).length).toBeGreaterThan(0);
+        for (const file of files) {
+          expect(readIfStillThere(file), file).not.toContain(SYNTHETIC_TOKEN);
+        }
+      },
+      Duration.toMillis(PROBE_DEADLINE) * 2,
+    );
+  },
+);
 
 /**
  * Checks that the boundary at the workspace root stops Claude Code's search
@@ -1005,9 +1156,10 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
       },
       run: runProcess,
     });
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       cwd: workspaceRoot,
       attachmentsDir: null,
+      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home,
@@ -1284,9 +1436,10 @@ describe.skipIf(binary === undefined)(
           : { text: "done" },
       );
       const { adapter, seen, running } = createRealAdapter();
-      const context: HarnessRunnerContext = {
+      const context: SessionStartContext = {
         cwd: workspaceRoot,
         attachmentsDir: null,
+        mcpServers: [],
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home,
@@ -1444,9 +1597,10 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
     }
     const mock = startMockApi(decide);
     const { adapter, seen } = createRealAdapter();
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       cwd: workspace,
       attachmentsDir: null,
+      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: join(root, "harness-home"),
@@ -1788,6 +1942,7 @@ const replayFixture = async (
       {
         cwd: "/workspace",
         attachmentsDir: null,
+        mcpServers: [],
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: "/var/hercule/runner/providers/replay",
@@ -2349,9 +2504,10 @@ describe.skipIf(binary === undefined)(
           },
           run: runProcess,
         });
-        const context: HarnessRunnerContext = {
+        const context: SessionStartContext = {
           cwd: checkout,
           attachmentsDir: null,
+          mcpServers: [],
           editMarks: null,
           attachmentUploader: NO_CONTROLLER_UPLOADER,
           home,

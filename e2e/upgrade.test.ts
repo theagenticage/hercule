@@ -12,8 +12,9 @@
  * gives the signal grants, migration 76 gives (to `unrestricted` only)
  * `thread.start`, migration 78 gives the discussion grants, migration 80
  * gives the wiki grants and migration 85 gives the `skill` grants (to
- * `unrestricted` and `assistant` only), and one open signal whose match
- * values migration 73 sorts by name. The session holds two inputs, one with
+ * `unrestricted` and `assistant` only), migration 126 gives the `mcp` grants
+ * (to the shipped profiles only: a custom profile keeps its grants), and one
+ * open signal whose match values migration 73 sorts by name. The session holds two inputs, one with
  * an image, which migration 77 copies into a rebuilt `session_inputs`. The
  * session's turns hold tool calls from its own agent and from a subagent
  * beside an item that is not a tool call, which
@@ -91,6 +92,14 @@
  * whose session lease is still active. After the upgrade both workspaces read
  * with the same holders and kept-until time, so the rebuild lost no lease.
  *
+ * Migration 130 rebuilds `mcp_servers` so a server can come from an address,
+ * and `project_mcp_servers` and `session_mcp_servers` are emptied and filled
+ * again around that rebuild. When the edge database has not run it yet, and
+ * has the MCP Server tables, the fixture writes a switched-off plugin server
+ * on a disabled Connection, and puts it on the test Project's list and on a
+ * Thread's list with a left-out reason. After the upgrade the server reads
+ * with the same name and plugin source, and both lists still name it.
+ *
  * Migration 106 gives audit entries a `runner_id`, filled from the payload's
  * runner, or through its workspace's or session's runner. The edge binary
  * writes five of the 19 kinds the migration fills itself: the real runner's
@@ -109,12 +118,19 @@
  * workspace, one in none, one Done and one archived), and stores a workflow
  * whose step is `task.update` with `status: in-progress`. After the upgrade
  * each Task reads with the stage of its status and with every other field and
- * time as it was, the handed-off Task is still listed by `hercule task
- * tracking`, the two shared Threads share one new Task, the main and
+ * time as it was, the handed-off Task is still listed by `hercule task list
+ * --handed-off true` and keeps its handoff entry and its run, the two shared
+ * Threads share one new Task, the main and
  * workspace-less Threads have a Task each, the Done and archived Threads have
  * none, and the event log holds no `task.created` it did not hold before. The
  * stored workflow is then run, and its legacy status step must succeed and
  * move the Task to `building`.
+ *
+ * Migration 132 drops `signal_snoozes`, so a signal snoozed when the database
+ * is upgraded is an open signal like any other. The edge binary raises an FYI
+ * signal and snoozes it far into the future with its own CLI, and lists it in
+ * Later only. After the upgrade the same signal is on To do, reads back, and
+ * resolves with `signal done`, and the table is gone.
  *
  * It is not a matrix of session states or harness behaviour.
  *
@@ -263,6 +279,26 @@ const SKILL_GRANTS_BY_PROFILE: Readonly<Record<string, ReadonlyArray<string>>> =
   worker: [],
 };
 
+/** The name of the profile the fixture makes, which no migration of grants may change. */
+const CUSTOM_PROFILE_NAME = "upgrade-custom";
+
+/**
+ * The migration that adds the `mcp` grants of `MCP_GRANTS_BY_PROFILE` to the
+ * shipped profiles.
+ */
+const MCP_GRANTS_MIGRATION = 126;
+
+/**
+ * The `mcp` grants each shipped profile holds from migration 126 on. No
+ * profile holds `mcp.manage`: only the user gives a session the power to add
+ * a server or change which servers a thread has.
+ */
+const MCP_GRANTS_BY_PROFILE: Readonly<Record<string, ReadonlyArray<string>>> = {
+  assistant: ["mcp.read"],
+  unrestricted: ["mcp.read", "mcp.use"],
+  worker: ["mcp.read", "mcp.use"],
+};
+
 /**
  * The migration that creates the Model Profile "Main", holding every account
  * with a pending Default Selection.
@@ -295,6 +331,25 @@ const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
 
 /** When the seeded released lease keeps its workspace until: far enough that the sweep never collects it. */
 const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
+
+/** The migration that gives `mcp_servers` a source that may be an address, and `secrets` the `mcp-server` owner kind. */
+const MCP_SERVER_URL_SOURCE_MIGRATION = 130;
+
+/** The migration that creates `project_mcp_servers` and `session_mcp_servers`, after `mcp_servers` itself. */
+const MCP_SERVER_LISTS_MIGRATION = 127;
+
+/**
+ * The plugin MCP Server that `persistMcpServerRows` writes, with the
+ * Connection it names. The server is switched off and the Connection is
+ * disabled, so the upgraded controller has nothing to check or to follow.
+ */
+const SEEDED_MCP_SERVER_ID = "0199e0e7-0000-7000-8000-000000000d02";
+const SEEDED_MCP_CONNECTION_ID = "0199e0e7-0000-7000-8000-000000000d01";
+const SEEDED_MCP_SERVER_NAME = "upgrade_fixture";
+const SEEDED_MCP_CONTRIBUTION_ID = "upgrade/fixture";
+
+/** Why the seeded Thread's last start left the seeded MCP Server out. */
+const SEEDED_MCP_LEFT_OUT = "needs-sign-in";
 
 /**
  * The migration that adds `tasks.stage`. Migration 111, which gives the
@@ -331,7 +386,7 @@ const SHIPPED_WORKFLOW_KEYS = ["card-in-review", "card-landed"] as const;
 /**
  * The Tasks whose provenance names a ref, which migration 114 turns into links:
  * one through a handoff entry (it names a signal as well) and one through a plain
- * `ref` entry. Both stay `open`, so Tracking leaves them out.
+ * `ref` entry. Both stay `open`.
  */
 const LINKED_TASKS = [
   {
@@ -540,6 +595,9 @@ const EDGE_RUNNER_AUDIT_KINDS = [
 /** The workspaces the fixture writes for audit entries to name: one on the seeded runner, one on the real runner. */
 const SEEDED_AUDIT_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009d1";
 const REAL_AUDIT_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009d2";
+
+/** The migration that drops `signal_snoozes`, the snoozes of Intake's Later view. */
+const DROP_SIGNAL_SNOOZES_MIGRATION = 132;
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -1542,6 +1600,68 @@ function persistWorkspaceLeases(home: string): boolean {
 }
 
 /**
+ * Writes a plugin MCP Server in the shape migration 130 rebuilds, with the
+ * Connection it names, and puts it on a Project's list and on a Thread's list
+ * (with a left-out reason), into the database the edge binary created. Returns
+ * true when it wrote them.
+ *
+ * The rows go straight into the database because a server needs a plugin that
+ * offers a contribution and a signed-in Connection, which this test has
+ * neither of. A database that already ran migration 130 is skipped because
+ * its table would not be in the old shape, and one that has not run migration
+ * 127 is skipped because it has no lists to keep.
+ */
+function persistMcpServerRows(
+  home: string,
+  owners: { readonly projectId: string; readonly threadId: string },
+): boolean {
+  const version = readMigrationVersion(home);
+  if (version >= MCP_SERVER_URL_SOURCE_MIGRATION || version < MCP_SERVER_LISTS_MIGRATION) {
+    return false;
+  }
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const at = new Date().toISOString();
+    database
+      .query(
+        `INSERT INTO connections (id, plugin_id, type, label, display_name, account_id, status,
+                                  labels, config, created_at, updated_at)
+         VALUES (?, 'github', 'github/github', 'upgrade-fixture', 'GitHub', 'upgrade-fixture-1',
+                 'disabled', '[]', '{}', ?, ?)`,
+      )
+      .run(uuidBlob(SEEDED_MCP_CONNECTION_ID), at, at);
+    database
+      .query(
+        `INSERT INTO mcp_servers (id, name, contribution_id, connection_id, account_id, enabled,
+                                  status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'upgrade-fixture-1', 0, 'checking', ?, ?)`,
+      )
+      .run(
+        uuidBlob(SEEDED_MCP_SERVER_ID),
+        SEEDED_MCP_SERVER_NAME,
+        SEEDED_MCP_CONTRIBUTION_ID,
+        uuidBlob(SEEDED_MCP_CONNECTION_ID),
+        at,
+        at,
+      );
+    database
+      .query(
+        `INSERT INTO project_mcp_servers (project_id, position, mcp_server_id) VALUES (?, 0, ?)`,
+      )
+      .run(uuidBlob(owners.projectId), uuidBlob(SEEDED_MCP_SERVER_ID));
+    database
+      .query(
+        `INSERT INTO session_mcp_servers (session_id, position, mcp_server_id, left_out)
+         VALUES (?, 0, ?, ?)`,
+      )
+      .run(uuidBlob(owners.threadId), uuidBlob(SEEDED_MCP_SERVER_ID), SEEDED_MCP_LEFT_OUT);
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/**
  * Writes the Tasks and Threads that migrations 110 and 111 rewrite or read into
  * the database the edge binary created, when that database has not run them.
  * Returns what the checks after the upgrade need, or `undefined` when it wrote
@@ -2400,14 +2520,14 @@ async function readTriggers(
   return new Map(triggers.map((trigger) => [trigger.triggerId, trigger]));
 }
 
-/** Lists the ids of the Tasks that `hercule task tracking` lists, in the order it prints them. */
-async function readTrackedTaskIds(options: {
+/** Lists the ids of the Tasks that `hercule task list --handed-off true` lists. */
+async function readHandedOffTaskIds(options: {
   readonly home: string;
   readonly binary: string;
 }): Promise<ReadonlyArray<string>> {
-  const ran = await runCli(["task", "tracking", "--json"], options);
+  const ran = await runCli(["task", "list", "--handed-off", "true", "--json"], options);
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-  return expectJson<{ rows: ReadonlyArray<{ taskId: string }> }>(ran).rows.map((row) => row.taskId);
+  return readListedItems<{ id: string }>(ran).map((task) => task.id);
 }
 
 /** Returns the id of the last migration the database in `home` ran. */
@@ -2612,6 +2732,16 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // A profile the user made. Migration 126 must leave it without `mcp`
+      // grants, as it leaves every profile but the three shipped ones.
+      const customProfile = expectJson<SeededProfile>(
+        await runCli(
+          ["profile", "create", "--name", CUSTOM_PROFILE_NAME, "--grant", "task.read", "--json"],
+          edge,
+        ),
+      );
+      expect(customProfile.name).toBe(CUSTOM_PROFILE_NAME);
+
       const seededSettings = expectJson<{ user: Record<string, unknown> }>(
         await runCli(["settings", "read", "--json"], edge),
       );
@@ -2791,6 +2921,21 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // The same holds for the mcp grants, which no edge build before
+      // migration 126 knew.
+      const mcpGrantsMigrated = readMigrationVersion(home) < MCP_GRANTS_MIGRATION;
+      if (mcpGrantsMigrated) {
+        for (const name of Object.keys(MCP_GRANTS_BY_PROFILE)) {
+          const profile = profiles.find((one) => one.name === name);
+          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
+          expect(profile?.grants.filter((grant) => grant.startsWith("mcp."))).toEqual([]);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(MCP_GRANTS_MIGRATION)}: checking that the mcp grants survive the upgrade.`,
+        );
+      }
+
       const sessionId = persistRepresentativeSession({
         home,
         conversationId: assistant.mainConversationId,
@@ -2835,6 +2980,10 @@ describe("upgrading from the previous edge release", () => {
         withoutLedger: piAccount.id,
       });
       const workspaceLeasesSeeded = persistWorkspaceLeases(home);
+      const mcpServerRowsSeeded = persistMcpServerRows(home, {
+        projectId: project.id,
+        threadId: codexSessionId,
+      });
       const taskStageRows = persistTaskStageRows(home, {
         home,
         providerAccountId: claudeAccount.id,
@@ -2868,6 +3017,47 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `Skipping the sorted match fixture: the edge database already ran migration ${String(SORTED_MATCH_MIGRATION)}.`,
+        );
+      }
+
+      // A signal the edge binary snoozes far into the future: it is in Later,
+      // not on To do, until the upgrade drops the snoozes.
+      const snoozedSignalId =
+        edgeVersion < DROP_SIGNAL_SNOOZES_MIGRATION
+          ? expectJson<{ signalId: string }>(
+              await runCli(
+                [
+                  "signal",
+                  "raise",
+                  "--kind",
+                  "fyi",
+                  "--title",
+                  "Upgrade fixture snoozed signal",
+                  "--reason",
+                  "Snoozed before the upgrade",
+                  "--event-id",
+                  "1",
+                  "--json",
+                ],
+                edge,
+              ),
+            ).signalId
+          : undefined;
+      if (snoozedSignalId !== undefined) {
+        const snoozed = await runCli(
+          ["signal", "snooze", snoozedSignalId, "--until", "2999-01-01T00:00Z", "--json"],
+          edge,
+        );
+        expect(snoozed.code, `${snoozed.stdout}\n${snoozed.stderr}`).toBe(0);
+        const listIds = async (args: ReadonlyArray<string>) =>
+          readListedItems<{ id: string }>(
+            await runCli(["signal", "list", ...args, "--json"], edge),
+          ).map((signal) => signal.id);
+        expect(await listIds([])).not.toContain(snoozedSignalId);
+        expect(await listIds(["--view", "later"])).toContain(snoozedSignalId);
+      } else {
+        console.log(
+          `Skipping the snoozed signal fixture: the edge database already ran migration ${String(DROP_SIGNAL_SNOOZES_MIGRATION)}.`,
         );
       }
 
@@ -2938,14 +3128,14 @@ describe("upgrading from the previous edge release", () => {
 
       if (taskStageRows !== undefined) {
         // The edge binary reads the Tasks it never wrote as the Tasks they are,
-        // and lists the handed-off one under Tracking.
+        // and lists the handed-off one as handed off.
         for (const seeded of [...SEEDED_TASKS, { ...HANDED_OFF_TASK, status: "in-progress" }]) {
           expect(
             expectJson<ReadTask>(await runCli(["task", "read", seeded.id, "--json"], edge)),
             `edge Task ${seeded.title}`,
           ).toMatchObject({ id: seeded.id, title: seeded.title, status: seeded.status });
         }
-        expect(await readTrackedTaskIds(edge)).toEqual([HANDED_OFF_TASK.id]);
+        expect(await readHandedOffTaskIds(edge)).toContain(HANDED_OFF_TASK.id);
       } else {
         console.log(
           `Skipping the task stages fixture: the edge database already ran migration ${String(TASK_STAGES_MIGRATION)}.`,
@@ -3191,6 +3381,46 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // The rebuilt `mcp_servers` kept the seeded server with a plugin source,
+      // and the two lists that name it were put back with their order and
+      // their left-out reason.
+      if (mcpServerRowsSeeded) {
+        const upgradedServer = expectJson<{
+          id: string;
+          name: string;
+          enabled: boolean;
+          source: unknown;
+        }>(await runCli(["mcp-server", "read", SEEDED_MCP_SERVER_ID, "--json"], upgraded));
+        expect(upgradedServer).toMatchObject({
+          id: SEEDED_MCP_SERVER_ID,
+          name: SEEDED_MCP_SERVER_NAME,
+          enabled: false,
+          source: {
+            kind: "plugin",
+            contributionId: SEEDED_MCP_CONTRIBUTION_ID,
+            connectionId: SEEDED_MCP_CONNECTION_ID,
+          },
+        });
+        const projectWithServer = expectJson<{ mcpServerIds: ReadonlyArray<string> }>(
+          await runCli(["project", "read", project.id, "--json"], upgraded),
+        );
+        expect(projectWithServer.mcpServerIds).toEqual([SEEDED_MCP_SERVER_ID]);
+        const threadWithServer = expectJson<{
+          mcpServers: ReadonlyArray<{ mcpServerId: string; name: string; leftOut: string | null }>;
+        }>(await runCli(["session", "read", codexSessionId, "--json"], upgraded));
+        expect(threadWithServer.mcpServers).toEqual([
+          {
+            mcpServerId: SEEDED_MCP_SERVER_ID,
+            name: SEEDED_MCP_SERVER_NAME,
+            leftOut: SEEDED_MCP_LEFT_OUT,
+          },
+        ]);
+      } else {
+        console.log(
+          `Skipping the MCP servers fixture: the edge database already ran migration ${String(MCP_SERVER_URL_SOURCE_MIGRATION)}, or has no MCP Server lists yet.`,
+        );
+      }
+
       // Migration 106 filled `runner_id` on the audit entries of the edge
       // binary: each kind reads back under its own runner and under no other,
       // and the entries that name no runner stay out of both.
@@ -3385,11 +3615,57 @@ describe("upgrading from the previous edge release", () => {
         ).toEqual([...grants].sort());
       }
 
+      for (const [name, grants] of Object.entries(MCP_GRANTS_BY_PROFILE)) {
+        const listed = upgradedProfiles.find((profile) => profile.name === name);
+        expect(listed, `the ${name} profile after the upgrade`).toBeDefined();
+        expect(
+          listed?.grants.filter((grant) => grant.startsWith("mcp.")).sort(),
+          `the mcp grants of ${name} after the upgrade`,
+        ).toEqual([...grants].sort());
+      }
+      expect(
+        upgradedProfiles.find((profile) => profile.id === customProfile.id)?.grants,
+        "the custom profile after the upgrade",
+      ).toEqual(["task.read"]);
+
       if (signalSeeded) {
         const upgradedSignal = expectJson<{ match: Record<string, string> }>(
           await runCli(["signal", "read", SEEDED_SIGNAL_ID, "--json"], upgraded),
         );
         expect(upgradedSignal.match).toEqual(JSON.parse(SEEDED_SIGNAL_MATCH));
+      }
+
+      if (snoozedSignalId !== undefined) {
+        // The snooze is gone, so the signal is on To do now, whatever time it
+        // named, and Done resolves it as it would any open signal.
+        expect(
+          readListedItems<{ id: string }>(await runCli(["signal", "list", "--json"], upgraded)).map(
+            (signal) => signal.id,
+          ),
+        ).toContain(snoozedSignalId);
+        expect(
+          expectJson<{ status: string; title: string }>(
+            await runCli(["signal", "read", snoozedSignalId, "--json"], upgraded),
+          ),
+        ).toMatchObject({ status: "open", title: "Upgrade fixture snoozed signal" });
+        expect(
+          expectJson<{ done: ReadonlyArray<string> }>(
+            await runCli(["signal", "done", snoozedSignalId, "--json"], upgraded),
+          ).done,
+        ).toEqual([snoozedSignalId]);
+        expect(
+          expectJson<{ status: string; resolution: { outcome: string } }>(
+            await runCli(["signal", "read", snoozedSignalId, "--json"], upgraded),
+          ),
+        ).toMatchObject({ status: "resolved", resolution: { outcome: "Done, nothing sent" } });
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader.query("SELECT name FROM sqlite_master WHERE name = 'signal_snoozes'").all(),
+          ).toEqual([]);
+        } finally {
+          reader.close();
+        }
       }
 
       // The messages written before the upgrade are searchable after it.
@@ -3684,7 +3960,24 @@ describe("upgrading from the previous edge release", () => {
           stage: "building",
           updatedAt: SEEDED_TASK_UPDATED,
         });
-        expect(await readTrackedTaskIds(upgraded)).toEqual([HANDED_OFF_TASK.id]);
+        expect(await readHandedOffTaskIds(upgraded)).toContain(HANDED_OFF_TASK.id);
+        // The handoff entry still names its signal and its run, and the Task's
+        // details list that run.
+        expect(
+          expectJson<{ provenance: ReadonlyArray<Record<string, unknown>> }>(
+            await runCli(["task", "read", HANDED_OFF_TASK.id, "--json"], upgraded),
+          ).provenance,
+        ).toContainEqual(
+          expect.objectContaining({
+            signalId: HANDED_OFF_TASK.signalId,
+            runId: HANDED_OFF_TASK.runId,
+          }),
+        );
+        expect(
+          expectJson<{ runs: ReadonlyArray<{ id: string; status: string }> }>(
+            await runCli(["task", "details", HANDED_OFF_TASK.id, "--json"], upgraded),
+          ).runs,
+        ).toMatchObject([{ id: HANDED_OFF_TASK.runId, status: "completed" }]);
 
         // Migration 111 gave the unfinished Threads their Tasks: the two that
         // share an ephemeral workspace share one, the main workspace's Thread

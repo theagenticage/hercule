@@ -1,6 +1,6 @@
 /**
  * Tests `buildTurns(rows, agent)`, which groups an agent's transcript rows
- * into turns, and `readUserSender`, which reads who sent a user message.
+ * into turns.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
  * `apps/runner/src/harnesses/claude-code.ts` / `claude-code-normalize.ts`):
@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { appendPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
-import { buildTurns, readUserSender } from "./turns";
+import { buildTurns } from "./turns";
 
 const SESSION_ID = "session-1";
 
@@ -1270,16 +1270,28 @@ describe("buildTurns runtime notes", () => {
       ["error", "HarnessNotInstalled"],
     ]);
   });
-});
 
-describe("readUserSender", () => {
-  it("returns the sending session's id, and undefined when the message has no sender", () => {
-    expect(readUserSender({ text: "Rebase on main", senderSessionId: "s-sender" })).toBe(
-      "s-sender",
+  it("keeps the MCP Servers a warning names on its note, and gives other warnings none", () => {
+    const mcpServers = [{ mcpServerId: "s-work", reason: "needs-sign-in" as const }];
+    const at = "2026-09-08T10:00:01.000Z";
+
+    const { turns } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, {
+          _tag: "runtime.warning",
+          ...base(2, at),
+          turnId: "t1",
+          message: "Sentry (work) needs sign-in",
+          mcpServers,
+        }),
+        row(3, { _tag: "runtime.warning", ...base(3, at), turnId: "t1", message: "Retrying." }),
+      ],
+      AGENT_ASKING_NOTHING,
     );
-    expect(readUserSender({ text: "Fix the login bug" })).toBeUndefined();
-    expect(readUserSender({ text: "Fix the login bug", senderSessionId: "" })).toBeUndefined();
-    expect(readUserSender(undefined)).toBeUndefined();
+
+    expect(turns[0]?.runtimeNotes[0]?.mcpServers).toEqual(mcpServers);
+    expect(turns[0]?.runtimeNotes[1]).not.toHaveProperty("mcpServers");
   });
 });
 

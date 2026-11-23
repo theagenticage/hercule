@@ -143,6 +143,16 @@ export {
 } from "./contributions";
 
 export {
+  MAX_MCP_SERVER_DESCRIPTION_LENGTH,
+  MAX_MCP_SERVER_NAME_LENGTH,
+  McpServerDeclaration,
+  McpServerName,
+  McpServerOrigin,
+  type McpServerConnection,
+  type McpServerContribution,
+} from "./mcp-servers";
+
+export {
   CORE_INBOX_FIELD_KEYS,
   CORE_INBOX_FIELDS,
   InboxClause,
@@ -218,6 +228,7 @@ export {
   registerConnectionType,
   registerEventSource,
   registerHarness,
+  registerMcpServer,
   registerProvider,
   registerWorkflowAction,
   type ActivationContext,
@@ -227,6 +238,7 @@ export {
   type Plugin,
   type PluginSecrets,
   type HarnessRegistration,
+  type McpServerRegistration,
   type ProviderRegistration,
   type ProviderRegistrationOptions,
   type RegistrationHost,

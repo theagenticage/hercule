@@ -13,7 +13,13 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
-import type { WikiPage, WikiPageSummary, WikiRevision } from "@hercule/contract";
+import type {
+  WikiPage,
+  WikiPageArchived,
+  WikiPageArchivedFilter,
+  WikiPageSummary,
+  WikiRevision,
+} from "@hercule/contract";
 import {
   buildPage,
   mintUuid,
@@ -27,11 +33,16 @@ import {
 } from "../db";
 
 /** A field a page listing can be sorted by. */
-export type WikiPageSortField = "updatedAt" | "title";
+export type WikiPageSortField = "updatedAt" | "title" | "createdAt";
 
 /** The filter, page size, cursor and sort keys of a page listing. */
 export interface WikiPageListRequest {
   readonly resourceId: string | undefined;
+  /**
+   * `only` lists the archived pages and `include` every page. `undefined`
+   * lists the pages that are not archived.
+   */
+  readonly archived: WikiPageArchivedFilter | undefined;
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<WikiPageSortField>>;
@@ -53,7 +64,7 @@ export interface NewWikiPage {
   readonly slug: string;
 }
 
-/** What the prompt line of one repository shows about its Wiki. */
+/** What the prompt line of one repository shows about its Wiki. Archived pages are left out. */
 export interface WikiOverview {
   readonly pageCount: number;
   /** The titles of the most recently changed pages, newest first. */
@@ -71,6 +82,9 @@ interface WikiPageRow {
   readonly updated_at: string;
   readonly updated_by: string;
   readonly created_at: string;
+  readonly archived_at: string | null;
+  readonly archived_by: string | null;
+  readonly archive_reason: string | null;
 }
 
 interface WikiRevisionRow {
@@ -83,11 +97,12 @@ interface WikiRevisionRow {
 }
 
 const PAGE_COLUMNS =
-  "id, resource_id, repository, slug, title, summary, revision, updated_at, updated_by, created_at";
+  "id, resource_id, repository, slug, title, summary, revision, updated_at, updated_by, created_at, archived_at, archived_by, archive_reason";
 
 const PAGE_SORT_COLUMNS: Record<WikiPageSortField, SortColumn<WikiPageSummary>> = {
   updatedAt: { column: "updated_at", valueType: "string", readValue: (page) => page.updatedAt },
   title: { column: "title", valueType: "string", readValue: (page) => page.title },
+  createdAt: { column: "created_at", valueType: "string", readValue: (page) => page.createdAt },
 };
 
 const toSummary = (row: WikiPageRow): WikiPageSummary => ({
@@ -101,6 +116,11 @@ const toSummary = (row: WikiPageRow): WikiPageSummary => ({
   updatedAt: row.updated_at,
   updatedBy: row.updated_by,
   createdAt: row.created_at,
+  // The table's check keeps the three archive columns all set or all NULL,
+  // so one of them tells whether the page is archived.
+  ...(row.archived_at === null
+    ? {}
+    : { archived: { at: row.archived_at, by: row.archived_by!, reason: row.archive_reason! } }),
 });
 
 /**
@@ -134,11 +154,12 @@ const make = Effect.gen(function* () {
       (rows) => Option.map(Option.fromNullishOr(rows[0]), toSummary),
     );
 
-  /** Returns how many pages this repository's Wiki holds. */
+  /** Returns how many pages this repository's Wiki holds, not counting archived pages. */
   const countPages = (resourceId: string): Effect.Effect<number, SqlError> =>
     Effect.map(
       sql<{ readonly count: number }>`
-        SELECT count(*) AS count FROM wiki_pages WHERE resource_id = ${uuidFromString(resourceId)}
+        SELECT count(*) AS count FROM wiki_pages
+        WHERE resource_id = ${uuidFromString(resourceId)} AND archived_at IS NULL
       `,
       (rows) => rows[0]?.count ?? 0,
     );
@@ -147,17 +168,27 @@ const make = Effect.gen(function* () {
     readSummary,
     countPages,
 
-    /** Returns the id of the page with this slug in this repository's Wiki, if there is one. */
-    findIdBySlug: (
+    /**
+     * Returns the page with this slug in this repository's Wiki, archived or
+     * not, if there is one: its id and whether it is archived.
+     */
+    findBySlug: (
       resourceId: string,
       slug: string,
-    ): Effect.Effect<Option.Option<string>, SqlError> =>
+    ): Effect.Effect<
+      Option.Option<{ readonly id: string; readonly isArchived: boolean }>,
+      SqlError
+    > =>
       Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM wiki_pages
+        sql<{ readonly id: Uint8Array; readonly archived_at: string | null }>`
+          SELECT id, archived_at FROM wiki_pages
           WHERE resource_id = ${uuidFromString(resourceId)} AND slug = ${slug}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            id: uuidToString(row.id),
+            isArchived: row.archived_at !== null,
+          })),
       ),
 
     /**
@@ -238,8 +269,25 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Writes a page's archive mark, or clears it when `archived` is
+     * `undefined`, so the page is listed and counted again. The page's
+     * revisions are left as they are.
+     */
+    writeArchiveMark: (
+      pageId: string,
+      archived: WikiPageArchived | undefined,
+    ): Effect.Effect<void, SqlError> =>
+      sql`
+        UPDATE wiki_pages
+        SET archived_at = ${archived?.at ?? null}, archived_by = ${archived?.by ?? null},
+            archive_reason = ${archived?.reason ?? null}
+        WHERE id = ${uuidFromString(pageId)}
+      `,
+
+    /**
      * Returns one page of page summaries, of one repository or of all, in the
-     * requested order. Fails with a `CursorError` if the cursor is invalid.
+     * requested order: the pages that are not archived, or the ones the
+     * request's `archived` names. Fails with a `CursorError` if the cursor is invalid.
      */
     list: (
       request: WikiPageListRequest,
@@ -254,6 +302,8 @@ const make = Effect.gen(function* () {
           request.cursor,
         );
         const clauses: Array<Fragment> = [keyset];
+        if (request.archived === undefined) clauses.push(sql`archived_at IS NULL`);
+        if (request.archived === "only") clauses.push(sql`archived_at IS NOT NULL`);
         if (request.resourceId !== undefined) {
           clauses.push(sql`resource_id = ${uuidFromString(request.resourceId)}`);
         }
@@ -272,11 +322,14 @@ const make = Effect.gen(function* () {
     /**
      * Returns what the prompt line shows about each of these repositories'
      * Wikis: the number of pages and the titles of the `titleCount` most
-     * recently changed, newest first. A repository with no pages is in the
-     * map with a count of 0.
+     * recently changed, newest first. Archived pages are neither counted nor
+     * named. A repository with no pages is in the map with a count of 0.
      *
-     * One query for every repository. It reads each Wiki's page rows, which
-     * the cap of 500 pages per Wiki bounds.
+     * One query for every repository. It reads each Wiki's pages that are
+     * not archived, which the cap of 500 pages per Wiki bounds. The query
+     * names the index that holds only those pages: left to choose, SQLite
+     * takes the slug index when several repositories are asked for, and then
+     * walks every page those Wikis ever archived.
      */
     summarizeWikis: (
       resourceIds: ReadonlyArray<string>,
@@ -296,8 +349,9 @@ const make = Effect.gen(function* () {
             SELECT resource_id, title,
               count(*) OVER (PARTITION BY resource_id) AS page_count,
               row_number() OVER (PARTITION BY resource_id ORDER BY updated_at DESC, id DESC) AS place
-            FROM wiki_pages
+            FROM wiki_pages INDEXED BY wiki_pages_current_resource_updated
             WHERE resource_id IN ${sql.in(resourceIds.map(uuidFromString))}
+              AND archived_at IS NULL
           )
           WHERE place <= ${titleCount}
           ORDER BY resource_id, place

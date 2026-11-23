@@ -3,7 +3,7 @@
  * the question and the lead, a draft that cannot start, starting a thread with ⏎ or Thread >
  * Send, a start the controller refuses, a start made once when the user
  * comes back while it runs, the draft kept per place, the start cards, the
- * starter threads while Intake is empty, and the picks a start carries.
+ * starter threads while the project has no planned task, and the picks a start carries.
  *
  * The menus are the browser's popovers, which jsdom does not implement, so
  * their content is tested on its own. Here a pick is written into the
@@ -128,7 +128,7 @@ describe("the new-thread screen", () => {
     expect(screen.getByText("It works without a checkout.")).toBeTruthy();
     expect(readLip()).toBe("No workspace" + "moss");
     // A draft with no project has no tasks to start from, nor starters.
-    expect(screen.queryByRole("heading", { name: "Start from Intake" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Start from Work" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Or start from one of these" })).toBeNull();
   });
 
@@ -495,7 +495,7 @@ describe("the new-thread screen", () => {
     });
     await userEvent.type(field, "Look at checkout");
 
-    const cards = screen.getByRole("region", { name: "Start from Intake" });
+    const cards = screen.getByRole("region", { name: "Start from Work" });
     // The heading's note says a click adds to the message and starts nothing.
     expect(within(cards).getByText("Puts the Task in your message")).toBeTruthy();
     const card = await within(cards).findByRole("button", { name: /Cart total rounding/ });
@@ -529,7 +529,7 @@ describe("the new-thread screen", () => {
       "GET /api/v1/tasks": () => ({ body: { items: tasks } }),
     });
 
-    const cards = screen.getByRole("region", { name: "Start from Intake" });
+    const cards = screen.getByRole("region", { name: "Start from Work" });
     const words = await within(cards).findAllByText(/^(Urgent|High|Normal|Low)$/);
     expect(words.map((word) => word.textContent)).toEqual(["Urgent", "High", "Normal", "Low"]);
     expect(words.map((word) => word.classList.contains("is-urgent"))).toEqual([
@@ -540,7 +540,7 @@ describe("the new-thread screen", () => {
     ]);
   });
 
-  it("offers code starters while the project's Intake is empty, and a click fills the message without sending", async () => {
+  it("offers code starters while the project has no planned task, and a click fills the message without sending", async () => {
     const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`);
 
     const starters = await screen.findByRole("region", { name: "Or start from one of these" });
@@ -553,10 +553,10 @@ describe("the new-thread screen", () => {
       "A first fix" + "Find a failing or flaky test and fix it",
       "A small chore" + "Bring the README up to date with how webshop runs today",
     ]);
-    expect(within(starters).getByText(/^Intake is empty for now/).textContent).toBe(
-      "Intake is empty for now. Connect GitHub, and Triage brings what needs work here.",
+    expect(within(starters).getByText(/^Nothing planned yet/).textContent).toBe(
+      "Nothing planned yet. Connect GitHub, and what needs work there shows on the Inbox.",
     );
-    expect(screen.queryByRole("region", { name: "Start from Intake" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Start from Work" })).toBeNull();
 
     await userEvent.click(within(starters).getByRole("button", { name: /^Get to know it/ }));
 
@@ -581,8 +581,8 @@ describe("the new-thread screen", () => {
       "Something to find out" + "Research … and summarise what you find, with sources",
       "Something to plan" + "Write a one-page plan for …",
     ]);
-    expect((await within(starters).findByText(/^Intake is empty for now/)).textContent).toBe(
-      "Intake is empty for now. Triage reads GitHub and brings what needs work here.",
+    expect((await within(starters).findByText(/^Nothing planned yet/)).textContent).toBe(
+      "Nothing planned yet. What needs work on GitHub shows on the Inbox.",
     );
   });
 

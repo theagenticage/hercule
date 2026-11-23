@@ -20,12 +20,15 @@ import {
   type WorkspaceLabel,
 } from "./workspaces";
 
+/** The catalogs of a draft: every optional read of `ThreadCatalogs` is present. */
+type DraftCatalogs = Required<ThreadCatalogs>;
+
 /**
  * The records a Draft Thread is built from, as the app's queries return them:
  * every catalog a thread's configuration is checked against, the settings
  * that hold the user's defaults, and the permission profiles.
  */
-export interface DraftReads extends Required<ThreadCatalogs> {
+export interface DraftReads extends DraftCatalogs {
   readonly settings: SettingsState;
   readonly profiles: readonly Profile[];
   /**
@@ -44,7 +47,7 @@ export interface DraftAddress {
 
 /** What a Draft Thread shows and starts with. */
 export interface DraftView {
-  readonly catalogs: Required<ThreadCatalogs>;
+  readonly catalogs: DraftCatalogs;
   /** What the draft runs with before the user picks anything. Each pick is compared with it. */
   readonly base: ThreadConfig;
   /**

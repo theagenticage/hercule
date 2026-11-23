@@ -51,6 +51,7 @@ import type {
   EncodedIpcRequest,
   FirstRunProgress,
   FolderPickOutcome,
+  LinkOpenOutcome,
   LocalControllerFindOutcome,
   LocalControllerStartOutcome,
   MenuCommand,
@@ -69,6 +70,8 @@ import {
   NO_SIDEBAR_RECORDS,
 } from "./fake-controller";
 import { buildRouterContext, type RouterContext } from "./context";
+import { REQUEST_TIMEOUT_MS } from "./controller-client";
+import { SHARED_READ_WINDOW_MS } from "./live";
 import { createAppRouter } from "./router";
 
 /** The address of the stubbed controller. */
@@ -131,6 +134,12 @@ export interface FakeBridge {
  * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
  * recorded either way.
  *
+ * `signInReturn` answers the browser's return from an MCP server's sign-in. By
+ * default main cannot listen (`unavailable`), so a sign-in asks for the paste.
+ *
+ * `openLink` answers each link the app opens in the browser (`link.open`),
+ * which is recorded either way. By default the system opens it.
+ *
  * `platform` is the platform the app says it runs on: a Mac unless a test
  * passes another.
  */
@@ -148,6 +157,12 @@ export const createFakeBridge = ({
   firstRun = null,
   appearance = DEFAULT_APPEARANCE,
   saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
+  signInReturn = {
+    listen: () => Promise.resolve({ _tag: "unavailable" }),
+    wait: () => Promise.resolve({ _tag: "cancelled" }),
+    cancel: () => Promise.resolve(undefined),
+  },
+  openLink = () => Promise.resolve({ _tag: "Opened" }),
   platform = "mac",
 }: {
   readonly controllerUrl?: string | null;
@@ -163,6 +178,8 @@ export const createFakeBridge = ({
   readonly firstRun?: FirstRunProgress | null;
   readonly appearance?: Appearance;
   readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
+  readonly signInReturn?: Bridge["signInReturn"];
+  readonly openLink?: (url: string) => Promise<LinkOpenOutcome>;
   readonly platform?: DesktopPlatform;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
@@ -273,9 +290,10 @@ export const createFakeBridge = ({
       link: {
         open: ({ url }) => {
           openedLinks.push(url);
-          return Promise.resolve(undefined);
+          return openLink(url);
         },
       },
+      signInReturn,
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);
@@ -356,6 +374,10 @@ export const neverAnswer = (): Promise<Answer> => new Promise(() => {});
  * test can call `answer` before the first request has arrived. That reply is
  * kept and answers the first request as soon as it arrives. Without this, the
  * reply would be lost and the request would wait forever.
+ *
+ * The app gives up on a request after `REQUEST_TIMEOUT_MS` of real time. A
+ * test that holds a request across steps that can be slow on a busy machine
+ * calls `stopRequestTimeLimit` first.
  */
 export const holdAnswer = (): {
   readonly handler: () => Promise<Answer>;
@@ -386,6 +408,32 @@ export const holdAnswer = (): {
       });
     },
   };
+};
+
+/**
+ * Stops the app's request time limit (`REQUEST_TIMEOUT_MS`) from firing for
+ * the rest of the test, so a request that the test holds stays pending
+ * however slowly the test's other steps run. Without it, a busy machine can
+ * take longer than the limit, and the app fails the held request with a
+ * `ConnectionError` the test did not plan. It replaces each timer of that
+ * length with a real timer that never fires by itself, and restores
+ * `setTimeout` when the test ends. Fake timers cannot be used here: Testing
+ * Library's `findBy` and `waitFor` wait on a timer of their own, which a fake
+ * clock never fires. Any other timer of that length is held too.
+ */
+export const stopRequestTimeLimit = (): void => {
+  const realSetTimeout = globalThis.setTimeout;
+  const spy = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementation(((callback: () => void, delay?: number, ...rest: unknown[]) =>
+      realSetTimeout(
+        callback,
+        delay === REQUEST_TIMEOUT_MS ? 2 ** 30 : delay,
+        ...rest,
+      )) as typeof setTimeout);
+  onTestFinished(() => {
+    spy.mockRestore();
+  });
 };
 
 /**
@@ -1287,6 +1335,12 @@ export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): reado
 export interface LiveStub {
   /** Returns the topics the app is subscribed to on its current socket, oldest first. */
   readonly readTopics: () => readonly string[];
+  /**
+   * Returns how many times the app has subscribed to `topic` on its current
+   * socket, including subscriptions it has ended since. A subscription that
+   * was dropped and made again counts twice, which `readTopics` cannot show.
+   */
+  readonly countSubscriptions: (topic: string) => number;
   /** Checks whether the app's current socket is open. `false` before the app opens one. */
   readonly isConnected: () => boolean;
   /**
@@ -1406,6 +1460,12 @@ export const buildTestContext = async (
         .at(-1)
         ?.subscriptions()
         .map((each) => each.topic) ?? [],
+    countSubscriptions: (topic) =>
+      sockets
+        .at(-1)
+        ?.calls("subscribe")
+        .filter((frame) => (frame.payload as { readonly topic: string }).topic === topic).length ??
+      0,
     isConnected: () => sockets.at(-1)?.readyState === 1,
     pushInvalidation: (
       topic,
@@ -1464,6 +1524,9 @@ export const buildTestContext = async (
       // The stub answers a subscription in a microtask, and the reads the
       // answer starts begin after it is decoded, so let those run first.
       await new Promise((resolve) => setTimeout(resolve, 0));
+      // The pushes gather for `SHARED_READ_WINDOW_MS` before any read starts, so a read they cause
+      // does not exist yet. This timer is set after the window's own, so it ends after it.
+      await new Promise((resolve) => setTimeout(resolve, SHARED_READ_WINDOW_MS));
       await waitFor(() => {
         if (context.queryClient.isFetching() > 0) throw new Error("reads are still running");
       });
