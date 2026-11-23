@@ -12,7 +12,7 @@ import {
   suggestServerName,
 } from "./add-by-url";
 import { buildServer } from "./testing";
-import type { ServerOutcome, UrlServerFlowState } from "./url-server-flows";
+import type { ServerOutcome, UrlServerAttemptState } from "./url-server-attempt";
 
 describe("suggestServerName", () => {
   it.each([
@@ -165,12 +165,13 @@ describe("readFieldIssues", () => {
 });
 
 describe("decideTokenFormEntry", () => {
-  const following = (outcome: ServerOutcome): UrlServerFlowState => ({
+  const following = (outcome: ServerOutcome): UrlServerAttemptState => ({
     kind: "following",
     mcpServerId: "s-docs",
     server: null,
     outcome,
     problem: null,
+    check: { busy: false, error: null },
   });
   const needsToken = (refusedWrite: "token" | "sign-in" | null) =>
     following({ kind: "needs-token", detail: "No.", refusedWrite });

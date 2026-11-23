@@ -12,7 +12,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
 import { ADDRESS_FIELD_HINT } from "@hercule/client-core/mcp-servers";
-import { readAuthorizationState } from "@hercule/contract";
+import { readAuthorizationState, type McpServer } from "@hercule/contract";
 import type { Handler } from "@hercule/client-core/testing";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
@@ -45,6 +45,17 @@ import {
 vi.mock("../../../../../office/office-screen", () => ({ OfficeScreen: () => <p>The Office</p> }));
 
 afterEach(forgetLastSettingsSection);
+
+/** Lets everything that waits on a promise that already settled run. No time passes. */
+const flushTasks = (): Promise<void> =>
+  new Promise((done) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = () => {
+      port1.close();
+      done();
+    };
+    port2.postMessage(null);
+  });
 
 /** The id the stubbed controller gives the first server a test creates. */
 const CREATED_ID = "01a06d02-8300-7000-8000-000000000001";
@@ -146,7 +157,7 @@ describe("Add by URL", () => {
     expect(within(dialog).getByText("mcp__tools__docs__<tool>")).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Check server" }));
 
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     expect(findCalls(app.calls, "POST", SERVER_LIST_PATH).map((call) => call.body)).toEqual([
       { source: { kind: "url", url: DOCS_URL } },
     ]);
@@ -191,7 +202,7 @@ describe("Add by URL", () => {
     const app = await openList({ servers: [] });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
 
     finishCheck(app, CREATED_ID, {
       status: "needs-sign-in",
@@ -200,6 +211,8 @@ describe("Add by URL", () => {
     });
 
     await within(dialog).findByText("This server needs a token.");
+    // The dialog's title does not name the server, so the step does, with its address.
+    expect(within(dialog).getByText(DOCS_URL)).toBeTruthy();
     expect(
       within(dialog).getByText("Kept on the controller. It never reaches a runner."),
     ).toBeTruthy();
@@ -218,7 +231,7 @@ describe("Add by URL", () => {
     await waitFor(() => {
       expect(app.world.tokens).toEqual([{ id: CREATED_ID, token: TOKEN }]);
     });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     finishCheck(app, CREATED_ID, { ...READY, tools: DOCS.tools });
     await within(dialog).findByText("ready · 2 tools");
   });
@@ -227,7 +240,7 @@ describe("Add by URL", () => {
     const app = await openList({ servers: [] });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     finishCheck(app, CREATED_ID, {
       status: "needs-sign-in",
       source: { kind: "url", url: DOCS_URL, signIn: "none", signInOffered: "token" },
@@ -264,7 +277,7 @@ describe("Add by URL", () => {
     const app = await openList({ servers: [] });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
 
     finishCheck(app, CREATED_ID, {
       status: "unreachable",
@@ -279,7 +292,7 @@ describe("Add by URL", () => {
     await waitFor(() => {
       expect(app.world.checked).toEqual([CREATED_ID]);
     });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
   });
 
   it("stays busy after Check now until the record answers, takes no second press, and shows the new failure when it comes", async () => {
@@ -296,7 +309,7 @@ describe("Add by URL", () => {
     });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     finishCheck(app, CREATED_ID, {
       status: "unreachable",
       statusDetail: "No answer in 10 seconds.",
@@ -332,7 +345,7 @@ describe("Add by URL", () => {
     const app = await openList({ servers: [] });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
 
     finishCheck(app, CREATED_ID, { enabled: false });
 
@@ -521,7 +534,8 @@ describe("Replace", () => {
       "Changesit acts through the Connection.",
       "Goesthe sign-in made by hand.",
     ]);
-    // Opening the dialog wrote nothing.
+    // Opening the dialog wrote nothing, and focus starts on Cancel, as in every dialog that changes something.
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(findCalls(app.calls, "POST", SERVER_LIST_PATH)).toEqual([]);
     expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_DOCS_ID}`)).toEqual([]);
 
@@ -698,6 +712,7 @@ describe("Replace, as the controller and other clients move it", () => {
     const dialog = screen.getByRole("dialog", {
       name: /Replace the sentrynotes server you added\?/,
     });
+    expect(within(dialog).getByRole("status").textContent).toBe("Replacing…");
     // The radios are fixed on the confirmed server, whatever the list does.
     const radios = within(dialog).getAllByRole<HTMLInputElement>("radio");
     expect(radios.map((radio) => radio.checked)).toEqual([false, true]);
@@ -708,6 +723,47 @@ describe("Replace, as the controller and other clients move it", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(findCalls(app.calls, "PATCH", `${SERVER_LIST_PATH}/${SENTRY_NOTES_ID}`)).toHaveLength(1);
+  });
+
+  it("says the write is saved when the list cannot be read, offers to read it again, and closes once the list shows the server moved", async () => {
+    let listFails = false;
+    let listed: readonly McpServer[] = [SENTRY_WORK, SENTRY_DOCS];
+    await openList({
+      servers: [SENTRY_WORK, SENTRY_DOCS],
+      handlers: {
+        [`PATCH ${SERVER_LIST_PATH}/${SENTRY_DOCS_ID}`]: () => {
+          listFails = true;
+          const moved = { ...SENTRY_DOCS, enabled: true, source: MOVED_NOTES.source };
+          listed = [SENTRY_WORK, moved];
+          return { body: moved };
+        },
+        [`GET ${SERVER_LIST_PATH}`]: () =>
+          listFails
+            ? {
+                status: 500,
+                body: { error: { code: "internal", message: "The controller is down." } },
+              }
+            : { body: { items: listed } },
+      },
+    });
+    await userEvent.click(
+      within(findRow("sentry hobby")).getByRole("switch", {
+        name: "Offer sentry hobby to threads",
+      }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Replace the sentrydocs server you added?",
+    });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+
+    const alert = await within(dialog).findByText(/could not be read again/);
+    expect(alert.getAttribute("role")).toBe("alert");
+    listFails = false;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Read again" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
   });
 
   it("keeps the dialog with the refusal and a link when another client's server appears on the Connection while the update is held, and lets the user choose again once the controller refuses", async () => {
@@ -843,7 +899,7 @@ describe("the page of a server added by URL", () => {
     await waitFor(() => {
       expect(app.world.tokens).toEqual([{ id: NOTION_ID, token: TOKEN }]);
     });
-    await within(dialog).findByText("Asking mcp.notion.example for its tools.");
+    await within(dialog).findByText("Asking mcp.notion.example for its tools…");
     finishCheck(app, NOTION_ID, READY);
     await within(dialog).findByText("ready · 2 tools");
     await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
@@ -982,7 +1038,7 @@ describe("the page of a server added by URL", () => {
     const dialog = await screen.findByRole("dialog", { name: "Replace the token of notion" });
     await userEvent.type(within(dialog).getByLabelText("Token"), TOKEN);
     await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await within(dialog).findByText("Asking mcp.notion.example for its tools.");
+    await within(dialog).findByText("Asking mcp.notion.example for its tools…");
 
     finishCheck(app, NOTION_ID, { status: "error", statusDetail: "It answered with HTML." });
 
@@ -1114,7 +1170,7 @@ const openSignInDialog = async (
 };
 
 describe("Signing in to a server added by URL through the browser", () => {
-  it("listens first, starts with the listener's address, opens the browser after showing who approves, and finishes with what the browser sent", async () => {
+  it("listens first, starts with the listener's address, shows who approves, opens the browser on the user's press, and finishes with what the browser sent", async () => {
     const signInReturn = buildSignInReturn();
     const { app, dialog } = await openSignInDialog(signInReturn);
 
@@ -1128,12 +1184,17 @@ describe("Signing in to a server added by URL through the browser", () => {
       findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in`).map((c) => c.body),
     ).toEqual([{ redirectUri: "http://127.0.0.1:4937/callback" }]);
     expect(signInReturn.listen).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
-    });
     expect(signInReturn.wait).toHaveBeenCalledWith({
       listenerId: "l-1",
       authorizationUrl: readAuthorizationUrl(app),
+    });
+    // The step waits for the user: nothing opens until the button beside the host is pressed.
+    expect(app.openedLinks).toEqual([]);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
+    );
+    await waitFor(() => {
+      expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
 
     await act(async () => {
@@ -1148,12 +1209,12 @@ describe("Signing in to a server added by URL through the browser", () => {
         ),
       ).toEqual([{ callbackQuery: signInReturn.callbackQueries[0] }]);
     });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     finishCheck(app, DOCS_ID, READY);
     await within(dialog).findByText("ready · 2 tools");
   });
 
-  it("opens the browser only after the dialog shows who approves, once", async () => {
+  it("opens the browser only when the user presses the button beside the host, and reads Open again from then on", async () => {
     const signInReturn = buildSignInReturn();
     const dialogsWhenOpened: string[] = [];
     const { app, dialog } = await openSignInDialog(signInReturn, undefined, () => {
@@ -1164,52 +1225,21 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
+    await within(dialog).findByText("Finish in your browser");
+    expect(app.openedLinks).toEqual([]);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
+    );
 
     await waitFor(() => {
       expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
     expect(dialogsWhenOpened).toHaveLength(1);
-    expect(dialogsWhenOpened[0]).toContain("Finish in your browser");
     expect(dialogsWhenOpened[0]).toContain("You will approve on auth.mcp.docs.example.");
-    // It said so before it opened: the label is Open again from then on.
     expect(within(dialog).getByRole("button", { name: "Open again" })).toBeTruthy();
   });
 
-  it("opens the browser only after the frame that presents the waiting step and the task after it, never in the commit's own effect flush", async () => {
-    const frames: FrameRequestCallback[] = [];
-    const holdFrames = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      frames.push(callback);
-      return frames.length;
-    });
-    try {
-      const signInReturn = buildSignInReturn();
-      const { app, dialog } = await openSignInDialog(signInReturn);
-
-      await userEvent.click(
-        within(dialog).getByRole("button", { name: "Sign in with your browser" }),
-      );
-      await within(dialog).findByText("Finish in your browser");
-
-      // The card is committed and its effects have run, but no frame presented it: no browser yet,
-      // however many tasks go by.
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(frames.length).toBeGreaterThan(0);
-      expect(app.openedLinks).toEqual([]);
-
-      // The frame has run. The browser still waits for the task after it.
-      act(() => {
-        for (const frame of frames.splice(0)) frame(0);
-      });
-      expect(app.openedLinks).toEqual([]);
-      await waitFor(() => {
-        expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
-      });
-    } finally {
-      holdFrames.mockRestore();
-    }
-  });
-
-  it("is ready for the browser's return before the browser opens, and opens no browser for a sign-in that a return already finished", async () => {
+  it("is ready for the browser's return before the user opens the browser, and opens no browser for a sign-in that a return already finished", async () => {
     const signInReturn = buildSignInReturn(true, true);
     const openLink = vi.fn(() => Promise.resolve({ _tag: "Opened" } as const));
     const { app, dialog } = await openSignInDialog(signInReturn, undefined, openLink);
@@ -1225,8 +1255,7 @@ describe("Signing in to a server added by URL through the browser", () => {
         ),
       ).toEqual([{ callbackQuery: signInReturn.callbackQueries[0] }]);
     });
-    // The return finished the sign-in before the card was presented, so there is nothing to open.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The return finished the sign-in before the user pressed anything, so there is nothing to open.
     expect(signInReturn.wait).toHaveBeenCalled();
     expect(openLink).not.toHaveBeenCalled();
   });
@@ -1242,6 +1271,9 @@ describe("Signing in to a server added by URL through the browser", () => {
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+    );
+    await userEvent.click(
+      await within(dialog).findByRole("button", { name: "Open auth.mcp.docs.example" }),
     );
 
     expect((await within(dialog).findByRole("alert")).textContent).toBe(
@@ -1284,7 +1316,7 @@ describe("Signing in to a server added by URL through the browser", () => {
         await act(async () => {
           request(dialog);
           signInReturn.comeBack();
-          await new Promise((resolve) => setTimeout(resolve, 20));
+          await flushTasks();
         });
         expect(closed).toBe(true);
         expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
@@ -1307,38 +1339,24 @@ describe("Signing in to a server added by URL through the browser", () => {
     },
   );
 
-  it("retires the sign-in in the commit that unmounts the dialog, before the dialog leaves the DOM, so a return delivered at that boundary finishes nothing", async () => {
+  it("retires the sign-in when the dialog goes away with its page, so a return that comes after finishes nothing", async () => {
     const signInReturn = buildSignInReturn();
     const { app, dialog } = await openSignInDialog(signInReturn);
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Sign in with your browser" }),
     );
     await within(dialog).findByText("Finish in your browser");
-    // The moment React takes the dialog out of the DOM is the boundary: the browser's return is
-    // delivered there, and the listener must have been retired by then. A passive cleanup runs after it.
-    // Called with the node it was taken from, so it is not unbound.
-    // oxlint-disable-next-line typescript/unbound-method
-    const removeChild = Node.prototype.removeChild;
-    let cancelsWhenRemoved: number | null = null;
-    Node.prototype.removeChild = function <T extends Node>(this: Node, child: T): T {
-      if (cancelsWhenRemoved === null && child.contains(dialog)) {
-        cancelsWhenRemoved = signInReturn.cancel.mock.calls.length;
-        signInReturn.comeBack();
-      }
-      return removeChild.call(this, child) as T;
-    };
-    try {
-      await act(async () => {
-        await app.router.navigate({ to: "/settings/connections" });
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    } finally {
-      Node.prototype.removeChild = removeChild;
-    }
 
+    await act(async () => {
+      await app.router.navigate({ to: "/settings/connections" });
+    });
     expect(document.contains(dialog)).toBe(false);
-    expect(cancelsWhenRemoved).toBe(1);
     expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+    await act(async () => {
+      signInReturn.comeBack();
+      await flushTasks();
+    });
+
     expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
       [],
     );
@@ -1355,7 +1373,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       signInReturn.comeBack();
       await Promise.resolve();
     });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
 
     finishCheck(app, DOCS_ID, {
       status: "needs-sign-in",
@@ -1379,7 +1397,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
     await userEvent.type(within(dialog).getByLabelText("Token"), TOKEN);
     await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
 
     finishCheck(app, DOCS_ID, {
       status: "needs-sign-in",
@@ -1413,7 +1431,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       signInReturn.comeBack();
       await Promise.resolve();
     });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
 
     finishCheck(app, DOCS_ID, {
       status: "needs-sign-in",
@@ -1433,6 +1451,9 @@ describe("Signing in to a server added by URL through the browser", () => {
     );
     await within(dialog).findByText("Finish in your browser");
 
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
+    );
     await userEvent.click(await within(dialog).findByRole("button", { name: "Open again" }));
 
     await waitFor(() => {
@@ -1533,7 +1554,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
   });
 
-  it("offers only the paste when the listener is unavailable, and still opens the browser", async () => {
+  it("offers only the paste when the listener is unavailable, and still opens the browser on the user's press", async () => {
     const signInReturn = buildSignInReturn(false);
     const { app, dialog } = await openSignInDialog(signInReturn);
 
@@ -1546,6 +1567,10 @@ describe("Signing in to a server added by URL through the browser", () => {
       within(dialog).queryByRole("button", { name: "Paste the browser's address…" }),
     ).toBeNull();
     expect(signInReturn.wait).not.toHaveBeenCalled();
+    expect(app.openedLinks).toEqual([]);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Open auth.mcp.docs.example" }),
+    );
     await waitFor(() => {
       expect(app.openedLinks).toEqual([readAuthorizationUrl(app)]);
     });
@@ -1612,7 +1637,7 @@ describe("Signing in to a server added by URL through the browser", () => {
     const app = await openList({ servers: [], signInReturn });
     const dialog = await openAddDialog();
     await checkAddress(dialog, DOCS_URL);
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     finishCheck(app, CREATED_ID, {
       status: "needs-sign-in",
       source: { kind: "url", url: DOCS_URL, signIn: "none", signInOffered: "oauth" },
@@ -1626,7 +1651,7 @@ describe("Signing in to a server added by URL through the browser", () => {
       signInReturn.comeBack();
       await Promise.resolve();
     });
-    await within(dialog).findByText("Asking mcp.docs.example for its tools.");
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
     finishCheck(app, CREATED_ID, { ...READY, tools: DOCS.tools });
 
     await within(dialog).findByText("ready · 2 tools");

@@ -608,7 +608,7 @@ describe("the + menu on a started thread", () => {
     const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
     await userEvent.type(within(dialog).getByLabelText("Token"), "abcd1234efgh5678");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await within(dialog).findByText("Asking mcp.notion.example for its tools.");
+    await within(dialog).findByText("Asking mcp.notion.example for its tools…");
 
     // The menu that opened the dialog is closed now, and nothing else on the thread names a server.
     toggleMenu(popover, "closed");

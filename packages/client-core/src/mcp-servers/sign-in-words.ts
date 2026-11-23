@@ -50,53 +50,6 @@ export const describeSignInRefusal = (reason: SignInRefusalReason, detail: strin
 export const BROWSER_SIGN_IN_UNSUPPORTED =
   "This server does not allow a sign-in through the browser. Paste a token instead.";
 
-/** What the dialog says while it waits for the browser. */
-export interface SignInWaitingWords {
-  /** "Finish in your browser". */
-  readonly heading: string;
-  /** Who asks for the approval, such as "You will approve on auth.example.com.". Always shown, so the user knows before the browser opens. */
-  readonly approval: string;
-  /** What to do in the browser, and how the sign-in comes back. */
-  readonly instruction: string;
-  /** The button that opens the sign-in page: "Open again" when the app opened it already, else "Open the sign-in page". */
-  readonly openLabel: string;
-  /** The question over the paste for a sign-in the app waits for, or `null` when the paste is the only way back. */
-  readonly pasteQuestion: string | null;
-  /** The button that shows the paste field for a sign-in the app waits for, or `null` when the field is always shown. */
-  readonly pasteToggle: string | null;
-  readonly pasteLabel: "Address the browser ended on";
-  readonly pasteSubmit: "Finish sign-in";
-}
-
-/**
- * Returns the words of the waiting step. `returnBy` is how the browser comes
- * back: `listener` when the desktop app catches it itself, `paste` when the
- * user pastes the address the browser ended on. `openedByApp` is true when
- * the app opens the sign-in page itself, which only the desktop app does.
- */
-export const describeSignInWaiting = ({
-  approvalHost,
-  returnBy,
-  openedByApp,
-}: {
-  readonly approvalHost: string;
-  readonly returnBy: "listener" | "paste";
-  readonly openedByApp: boolean;
-}): SignInWaitingWords => ({
-  heading: "Finish in your browser",
-  approval: `You will approve on ${approvalHost}.`,
-  instruction:
-    returnBy === "listener"
-      ? "Approve the sign-in there. This window finishes by itself when the browser comes back."
-      : "Approve the sign-in there. The browser then shows an error page for an address that starts with http://127.0.0.1. Copy that address from the address bar and paste it here.",
-  openLabel: openedByApp ? "Open again" : "Open the sign-in page",
-  pasteQuestion:
-    returnBy === "listener" ? "Approved, and the browser did not come back here?" : null,
-  pasteToggle: returnBy === "listener" ? "Paste the browser's address…" : null,
-  pasteLabel: "Address the browser ended on",
-  pasteSubmit: "Finish sign-in",
-});
-
 /** Returns the text under the paste field for an address that is not a redirect answer. `reason` is the parser's own words. */
 export const describePasteRefusal = (reason: string): string =>
   `That is not what the browser ended on: ${reason}.`;

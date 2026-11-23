@@ -2,26 +2,18 @@ import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
-  describeClosing,
-  describeExistsRefusal,
-  describeOpenServerAction,
-  describePluginOriginRefusal,
+  describeUrlServerDialogTitle,
+  describeUrlServerStep,
   readAddForm,
   type RefusalAction,
-  type RefusalDescription,
-  type UrlServerFlowState,
+  type UrlServerDialog,
 } from "@hercule/client-core/mcp-servers";
-import {
-  buildSignInActions,
-  describeAttemptTokenForm,
-  useCheckNow,
-  useUrlServerAttempt,
-} from "../../../../../app/mcp-url-flows";
+import { useUrlServerAttempt } from "../../../../../app/mcp-url-flows";
 import { connectionsQuery, pluginsQuery } from "../../../../../app/queries";
 import { showOfferRow } from "../../../../../screens/settings/mcp-servers/server-list";
 import {
   AddForm,
-  FlowBody,
+  StepView,
   UrlServerDialogFrame,
 } from "../../../../../screens/settings/mcp-servers/url-server-dialog-parts";
 
@@ -35,7 +27,8 @@ import {
  * The server is created by the check, so it stays in the list when the dialog
  * is closed after it, and the dialog says so. The address and the name are
  * this dialog's; the token is the token form's. The attempt (see
- * `useUrlServerAttempt`) holds the write and follows the server. `onClose` is called whenever the dialog closes; the list then
+ * `useUrlServerAttempt`) holds the write, follows the server, and keeps a
+ * refusal only while the fields are as they were when it was made. `onClose` is called whenever the dialog closes; the list then
  * unmounts it.
  */
 export function AddServerDialog({ onClose }: { readonly onClose: () => void }): JSX.Element {
@@ -44,40 +37,23 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const { flows, attemptId, state, closeAttempt } = useUrlServerAttempt({ kind: "add" });
-  const check = useCheckNow(flows, attemptId);
+  const { attempt, state } = useUrlServerAttempt({ kind: "add" });
   const [address, setAddress] = useState("");
   // `null` until the user types in the Name: the field then follows the address.
   const [typedName, setTypedName] = useState<string | null>(null);
-  // The fields the last "Check server" sent. A refusal is about those, not about what is typed now.
-  const [sent, setSent] = useState<string | null>(null);
-  const fields = JSON.stringify([address, typedName]);
+  // This app has no Plugins page, so a plugin that is off gets a sentence that says where to act,
+  // and no button.
+  const dialog: UrlServerDialog = { kind: "add", plugins, connections, pluginsSettings: "web-app" };
+  const [heading] = useState(() => describeUrlServerDialogTitle(dialog));
+  const step = describeUrlServerStep(state, dialog);
   // Ends the attempt before the dialog closes, so no late result reaches it.
   const close = (): void => {
-    closeAttempt();
+    attempt.close();
     dialogRef.current?.close();
   };
   const openServer = (mcpServerId: string): void => {
     close();
     void navigate({ to: "/settings/mcp-servers/$id", params: { id: mcpServerId } });
-  };
-  const reading = readAddForm({ address, typedName });
-
-  const describeRefusal = (current: UrlServerFlowState): RefusalDescription | null => {
-    if (current.kind !== "form" || current.problem === null || sent !== fields) return null;
-    const { problem } = current;
-    if (problem.kind === "exists")
-      return describeExistsRefusal(problem.mcpServerId, problem.existing);
-    if (problem.kind !== "plugin-origin") return null;
-    // This app has no Plugins page, so a plugin that is off gets a sentence that says where
-    // to act, and no button.
-    return describePluginOriginRefusal({
-      refusal: problem.refusal,
-      message: problem.message,
-      plugins,
-      connections,
-      pluginsSettings: "web-app",
-    });
   };
   const runRefusalAction = (action: RefusalAction): void => {
     switch (action.kind) {
@@ -93,7 +69,7 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
         void navigate({ to: "/settings/connections" });
         return;
       case "open-plugins":
-        // Not offered here: `describePluginOriginRefusal` is asked for the app without a Plugins page.
+        // Not offered here: `pluginsSettings` of the dialog says this app has no Plugins page.
         return;
     }
   };
@@ -101,55 +77,35 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
   return (
     <UrlServerDialogFrame
       dialogRef={dialogRef}
-      heading="Add an MCP server"
+      heading={heading}
       onClose={() => {
-        closeAttempt();
+        attempt.close();
         onClose();
       }}
       onCloseRequest={close}
     >
-      {state.kind === "form" ? (
+      {step.kind === "add-form" ? (
         <AddForm
+          step={step}
           address={address}
           typedName={typedName}
-          reading={reading}
-          problem={sent === fields ? state.problem : null}
-          refusal={describeRefusal(state)}
-          onAddressChange={setAddress}
-          onNameChange={setTypedName}
+          reading={readAddForm({ address, typedName })}
+          onAddressChange={(next) => {
+            setAddress(next);
+            attempt.changeFields({ address: next, typedName });
+          }}
+          onNameChange={(next) => {
+            setTypedName(next);
+            attempt.changeFields({ address, typedName: next });
+          }}
           onSubmit={() => {
-            if (attemptId === null) return;
-            setSent(fields);
-            flows.submitAdd(attemptId, { address, typedName });
+            attempt.submitAdd({ address, typedName });
           }}
           onRefusalAction={runRefusalAction}
           onCancel={close}
         />
       ) : (
-        <FlowBody
-          state={state}
-          tokenWords={
-            state.kind === "following" && state.server !== null
-              ? describeAttemptTokenForm(state.server, state, "sign-in")
-              : null
-          }
-          openAction={describeOpenServerAction(state, "elsewhere")}
-          closingNote={describeClosing(state)}
-          checkBusy={check.busy}
-          checkError={check.error}
-          actions={{
-            onClose: close,
-            onOpenServer: openServer,
-            onCheckNow: check.run,
-            onRetryRead: () => {
-              if (attemptId !== null) flows.retryRead(attemptId);
-            },
-            onSaveToken: (token) => {
-              if (attemptId !== null) flows.submitToken(attemptId, token);
-            },
-            ...buildSignInActions(flows, attemptId),
-          }}
-        />
+        <StepView step={step} attempt={attempt} onClose={close} onOpenServer={openServer} />
       )}
     </UrlServerDialogFrame>
   );

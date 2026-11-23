@@ -14,7 +14,7 @@ import {
   type McpServerSwitchPress,
   type McpServerSwitchTarget,
   type McpServerSwitches,
-  type ReplaceProgress,
+  type ReplaceDialogView,
 } from "@hercule/client-core/mcp-servers";
 import { mcpServerQuery, mcpServersQuery, pluginsQuery } from "./queries";
 
@@ -22,15 +22,15 @@ import { mcpServerQuery, mcpServersQuery, pluginsQuery } from "./queries";
 export interface McpServerSwitch {
   /**
    * Switches the server on or off, creating it when it has no record yet.
-   * Does nothing while `blocked`. Returns `replace` with the servers added by
-   * URL on the offer's address when the press wrote nothing because the user
-   * must choose which one to replace first.
+   * Does nothing while `blocked`. Returns `replace` when the press wrote
+   * nothing because the user must be asked first which server to replace.
    */
   readonly press: (on: boolean) => McpServerSwitchPress;
-  /** Moves the server added by URL `serverId` onto this target's Connection, and switches it on. */
-  readonly replace: (serverId: string) => void;
-  /** Forgets the Replace's refusal. A dialog calls it when it closes. */
-  readonly clearReplace: () => void;
+  /** Opens the Replace dialog of this plugin target, after `press` returned `replace`. `words` name the Connection in the dialog. */
+  readonly openReplace: (words: {
+    readonly connectionLabel: string;
+    readonly typeName: string;
+  }) => void;
   /** Whether a write of the switch runs, started by any control, or the list could not be read again after one. */
   readonly blocked: boolean;
   /** Returns why the last press made no change, or that a saved change could not be read again, or `null`. */
@@ -78,36 +78,52 @@ export function useMcpServerSwitch(
   }, [switches, key]);
   return {
     press: (on) => switches.apply(target, on, existingRecordId),
-    replace: (serverId) => {
-      switches.replace(target, serverId);
-    },
-    clearReplace: () => {
-      switches.clearRefusal(target);
+    openReplace: (words) => {
+      switches.openReplace(target, words);
     },
     blocked: state.blocked,
     problem: describeMcpListProblem(state),
   };
 }
 
+/** What a Replace dialog gets from `useReplaceDialog`: what to draw, and the user's moves. */
+export interface ReplaceDialog {
+  /** What the dialog draws, or `null` once it is closed. */
+  readonly view: ReplaceDialogView | null;
+  readonly pick: (serverId: string) => void;
+  readonly confirm: () => void;
+  /** Reads the list of servers again, after the dialog said it could not. */
+  readonly readAgain: () => void;
+  /** Closes the dialog and forgets its refusal. */
+  readonly close: () => void;
+}
+
 /**
- * Returns where the Replace of `target` stands, for the Replace dialog that is
- * open: choosing, writing the server the user confirmed, replaced, or refused
- * with the server that won. It follows the switches and the list of servers
- * only, so a closed dialog and an unrelated change of the query cache cost
- * nothing. While the caller is mounted, the confirmed server is kept; after the
- * last dialog unmounts it is dropped once the write has settled.
+ * Returns the Replace dialog of `target` that `openReplace` opened. It follows
+ * the switches and the list of servers only, so a closed dialog and an
+ * unrelated change of the query cache cost nothing.
  */
-export function useReplaceProgress(
+export function useReplaceDialog(
   client: HerculeClient,
   target: McpServerSwitchTarget,
-): ReplaceProgress {
+): ReplaceDialog {
   const switches = useMcpServerSwitches(client);
-  const key = JSON.stringify(target);
-  useEffect(() => {
-    const mine = JSON.parse(key) as McpServerSwitchTarget;
-    return switches.attachReplaceReader(mine);
-  }, [switches, key]);
-  return useSyncExternalStore(switches.subscribeReplaceProgress, () =>
-    switches.readReplaceProgress(target),
+  const view = useSyncExternalStore(switches.subscribeReplaceDialog, () =>
+    switches.readReplaceDialog(target),
   );
+  return {
+    view,
+    pick: (serverId) => {
+      switches.pickReplaceServer(target, serverId);
+    },
+    confirm: () => {
+      switches.confirmReplace(target);
+    },
+    readAgain: () => {
+      switches.readReplaceListAgain(target);
+    },
+    close: () => {
+      switches.closeReplace(target);
+    },
+  };
 }

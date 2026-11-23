@@ -1,7 +1,7 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { HerculeClient } from "@hercule/client-core";
-import type { McpServer, PluginDetail } from "@hercule/contract";
+import type { PluginDetail } from "@hercule/contract";
 import {
   buildOfferSwitchTarget,
   type McpServerSettingsRow,
@@ -45,12 +45,14 @@ export function ServerRow({
 }): JSX.Element {
   const { view } = row;
 
-  const switchServer = useMcpServerSwitch(client, buildOfferSwitchTarget(row));
-  // The servers added by URL the switch would replace, while the user chooses.
-  const [replacing, setReplacing] = useState<readonly McpServer[] | null>(null);
+  const offerTarget = buildOfferSwitchTarget(row);
+  const switchServer = useMcpServerSwitch(client, offerTarget);
+  const [replacing, setReplacing] = useState(false);
   const press = (on: boolean): void => {
     const pressed = switchServer.press(on);
-    if (pressed.kind === "replace") setReplacing(pressed.candidates);
+    if (pressed.kind !== "replace") return;
+    switchServer.openReplace({ connectionLabel: row.connection.label, typeName: row.typeName });
+    setReplacing(true);
   };
 
   const content: ReactNode = (
@@ -94,25 +96,20 @@ export function ServerRow({
           />
         </span>
       </div>
-      {switchServer.problem === null || replacing !== null ? null : (
+      {switchServer.problem === null || replacing ? null : (
         <p className="px-2.5 pb-1.5 text-fine text-fail" role="alert">
           {switchServer.problem}
         </p>
       )}
-      {replacing === null ? null : (
+      {replacing ? (
         <ReplaceDialog
           client={client}
-          candidates={replacing}
-          offer={row.offer}
-          connection={row.connection}
-          typeName={row.typeName}
-          switchServer={switchServer}
+          target={offerTarget}
           onClose={() => {
-            switchServer.clearReplace();
-            setReplacing(null);
+            setReplacing(false);
           }}
         />
-      )}
+      ) : null}
     </li>
   );
 }

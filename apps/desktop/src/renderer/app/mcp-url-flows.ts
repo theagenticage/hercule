@@ -1,27 +1,23 @@
 /**
  * The desktop app's side of the dialogs that write a server added by URL (see
- * `url-server-flows.ts` in client-core): how this app's query cache holds the
- * servers, and the hook the Add by URL dialog and the token dialog use.
+ * `url-server-attempt.ts` in client-core): the port through which an attempt
+ * catches the browser's return, and the hook each dialog uses to open its
+ * attempt, draw it, and close it.
  */
-import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { isWebLink } from "@hercule/client-core";
 import {
-  buildMcpListQuery,
-  decideTokenFormEntry,
-  describeTokenForm,
-  findOrCreateMcpUrlServerFlows,
-  IDLE_CHECK_NOW,
+  createAttemptSlot,
+  openUrlServerAttempt,
+  type AttemptTarget,
   type BrowserSignInPort,
-  type McpUrlServerFlows,
-  type SignInEntry,
-  type TokenFormWords,
-  type UrlServerFlowState,
+  type UrlServerAttempt,
+  type UrlServerAttemptState,
 } from "@hercule/client-core/mcp-servers";
-import type { McpServer } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
-import { mcpServerQuery, mcpServersQuery } from "./queries";
+import { buildMcpServerQueries } from "./mcp-server-queries";
 
 /**
  * Returns the port through which the attempts catch the browser's return,
@@ -52,178 +48,47 @@ const buildBrowserSignInPort = (bridge: Bridge): BrowserSignInPort => ({
   },
 });
 
-/** What a dialog opens an attempt for: a new server, or the token of the server `mcpServerId`, named `name`. */
-export type UrlServerAttemptTarget =
-  | { readonly kind: "add" }
-  | { readonly kind: "token"; readonly mcpServerId: string; readonly name: string };
-
 /**
- * Holds the id of a dialog's attempt, which the dialog's layout effect opens
- * and closes, so that React Strict Mode's second run of the effect opens a new
- * attempt instead of reusing one that was closed. It is a small store the
- * dialog reads with `useSyncExternalStore`.
+ * Opens the attempt of the dialog that calls it when the dialog mounts, and
+ * closes it when the dialog goes. Returns the attempt, which the dialog
+ * calls, and what it shows now.
+ *
+ * The attempt belongs to the server's id, not to its name: a rename that
+ * arrives while the dialog is open changes the record, never the attempt, so a
+ * sign-in in progress goes on. The first render holds an inert attempt, which
+ * the layout effect replaces before the window paints. A dialog that must end
+ * its attempt before its own close event (Esc, the scrim) calls
+ * `attempt.close()` itself.
  */
-const createAttemptSlot = () => {
-  let id: string | null = null;
-  const listeners = new Set<() => void>();
-  return {
-    read: (): string | null => id,
-    set: (next: string | null): void => {
-      id = next;
-      for (const listener of listeners) listener();
-    },
-    subscribe: (listener: () => void): (() => void) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-};
-
-/** What a dialog shows before its attempt has opened, which is one render: the empty form. */
-const UNOPENED: UrlServerFlowState = { kind: "form", problem: null };
-
-/** What `useUrlServerAttempt` returns. */
-export interface UrlServerAttempt {
-  readonly flows: McpUrlServerFlows;
-  /** The attempt's id, or `null` until the dialog's first effect has opened it. */
-  readonly attemptId: string | null;
-  readonly state: UrlServerFlowState;
-  /**
-   * Ends the attempt at once: a sign-in result or a push that arrives after
-   * this call changes nothing. A dialog calls it the moment the user asks to
-   * close it (Esc, the scrim, a button), not when the browser's `close` event
-   * comes later. The unmount ends the attempt too, in a layout cleanup that
-   * runs while the dialog leaves the screen, for a dialog that goes away with
-   * its page.
-   */
-  readonly closeAttempt: () => void;
-}
-
-/**
- * Returns the attempt of a dialog that writes a server added by URL, opened
- * when the dialog mounts and closed when it unmounts. One attempt belongs to
- * one opening of the dialog, so a reply to an earlier opening never reaches a
- * later one. The attempts are shared by the app (one instance for each query
- * client), so a write that still runs after the dialog closed is finished
- * by the same module.
- */
-export function useUrlServerAttempt(target: UrlServerAttemptTarget): UrlServerAttempt {
+export function useUrlServerAttempt(target: AttemptTarget): {
+  readonly attempt: UrlServerAttempt;
+  readonly state: UrlServerAttemptState;
+} {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
-  const flows = findOrCreateMcpUrlServerFlows({
-    queryClient,
-    client,
-    browserSignIn: buildBrowserSignInPort(bridge),
-    cache: {
-      readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey),
-      readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
-      readServerQuery: (mcpServerId) => {
-        const { queryKey } = mcpServerQuery(client, mcpServerId);
-        return { queryKey, queryFn: () => client.mcpServer.read({ params: { id: mcpServerId } }) };
-      },
-    },
-  });
-  const [slot] = useState(createAttemptSlot);
-  const attemptId = useSyncExternalStore(slot.subscribe, slot.read);
-  // Strings, not the target object, which is a new object on every render.
   const mcpServerId = target.kind === "token" ? target.mcpServerId : null;
-  const name = target.kind === "token" ? target.name : null;
-  // A layout effect, so the unmount retires the attempt while the dialog leaves the screen:
-  // a passive cleanup runs later, and a sign-in result that lands in between would finish.
+  // The name only words a sentence before the record is read, so the one the dialog opened with serves.
+  const [openedName] = useState(target.kind === "token" ? target.name : "");
+  const [slot] = useState(createAttemptSlot);
+  const attempt = useSyncExternalStore(slot.subscribe, slot.read);
+  // A layout effect, so the unmount closes the attempt while the dialog leaves the screen: a passive
+  // cleanup runs later, and a sign-in result that lands in between would finish.
   useLayoutEffect(() => {
-    const id =
-      mcpServerId === null || name === null ? flows.openAdd() : flows.openToken(mcpServerId, name);
-    slot.set(id);
+    const opened = openUrlServerAttempt(
+      {
+        queryClient,
+        client,
+        queries: buildMcpServerQueries(queryClient, client),
+        browserSignIn: buildBrowserSignInPort(bridge),
+      },
+      mcpServerId === null ? { kind: "add" } : { kind: "token", mcpServerId, name: openedName },
+    );
+    slot.hold(opened);
     return () => {
-      flows.close(id);
-      slot.set(null);
+      opened.close();
     };
-  }, [flows, slot, mcpServerId, name]);
-  const state = useSyncExternalStore(flows.subscribe, () =>
-    attemptId === null ? UNOPENED : flows.readState(attemptId),
-  );
-  const closeAttempt = useCallback((): void => {
-    if (attemptId !== null) flows.close(attemptId);
-  }, [flows, attemptId]);
-  return { flows, attemptId, state, closeAttempt };
-}
-
-/**
- * Returns the words of the token form for the server the dialog follows,
- * `server`, with the problem the attempt's last write left, so a rejected
- * token and the unsupported browser sign-in show where they belong. `entry`
- * is the button that opened the dialog, which decides the first form. After a
- * refused write the form leads from the method that was written instead
- * (`decideTokenFormEntry`).
- */
-export const describeAttemptTokenForm = (
-  server: McpServer,
-  state: UrlServerFlowState,
-  entry: SignInEntry,
-): TokenFormWords =>
-  describeTokenForm(
-    server,
-    state.kind === "form" || state.kind === "following" ? state.problem : null,
-    decideTokenFormEntry(state, entry),
-  );
-
-/** What a dialog calls to drive the sign-in through the browser of its attempt. */
-export interface SignInActions {
-  /** Starts the sign-in, or starts it again after a refusal. */
-  readonly onStartSignIn: () => void;
-  /** Ends the sign-in and returns the dialog to its form. */
-  readonly onCancelSignIn: () => void;
-  /** Opens the sign-in page in the browser. */
-  readonly onOpenSignInPage: () => void;
-  /** Finishes the sign-in with the address the user pasted. */
-  readonly onFinishSignIn: (pasted: string) => void;
-}
-
-/** Returns the calls that drive the sign-in of the attempt `attemptId`, which do nothing while it is `null`. */
-export const buildSignInActions = (
-  flows: McpUrlServerFlows,
-  attemptId: string | null,
-): SignInActions => ({
-  onStartSignIn: () => {
-    if (attemptId !== null) void flows.startSignIn(attemptId);
-  },
-  onCancelSignIn: () => {
-    if (attemptId !== null) flows.cancelSignIn(attemptId);
-  },
-  onOpenSignInPage: () => {
-    if (attemptId !== null) void flows.openSignInPage(attemptId);
-  },
-  onFinishSignIn: (pasted) => {
-    if (attemptId !== null) void flows.finishSignInByPaste(attemptId, pasted);
-  },
-});
-
-/** What `useCheckNow` returns. */
-export interface CheckNow {
-  /** Asks the controller to check the followed server again. Does nothing while a check was asked for and the record has not answered yet. */
-  readonly run: () => void;
-  readonly busy: boolean;
-  /** Why the controller refused the check, or `null`. */
-  readonly error: string | null;
-}
-
-/**
- * Returns "Check now" for the attempt `attemptId` of a dialog that follows a
- * server. The attempt keeps the request apart from the answer: it is busy
- * until the record changes (`flows.readCheck`), not until the next read.
- */
-export function useCheckNow(flows: McpUrlServerFlows, attemptId: string | null): CheckNow {
-  const { busy, error } = useSyncExternalStore(flows.subscribe, () =>
-    attemptId === null ? IDLE_CHECK_NOW : flows.readCheck(attemptId),
-  );
-  return {
-    run: () => {
-      if (attemptId !== null) void flows.checkNow(attemptId);
-    },
-    busy,
-    error,
-  };
+  }, [queryClient, client, bridge, slot, mcpServerId, openedName]);
+  const state = useSyncExternalStore(attempt.subscribe, attempt.read);
+  return { attempt, state };
 }

@@ -5,7 +5,6 @@ import {
   buildOfferSwitchTarget,
   type McpServerSettingsRow,
 } from "@hercule/client-core/mcp-servers";
-import type { McpServer } from "@hercule/contract";
 import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
 import { pluginsQuery, projectsQuery } from "../../../../../app/queries";
 import { ServerRowView } from "../../../../../screens/settings/mcp-servers/server-list";
@@ -29,28 +28,33 @@ export function ServerRow({ row }: { readonly row: McpServerSettingsRow }): JSX.
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const { view } = row;
-  const flip = useMcpServerSwitch(buildOfferSwitchTarget(row));
-  // The servers added by URL the switch found on the offer's address, while the dialog is open.
-  const [replacing, setReplacing] = useState<readonly McpServer[] | null>(null);
+  const offerTarget = buildOfferSwitchTarget(row);
+  const offerSwitch = useMcpServerSwitch(offerTarget);
+  // True while the Replace dialog is open.
+  const [replacing, setReplacing] = useState(false);
   return (
     <>
       <ServerRowView
         row={row}
         plugins={plugins}
         allProjects={projects}
-        busy={flip.blocked}
-        refusal={flip.problem}
+        busy={offerSwitch.blocked}
+        refusal={offerSwitch.problem}
         onFlip={() => {
-          const pressed = flip.press(!(view?.server.enabled ?? false));
-          if (pressed.kind === "replace") setReplacing(pressed.candidates);
+          const pressed = offerSwitch.press(!(view?.server.enabled ?? false));
+          if (pressed.kind !== "replace") return;
+          offerSwitch.openReplace({
+            connectionLabel: row.connection.label,
+            typeName: row.typeName,
+          });
+          setReplacing(true);
         }}
       />
-      {replacing !== null && (
+      {replacing && (
         <ReplaceDialog
-          row={row}
-          candidates={replacing}
+          target={offerTarget}
           onClose={() => {
-            setReplacing(null);
+            setReplacing(false);
           }}
         />
       )}

@@ -18,7 +18,7 @@ import { Schema } from "effect";
 import { readValidationIssues } from "../errors";
 import { BROWSER_SIGN_IN_LABEL, offersBrowserSignIn } from "./sign-in-words";
 import type { TextPart } from "./project-boxes";
-import type { FlowProblem, UrlServerFlowState } from "./url-server-flows";
+import type { AttemptProblem, UrlServerAttemptState } from "./url-server-attempt";
 
 /** The host labels that say what a server is and not whose it is, so they never name a server. */
 const GENERIC_HOST_LABELS: readonly string[] = ["mcp", "www", "api"];
@@ -254,7 +254,7 @@ export const describeSignInHeading = (server: McpServer): string =>
  * failure's own message. `undefined` when there is none. The refusals of a
  * create (`exists`, `plugin-origin`) never answer a token write.
  */
-const describeTokenProblem = (problem: FlowProblem | null): string | undefined => {
+const describeTokenProblem = (problem: AttemptProblem | null): string | undefined => {
   switch (problem?.kind) {
     case "invalid":
       return (
@@ -281,7 +281,7 @@ const describeTokenProblem = (problem: FlowProblem | null): string | undefined =
  *   (`sign-in-again`).
  */
 export const decideTokenFormEntry = (
-  state: UrlServerFlowState,
+  state: UrlServerAttemptState,
   openedWith: SignInEntry,
 ): SignInEntry => {
   if (state.kind !== "following" || state.outcome.kind !== "needs-token") return openedWith;
@@ -329,7 +329,7 @@ const decideFirstMethod = ({
  *   first (`method` is `browser`).
  * - A server that needs a token: "This server needs a token."
  *
- * `problem` is what the last write of the form left (`FlowProblem`). When it
+ * `problem` is what the last write of the form left (`AttemptProblem`). When it
  * says only a pasted token works, the browser choice is dropped (`browser` is
  * `null`), and any problem puts the token field first. `entry` is the button
  * that opened the dialog (`SignInEntry`): the first step follows it, whatever
@@ -338,7 +338,7 @@ const decideFirstMethod = ({
  */
 export const describeTokenForm = (
   server: McpServer,
-  problem: FlowProblem | null = null,
+  problem: AttemptProblem | null = null,
   entry: SignInEntry = "sign-in",
 ): TokenFormWords => {
   const { source } = server;

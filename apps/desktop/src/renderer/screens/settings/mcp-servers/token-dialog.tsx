@@ -3,22 +3,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { isNotFound, readErrorMessage } from "@hercule/client-core";
 import {
-  describeClosing,
-  describeOpenServerAction,
-  describeSignInHeading,
+  describeUrlServerDialogTitle,
+  describeUrlServerStep,
   type SignInEntry,
+  type UrlServerDialog,
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
-import {
-  buildSignInActions,
-  describeAttemptTokenForm,
-  useCheckNow,
-  useUrlServerAttempt,
-} from "../../../app/mcp-url-flows";
+import { useUrlServerAttempt } from "../../../app/mcp-url-flows";
 import { mcpServerQuery } from "../../../app/queries";
 import { WaitLine, Warning } from "../../step";
 import { QuestionIcon } from "../../../icons/question";
-import { FlowBody, TokenForm, UrlServerDialogFrame } from "./url-server-dialog-parts";
+import { StepView, UrlServerDialogFrame } from "./url-server-dialog-parts";
 
 /**
  * Renders the sign-in dialog of the server added by URL `mcpServerId`, the one
@@ -103,70 +98,39 @@ function TokenDialogFor({
 }): JSX.Element {
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  // The attempt is kept by the server's id and the name it was opened with, so a rename
-  // that arrives while the dialog is open never replaces the attempt and its sign-in.
-  const [openedName] = useState(server.name);
-  // The heading stays what the dialog opened with: a server that moves onto a Connection while
-  // the dialog is open changes the record, not what the user asked for.
-  const [heading] = useState(() => describeSignInHeading(server));
-  const { flows, attemptId, state, closeAttempt } = useUrlServerAttempt({
+  const { attempt, state } = useUrlServerAttempt({
     kind: "token",
     mcpServerId: server.id,
-    name: openedName,
+    name: server.name,
   });
-  const check = useCheckNow(flows, attemptId);
+  const dialog: UrlServerDialog = { kind: "token", server, openedOn, entry };
+  // The title stays what the dialog opened with: a server that moves onto a Connection while
+  // the dialog is open changes the record, not what the user asked for.
+  const [heading] = useState(() => describeUrlServerDialogTitle(dialog));
   // Ends the attempt before the dialog closes, so no late result reaches it.
   const close = (): void => {
-    closeAttempt();
+    attempt.close();
     dialogRef.current?.close();
   };
-  const actions = {
-    onClose: close,
-    onOpenServer: (mcpServerId: string) => {
-      close();
-      void navigate({ to: "/settings/mcp-servers/$id", params: { id: mcpServerId } });
-    },
-    onCheckNow: check.run,
-    onRetryRead: () => {
-      if (attemptId !== null) flows.retryRead(attemptId);
-    },
-    onSaveToken: (token: string) => {
-      if (attemptId !== null) flows.submitToken(attemptId, token);
-    },
-    ...buildSignInActions(flows, attemptId),
-  };
-  // The words follow the record the attempt last read, which a check may have changed.
-  const followed = state.kind === "following" ? (state.server ?? server) : server;
-  const words = describeAttemptTokenForm(followed, state, entry);
   return (
     <UrlServerDialogFrame
       dialogRef={dialogRef}
       heading={heading}
       onClose={() => {
-        closeAttempt();
+        attempt.close();
         onClose();
       }}
       onCloseRequest={close}
     >
-      {state.kind === "form" ? (
-        <TokenForm
-          words={words}
-          refusedReason={null}
-          onSubmit={actions.onSaveToken}
-          onSignIn={actions.onStartSignIn}
-          onCancel={close}
-        />
-      ) : (
-        <FlowBody
-          state={state}
-          tokenWords={words}
-          openAction={describeOpenServerAction(state, openedOn)}
-          closingNote={describeClosing(state)}
-          checkBusy={check.busy}
-          checkError={check.error}
-          actions={actions}
-        />
-      )}
+      <StepView
+        step={describeUrlServerStep(state, dialog)}
+        attempt={attempt}
+        onClose={close}
+        onOpenServer={(mcpServerId) => {
+          close();
+          void navigate({ to: "/settings/mcp-servers/$id", params: { id: mcpServerId } });
+        }}
+      />
     </UrlServerDialogFrame>
   );
 }

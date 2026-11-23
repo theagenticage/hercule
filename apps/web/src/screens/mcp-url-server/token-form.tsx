@@ -1,10 +1,5 @@
 import { useState, type JSX } from "react";
-import type { McpServer } from "@hercule/contract";
-import {
-  describeTokenForm,
-  type FlowProblem,
-  type SignInEntry,
-} from "@hercule/client-core/mcp-servers";
+import type { UrlServerStep } from "@hercule/client-core/mcp-servers";
 import { Button, Field, Input } from "@hercule/ui";
 
 /**
@@ -12,53 +7,43 @@ import { Button, Field, Input } from "@hercule/ui";
  * sign-in through the browser first when the server offers it (`onSignIn`),
  * one token field, and the note that the token stays on the controller. Add,
  * the page's "Replace token…" and "Sign in again…" and the "Sign in…" of a
- * thread line and of the band all draw it.
+ * thread line and of the band all draw it from the same step.
  *
  * For a server that offers the browser, the token field is the quieter second
- * choice: it shows after "Paste a token instead". It shows at once (the
- * words' `method` is `token`) when the token the server holds was refused, for
- * "Replace token…", and when the controller says only a token works. The
- * words come from `describeTokenForm`, which also decides the problem text.
+ * choice: it shows after "Paste a token instead", or at once when the step's
+ * words say the form opens with `token`.
  *
  * The token lives in this form's state alone, so it is gone when the form
- * leaves the screen, whether the write was acknowledged or refused. The
- * attempt checks the token against the contract's rule when it is sent and
- * answers in `problem`.
- *
- * - `entry` is the button that opened the dialog (`SignInEntry`), which
- *   decides what the form opens with.
- * - `refusal` is the controller's reason when the token just saved was
- *   refused, shown above the field.
- * - `closingNote` is what closing the dialog now would do, or `null`.
+ * leaves the screen, whether the write was acknowledged or refused.
  */
 export function TokenForm({
-  server,
-  problem,
-  entry,
-  refusal,
-  closingNote,
+  step,
   onSubmit,
   onSignIn,
   onCancel,
 }: {
-  readonly server: McpServer;
-  readonly problem: FlowProblem | null;
-  readonly entry: SignInEntry;
-  readonly refusal: string | null;
-  readonly closingNote: string | null;
+  readonly step: Extract<UrlServerStep, { kind: "token-form" }>;
   readonly onSubmit: (token: string) => void;
   /** Starts the sign-in through the browser. */
   readonly onSignIn: () => void;
   readonly onCancel: () => void;
 }): JSX.Element {
+  const { words, refusedReason: refusal, closingNote, subject } = step;
   const [token, setToken] = useState("");
-  const words = describeTokenForm(server, problem, entry);
   const { browser, problemText } = words;
+  const subjectLine =
+    subject === null ? null : (
+      <p className="text-row text-ink">
+        <b className="font-emph">{subject.name}</b>{" "}
+        <span className="font-mono text-fine text-muted break-all">{subject.address}</span>
+      </p>
+    );
   // The user's press of "Paste a token instead" adds to what the words say the form opens with.
   const [choseToken, setChoseToken] = useState(false);
   if (browser !== null && words.method === "browser" && !choseToken) {
     return (
       <div className="flex flex-col gap-3">
+        {subjectLine}
         <p className="text-row text-muted">{browser.intro}</p>
         {refusal === null ? null : (
           <p className="text-fine text-fail" role="alert">
@@ -94,6 +79,7 @@ export function TokenForm({
         if (token !== "") onSubmit(token);
       }}
     >
+      {subjectLine}
       <p className="text-row text-muted">{words.intro}</p>
       {refusal === null ? null : (
         <p className="text-fine text-fail" role="alert">

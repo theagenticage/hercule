@@ -6287,7 +6287,7 @@ describe("Thread: the MCP servers of the + menu", () => {
     servers = [];
     await pushServerChange(live, S_DOCS_URL.id);
 
-    await within(dialog).findByText("docs was removed, so there is nothing more to do here.");
+    await within(dialog).findByText("docs was removed.");
     expect(screen.getByRole("dialog", { name: "Sign in to docs" })).toBe(dialog);
     expect(live.topics()).toContain("mcpServer");
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -6298,11 +6298,7 @@ describe("Thread: the MCP servers of the + menu", () => {
   });
 
   it.each([
-    [
-      "deleted",
-      (): readonly McpServer[] => [],
-      /docs was removed, so there is nothing more to do here\./,
-    ],
+    ["deleted", (): readonly McpServer[] => [], /docs was removed\./],
     [
       "moved onto a Connection",
       (server: McpServer): readonly McpServer[] => [
@@ -6376,7 +6372,7 @@ describe("Thread: the MCP servers of the + menu", () => {
     const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
     await user.type(within(dialog).getByLabelText("Token"), "abc12345-xyz");
     await user.click(within(dialog).getByRole("button", { name: "Save token" }));
-    await within(dialog).findByText("Checking: asking the server for its tools.");
+    await within(dialog).findByText("Asking docs.acme.example for its tools…");
 
     server = { ...server, status: "unreachable", statusDetail: "connection refused" };
     await pushServerChange(live, S_DOCS_URL.id);
@@ -6482,7 +6478,7 @@ describe("Thread: the lines about MCP servers", () => {
     expect(api.calls.find((call) => call.path.endsWith("/token"))!.body).toEqual({
       token: "abc12345-xyz",
     });
-    await within(dialog).findByText("Checking: asking the server for its tools.");
+    await within(dialog).findByText("Asking docs.acme.example for its tools…");
     // Closing leaves the thread as it was.
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Sign in to docs" })).toBeNull();
