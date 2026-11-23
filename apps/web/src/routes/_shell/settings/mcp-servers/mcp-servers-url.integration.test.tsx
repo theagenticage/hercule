@@ -56,6 +56,8 @@ const S_HAND_TWO = buildUrlServer(
 );
 /** The server the stub controller creates for Add by URL. */
 const NEW_ID = makeId("5", 90);
+/** A server another client puts on the Sentry Connection while the user decides. */
+const WINNER_ID = makeId("5", 91);
 
 const P_WEBSHOP = makeId("a", 1);
 
@@ -124,7 +126,7 @@ const buildController = (
       return { body: created };
     },
   };
-  for (const id of [S_DOCS.id, S_WIKI.id, S_HAND.id, S_HAND_TWO.id, NEW_ID]) {
+  for (const id of [S_DOCS.id, S_WIKI.id, S_HAND.id, S_HAND_TWO.id, NEW_ID, WINNER_ID]) {
     const path = `/api/v1/mcp-servers/${id}`;
     handlers[`GET ${path}`] = () => {
       const found = world.servers.find((each) => each.id === id);
@@ -246,6 +248,10 @@ describe("Settings > MCP servers > Add by URL", () => {
     await user.type(within(dialog).getByLabelText("Address"), "https://mcp.deepwiki.example/mcp");
     expect(within(dialog).getByLabelText<HTMLInputElement>("Name").value).toBe("deepwiki");
     expect(readPageText(dialog)).toContain("Agents see its tools as mcp__tools__deepwiki__<tool>");
+    // The address is shown whole everywhere, so the form says where a key goes before it is typed.
+    expect(readPageText(dialog)).toContain(
+      "If it needs a key, leave it out of the address: the next step asks for it in a token field.",
+    );
     await user.click(within(dialog).getByRole("button", { name: "Check server" }));
 
     // The user did not change the suggestion, so the controller chooses the name.
@@ -280,6 +286,47 @@ describe("Settings > MCP servers > Add by URL", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await findRow("Offer deepwiki to threads")).toBeTruthy();
   });
+
+  it.each([
+    ["unreachable", "slow.example could not be reached."],
+    ["error", "slow.example answered in a way Hercule could not use."],
+  ] as const)(
+    "words a check that ended %s from the server's host, and checks again without waiting for a push",
+    async (status, headline) => {
+      const user = userEvent.setup();
+      const world = buildWorld([]);
+      const { api, live } = await openList(world, {
+        [`POST /api/v1/mcp-servers/${NEW_ID}/check`]: () => {
+          replaceInWorld(world, NEW_ID, (server) => ({
+            ...server,
+            status: "checking",
+            statusDetail: null,
+          }));
+          return { body: {} };
+        },
+      });
+      const dialog = await openAddDialog(user);
+      await user.type(within(dialog).getByLabelText("Address"), "https://slow.example/mcp");
+      await user.click(within(dialog).getByRole("button", { name: "Check server" }));
+      await within(dialog).findByText("Checking: asking the server for its tools.");
+      replaceInWorld(world, NEW_ID, (server) => ({
+        ...server,
+        status,
+        statusDetail: "connection refused",
+      }));
+      await pushChange(live, NEW_ID);
+
+      const failure = await within(dialog).findByRole("alert");
+      expect(readPageText(failure)).toBe(`${headline} connection refused`);
+      // A failed check leads to the server's page as well: it is a new server in the list.
+      expect(within(dialog).getByRole("link", { name: "Open created" })).toBeTruthy();
+
+      // The push is held: the dialog shows the new check from its own reads.
+      await user.click(within(dialog).getByRole("button", { name: "Check now" }));
+      await within(dialog).findByText("Checking: asking the server for its tools.");
+      expect(api.calls.filter((call) => call.path.endsWith(`${NEW_ID}/check`))).toHaveLength(1);
+    },
+  );
 
   it("sends the name the user typed, and keeps it when the address changes", async () => {
     const user = userEvent.setup();
@@ -388,6 +435,125 @@ describe("Settings > MCP servers > Add by URL", () => {
     expect(readPageText(dialog)).toContain("The server refused its token. Paste a new one.");
   });
 
+  it("keeps the heading the sign-in dialog opened with when the server moves onto a Connection meanwhile", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld([
+      { ...S_DOCS, status: "needs-sign-in", statusDetail: "No token yet" },
+    ]);
+    const { live } = await openApp(`/settings/mcp-servers/${S_DOCS.id}`, world);
+    await user.click(await screen.findByRole("button", { name: "Sign in…" }));
+    await screen.findByRole("dialog", { name: "Sign in to docs" });
+
+    replaceInWorld(world, S_DOCS.id, (server) => ({
+      ...server,
+      enabled: true,
+      status: "ready",
+      statusDetail: null,
+      source: { kind: "plugin", contributionId: SENTRY_CONTRIBUTION, connectionId: C_WORK },
+    }));
+    await pushChange(live, S_DOCS.id);
+
+    expect(
+      await within(screen.getByRole("dialog")).findByText(/is reached with a Connection now/),
+    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Sign in to docs" })).toBeTruthy();
+  });
+
+  it("opens 'Replace token…' on the token field, also when the server offers the browser", async () => {
+    const user = userEvent.setup();
+    const holdsToken = buildUrlServer(S_DOCS.id, "docs", "https://docs.acme.example/mcp", {
+      source: {
+        kind: "url",
+        url: "https://docs.acme.example/mcp",
+        signIn: "token",
+        signInOffered: "oauth",
+      },
+    });
+    await openApp(`/settings/mcp-servers/${S_DOCS.id}`, buildWorld([holdsToken]));
+
+    await user.click(await screen.findByRole("button", { name: "Replace token…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
+    expect(readPageText(dialog)).toContain(
+      "Paste a new token. It replaces the one this server holds.",
+    );
+    expect(within(dialog).queryByText("This server signs in through your browser.")).toBeNull();
+  });
+
+  it("asks for the token again, not for the browser, when the server refuses a pasted token and still offers the browser", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld([S_WIKI]);
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
+      [`POST /api/v1/mcp-servers/${S_WIKI.id}/token`]: () => ({
+        body: replaceInWorld(world, S_WIKI.id, (server) => ({
+          ...server,
+          status: "checking",
+          statusDetail: null,
+          source: { ...server.source, signIn: "token" } as McpServer["source"],
+        })),
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
+    await user.click(within(dialog).getByRole("button", { name: "Paste a token instead" }));
+    await user.type(within(dialog).getByLabelText("Token"), "wrong-token-1");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Checking: asking the server for its tools.");
+
+    replaceInWorld(world, S_WIKI.id, (server) => ({
+      ...server,
+      status: "needs-sign-in",
+      statusDetail: "The server refused the token",
+    }));
+    await pushChange(live, S_WIKI.id);
+
+    expect(await within(dialog).findByText("The server refused the token")).toBeTruthy();
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
+    expect(readPageText(dialog)).toContain("The server refused its token. Paste a new one.");
+  });
+
+  it("goes back to the browser choice when a sign-in through the browser is refused by the check", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld([S_WIKI]);
+    const { live } = await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, {
+      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in`]: {
+        body: {
+          authorizationUrl: "https://auth.wiki.example/authorize?state=abc123",
+          expiresAt: "2026-11-23T10:10:00.000Z",
+        },
+      },
+      [`POST /api/v1/mcp-servers/${S_WIKI.id}/sign-in/finish`]: () => ({
+        body: replaceInWorld(world, S_WIKI.id, (server) => ({
+          ...server,
+          status: "checking",
+          source: { ...server.source, signIn: "oauth" } as McpServer["source"],
+        })),
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
+    await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
+    await user.type(
+      await within(dialog).findByLabelText("Address the browser ended on"),
+      "http://127.0.0.1:50000/callback?code=the-code&state=abc123",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
+    await within(dialog).findByText("Checking: asking the server for its tools.");
+
+    replaceInWorld(world, S_WIKI.id, (server) => ({
+      ...server,
+      status: "needs-sign-in",
+      statusDetail: "The server did not accept the sign-in",
+    }));
+    await pushChange(live, S_WIKI.id);
+
+    expect(
+      await within(dialog).findByRole("button", { name: "Sign in with your browser" }),
+    ).toBeTruthy();
+    expect(within(dialog).queryByLabelText("Token")).toBeNull();
+  });
+
   it("offers the browser first for a server that signs in through it, and the pasted token as the quieter other way", async () => {
     const user = userEvent.setup();
     const world = buildWorld([S_WIKI]);
@@ -492,6 +658,30 @@ describe("Settings > MCP servers > Add by URL", () => {
       expect(await within(dialog).findByText(/ready · 2 tools/)).toBeTruthy();
       // Nothing of the sign-in stays on the page: not the code, and not the pasted address.
       expect(readPageText()).not.toContain("the-code");
+    });
+
+    it("draws who approves in the same render as the link to the sign-in page, so the host is there before the link can be followed", async () => {
+      const user = userEvent.setup();
+      const world = buildWorld([S_WIKI]);
+      await openApp(`/settings/mcp-servers/${S_WIKI.id}`, world, startsSignIn);
+      await user.click(await screen.findByRole("button", { name: "Sign in…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign in to wiki" });
+
+      // Records, at every change of the page, whether the link is there and the host with it.
+      const seen: { link: boolean; host: boolean }[] = [];
+      const observer = new MutationObserver(() => {
+        seen.push({
+          link: document.querySelector(`a[href="${SIGN_IN_URL}"]`) !== null,
+          host: readPageText(dialog).includes("You will approve on auth.wiki.example."),
+        });
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
+      await within(dialog).findByRole("link", { name: "Open the sign-in page" });
+      observer.disconnect();
+
+      expect(seen.some((each) => each.link)).toBe(true);
+      expect(seen.filter((each) => each.link && !each.host)).toEqual([]);
     });
 
     it("keeps waiting, with the controller's words, when it finds the pasted address is for another redirect", async () => {
@@ -654,6 +844,30 @@ describe("Settings > MCP servers > Add by URL", () => {
     expect(within(dialog).queryByRole("alert")).toBeNull();
   });
 
+  it("takes the button away from a duplicate refusal once that server is deleted", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld([S_DOCS]);
+    const { live } = await openList(world, {
+      "POST /api/v1/mcp-servers": conflict("That address is added already.", {
+        reason: "mcp-server-exists",
+        mcpServerId: S_DOCS.id,
+      }),
+    });
+    const dialog = await openAddDialog(user);
+    await user.type(within(dialog).getByLabelText("Address"), "https://docs.acme.example/mcp");
+    await user.click(within(dialog).getByRole("button", { name: "Check server" }));
+    const refusal = await within(dialog).findByRole("alert");
+    await within(refusal).findByRole("link", { name: "Open docs" });
+
+    world.servers = world.servers.filter((server) => server.id !== S_DOCS.id);
+    await pushChange(live, S_DOCS.id);
+
+    await waitFor(() => {
+      expect(within(dialog).queryByRole("link", { name: "Open docs" })).toBeNull();
+    });
+    expect(within(dialog).getByRole("alert")).toBeTruthy();
+  });
+
   it("refuses an address a plugin offers, and shows the row of that offer in the list", async () => {
     const user = userEvent.setup();
     await openList(buildWorld([]), {
@@ -804,6 +1018,79 @@ describe("Settings > MCP servers > Replace", () => {
       `/settings/mcp-servers/${S_DOCS.id}`,
     );
     expect(listWrites(api)).toHaveLength(1);
+  });
+
+  /** The server another client put on the Sentry Connection. */
+  const buildWinner = (): McpServer =>
+    buildUrlServer(WINNER_ID, "sentry_win", "https://mcp.sentry.example/mcp", {
+      source: SENTRY_SOURCE as McpServer["source"],
+    });
+
+  it("stays with the refusal and a link when another server takes the Connection while the user is choosing", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld([S_HAND, S_HAND_TWO]);
+    const { api, live } = await openList(world);
+    await user.click(within(await findRow("Offer sentry work to threads")).getByRole("switch"));
+    const dialog = await screen.findByRole("dialog");
+
+    world.servers.push(buildWinner());
+    await pushChange(live, WINNER_ID);
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(readPageText(alert)).toContain("Nothing was replaced.");
+    expect(within(alert).getByRole("link", { name: "Open sentry_win" }).getAttribute("href")).toBe(
+      `/settings/mcp-servers/${WINNER_ID}`,
+    );
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(listWrites(api)).toHaveLength(0);
+  });
+
+  it("keeps the confirmed server selected and the dialog open when another server wins while the write is held", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld([S_HAND, S_HAND_TWO]);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { api, live } = await openList(world, {
+      [`PATCH /api/v1/mcp-servers/${S_HAND_TWO.id}`]: async () => {
+        await held;
+        return conflict("Another server holds it.", {
+          reason: "mcp-server-exists",
+          mcpServerId: WINNER_ID,
+        });
+      },
+    });
+    await user.click(within(await findRow("Offer sentry work to threads")).getByRole("switch"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("radio", { name: /sentry_two/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Replace" }));
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+
+    world.servers.push(buildWinner());
+    await pushChange(live, WINNER_ID);
+    const alert = await within(dialog).findByRole("alert");
+    expect(within(alert).getByRole("link", { name: "Open sentry_win" })).toBeTruthy();
+    // The choice the user confirmed does not move to the other server while the write is held.
+    expect(
+      within(dialog).getByRole<HTMLInputElement>("radio", { name: /sentry_two/ }).checked,
+    ).toBe(true);
+    expect(
+      within(dialog)
+        .getByRole("radio", { name: /sentry_hand/ })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+
+    release();
+    await waitFor(() => {
+      expect(readPageText(dialog)).toContain("Another server holds it.");
+    });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(listWrites(api).map((call) => call.path)).toEqual([
+      `/api/v1/mcp-servers/${S_HAND_TWO.id}`,
+    ]);
   });
 
   it("stops when the chosen server is deleted meanwhile, and asks again before it uses another", async () => {

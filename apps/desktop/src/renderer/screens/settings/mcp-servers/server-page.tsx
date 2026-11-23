@@ -13,12 +13,13 @@ import {
   describeSourceChip,
   isCheckDisabled,
   type McpServerView,
+  type ServerPageFields,
   type StatusBand,
   type StatusBandAction,
 } from "@hercule/client-core/mcp-servers";
 import { useAgeWords } from "../../../app/age-clock";
 import { PluginMark } from "../../../marks/plugin-mark";
-import { readNameAccount, ServerName, ServerSwitch } from "./server-parts";
+import { ServerName, ServerSwitch } from "./server-parts";
 // The head's mark is the list's `.profile-mark`. A page opened on its own, from a thread's "Open
 // server", does not load the list's code, so the page loads this file itself.
 import "../permission-profiles/permission-profiles.css";
@@ -30,21 +31,21 @@ import "./mcp-servers.css";
  * server comes from and its `address`, and then the status `band`, when the
  * server has one.
  *
- * `address` is the server's address, `null` when no plugin offers a plugin's
- * server any more. A server added by URL has its whole address. While
- * `busy`, the band's button is already running its action.
+ * `fields` holds the server's address and the account written beside its
+ * name (see `describeServerPageFields`). While `busy`, the band's button is
+ * already running its action.
  */
 export function ServerHead({
   view,
   plugins,
-  address,
+  fields,
   band,
   busy,
   onBandAction,
 }: {
   readonly view: McpServerView;
   readonly plugins: readonly PluginIdentity[];
-  readonly address: string | null;
+  readonly fields: ServerPageFields;
   readonly band: StatusBand | null;
   readonly busy: boolean;
   readonly onBandAction: (action: StatusBandAction) => void;
@@ -58,12 +59,12 @@ export function ServerHead({
           <PluginMark pluginId={view.pluginId} plugins={plugins} size={20} />
         </span>
         <h2>
-          <ServerName name={view.server.name} account={readNameAccount(view)} />
+          <ServerName name={view.server.name} account={fields.account ?? undefined} />
         </h2>
       </div>
       <div className="mcp-chips">
         <span className="chip">{describeSourceChip(view)}</span>
-        {address !== null && <span className="chip">{address}</span>}
+        {fields.address !== null && <span className="chip">{fields.address}</span>}
       </div>
       {band !== null && (
         <div className={band.tone === "fail" ? "mcp-band mcp-band--fail" : "mcp-band"}>

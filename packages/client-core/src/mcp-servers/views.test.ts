@@ -5,6 +5,7 @@ import {
   describeConnectionRowProblem,
   describeReconnect,
   describeRemoveEffect,
+  describeServerPageFields,
   describeSignInRow,
   describeSourceChip,
   isCheckDisabled,
@@ -200,6 +201,33 @@ describe("the page of a server added by URL", () => {
     expect(describeSourceChip(plugin!, "Sentry for teams")).toBe(
       "From the Sentry for teams plugin",
     );
+  });
+
+  it("shows its whole address and no account beside the name", () => {
+    const [url] = buildViews([URL_SERVER()]);
+
+    expect(describeServerPageFields(url!, OFFERING_PLUGINS)).toEqual({
+      address: "https://docs.example.com/mcp",
+      account: null,
+    });
+  });
+
+  it("shows a plugin's server with the host its plugin offers and its Connection's label as the account", () => {
+    const [plugin] = buildViews([SENTRY_WORK]);
+
+    expect(describeServerPageFields(plugin!, OFFERING_PLUGINS)).toEqual({
+      address: "mcp.sentry.example",
+      account: "work",
+    });
+  });
+
+  it("shows no address for a plugin's server whose plugin no longer offers it, and no account without its Connection", () => {
+    const orphan = buildViews([SENTRY_WORK])[0]!;
+
+    expect(describeServerPageFields({ ...orphan, account: undefined }, [])).toEqual({
+      address: null,
+      account: null,
+    });
   });
 
   it("says what removing it takes along", () => {

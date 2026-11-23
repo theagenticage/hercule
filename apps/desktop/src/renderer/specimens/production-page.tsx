@@ -60,10 +60,22 @@ export interface ProductionPageOptions {
    * put in place what the user had done before the page opened.
    */
   readonly prepare?: (context: RouterContext) => void;
+  /**
+   * How main answers the browser's return from a sign-in. By default main
+   * cannot listen, so a sign-in that starts on the page shows its paste step.
+   */
+  readonly signInReturn?: Bridge["signInReturn"];
 }
 
 const refuse = (call: string) => (): Promise<never> =>
   Promise.reject(new Error(`The specimen page does not answer ${call}.`));
+
+/** Main's answers when it cannot listen for the browser's return: the sign-in asks for the paste. */
+const NO_SIGN_IN_RETURN: Bridge["signInReturn"] = {
+  listen: () => Promise.resolve({ _tag: "unavailable" }),
+  wait: refuse("signInReturn.wait"),
+  cancel: () => Promise.resolve(undefined),
+};
 
 /**
  * Returns main's answers for a user signed in to the fake controller. What
@@ -71,7 +83,11 @@ const refuse = (call: string) => (): Promise<never> =>
  * accepted and ignored, and every other call fails, because the specimens
  * never make one.
  */
-const buildBridge = (username: string, appearance: Appearance): Bridge => ({
+const buildBridge = (
+  username: string,
+  appearance: Appearance,
+  signInReturn: Bridge["signInReturn"],
+): Bridge => ({
   platform: "mac",
   hiddenWindowDraws: true,
   controllerUrl: {
@@ -93,13 +109,9 @@ const buildBridge = (username: string, appearance: Appearance): Bridge => ({
   skillArchive: { build: refuse("skillArchive.build") },
   firstRunProgress: { read: () => Promise.resolve(null), save: refuse("firstRunProgress.save") },
   appearance: { read: () => appearance, save: refuse("appearance.save") },
-  // A specimen has no browser to open and nothing to listen on: a sign-in that starts here shows its paste step.
-  link: { open: () => Promise.resolve(undefined) },
-  signInReturn: {
-    listen: () => Promise.resolve({ _tag: "unavailable" }),
-    wait: refuse("signInReturn.wait"),
-    cancel: () => Promise.resolve(undefined),
-  },
+  // A specimen has no browser to open.
+  link: { open: () => Promise.resolve({ _tag: "Opened" }) },
+  signInReturn,
   menu: { onCommand: () => () => undefined },
   destination: { onOpen: () => () => undefined },
 });
@@ -111,7 +123,14 @@ const buildBridge = (username: string, appearance: Appearance): Bridge => ({
  * fails.
  */
 export async function mountProductionApp(options: ProductionPageOptions): Promise<ProductionPage> {
-  const { handlers, path, username, appearance, prepare } = options;
+  const {
+    handlers,
+    path,
+    username,
+    appearance,
+    prepare,
+    signInReturn = NO_SIGN_IN_RETURN,
+  } = options;
   const { fetch, calls } = createApiStub(handlers);
   globalThis.fetch = fetch as typeof globalThis.fetch;
   const sockets: StubSocket[] = [];
@@ -121,7 +140,7 @@ export async function mountProductionApp(options: ProductionPageOptions): Promis
     return dial(url);
   } as unknown as typeof WebSocket;
 
-  const context = await buildRouterContext(buildBridge(username, appearance));
+  const context = await buildRouterContext(buildBridge(username, appearance, signInReturn));
   prepare?.(context);
   const router = createAppRouter(context);
   router.history.replace(path);

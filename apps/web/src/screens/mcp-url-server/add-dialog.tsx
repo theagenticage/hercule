@@ -2,6 +2,7 @@ import { useState, type JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
+  ADDRESS_FIELD_HINT,
   describeExistsRefusal,
   describePluginOriginRefusal,
   readAddForm,
@@ -70,11 +71,10 @@ export function AddByUrlDialog({
         />
       ) : (
         <FollowSteps
-          client={client}
           flow={flow}
           state={state}
           fallbackServer={null}
-          openServer
+          openedOn="elsewhere"
           onClose={onClose}
         />
       )}
@@ -154,10 +154,7 @@ function AddForm({
             onChange({ address: event.target.value, typedName });
           }}
         />
-        <p className="text-fine text-faint">
-          A remote MCP server, reached over HTTPS. The controller calls it, so it must be reachable
-          from there.
-        </p>
+        <p className="text-fine text-faint">{ADDRESS_FIELD_HINT}</p>
       </Field>
       {refusal === null ? null : (
         <RefusalNote description={refusal} onLeave={onClose} onShowOfferRow={onShowOfferRow} />

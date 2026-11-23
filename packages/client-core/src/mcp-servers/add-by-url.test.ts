@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../errors";
 import {
+  ADDRESS_FIELD_HINT,
   describeSignInHeading,
   describeTokenForm,
   describeToolNamePreview,
@@ -175,6 +176,8 @@ describe("describeTokenForm", () => {
   it("asks a new server for a token", () => {
     expect(describeTokenForm(urlServer("none", "token", { status: "needs-sign-in" }))).toEqual({
       intro: "This server needs a token.",
+      method: "token",
+      problemText: undefined,
       browser: null,
       note: "Kept on the controller. It never reaches a runner.",
       offNote: null,
@@ -206,6 +209,64 @@ describe("describeTokenForm", () => {
     expect(describeTokenForm(urlServer("oauth", "oauth")).browser).not.toBeNull();
     expect(describeTokenForm(urlServer("token", "token")).browser).toBeNull();
     expect(describeTokenForm(urlServer("none", null)).browser).toBeNull();
+  });
+
+  it("opens with the token field when the server holds a pasted token, though it still offers the browser: a refused token and Replace token…", () => {
+    const refused = describeTokenForm(urlServer("token", "oauth", { status: "needs-sign-in" }));
+    const replacing = describeTokenForm(urlServer("token", "oauth"));
+
+    expect(refused).toMatchObject({
+      method: "token",
+      intro: "The server refused its token. Paste a new one.",
+    });
+    expect(replacing).toMatchObject({
+      method: "token",
+      intro: "Paste a new token. It replaces the one this server holds.",
+    });
+    // The browser stays the quiet other way.
+    expect(refused.browser).not.toBeNull();
+    expect(replacing.browser).not.toBeNull();
+  });
+
+  it("opens with the browser choice for a refused browser sign-in, for a server that holds none, and again after Sign in again…", () => {
+    expect(describeTokenForm(urlServer("oauth", "oauth", { status: "needs-sign-in" })).method).toBe(
+      "browser",
+    );
+    expect(describeTokenForm(urlServer("none", "oauth", { status: "needs-sign-in" })).method).toBe(
+      "browser",
+    );
+    expect(describeTokenForm(urlServer("oauth", "oauth")).method).toBe("browser");
+  });
+
+  it("drops the browser choice and shows the controller's words once only a token works, whatever was offered", () => {
+    const server = urlServer("none", "oauth", { status: "needs-sign-in" });
+    const words = describeTokenForm(server, {
+      kind: "sign-in-unsupported",
+      message: "No browser here. Paste a token instead.",
+    });
+
+    expect(words.browser).toBeNull();
+    expect(words.method).toBe("token");
+    expect(words.problemText).toBe("No browser here. Paste a token instead.");
+    expect(words.intro).toBe("This server needs a token.");
+  });
+
+  it("shows the reason of the last token write beside the field, and puts the field first", () => {
+    const server = urlServer("none", "oauth", { status: "needs-sign-in" });
+    const invalid = describeTokenForm(server, {
+      kind: "invalid",
+      issues: { address: null, name: null, token: "Too short.", other: "Also this." },
+    });
+    const failed = describeTokenForm(server, { kind: "failed", message: "offline" });
+
+    expect(invalid).toMatchObject({ method: "token", problemText: "Too short. Also this." });
+    expect(failed).toMatchObject({ method: "token", problemText: "offline" });
+    expect(describeTokenForm(server, null).method).toBe("browser");
+  });
+
+  it("tells the address form that a key goes in the token field, not the address", () => {
+    expect(ADDRESS_FIELD_HINT).toContain("token field");
+    expect(ADDRESS_FIELD_HINT).toContain("leave it out of the address");
   });
 
   it("titles the dialog by what the user does there", () => {

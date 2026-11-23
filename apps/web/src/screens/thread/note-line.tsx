@@ -45,45 +45,74 @@ function McpNoteLine({
   readonly note: RuntimeNote;
   readonly entries: readonly McpServerWarningEntry[];
 }): JSX.Element {
+  const { client } = useRouteContext({ from: "/_shell" });
   const views = useThreadViews();
-  if (views === undefined) return <RuntimeNoteLine note={note} />;
+  // The server whose token dialog is open, as its button showed it. The dialog belongs to the
+  // line, not to the button, because a live change (a delete, a Replace) can remove the button
+  // while the dialog is open: the dialog then follows the server and says what happened.
+  const [signingIn, setSigningIn] = useState<McpServer | null>(null);
+  const dialog =
+    signingIn === null ? null : (
+      <TokenDialog
+        client={client}
+        server={views?.find((view) => view.server.id === signingIn.id)?.server ?? signingIn}
+        openedOn="elsewhere"
+        onClose={() => {
+          setSigningIn(null);
+        }}
+      />
+    );
+  if (views === undefined) {
+    return (
+      <>
+        <RuntimeNoteLine note={note} />
+        {dialog}
+      </>
+    );
+  }
   const { tone, fixes } = buildMcpWarningLine(entries, views);
   return (
-    <RuntimeNoteLine
-      note={note}
-      tone={tone}
-      actions={
-        fixes.length === 0
-          ? undefined
-          : fixes.map(({ key, fix }) => (
-              <FixButton
-                key={key}
-                fix={fix}
-                server={
-                  fix.kind === "open-server" || fix.kind === "sign-in"
-                    ? views.find((view) => view.server.id === fix.mcpServerId)?.server
-                    : undefined
-                }
-              />
-            ))
-      }
-    />
+    <>
+      <RuntimeNoteLine
+        note={note}
+        tone={tone}
+        actions={
+          fixes.length === 0
+            ? undefined
+            : fixes.map(({ key, fix }) => (
+                <FixButton
+                  key={key}
+                  fix={fix}
+                  server={
+                    fix.kind === "open-server" || fix.kind === "sign-in"
+                      ? views.find((view) => view.server.id === fix.mcpServerId)?.server
+                      : undefined
+                  }
+                  onSignIn={setSigningIn}
+                />
+              ))
+        }
+      />
+      {dialog}
+    </>
   );
 }
 
 /**
  * Draws the button of one fix: Reconnect leads to the Connection's reconnect
  * panel, "Open server" to the server's page, and "Sign in…" opens the token
- * dialog of a server added by URL. `server` tells apart two buttons of one
- * kind on one line for screen readers, and is the record the token dialog
- * starts from.
+ * dialog of a server added by URL (`onSignIn`, which the line holds). `server`
+ * tells apart two buttons of one kind on one line for screen readers, and is
+ * the record the token dialog starts from.
  */
 function FixButton({
   fix,
   server,
+  onSignIn,
 }: {
   readonly fix: WarningFix;
   readonly server: McpServer | undefined;
+  readonly onSignIn: (server: McpServer) => void;
 }): JSX.Element | null {
   const className = buildButtonClassName("primary", "px-1.5 py-0.5 text-meta");
   switch (fix.kind) {
@@ -105,44 +134,17 @@ function FixButton({
         </Link>
       );
     case "sign-in":
-      return server === undefined ? null : <SignInButton fix={fix} server={server} />;
-  }
-}
-
-/**
- * Draws the "Sign in…" button of a server added by URL. It opens the token
- * dialog over the thread, and closing the dialog leaves the thread as it was.
- */
-function SignInButton({
-  fix,
-  server,
-}: {
-  readonly fix: Extract<WarningFix, { kind: "sign-in" }>;
-  readonly server: McpServer;
-}): JSX.Element {
-  const { client } = useRouteContext({ from: "/_shell" });
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Button
-        variant="primary"
-        className="px-1.5 py-0.5 text-meta"
-        aria-label={`${fix.label}: ${server.name}`}
-        onClick={() => {
-          setOpen(true);
-        }}
-      >
-        {fix.label}
-      </Button>
-      {open ? (
-        <TokenDialog
-          client={client}
-          server={server}
-          onClose={() => {
-            setOpen(false);
+      return server === undefined ? null : (
+        <Button
+          variant="primary"
+          className="px-1.5 py-0.5 text-meta"
+          aria-label={`${fix.label}: ${server.name}`}
+          onClick={() => {
+            onSignIn(server);
           }}
-        />
-      ) : null}
-    </>
-  );
+        >
+          {fix.label}
+        </Button>
+      );
+  }
 }

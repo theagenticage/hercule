@@ -33,6 +33,8 @@ export interface UrlServerFlow {
   readonly finishSignInByPaste: (pasted: string) => void;
   readonly cancelSignIn: () => void;
   readonly retryRead: () => void;
+  /** Checks the followed server again and reads it again. Resolves to the controller's reason when it refused the check, or `null`. */
+  readonly checkNow: () => Promise<string | null>;
 }
 
 /** What a dialog shows before its attempt has opened, which is the first render only. */
@@ -82,6 +84,8 @@ const buildAttemptStore = (flows: McpUrlServerFlows, subject: UrlServerFlowSubje
     retryRead: (): void => {
       if (attemptId !== null) flows.retryRead(attemptId);
     },
+    checkNow: (): Promise<string | null> =>
+      attemptId === null ? Promise.resolve(null) : flows.checkNow(attemptId),
   };
 };
 
@@ -122,5 +126,6 @@ export function useUrlServerFlow(
     finishSignInByPaste: store.finishSignInByPaste,
     cancelSignIn: store.cancelSignIn,
     retryRead: store.retryRead,
+    checkNow: store.checkNow,
   };
 }

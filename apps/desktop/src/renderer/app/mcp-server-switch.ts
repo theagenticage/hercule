@@ -10,12 +10,11 @@ import { useRouteContext } from "@tanstack/react-router";
 import {
   buildMcpListQuery,
   describeMcpListProblem,
-  describeReplaceRefusal,
   findOrCreateMcpServerSwitches,
   readMcpServerOffers,
   type McpServerSwitchPress,
   type McpServerSwitchTarget,
-  type ReplaceRefusal,
+  type ReplaceProgress,
 } from "@hercule/client-core/mcp-servers";
 import { mcpServerQuery, mcpServersQuery, pluginsQuery } from "./queries";
 
@@ -31,10 +30,10 @@ export interface McpServerSwitch {
   readonly press: (on: boolean) => McpServerSwitchPress;
   /** Moves the server added by URL `serverId` onto this plugin target, switched on, with one write. Does nothing for a target that is not a plugin's. */
   readonly replace: (serverId: string) => void;
-  /** What Replace was refused for, or `null`. A refusal names the server that won, when there is one. */
-  readonly replaceRefusal: ReplaceRefusal | null;
-  /** Forgets the refusal, when the user dismisses it. */
-  readonly clearRefusal: () => void;
+  /** Where the Replace of this plugin target stands: still being chosen, writing, done, or refused. */
+  readonly replaceProgress: ReplaceProgress;
+  /** Forgets the refusal and the server the user confirmed, when the dialog closes. */
+  readonly clearReplace: () => void;
   /** Whether a write of the switch runs, started by any control, or the list could not be read again after one. */
   readonly blocked: boolean;
   /** Returns why the last press made no change, or that a saved change could not be read again, or `null`. */
@@ -70,6 +69,22 @@ export function useMcpServerSwitch(
     },
   });
   const state = useSyncExternalStore(switches.subscribe, () => switches.readState(target));
+  // The progress reads the servers the cache holds now, so it follows the cache as well as the
+  // switches. `useSyncExternalStore` needs a snapshot that is equal while nothing changed, so
+  // the snapshot is the progress written as text.
+  const subscribeToProgress = (listener: () => void): (() => void) => {
+    const stopSwitches = switches.subscribe(listener);
+    const stopCache = queryClient.getQueryCache().subscribe(listener);
+    return () => {
+      stopSwitches();
+      stopCache();
+    };
+  };
+  const replaceProgress = JSON.parse(
+    useSyncExternalStore(subscribeToProgress, () =>
+      JSON.stringify(switches.readReplaceProgress(target)),
+    ),
+  ) as ReplaceProgress;
   // A refusal stays while a control shows the target, and expires some time after the last one left.
   const key = JSON.stringify(target);
   useEffect(() => {
@@ -81,8 +96,8 @@ export function useMcpServerSwitch(
     replace: (serverId) => {
       switches.replace(target, serverId);
     },
-    replaceRefusal: describeReplaceRefusal(state),
-    clearRefusal: () => {
+    replaceProgress,
+    clearReplace: () => {
       switches.clearRefusal(target);
     },
     blocked: state.blocked,

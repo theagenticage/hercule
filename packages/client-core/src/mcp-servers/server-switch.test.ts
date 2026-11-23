@@ -30,6 +30,15 @@ const OFFER_ORIGIN = (contributionId: string) =>
   contributionId === "sentry/sentry" ? "https://mcp.sentry.example" : undefined;
 const PAGE_KEY = (id: string) => ["mcp-server", id];
 
+/** A promise the test settles by hand. */
+const hold = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
 /** A controller that holds a list of servers, with a stub client that creates and updates them. */
 const setup = async (initial: readonly McpServer[] = []) => {
   const world = {
@@ -37,6 +46,8 @@ const setup = async (initial: readonly McpServer[] = []) => {
     readsFail: false,
     /** The error the next update fails with, or `null`. */
     updateFails: null as Error | null,
+    /** Holds the next update until it is released, or `null`. */
+    holdUpdate: null as Promise<void> | null,
     /** Resolves the create that is running, or `null` while none waits. */
     finishCreate: null as ((error?: Error) => void) | null,
   };
@@ -59,11 +70,14 @@ const setup = async (initial: readonly McpServer[] = []) => {
           }),
       ),
       update: vi.fn(
-        (request: {
+        async (request: {
           params: { id: string };
           payload: { enabled?: boolean; source?: McpServer["source"] };
         }) => {
-          if (world.updateFails !== null) return Promise.reject(world.updateFails);
+          const gate = world.holdUpdate;
+          world.holdUpdate = null;
+          if (gate !== null) await gate;
+          if (world.updateFails !== null) throw world.updateFails;
           const { enabled, source } = request.payload;
           world.servers = world.servers.map((server) =>
             server.id === request.params.id
@@ -74,7 +88,7 @@ const setup = async (initial: readonly McpServer[] = []) => {
                 }
               : server,
           );
-          return Promise.resolve({ answeredWith: "not a record" });
+          return { answeredWith: "not a record" };
         },
       ),
     },
@@ -592,6 +606,110 @@ describe("Replace", () => {
       message: "Nothing was replaced. This Connection's server was added meanwhile.",
       existingServerId: WINNER_ID,
     });
+  });
+});
+
+describe("where the Replace of an offer stands", () => {
+  const winnerRecord = (): McpServer => ({ ...SENTRY_WORK, id: WINNER_ID });
+
+  it("goes from choosing to writing the confirmed server to replaced, once that server shows on the Connection", async () => {
+    const { switches, settle } = await setup([docsByUrl("s-a"), docsByUrl("s-b", "/sse")]);
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "choosing" });
+
+    switches.replace(WORK, "s-b");
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "writing", serverId: "s-b" });
+
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "replaced", serverId: "s-b" });
+  });
+
+  it("stays writing, and not replaced, while the write is held even when the list already shows the record", async () => {
+    const { world, queryClient, switches } = await setup([docsByUrl("s-a")]);
+    const gate = hold();
+    world.holdUpdate = gate.promise;
+
+    switches.replace(WORK, "s-a");
+    queryClient.setQueryData(SERVERS_KEY, [
+      {
+        ...docsByUrl("s-a"),
+        source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: "c-work" },
+      },
+    ]);
+
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "writing", serverId: "s-a" });
+    gate.resolve();
+  });
+
+  it("refuses with a link to the winner when another client's server arrives before the user confirms, and never writes", async () => {
+    const { client, queryClient, switches } = await setup([docsByUrl("s-a")]);
+
+    queryClient.setQueryData(SERVERS_KEY, [docsByUrl("s-a"), winnerRecord()]);
+
+    expect(switches.readReplaceProgress(WORK)).toEqual({
+      kind: "refused",
+      serverId: null,
+      message: "Nothing was replaced. This Connection's server was added meanwhile.",
+      winnerServerId: WINNER_ID,
+    });
+    switches.replace(WORK, "s-a");
+    expect(client.mcpServer.update).not.toHaveBeenCalled();
+    expect(switches.readReplaceProgress(WORK)).toMatchObject({
+      kind: "refused",
+      winnerServerId: WINNER_ID,
+    });
+  });
+
+  it("keeps the confirmed server and shows the winner when another client's server arrives while the write is held, and the write was sent once to the confirmed id", async () => {
+    const { world, client, queryClient, switches, settle } = await setup([
+      docsByUrl("s-a"),
+      docsByUrl("s-b", "/sse"),
+    ]);
+    const gate = hold();
+    world.holdUpdate = gate.promise;
+    world.updateFails = new ApiError("conflict", "A server of this account exists.", {
+      reason: "mcp-server-exists",
+      mcpServerId: WINNER_ID,
+    });
+
+    switches.replace(WORK, "s-b");
+    queryClient.setQueryData(SERVERS_KEY, [
+      docsByUrl("s-a"),
+      docsByUrl("s-b", "/sse"),
+      winnerRecord(),
+    ]);
+
+    expect(switches.readReplaceProgress(WORK)).toEqual({
+      kind: "refused",
+      serverId: "s-b",
+      message: "Nothing was replaced. This Connection's server was added meanwhile.",
+      winnerServerId: WINNER_ID,
+    });
+    expect(switches.readState(WORK).blocked).toBe(true);
+
+    gate.resolve();
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toMatchObject({
+      kind: "refused",
+      serverId: "s-b",
+      winnerServerId: WINNER_ID,
+    });
+    expect(client.mcpServer.update).toHaveBeenCalledExactlyOnceWith({
+      params: { id: "s-b" },
+      payload: expect.objectContaining({ enabled: true }) as unknown,
+    });
+  });
+
+  it("forgets the confirmed server when the refusal is dismissed, and is always choosing for a target that is not a plugin's", async () => {
+    const { world, switches, settle } = await setup([docsByUrl("s-a")]);
+    world.updateFails = new ApiError("not_found", "Gone.");
+    switches.replace(WORK, "s-a");
+    await settle(WORK);
+    expect(switches.readReplaceProgress(WORK)).toMatchObject({ kind: "refused", serverId: "s-a" });
+
+    switches.clearRefusal(WORK);
+
+    expect(switches.readReplaceProgress(WORK)).toEqual({ kind: "choosing" });
+    expect(switches.readReplaceProgress(URL_TARGET("s-a"))).toEqual({ kind: "choosing" });
   });
 });
 

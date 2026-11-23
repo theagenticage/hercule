@@ -30,7 +30,9 @@ export const buildOfferRowId = (contributionId: string, connectionId: string): s
  *   the server or updates its record is decided when it is pressed.
  * - Switching the server on while the user added the same server by URL does
  *   not create it. The row opens the Replace dialog, which moves the server the
- *   user added onto the Connection. The dialog goes once the row has a record.
+ *   user added onto the Connection. The dialog closes itself once the server it
+ *   confirmed is on the Connection; a server that appeared on the Connection
+ *   some other way does not close it.
  */
 export function ServerRow({
   client,
@@ -46,7 +48,6 @@ export function ServerRow({
   const switchServer = useMcpServerSwitch(client, buildOfferSwitchTarget(row));
   // The servers added by URL the switch would replace, while the user chooses.
   const [replacing, setReplacing] = useState<readonly McpServer[] | null>(null);
-  if (replacing !== null && view !== null) setReplacing(null);
   const press = (on: boolean): void => {
     const pressed = switchServer.press(on);
     if (pressed.kind === "replace") setReplacing(pressed.candidates);
@@ -107,6 +108,7 @@ export function ServerRow({
           typeName={row.typeName}
           switchServer={switchServer}
           onClose={() => {
+            switchServer.clearReplace();
             setReplacing(null);
           }}
         />

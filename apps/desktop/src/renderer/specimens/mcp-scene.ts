@@ -10,6 +10,7 @@
  * `listUnknownRequests` and fails the scene.
  */
 import type { Handler } from "@hercule/client-core/testing";
+import type { Bridge } from "../../ipc/bridge";
 import type { EventCountsByConnection, McpServer } from "@hercule/contract";
 import { BOOT_HANDLERS, buildSidebarHandlers } from "../app/fake-controller";
 import type { SidebarRecords as ControllerRecords } from "../app/fake-controller";
@@ -41,6 +42,12 @@ export interface McpScene {
    * used, on every server of the scene.
    */
   readonly signIn?: { readonly status: number; readonly body: unknown };
+  /**
+   * True for a scene whose sign-in dialog is drawn after main started its
+   * listener for the browser's return, so the waiting step is the one a Mac
+   * shows. The browser never comes back in the scene.
+   */
+  readonly signInListens?: boolean;
   /** The thread the scene opens. */
   readonly thread?: ThreadScreenRecords;
   /** The Draft Thread the scene opens. */
@@ -102,12 +109,16 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
   };
   if (create !== undefined) {
     handlers["POST /api/v1/mcp-servers"] = () => {
-      if (create.status === 200) {
-        created = create.body as McpServer;
-        handlers[`GET /api/v1/mcp-servers/${created.id}`] = { body: created };
-      }
+      if (create.status === 200) created = create.body as McpServer;
       return { status: create.status, body: create.body };
     };
+    // Registered up front, because the returned handlers are a copy: a handler added
+    // after the copy is made would never answer. Nothing reads the new server before
+    // the call above makes it.
+    if (create.status === 200) {
+      const { id } = create.body as McpServer;
+      handlers[`GET /api/v1/mcp-servers/${id}`] = { body: create.body };
+    }
   }
   if (signIn !== undefined) {
     for (const { id } of mcp.servers) {
@@ -151,6 +162,7 @@ export function mountMcpScene(
     path: fixturePath.replace(/[^/?=&]+/g, (part) => convertIds(part)),
     username: scene.records.user.username,
     appearance: readSheetAppearance(),
+    ...(scene.signInListens === true ? { signInReturn: LISTENING_SIGN_IN_RETURN } : {}),
     prepare: ({ controller }) => {
       if (draft === undefined || controller === null) return;
       for (const entry of draft.recent ?? []) rememberRecentModel(CONTROLLER_URL, entry);
@@ -158,6 +170,18 @@ export function mountMcpScene(
     },
   });
 }
+
+/** Main's answers when it listens for the browser's return, which never comes. */
+const LISTENING_SIGN_IN_RETURN: Bridge["signInReturn"] = {
+  listen: () =>
+    Promise.resolve({
+      _tag: "listening",
+      listenerId: "specimen",
+      redirectUri: "http://127.0.0.1:4937/callback",
+    }),
+  wait: () => new Promise(() => undefined),
+  cancel: () => Promise.resolve(undefined),
+};
 
 /**
  * Waits until the page's sidebar has drawn and no read is running, fails when

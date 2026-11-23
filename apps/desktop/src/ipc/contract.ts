@@ -71,6 +71,20 @@ const ControllerRefusalCases = {
 };
 
 /**
+ * The outcomes of opening a web link in the default browser.
+ *
+ * - `Opened`: the system accepted the link.
+ * - `NotOpened`: the system could not open it, for example because no browser
+ *   is set. `reason` is a sentence for the user. It never holds the link, which
+ *   can carry a one-time sign-in `state` in its query.
+ */
+export const LinkOpenOutcome = Schema.TaggedUnion({
+  Opened: {},
+  NotOpened: { reason: Schema.String },
+});
+export type LinkOpenOutcome = typeof LinkOpenOutcome.Type;
+
+/**
  * The outcomes of saving the Appearance in main's settings file.
  *
  * - `Saved`: the file holds the new Appearance.
@@ -676,10 +690,13 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     request: Appearance,
     response: AppearanceSaveOutcome,
   },
-  /** Opens an `http:` or `https:` URL in the default browser. Refuses any other URL. */
+  /**
+   * Opens an `http:` or `https:` URL in the default browser. Refuses any other
+   * URL. Answers `NotOpened` when the system cannot open it.
+   */
   "link.open": {
     request: Schema.Struct({ url: HttpUrl }),
-    response: Schema.Void,
+    response: LinkOpenOutcome,
   },
   /**
    * Starts a listener on 127.0.0.1, on a port main picks, that catches the

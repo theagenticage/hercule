@@ -4,8 +4,8 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   describeClosing,
   describeExistsRefusal,
+  describeOpenServerAction,
   describePluginOriginRefusal,
-  describeTokenForm,
   readAddForm,
   type RefusalAction,
   type RefusalDescription,
@@ -13,6 +13,7 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import {
   buildSignInActions,
+  describeAttemptTokenForm,
   useCheckNow,
   useUrlServerAttempt,
 } from "../../../../../app/mcp-url-flows";
@@ -32,9 +33,9 @@ import {
  * offers, show in the form with their button.
  *
  * The server is created by the check, so it stays in the list when the dialog
- * is closed after it, and the dialog says so. The fields are this dialog's;
- * the attempt (see `useUrlServerAttempt`) holds the write and follows the
- * server. `onClose` is called whenever the dialog closes; the list then
+ * is closed after it, and the dialog says so. The address and the name are
+ * this dialog's; the token is the token form's. The attempt (see
+ * `useUrlServerAttempt`) holds the write and follows the server. `onClose` is called whenever the dialog closes; the list then
  * unmounts it.
  */
 export function AddServerDialog({ onClose }: { readonly onClose: () => void }): JSX.Element {
@@ -43,16 +44,19 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const { flows, attemptId, state } = useUrlServerAttempt({ kind: "add" });
-  const check = useCheckNow();
+  const { flows, attemptId, state, closeAttempt } = useUrlServerAttempt({ kind: "add" });
+  const check = useCheckNow(flows, attemptId);
   const [address, setAddress] = useState("");
   // `null` until the user types in the Name: the field then follows the address.
   const [typedName, setTypedName] = useState<string | null>(null);
-  const [token, setToken] = useState("");
   // The fields the last "Check server" sent. A refusal is about those, not about what is typed now.
   const [sent, setSent] = useState<string | null>(null);
   const fields = JSON.stringify([address, typedName]);
-  const close = (): void => dialogRef.current?.close();
+  // Ends the attempt before the dialog closes, so no late result reaches it.
+  const close = (): void => {
+    closeAttempt();
+    dialogRef.current?.close();
+  };
   const openServer = (mcpServerId: string): void => {
     close();
     void navigate({ to: "/settings/mcp-servers/$id", params: { id: mcpServerId } });
@@ -65,14 +69,15 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
     if (problem.kind === "exists")
       return describeExistsRefusal(problem.mcpServerId, problem.existing);
     if (problem.kind !== "plugin-origin") return null;
-    const described = describePluginOriginRefusal({
+    // This app has no Plugins page, so a plugin that is off gets a sentence that says where
+    // to act, and no button.
+    return describePluginOriginRefusal({
       refusal: problem.refusal,
       message: problem.message,
       plugins,
       connections,
+      pluginsSettings: "web-app",
     });
-    // This app has no Plugins page to open yet, so the sentence stands without a button.
-    return described.action?.kind === "open-plugins" ? { ...described, action: null } : described;
   };
   const runRefusalAction = (action: RefusalAction): void => {
     switch (action.kind) {
@@ -88,12 +93,21 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
         void navigate({ to: "/settings/connections" });
         return;
       case "open-plugins":
+        // Not offered here: `describePluginOriginRefusal` is asked for the app without a Plugins page.
         return;
     }
   };
 
   return (
-    <UrlServerDialogFrame dialogRef={dialogRef} heading="Add an MCP server" onClose={onClose}>
+    <UrlServerDialogFrame
+      dialogRef={dialogRef}
+      heading="Add an MCP server"
+      onClose={() => {
+        closeAttempt();
+        onClose();
+      }}
+      onCloseRequest={close}
+    >
       {state.kind === "form" ? (
         <AddForm
           address={address}
@@ -116,24 +130,21 @@ export function AddServerDialog({ onClose }: { readonly onClose: () => void }): 
           state={state}
           tokenWords={
             state.kind === "following" && state.server !== null
-              ? describeTokenForm(state.server)
+              ? describeAttemptTokenForm(state.server, state)
               : null
           }
-          token={token}
+          openAction={describeOpenServerAction(state, "elsewhere")}
           closingNote={describeClosing(state)}
           checkBusy={check.busy}
           checkError={check.error}
           actions={{
             onClose: close,
             onOpenServer: openServer,
-            onCheckNow: () => {
-              if (state.kind === "following") check.run(state.mcpServerId);
-            },
+            onCheckNow: check.run,
             onRetryRead: () => {
               if (attemptId !== null) flows.retryRead(attemptId);
             },
-            onTokenChange: setToken,
-            onSaveToken: () => {
+            onSaveToken: (token) => {
               if (attemptId !== null) flows.submitToken(attemptId, token);
             },
             ...buildSignInActions(flows, attemptId),

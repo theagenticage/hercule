@@ -51,6 +51,8 @@ export interface OpenWorldOptions {
   readonly handlers?: Readonly<Record<string, Handler>>;
   /** How main answers the browser's return from a sign-in (see `createFakeBridge`). */
   readonly signInReturn?: Bridge["signInReturn"];
+  /** How main answers a link the app opens in the browser (see `createFakeBridge`). */
+  readonly openLink?: (url: string) => ReturnType<Bridge["link"]["open"]>;
 }
 
 /**
@@ -106,6 +108,7 @@ export const openAt = async (
     controllerUrl: CONTROLLER_URL,
     token: "bearer",
     ...(options.signInReturn === undefined ? {} : { signInReturn: options.signInReturn }),
+    ...(options.openLink === undefined ? {} : { openLink: options.openLink }),
   });
   const app = await renderApp(fake, { path });
   await app.live.waitForFirstPushes();

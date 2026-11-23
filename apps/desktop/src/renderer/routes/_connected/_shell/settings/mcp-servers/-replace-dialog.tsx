@@ -50,33 +50,34 @@ export function ReplaceDialog({
   const [chosenId, setChosenId] = useState<string | null>(
     candidates.length === 1 ? candidates[0]!.id : null,
   );
-  const [started, setStarted] = useState(false);
+  // The servers the dialog listed when the user pressed Replace. The write moves the chosen
+  // server onto the Connection, so the live list no longer holds it afterwards.
+  const [confirmedList, setConfirmedList] = useState<readonly McpServer[] | null>(null);
+  const progress = flip.replaceProgress;
+  const choosing = progress.kind === "choosing";
   const live = findReplaceCandidates(row.offer, servers);
+  const shown = choosing ? live : (confirmedList ?? live);
+  // Once the user confirmed, the dialog keeps the confirmed server selected, whatever the list does.
+  const selectedId =
+    progress.kind === "choosing" || progress.serverId === null ? chosenId : progress.serverId;
   const choice =
-    chosenId === null
+    selectedId === null
       ? null
-      : decideReplaceChoice({ offer: row.offer, servers, chosenServerId: chosenId });
-  const chosen = choice?.kind === "chosen" ? choice.server : null;
+      : choosing
+        ? decideReplaceChoice({ offer: row.offer, servers, chosenServerId: selectedId })
+        : { kind: "chosen" as const, server: shown.find((server) => server.id === selectedId) };
+  const chosen = choice?.kind === "chosen" ? (choice.server ?? null) : null;
   const lostChoice = choice?.kind === "changed";
-  const refusal = flip.replaceRefusal;
+  const refusal = progress.kind === "refused" ? progress.message : null;
   const winner =
-    refusal?.winnerServerId == null
-      ? undefined
-      : servers.find((server) => server.id === refusal.winnerServerId);
+    progress.kind === "refused" && progress.winnerServerId !== null
+      ? servers.find((server) => server.id === progress.winnerServerId)
+      : undefined;
 
-  // The Connection's server has a record once the write ran and the list was read again.
-  const replaced = servers.some(
-    ({ source }) =>
-      source.kind === "plugin" &&
-      source.contributionId === row.offer.contributionId &&
-      source.connectionId === row.connection.id,
-  );
-  // The dialog ends with the write: once it ran and left no refusal, the server is on the Connection.
+  // The dialog ends when the confirmed server's own record is on the Connection.
   useEffect(() => {
-    if (started && replaced && !flip.blocked && flip.replaceRefusal === null) {
-      dialogRef.current?.close();
-    }
-  }, [started, replaced, flip.blocked, flip.replaceRefusal]);
+    if (progress.kind === "replaced") dialogRef.current?.close();
+  }, [progress.kind]);
 
   const described =
     chosen === null
@@ -86,7 +87,7 @@ export function ReplaceDialog({
           connection: row.connection,
           typeName: row.typeName,
         });
-  const several = live.length > 1 || (lostChoice && live.length > 0);
+  const several = shown.length > 1 || (lostChoice && live.length > 0);
   return (
     <ConfirmDialog
       dialogRef={dialogRef}
@@ -95,18 +96,21 @@ export function ReplaceDialog({
       actionClass="accent"
       initialFocus={chosen === null ? undefined : "action"}
       pending={flip.blocked || chosen === null}
-      error={refusal?.message ?? null}
+      error={refusal}
       refusal={
-        live.length === 0 && !started
+        live.length === 0 && choosing
           ? "No server added by URL sits on this address any more."
           : null
       }
       onConfirm={() => {
         if (chosen === null) return;
-        setStarted(true);
+        setConfirmedList(live);
         flip.replace(chosen.id);
       }}
-      onClose={onClose}
+      onClose={() => {
+        flip.clearReplace();
+        onClose();
+      }}
     >
       {lostChoice && (
         <p>
@@ -116,13 +120,13 @@ export function ReplaceDialog({
       )}
       {several && (
         <div className="url-choice" role="radiogroup" aria-label="Server to replace">
-          {live.map((server) => (
+          {shown.map((server) => (
             <label key={server.id}>
               <input
                 type="radio"
                 name="replace-server"
                 checked={chosen?.id === server.id}
-                disabled={flip.blocked}
+                disabled={flip.blocked || !choosing}
                 onChange={() => {
                   setChosenId(server.id);
                 }}

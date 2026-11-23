@@ -6,8 +6,18 @@
  * and callbacks and reads nothing. The two orchestrators (`-add-server-dialog.tsx`
  * of the route, and `token-dialog.tsx`) hold the attempt and the fields.
  */
-import { useState, type FormEvent, type JSX, type ReactNode, type RefObject } from "react";
 import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import {
+  ADDRESS_FIELD_HINT,
+  describeFailedCheck,
   describeOffOutcome,
   describeReadyTools,
   describeSignInWaiting,
@@ -15,6 +25,7 @@ import {
   NEW_SERVER_NOTE,
   type AddFormReading,
   type FlowProblem,
+  type OpenServerAction,
   type RefusalAction,
   type RefusalDescription,
   type ServerOutcome,
@@ -22,6 +33,7 @@ import {
   type UrlServerFlowState,
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
+import { ExternalIcon } from "../../../icons/external";
 import { QuestionIcon } from "../../../icons/question";
 import { ToolsIcon } from "../../../icons/tools";
 import { GlassDialog } from "../../glass-dialog";
@@ -30,16 +42,24 @@ import { TextParts } from "./server-parts";
 import "../connections/connection-setup.css";
 import "./url-server-dialogs.css";
 
-/** Renders the dialog around `children`: its glass, its heading and its body. `onClose` is called whenever it closes. */
+/**
+ * Renders the dialog around `children`: its glass, its heading and its body.
+ * `onClose` is called whenever it closes. `onCloseRequest` is called when the
+ * user presses Esc or the scrim, before anything closes: the caller ends what
+ * the dialog runs and then closes the dialog itself, so nothing that arrives
+ * between the request and the close event still reaches the dialog.
+ */
 export function UrlServerDialogFrame({
   dialogRef,
   heading,
   onClose,
+  onCloseRequest,
   children,
 }: {
   readonly dialogRef: RefObject<HTMLDialogElement | null>;
   readonly heading: string;
   readonly onClose: () => void;
+  readonly onCloseRequest?: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -48,6 +68,7 @@ export function UrlServerDialogFrame({
       className="setup-dialog url-dialog"
       label={heading}
       onClose={onClose}
+      {...(onCloseRequest === undefined ? {} : { onCloseRequest })}
     >
       <div className="pop-h">
         <b>{heading}</b>
@@ -119,11 +140,7 @@ export function AddForm({
   return (
     <form onSubmit={submit}>
       <div className="url-form">
-        <FormField
-          label="Address"
-          hint="A remote MCP server, reached over HTTPS. The controller calls it, so it must be reachable from there."
-          error={issues?.address ?? null}
-        >
+        <FormField label="Address" hint={ADDRESS_FIELD_HINT} error={issues?.address ?? null}>
           <input
             autoFocus
             spellCheck={false}
@@ -187,44 +204,38 @@ export function AddForm({
 }
 
 /**
- * Renders the sign-in form of a server added by URL. A server that signs in
- * through the browser gets that first (`words.browser`), with the pasted token
- * behind "Paste a token instead", unless the controller said the browser does
- * not work for it. The token part is the sentence `words.intro`, the masked
- * Token field with `words.note` under it, and Save token. `problem` is why the
- * last write did not go through, and `refusedReason` is the controller's reason
- * when the token this dialog saved was refused. Every wording comes from
- * `describeTokenForm`, so Add, "Replace token…" and every "Sign in…" say the
- * same.
+ * Renders the sign-in form of a server added by URL, opened as `words.method`
+ * says: the browser choice (`words.browser`), with the token field behind
+ * "Paste a token instead", or the token field. The token part is the sentence
+ * `words.intro`, the masked Token field with `words.note` under it, and Save
+ * token. `refusedReason` is the controller's reason when the token this
+ * dialog saved was refused, and the field shows `words.problemText` first.
+ * Every wording comes from `describeTokenForm`, so Add, "Replace token…" and
+ * every "Sign in…" say the same.
+ *
+ * The field owns its draft. `onSubmit` hands the token over, and the form is
+ * gone while the write and the check run, so a refused check opens an empty
+ * field and no copy of the token stays in the dialog.
  */
 export function TokenForm({
   words,
-  token,
-  problem,
   refusedReason,
-  onTokenChange,
   onSubmit,
   onSignIn,
   onCancel,
 }: {
   readonly words: TokenFormWords;
-  readonly token: string;
-  readonly problem: FlowProblem | null;
   /** The controller's reason for refusing the token this dialog saved, or `null`. */
   readonly refusedReason: string | null;
-  readonly onTokenChange: (token: string) => void;
-  readonly onSubmit: () => void;
+  readonly onSubmit: (token: string) => void;
   /** Starts the sign-in through the browser. */
   readonly onSignIn: () => void;
   readonly onCancel: () => void;
 }): JSX.Element {
-  const issues = problem?.kind === "invalid" ? problem.issues : null;
-  const fieldError =
-    issues?.token ?? (problem?.kind === "failed" ? problem.message : null) ?? refusedReason;
-  // The browser is offered unless the controller said it does not work for this server.
-  const browser = problem?.kind === "sign-in-unsupported" ? null : words.browser;
-  const [pasting, setPasting] = useState(browser === null || problem !== null);
-  if (browser !== null && !pasting) {
+  const [token, setToken] = useState("");
+  const [showsToken, setShowsToken] = useState(words.method === "token");
+  const { browser } = words;
+  if (browser !== null && !showsToken) {
     return (
       <>
         <p className="setup-lead">{browser.intro}</p>
@@ -242,7 +253,7 @@ export function TokenForm({
             type="button"
             className="btn"
             onClick={() => {
-              setPasting(true);
+              setShowsToken(true);
             }}
           >
             {browser.pasteToggle}
@@ -258,16 +269,11 @@ export function TokenForm({
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        if (token !== "") onSubmit();
+        if (token !== "") onSubmit(token);
       }}
     >
-      {problem?.kind === "sign-in-unsupported" && (
-        <p className="fl-err setup-error" role="alert">
-          {problem.message}
-        </p>
-      )}
       <p className="setup-lead">{words.intro}</p>
-      <FormField label="Token" hint={words.note} error={fieldError}>
+      <FormField label="Token" hint={words.note} error={words.problemText ?? refusedReason}>
         <input
           type="password"
           autoFocus
@@ -275,16 +281,11 @@ export function TokenForm({
           spellCheck={false}
           value={token}
           onChange={(event) => {
-            onTokenChange(event.target.value);
+            setToken(event.target.value);
           }}
         />
       </FormField>
       {words.offNote !== null && <p className="setup-lead url-note">{words.offNote}</p>}
-      {issues?.other != null && (
-        <p className="fl-err setup-error" role="alert">
-          {issues.other}
-        </p>
-      )}
       <div className="setup-acts">
         <button type="button" className="btn btn--quiet" onClick={onCancel}>
           Cancel
@@ -344,6 +345,21 @@ function ServerCard({
   );
 }
 
+/** Renders the tools a server offered: each name in the code font, with its description. */
+function ToolList({ tools }: { readonly tools: McpServer["tools"] }): JSX.Element | null {
+  if (tools.length === 0) return null;
+  return (
+    <div className="url-tools">
+      {tools.map((tool) => (
+        <div key={tool.name} className="mcp-tool">
+          <code>{tool.name}</code>
+          <span>{tool.description}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Renders what the attempt shows once the write was acknowledged and the
  * server is followed: a wait while it is read or checked, the done step, a
@@ -354,36 +370,37 @@ function ServerCard({
  * second does not mean the server is broken.
  */
 export function OutcomeView({
-  mcpServerId,
   server,
   outcome,
+  openAction,
   closingNote,
   checkBusy,
   checkError,
   actions,
 }: {
-  readonly mcpServerId: string;
   readonly server: McpServer | null;
   readonly outcome: Exclude<ServerOutcome, { kind: "needs-token" }>;
+  /** The "Open <name>" button, or `null` when the outcome leads nowhere else (see `describeOpenServerAction`). */
+  readonly openAction: OpenServerAction | null;
   /** What closing the dialog now does, or `null` (see `describeClosing`). */
   readonly closingNote: string | null;
   readonly checkBusy: boolean;
   readonly checkError: string | null;
   readonly actions: OutcomeActions;
 }): JSX.Element {
-  const name = server?.name ?? "server";
-  const openButton = (
-    <button
-      type="button"
-      className="btn btn--accent"
-      autoFocus
-      onClick={() => {
-        actions.onOpenServer(mcpServerId);
-      }}
-    >
-      {`Open ${name}`}
-    </button>
-  );
+  const openButton =
+    openAction === null ? null : (
+      <button
+        type="button"
+        className="btn btn--accent"
+        autoFocus
+        onClick={() => {
+          actions.onOpenServer(openAction.mcpServerId);
+        }}
+      >
+        {openAction.label}
+      </button>
+    );
   const closeButton = (label: string): JSX.Element => (
     <button type="button" className="btn btn--quiet" onClick={actions.onClose}>
       {label}
@@ -413,38 +430,39 @@ export function OutcomeView({
       return (
         <>
           {server !== null && (
-            <ServerCard
-              server={server}
-              end={<DoneMark>{describeReadyTools(outcome.toolCount)}</DoneMark>}
-            />
-          )}
-          {outcome.newServer ? (
             <>
-              <p className="setup-lead url-note">{NEW_SERVER_NOTE}</p>
-              <div className="setup-acts">
-                {closeButton("Done")}
-                {openButton}
-              </div>
+              <ServerCard
+                server={server}
+                end={<DoneMark>{describeReadyTools(outcome.toolCount)}</DoneMark>}
+              />
+              <ToolList tools={server.tools} />
             </>
-          ) : (
-            <div className="setup-acts">
+          )}
+          {outcome.newServer && <p className="setup-lead url-note">{NEW_SERVER_NOTE}</p>}
+          <div className="setup-acts">
+            {openButton === null ? (
               <button type="button" className="btn btn--accent" autoFocus onClick={actions.onClose}>
                 Done
               </button>
-            </div>
-          )}
+            ) : (
+              <>
+                {closeButton("Done")}
+                {openButton}
+              </>
+            )}
+          </div>
         </>
       );
-    case "failed":
+    case "failed": {
+      const failed = describeFailedCheck({
+        status: outcome.status,
+        detail: outcome.detail,
+        server,
+      });
       return (
         <>
           <Warning icon={<QuestionIcon size={14} />}>
-            <b>
-              {outcome.status === "unreachable"
-                ? `${readHost(server)} could not be reached.`
-                : `${readHost(server)} answered in a way Hercule could not use.`}
-            </b>{" "}
-            {outcome.detail}
+            <b>{failed.headline}</b> {failed.detail}
           </Warning>
           {checkError !== null && (
             <p className="fl-err setup-error" role="alert">
@@ -467,13 +485,22 @@ export function OutcomeView({
           </div>
         </>
       );
+    }
     case "off":
       return (
         <>
           <p className="setup-lead">{describeOffOutcome(outcome.saved)}</p>
           <div className="setup-acts">
-            {closeButton("Done")}
-            {openButton}
+            {openButton === null ? (
+              <button type="button" className="btn btn--accent" autoFocus onClick={actions.onClose}>
+                Done
+              </button>
+            ) : (
+              <>
+                {closeButton("Done")}
+                {openButton}
+              </>
+            )}
           </div>
         </>
       );
@@ -519,10 +546,13 @@ export function WritingView({
  */
 export function EndedView({
   state,
+  openAction,
   onClose,
   onOpenServer,
 }: {
   readonly state: Extract<UrlServerFlowState, { kind: "ended" }>;
+  /** The "Open <name>" button of a server that moved onto a Connection, or `null`. */
+  readonly openAction: OpenServerAction | null;
   readonly onClose: () => void;
   readonly onOpenServer: (mcpServerId: string) => void;
 }): JSX.Element {
@@ -545,15 +575,15 @@ export function EndedView({
         <button type="button" className="btn btn--quiet" onClick={onClose}>
           Close
         </button>
-        {state.reason === "moved" && state.mcpServerId !== null && (
+        {openAction !== null && (
           <button
             type="button"
             className="btn btn--accent"
             onClick={() => {
-              onOpenServer(state.mcpServerId!);
+              onOpenServer(openAction.mcpServerId);
             }}
           >
-            {state.name === null ? "Open server" : `Open ${state.name}`}
+            {openAction.label}
           </button>
         )}
       </div>
@@ -563,13 +593,13 @@ export function EndedView({
 
 /** What `FlowBody` needs to run the token form and the outcome's buttons. */
 export interface FlowBodyActions extends OutcomeActions {
-  readonly onTokenChange: (token: string) => void;
-  readonly onSaveToken: () => void;
+  /** Writes the token the form handed over. */
+  readonly onSaveToken: (token: string) => void;
   /** Starts the sign-in through the browser, or starts it again after a refusal. */
   readonly onStartSignIn: () => void;
   /** Ends the sign-in and returns to the form. */
   readonly onCancelSignIn: () => void;
-  /** Opens the sign-in page in the browser again. */
+  /** Opens the sign-in page in the browser. */
   readonly onOpenSignInPage: () => void;
   /** Finishes the sign-in with the address the user pasted. */
   readonly onFinishSignIn: (pasted: string) => void;
@@ -580,10 +610,10 @@ export interface FlowBodyActions extends OutcomeActions {
  * `signing-in` state:
  *
  * - `starting` and `finishing`: a wait;
- * - `waiting`: who asks for the approval, Open again and Cancel, and the way
- *   back when the browser does not return here: "Paste the browser's
- *   address…". When the app could not start its listener, the paste is the
- *   only way back and its field is shown at once;
+ * - `waiting`: a card that says who asks for the approval, with Open again
+ *   and Cancel, and under it the way back when the browser does not return
+ *   here: "Paste the browser's address…". When the app could not start its
+ *   listener, the paste is the only way back and its field is shown at once;
  * - `refused`: why the sign-in ended, with Start again.
  */
 export function SignInView({
@@ -629,7 +659,13 @@ export function SignInView({
   }
 }
 
-/** Renders the waiting step of a sign-in: the approval host, Open again, Cancel and the paste. */
+/**
+ * Renders the waiting step of a sign-in as a card: the heading, who asks for
+ * the approval, what to do in the browser, Open again and Cancel, and the
+ * paste. The step opens the browser itself, once, after this card has drawn
+ * who asks for the approval, so the user reads the host before the browser
+ * takes the focus.
+ */
 function WaitingView({
   step,
   closingNote,
@@ -647,73 +683,91 @@ function WaitingView({
   const words = describeSignInWaiting({
     approvalHost: step.approvalHost,
     returnBy: step.returnBy,
-    openedByApp: true,
+    openedByApp: step.opened,
   });
   const pasteShown = step.returnBy === "paste" || showsPaste || step.pasteProblem !== null;
+  // React's Strict Mode runs this effect twice before the step shows `opened`, and the page must open once.
+  const requestedOpen = useRef(false);
+  const { onOpenSignInPage } = actions;
+  useEffect(() => {
+    if (step.opened || requestedOpen.current) return;
+    requestedOpen.current = true;
+    onOpenSignInPage();
+  }, [step.opened, onOpenSignInPage]);
   return (
-    <>
-      <p className="setup-lead">
-        <b>{words.heading}</b>
-      </p>
-      <p className="setup-lead">{words.approval}</p>
-      <p className="setup-lead url-note">{words.instruction}</p>
-      {step.openError !== null && (
-        <p className="fl-err setup-error" role="alert">
-          {`The browser did not open the sign-in page: ${step.openError}`}
-        </p>
-      )}
-      {words.pasteQuestion !== null && (
-        <p className="setup-lead url-note">
-          {words.pasteQuestion}{" "}
-          {!pasteShown && (
-            <button
-              type="button"
-              className="btn btn--quiet btn--sm"
-              onClick={() => {
-                setShowsPaste(true);
+    <div className="url-waiting">
+      <MarkedRows>
+        <MarkedRow
+          mark={<ToolsIcon size={18} />}
+          name={words.heading}
+          detail={words.approval}
+          end={
+            <span className="setup-row-acts">
+              <button type="button" className="btn btn--sm" onClick={actions.onOpenSignInPage}>
+                <ExternalIcon size={14} />
+                {words.openLabel}
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--quiet"
+                onClick={actions.onCancelSignIn}
+              >
+                Cancel
+              </button>
+            </span>
+          }
+        >
+          <WaitLine text={words.instruction} />
+          {step.openError !== null && (
+            <p className="fl-err" role="alert">
+              {`The browser did not open the sign-in page: ${step.openError}`}
+            </p>
+          )}
+          {pasteShown && (
+            <form
+              className="url-paste"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (pasted.trim() !== "") actions.onFinishSignIn(pasted);
               }}
             >
-              {words.pasteToggle}
-            </button>
+              <FormField label={words.pasteLabel} error={step.pasteProblem}>
+                <input
+                  autoFocus={step.returnBy === "listener"}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder="http://127.0.0.1:…/callback?code=…"
+                  value={pasted}
+                  onChange={(event) => {
+                    setPasted(event.target.value);
+                  }}
+                />
+              </FormField>
+              <div className="setup-acts">
+                <button type="submit" className="btn btn--accent" disabled={pasted.trim() === ""}>
+                  {words.pasteSubmit}
+                </button>
+              </div>
+            </form>
           )}
+        </MarkedRow>
+      </MarkedRows>
+      {words.pasteQuestion !== null && !pasteShown && (
+        <p className="url-stuck">
+          {words.pasteQuestion}
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => {
+              setShowsPaste(true);
+            }}
+          >
+            {words.pasteToggle}
+          </button>
         </p>
       )}
-      {pasteShown && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (pasted.trim() !== "") actions.onFinishSignIn(pasted);
-          }}
-        >
-          <FormField label={words.pasteLabel} error={step.pasteProblem}>
-            <input
-              autoFocus={step.returnBy === "listener"}
-              spellCheck={false}
-              autoComplete="off"
-              placeholder="http://127.0.0.1:…/callback?code=…"
-              value={pasted}
-              onChange={(event) => {
-                setPasted(event.target.value);
-              }}
-            />
-          </FormField>
-          <div className="setup-acts">
-            <button type="submit" className="btn btn--accent" disabled={pasted.trim() === ""}>
-              {words.pasteSubmit}
-            </button>
-          </div>
-        </form>
-      )}
       {closingNote !== null && <p className="url-note">{closingNote}</p>}
-      <div className="setup-acts">
-        <button type="button" className="btn btn--quiet" onClick={actions.onCancelSignIn}>
-          Cancel
-        </button>
-        <button type="button" className="btn" onClick={actions.onOpenSignInPage}>
-          {words.openLabel}
-        </button>
-      </div>
-    </>
+    </div>
   );
 }
 
@@ -728,13 +782,14 @@ function WaitingView({
  *   the check;
  * - `ended`: why there is nothing left to follow.
  *
- * `server` is the record the words are decided from. `token` is the text of
- * the token field, which the dialog keeps.
+ * `tokenWords` are the words of the token form, from `describeTokenForm`, and
+ * `openAction` is the dialog's "Open <name>" button, from
+ * `describeOpenServerAction`.
  */
 export function FlowBody({
   state,
   tokenWords,
-  token,
+  openAction,
   closingNote,
   checkBusy,
   checkError,
@@ -743,7 +798,7 @@ export function FlowBody({
   readonly state: Exclude<UrlServerFlowState, { kind: "form" }>;
   /** The words of the token form for the followed server, or `null` while it is not read. */
   readonly tokenWords: TokenFormWords | null;
-  readonly token: string;
+  readonly openAction: OpenServerAction | null;
   readonly closingNote: string | null;
   readonly checkBusy: boolean;
   readonly checkError: string | null;
@@ -755,8 +810,16 @@ export function FlowBody({
     case "signing-in":
       return <SignInView state={state} closingNote={closingNote} actions={actions} />;
     case "ended":
-      return (
-        <EndedView state={state} onClose={actions.onClose} onOpenServer={actions.onOpenServer} />
+      // A closed attempt is the dialog going away: it has nothing left to say.
+      return state.reason === "closed" ? (
+        <></>
+      ) : (
+        <EndedView
+          state={state}
+          openAction={openAction}
+          onClose={actions.onClose}
+          onOpenServer={actions.onOpenServer}
+        />
       );
     case "following":
       if (state.outcome.kind === "needs-token") {
@@ -765,14 +828,11 @@ export function FlowBody({
         ) : (
           <TokenForm
             words={tokenWords}
-            token={token}
-            problem={state.problem}
             refusedReason={
               state.outcome.refusedAgain
                 ? (state.outcome.detail ?? "The server refused this token.")
                 : null
             }
-            onTokenChange={actions.onTokenChange}
             onSubmit={actions.onSaveToken}
             onSignIn={actions.onStartSignIn}
             onCancel={actions.onClose}
@@ -781,9 +841,9 @@ export function FlowBody({
       }
       return (
         <OutcomeView
-          mcpServerId={state.mcpServerId}
           server={state.server}
           outcome={state.outcome}
+          openAction={openAction}
           closingNote={closingNote}
           checkBusy={checkBusy}
           checkError={checkError}

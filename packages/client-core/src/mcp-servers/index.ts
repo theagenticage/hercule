@@ -6,6 +6,7 @@
  * no room for them.
  */
 export {
+  ADDRESS_FIELD_HINT,
   describeSignInHeading,
   describeTokenForm,
   describeToolNamePreview,
@@ -31,15 +32,19 @@ export {
   createMcpUrlServerFlows,
   decideFollowing,
   describeClosing,
+  describeFailedCheck,
   describeOffOutcome,
+  describeOpenServerAction,
   describeReadyTools,
   findOrCreateMcpUrlServerFlows,
   type BrowserSignInPort,
   type EndReason,
+  type FailedCheckWords,
   type FlowProblem,
   type FollowOrigin,
   type McpUrlServerFlowCache,
   type McpUrlServerFlows,
+  type OpenServerAction,
   type RecordReading,
   type ServerOutcome,
   type SignInStep,
@@ -96,6 +101,7 @@ export {
   type McpServerSwitchPress,
   type McpServerSwitches,
   type McpServerSwitchTarget,
+  type ReplaceProgress,
 } from "./server-switch";
 export {
   decideReplaceChoice,
@@ -170,11 +176,13 @@ export {
   buildMcpServerViews,
   describeConnectionRowProblem,
   describeRemoveEffect,
+  describeServerPageFields,
   describeSignInAction,
   describeSignInRow,
   describeSourceChip,
   isCheckDisabled,
   type McpServerView,
+  type ServerPageFields,
   type SignInAction,
   type SignInRow,
 } from "./views";

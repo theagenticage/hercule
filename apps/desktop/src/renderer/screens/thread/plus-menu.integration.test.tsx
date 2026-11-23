@@ -599,6 +599,30 @@ describe("the + menu on a started thread", () => {
     });
   });
 
+  it("keeps the thread on the live topic while a sign-in dialog opened from the submenu follows its server, on a thread with an empty list", async () => {
+    const signedOut = { ...NOTION, status: "needs-sign-in" } as const;
+    const app = await openComposerApp(`/?project=${WEBSHOP.id}`, { servers: [signedOut] });
+    const popover = await openServersSubmenu();
+    expect(readSubmenuRows(popover)).toEqual(["notion"]);
+    fireEvent.click(within(popover).getByRole("button", { name: "Sign in…", hidden: true }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to notion" });
+    await userEvent.type(within(dialog).getByLabelText("Token"), "abcd1234efgh5678");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Asking mcp.notion.example for its tools.");
+
+    // The menu that opened the dialog is closed now, and nothing else on the thread names a server.
+    toggleMenu(popover, "closed");
+    expect(app.live.readTopics()).toContain("mcpServer");
+    app.world.servers = app.world.servers.map((server) =>
+      server.id === NOTION.id ? { ...server, status: "ready" } : server,
+    );
+    act(() => {
+      app.live.pushInvalidation("mcpServer", [NOTION.id]);
+    });
+
+    await within(dialog).findByText("ready · 2 tools");
+  });
+
   it("says why Reconnect cannot go on when its Connection is deleted while the dialog is open, and closes with Close", async () => {
     const thread = threadWith([SENTRY_WORK]);
     const { context } = await openComposerApp(`/threads/${thread.session.id}`, {

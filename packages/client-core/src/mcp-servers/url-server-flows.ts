@@ -17,10 +17,14 @@
  * leaves through `cancelSignIn`, a refusal or a finished sign-in (which then
  * follows the server, as after a token). It runs these steps: the app that
  * can catch the browser's return starts a listener first (`listen`), then
- * `mcpServer.startSignIn` gives the authorization address, the app opens it,
- * and the return (or the pasted address) goes to `mcpServer.finishSignIn`.
- * An app that cannot catch the return (the web app, or the desktop app when
- * its listener is unavailable) uses the paste alone.
+ * `mcpServer.startSignIn` gives the authorization address, and the attempt
+ * shows the `waiting` step, which names the approval host, and waits for the
+ * return (`wait`) at once. The browser opens only when the app calls
+ * `openSignInPage`, which it does once the waiting step is on screen, so the
+ * user sees who asks before the browser opens and the return can never come
+ * before the wait. The return (or the pasted address) goes to
+ * `mcpServer.finishSignIn`. An app that cannot catch the return (the web app,
+ * or the desktop app when its listener is unavailable) uses the paste alone.
  *
  * What the rules are for:
  *
@@ -157,7 +161,7 @@ export type UrlServerFlowState =
  * Where the browser sign-in of an attempt is.
  *
  * - `starting`: the listener is starting and the controller is preparing the sign-in.
- * - `waiting`: the authorization address is out and the browser has not come back.
+ * - `waiting`: the authorization address is out and the browser has not come back. The app that opens the browser itself does so from this step, after drawing it.
  * - `finishing`: the browser's answer is with the controller.
  * - `refused`: the sign-in ended without a sign-in. `message` says why and what to do.
  */
@@ -173,6 +177,8 @@ export type SignInStep =
       readonly expiresAt: string;
       /** `listener`: the app catches the browser's return itself. `paste`: the user pastes the address the browser ended on. */
       readonly returnBy: "listener" | "paste";
+      /** True once the app asked to open the sign-in page (`openSignInPage`). The app that opens it by itself opens it while this is false, once. */
+      readonly opened: boolean;
       /** Why the app could not open the browser, or `null`. */
       readonly openError: string | null;
       /** Why the last pasted address was not accepted, or `null`. */
@@ -279,6 +285,78 @@ export const describeOffOutcome = (saved: "token" | "sign-in" | null): string =>
     ? "This server is switched off, so it is not checked."
     : `The ${saved} is saved. This server is switched off, so checking runs when it is switched on.`;
 
+/** The words of a check that ended with `unreachable` or `error`. */
+export interface FailedCheckWords {
+  /** What the check found, naming the server's host, such as "mcp.docs.example could not be reached.". */
+  readonly headline: string;
+  /** The controller's own reason, or `null` when it gave none. */
+  readonly detail: string | null;
+}
+
+/**
+ * Returns what a dialog says of a check that failed. The host of the address
+ * names the server, or "the server" when `server` is not known yet or has no
+ * address. Both apps draw these words.
+ */
+export const describeFailedCheck = ({
+  status,
+  detail,
+  server,
+}: {
+  readonly status: "unreachable" | "error";
+  readonly detail: string | null;
+  readonly server: McpServer | null;
+}): FailedCheckWords => {
+  const host =
+    server?.source.kind === "url" && URL.canParse(server.source.url)
+      ? new URL(server.source.url).host
+      : "the server";
+  return {
+    headline:
+      status === "unreachable"
+        ? `${host} could not be reached.`
+        : `${host} answered in a way Hercule could not use.`,
+    detail,
+  };
+};
+
+/** The button that leads from a dialog to a server's own page. */
+export interface OpenServerAction {
+  readonly mcpServerId: string;
+  /** Such as "Open docs". */
+  readonly label: string;
+}
+
+/**
+ * Returns the "Open <name>" button of a dialog's outcome, or `null` when there
+ * is none. It is offered whenever it leads somewhere the user is not:
+ *
+ * - `server-page` is a dialog opened on the server's own page: never.
+ * - `elsewhere` is a dialog opened from the list (Add) or from a thread: when
+ *   the check failed, when the server moved onto a Connection, and, for a
+ *   server this dialog just created, when it is ready.
+ *
+ * It does not draw the new server's footer (`NEW_SERVER_NOTE`), which belongs
+ * to a ready server this attempt created and nothing else.
+ */
+export const describeOpenServerAction = (
+  state: UrlServerFlowState,
+  openedOn: "server-page" | "elsewhere",
+): OpenServerAction | null => {
+  if (openedOn === "server-page") return null;
+  if (state.kind === "ended") {
+    return state.reason === "moved" && state.mcpServerId !== null
+      ? { mcpServerId: state.mcpServerId, label: `Open ${state.name ?? "server"}` }
+      : null;
+  }
+  if (state.kind !== "following") return null;
+  const { outcome } = state;
+  const leads = outcome.kind === "failed" || (outcome.kind === "ready" && outcome.newServer);
+  return leads
+    ? { mcpServerId: state.mcpServerId, label: `Open ${state.server?.name ?? "server"}` }
+    : null;
+};
+
 /** The footer a new server's dialog ends with, under "ready · N tools". */
 export const NEW_SERVER_NOTE =
   "No project names it yet. A thread gets it from its project's list once a project names it, from the default list when it is named there, or when it is switched on in that thread's composer. Name it in the projects that should use it.";
@@ -373,8 +451,23 @@ export interface McpUrlServerFlows {
    * sign-in goes on waiting. Does nothing unless the sign-in is waiting.
    */
   readonly finishSignInByPaste: (attemptId: string, pasted: string) => Promise<void>;
-  /** Opens the sign-in page again, for a waiting sign-in of an app that opens it. A failure is the waiting step's `openError`. */
-  readonly openSignInPageAgain: (attemptId: string) => Promise<void>;
+  /**
+   * Opens the sign-in page in the browser, for a waiting sign-in of an app
+   * that opens it. The waiting step shows `opened: true` from the moment this
+   * is called, so an app that calls it from an effect while `opened` is false
+   * opens the page once. A failure is the waiting step's `openError`. Does
+   * nothing for an app without a browser port, or when the sign-in is not
+   * waiting.
+   */
+  readonly openSignInPage: (attemptId: string) => Promise<void>;
+  /**
+   * Asks the controller to check the server the attempt follows again, then
+   * reads the server and the list again, so the attempt shows `checking` at
+   * once and does not wait for the push. Resolves to the controller's reason
+   * when it refused the check, or `null`. Does nothing, and resolves to
+   * `null`, when the attempt follows no server.
+   */
+  readonly checkNow: (attemptId: string) => Promise<string | null>;
   /** Ends the sign-in that is starting, waiting or refused, and returns the attempt to where it was. */
   readonly cancelSignIn: (attemptId: string) => void;
   /** Reads the followed server again, after `read-failed`. */
@@ -443,6 +536,8 @@ interface Attempt {
   listenerId: string | null;
   /** Counts the sign-ins the attempt started or ended, so the reply of an earlier one changes nothing. */
   signInRun: number;
+  /** Stops watching the list of servers for the record the dialog was opened for. */
+  stopWatchingList: () => void;
 }
 
 /** Describes what closing the dialog does, from the attempt's state: a sentence for the dialog to show, or `null` when closing says nothing new. */
@@ -502,11 +597,12 @@ export const createMcpUrlServerFlows = ({
       | "stateBeforeSignIn"
       | "listenerId"
       | "signInRun"
+      | "stopWatchingList"
     >,
   ) => {
     opened += 1;
     const id = `url-server-attempt-${String(opened)}`;
-    attempts.set(id, {
+    const created: Attempt = {
       ...attempt,
       state: FORM,
       origin: "create",
@@ -516,8 +612,63 @@ export const createMcpUrlServerFlows = ({
       stateBeforeSignIn: null,
       listenerId: null,
       signInRun: 0,
-    });
+      stopWatchingList: () => {},
+    };
+    attempts.set(id, created);
+    created.stopWatchingList = watchList(id, created);
     return id;
+  };
+
+  /**
+   * Reviews the records the form of an attempt stands on whenever the list of
+   * servers is read again (a live push reads it), so a form never keeps
+   * pointing at what is gone:
+   *
+   * - a token form of a server that was deleted, or that is reached with a
+   *   plugin's Connection now, ends with `gone` or `moved`, so the dialog can
+   *   say so before it closes;
+   * - the duplicate an Add refusal points at is `gone` once the list lacks it,
+   *   and `found` with its current name while it is there, so the refusal's
+   *   button never leads to a page that does not exist.
+   *
+   * Returns the function that stops watching.
+   */
+  const watchList = (id: string, attempt: Attempt): (() => void) => {
+    const { queryKey } = cache.readCatalogue();
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type !== "updated" ||
+        event.action.type !== "success" ||
+        !matchQuery({ queryKey, exact: true }, event.query) ||
+        !isCurrent(id, attempt)
+      ) {
+        return;
+      }
+      const servers = cache.readServers();
+      const { state } = attempt;
+      if (servers === undefined || state.kind !== "form") return;
+      if (attempt.kind === "token" && attempt.mcpServerId !== null) {
+        const record = servers.find((server) => server.id === attempt.mcpServerId);
+        if (record !== undefined && record.source.kind === "url") return;
+        commit(attempt, {
+          kind: "ended",
+          reason: record === undefined ? "gone" : "moved",
+          mcpServerId: attempt.mcpServerId,
+          name: record?.name ?? attempt.name,
+          message: null,
+        });
+      } else if (state.problem?.kind === "exists") {
+        const { problem } = state;
+        const record = servers.find((server) => server.id === problem.mcpServerId);
+        const existing: ExistingServer =
+          record === undefined ? { kind: "gone" } : { kind: "found", name: record.name };
+        const same =
+          problem.existing.kind === existing.kind &&
+          (existing.kind !== "found" ||
+            (problem.existing.kind === "found" && problem.existing.name === existing.name));
+        if (!same) commit(attempt, { kind: "form", problem: { ...problem, existing } });
+      }
+    });
   };
 
   /** Returns the attempt if it is still the one the dialog `id` holds, so a reply of a closed or replaced attempt changes nothing. */
@@ -916,12 +1067,13 @@ export const createMcpUrlServerFlows = ({
       approvalHost: readApprovalHost(started.authorizationUrl),
       expiresAt: started.expiresAt,
       returnBy: listenerId === null ? "paste" : "listener",
+      opened: false,
       openError: null,
       pasteProblem: null,
     };
-    // The host is on screen before the browser opens.
+    // The wait starts before the app can open the browser, so a return that comes at once finds it.
+    // The host is on screen before the browser opens: the app opens it from this step (`openSignInPage`).
     commit(attempt, { kind: "signing-in", mcpServerId, step: waiting });
-    if (browserSignIn !== undefined) void openSignInPage(id, attempt, run);
     if (listenerId !== null)
       void awaitReturn(id, attempt, run, listenerId, started.authorizationUrl);
   };
@@ -969,6 +1121,12 @@ export const createMcpUrlServerFlows = ({
       return;
     }
     const waiting = state.step;
+    // Marked before the call, so an effect that opens the page while `opened` is false runs once.
+    commit(attempt, {
+      kind: "signing-in",
+      mcpServerId: state.mcpServerId,
+      step: { ...waiting, opened: true, openError: null },
+    });
     let openError: string | null = null;
     try {
       await browserSignIn.open(waiting.authorizationUrl);
@@ -984,6 +1142,25 @@ export const createMcpUrlServerFlows = ({
       mcpServerId: now.mcpServerId,
       step: { ...now.step, openError },
     });
+  };
+
+  const checkNow = async (id: string): Promise<string | null> => {
+    const attempt = attempts.get(id);
+    if (attempt === undefined || attempt.mcpServerId === null) return null;
+    const { mcpServerId } = attempt;
+    let reason: string | null = null;
+    try {
+      await client.mcpServer.check({ params: { id: mcpServerId } });
+    } catch (error) {
+      reason = readErrorMessage(error);
+    }
+    // Read again whether or not the check was accepted, so the status shows without the push.
+    void queryClient.invalidateQueries({
+      queryKey: cache.readServerQuery(mcpServerId).queryKey,
+      exact: true,
+    });
+    readCatalogueAgain();
+    return reason;
   };
 
   return {
@@ -1047,10 +1224,11 @@ export const createMcpUrlServerFlows = ({
       if (listenerId !== null) void browserSignIn?.cancel(listenerId).catch(() => {});
       await finishSignIn(id, attempt, attempt.signInRun, pasted.trim(), step);
     },
-    openSignInPageAgain: async (id) => {
+    openSignInPage: async (id) => {
       const attempt = attempts.get(id);
       if (attempt !== undefined) await openSignInPage(id, attempt, attempt.signInRun);
     },
+    checkNow,
     cancelSignIn: (id) => {
       const attempt = attempts.get(id);
       if (attempt === undefined || attempt.state.kind !== "signing-in") return;
@@ -1075,6 +1253,7 @@ export const createMcpUrlServerFlows = ({
       const attempt = attempts.get(id);
       if (attempt === undefined) return;
       attempt.stopFollowing?.();
+      attempt.stopWatchingList();
       stopSignIn(attempt);
       attempts.delete(id);
       for (const listener of listeners) listener();

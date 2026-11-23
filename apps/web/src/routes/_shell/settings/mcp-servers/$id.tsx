@@ -4,9 +4,8 @@ import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, queryKeys, readErrorMessage } from "@hercule/client-core";
 import {
   buildMcpServerViews,
-  describeOfferAddress,
+  describeServerPageFields,
   describeSourceChip,
-  readMcpServerOffers,
 } from "@hercule/client-core/mcp-servers";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
 import {
@@ -96,19 +95,8 @@ function McpServerPage(): JSX.Element | null {
   if (server === undefined || gone) return null;
 
   const view = buildMcpServerViews([server], connections, plugins)[0]!;
-  const { source } = server;
-  // The second chip: a plugin's server shows its host, a server added by URL its whole address.
-  const offerOrigin =
-    source.kind === "plugin"
-      ? readMcpServerOffers(plugins).find((offer) => offer.contributionId === source.contributionId)
-          ?.origin
-      : undefined;
-  const address =
-    source.kind === "url"
-      ? source.url
-      : offerOrigin === undefined
-        ? undefined
-        : describeOfferAddress(offerOrigin);
+  // The second chip and the account beside the name are decided in client-core, as on the desktop.
+  const { address, account } = describeServerPageFields(view, plugins);
   const pluginName = plugins.find((plugin) => plugin.id === view.pluginId)?.displayName;
   const chip = "rounded-full border border-line px-2 py-0.5 text-fine text-muted";
 
@@ -123,18 +111,17 @@ function McpServerPage(): JSX.Element | null {
           <McpServerMark view={view} plugins={plugins} className="size-5" />
           <span>
             {server.name}
-            {/* A server added by URL has its address for an account, which its chip shows. */}
-            {view.account === undefined || source.kind === "url" ? null : (
+            {account === null ? null : (
               <>
                 {" "}
-                <span className="text-row font-normal text-muted">{view.account}</span>
+                <span className="text-row font-normal text-muted">{account}</span>
               </>
             )}
           </span>
         </h2>
         <div className="flex flex-wrap gap-1.5">
           <span className={chip}>{describeSourceChip(view, pluginName)}</span>
-          {address === undefined ? null : <span className={chip}>{address}</span>}
+          {address === null ? null : <span className={chip}>{address}</span>}
         </div>
       </div>
 
@@ -173,6 +160,7 @@ function McpServerPage(): JSX.Element | null {
         <TokenDialog
           client={client}
           server={server}
+          openedOn="server-page"
           onClose={() => {
             setSigningIn(false);
           }}

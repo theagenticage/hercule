@@ -67,6 +67,31 @@ export const buildServerSwitchTarget = (server: McpServer): McpServerSwitchTarge
       }
     : { kind: "url", serverId: server.id };
 
+/**
+ * Where the Replace dialog of an offer stands. The dialog draws it and decides
+ * nothing: it closes on `replaced`, and keeps its refusal and link on `refused`.
+ */
+export type ReplaceProgress =
+  /** Nothing was confirmed: the user is still choosing, and the offer has no record. */
+  | { readonly kind: "choosing" }
+  /** The user confirmed `serverId`. The write, or the read of the list after it, is not done. The dialog keeps `serverId` selected. */
+  | { readonly kind: "writing"; readonly serverId: string }
+  /** The write of `serverId` succeeded, and the list shows it on the offer's Connection. */
+  | { readonly kind: "replaced"; readonly serverId: string }
+  /**
+   * Nothing was replaced. `message` says why. `winnerServerId` is the server
+   * that holds the offer's Connection when there is one, which the dialog
+   * links to: another client's server that appeared while the user was
+   * choosing or while the confirmed write was held, or the one the controller
+   * named. `serverId` is the one the user confirmed, or `null`.
+   */
+  | {
+      readonly kind: "refused";
+      readonly serverId: string | null;
+      readonly message: string;
+      readonly winnerServerId: string | null;
+    };
+
 /** What the switch on a server's page shows. */
 export interface ServerPageSwitch {
   /** Whether the switch is on: the server's record in the list of servers, else the page's own read. */
@@ -191,6 +216,16 @@ export interface McpServerSwitches {
    * `mcp-server-exists` the refusal names the server that won.
    */
   readonly replace: (target: McpServerSwitchTarget, serverId: string) => void;
+  /**
+   * Returns where the Replace of the plugin target stands, from the
+   * confirmed write and the servers the cache holds now. A record on the
+   * target that is not the confirmed server, or that appeared before any
+   * confirmation, is a winner: it is `refused` with a link to it, never
+   * `replaced`, whether it arrives before the press or while the write is
+   * held. `replaced` needs the confirmed server's own record. A target that is
+   * not a plugin's is always `choosing`.
+   */
+  readonly readReplaceProgress: (target: McpServerSwitchTarget) => ReplaceProgress;
   /** Returns what a control shows of the target. */
   readonly readState: (target: McpServerSwitchTarget) => McpListEditState;
   /** Forgets the target's refusal, when the user dismisses it. */
@@ -268,7 +303,37 @@ export const createMcpServerSwitches = ({
       if (refusal === null && !blocked) pressedAgainst.delete(key);
     }
   });
+  const readReplaceProgress = (target: McpServerSwitchTarget): ReplaceProgress => {
+    if (target.kind !== "plugin") return { kind: "choosing" };
+    const key = buildTargetKey(target);
+    const confirmed = confirmedReplaces.get(key);
+    const record = findRecord(cache.readServers() ?? [], target);
+    const winner = record !== undefined && record.id !== confirmed?.serverId ? record.id : null;
+    const { refusal } = guard.readState(key);
+    if (refusal?.kind === "refused") {
+      return {
+        kind: "refused",
+        serverId: confirmed?.serverId ?? null,
+        message: refusal.message,
+        winnerServerId: refusal.existingServerId ?? winner,
+      };
+    }
+    if (winner !== null) {
+      return {
+        kind: "refused",
+        serverId: confirmed?.serverId ?? null,
+        message: "Nothing was replaced. This Connection's server was added meanwhile.",
+        winnerServerId: winner,
+      };
+    }
+    if (confirmed === undefined) return { kind: "choosing" };
+    return record?.id === confirmed.serverId && confirmed.saved
+      ? { kind: "replaced", serverId: confirmed.serverId }
+      : { kind: "writing", serverId: confirmed.serverId };
+  };
   const stateWithoutRefusal = new WeakMap<McpListEditState, McpListEditState>();
+  /** The server each offer's Replace was confirmed for, and whether its write succeeded. Dropped with the refusal. */
+  const confirmedReplaces = new Map<string, { readonly serverId: string; saved: boolean }>();
 
   /**
    * Runs the write, then reads the list of servers again, on its own
@@ -397,18 +462,23 @@ export const createMcpServerSwitches = ({
       pressedAgainst.set(offerKey, KEEP_REFUSAL);
       guard.start(offerKey);
       guard.start(chosenKey);
+      const confirmed = { serverId, saved: false };
+      confirmedReplaces.set(offerKey, confirmed);
       const { contributionId, connectionId } = target;
       void run({
         keys: [offerKey, chosenKey],
         pageIds: [serverId],
-        write: () =>
-          client.mcpServer.update({
+        write: async () => {
+          await client.mcpServer.update({
             params: { id: serverId },
             payload: { source: { kind: "plugin", contributionId, connectionId }, enabled: true },
-          }),
+          });
+          confirmed.saved = true;
+        },
         failurePrefix: "Nothing was replaced. ",
       });
     },
+    readReplaceProgress,
     readState: (target) => {
       const key = buildTargetKey(target);
       const state = guard.readState(key);
@@ -427,6 +497,7 @@ export const createMcpServerSwitches = ({
     },
     clearRefusal: (target) => {
       guard.clearRefusal(buildTargetKey(target));
+      confirmedReplaces.delete(buildTargetKey(target));
     },
     attach: (target) => guard.attach(buildTargetKey(target)),
     subscribe: guard.subscribe,

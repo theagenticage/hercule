@@ -154,8 +154,14 @@ describe("the browser sign-in of the desktop app", () => {
       params: { id: "s-docs" },
       payload: { redirectUri: "http://127.0.0.1:4937/callback" },
     });
-    expect(port.open).toHaveBeenCalledWith(AUTHORIZATION_URL);
+    // The waiting step is on screen, the return is awaited, and the browser has not opened yet.
     expect(port.wait).toHaveBeenCalledWith("l-1", AUTHORIZATION_URL);
+    expect(port.open).not.toHaveBeenCalled();
+    await flows.openSignInPage(attempt);
+    expect(port.open).toHaveBeenCalledWith(AUTHORIZATION_URL);
+    expect(port.wait.mock.invocationCallOrder[0]).toBeLessThan(
+      port.open.mock.invocationCallOrder[0]!,
+    );
 
     waits[0]!.resolve({ kind: "received", callbackQuery: CALLBACK });
     await vi.waitFor(() => {
@@ -173,7 +179,7 @@ describe("the browser sign-in of the desktop app", () => {
     });
   });
 
-  it("offers only the paste when the listener is unavailable, and still opens the browser", async () => {
+  it("offers only the paste when the listener is unavailable, and opens the browser when the app asks", async () => {
     const { flows, client, port, waitForStep } = await setup({ listens: false });
     const attempt = flows.openToken("s-docs", "docs");
 
@@ -182,6 +188,8 @@ describe("the browser sign-in of the desktop app", () => {
     const waiting = await waitForStep(attempt, "waiting");
     expect(waiting.returnBy).toBe("paste");
     expect(port.wait).not.toHaveBeenCalled();
+    expect(port.open).not.toHaveBeenCalled();
+    await flows.openSignInPage(attempt);
     expect(port.open).toHaveBeenCalledWith(AUTHORIZATION_URL);
     const sent = client.mcpServer.startSignIn.mock.calls[0] as unknown as [
       { payload: { redirectUri: string } },
@@ -213,15 +221,92 @@ describe("the browser sign-in of the desktop app", () => {
     const attempt = flows.openToken("s-docs", "docs");
 
     await flows.startSignIn(attempt);
-    await vi.waitFor(async () => {
-      expect(await waitForStep(attempt, "waiting")).toMatchObject({ openError: "no browser" });
+    expect(await waitForStep(attempt, "waiting")).toMatchObject({ opened: false, openError: null });
+    await flows.openSignInPage(attempt);
+    expect(await waitForStep(attempt, "waiting")).toMatchObject({
+      opened: true,
+      openError: "no browser",
     });
-    await flows.openSignInPageAgain(attempt);
+    await flows.openSignInPage(attempt);
 
     expect(port.open).toHaveBeenCalledTimes(2);
     await vi.waitFor(async () => {
       expect(await waitForStep(attempt, "waiting")).toMatchObject({ openError: null });
     });
+  });
+
+  it("finishes a browser return that comes at once, before the app has opened the browser", async () => {
+    const { flows, client, port, waitForOutcome } = await setup();
+    // The browser (or a fast redirect) answers the moment the wait is armed.
+    port.wait.mockImplementationOnce(() =>
+      Promise.resolve({ kind: "received" as const, callbackQuery: CALLBACK }),
+    );
+    const attempt = flows.openToken("s-docs", "docs");
+
+    await flows.startSignIn(attempt);
+
+    await vi.waitFor(() => {
+      expect(client.mcpServer.finishSignIn).toHaveBeenCalledWith({
+        params: { id: "s-docs" },
+        payload: { callbackQuery: CALLBACK },
+      });
+    });
+    expect(port.open).not.toHaveBeenCalled();
+    await waitForOutcome(attempt, "checking");
+  });
+
+  it("never opens the browser by itself, and ignores a request to open before the sign-in waits", async () => {
+    const { flows, port, waitForStep } = await setup();
+    const attempt = flows.openToken("s-docs", "docs");
+
+    await flows.openSignInPage(attempt);
+    await flows.startSignIn(attempt);
+    await waitForStep(attempt, "waiting");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(port.open).not.toHaveBeenCalled();
+  });
+
+  it("marks the page as opened before the browser answers, so an effect opens it once", async () => {
+    const { flows, port, waitForStep } = await setup();
+    const opening = hold();
+    port.open.mockImplementationOnce(() => opening.promise);
+    const attempt = flows.openToken("s-docs", "docs");
+    await flows.startSignIn(attempt);
+    await waitForStep(attempt, "waiting");
+
+    const pending = flows.openSignInPage(attempt);
+
+    expect(await waitForStep(attempt, "waiting")).toMatchObject({ opened: true });
+    opening.resolve();
+    await pending;
+  });
+
+  it("retires the attempt at the close request: a return that arrives in the same tick finishes nothing, and a late open failure shows nothing", async () => {
+    const { flows, client, port, waits, waitForStep } = await setup();
+    let failOpen!: (error: unknown) => void;
+    port.open.mockImplementationOnce(
+      () =>
+        new Promise<void>((_done, fail) => {
+          failOpen = fail;
+        }),
+    );
+    const attempt = flows.openToken("s-docs", "docs");
+    await flows.startSignIn(attempt);
+    await waitForStep(attempt, "waiting");
+    const pending = flows.openSignInPage(attempt);
+
+    // The result lands and the close request comes in one tick, before any continuation runs.
+    waits[0]!.resolve({ kind: "received", callbackQuery: CALLBACK });
+    flows.close(attempt);
+    expect(flows.readState(attempt).kind).toBe("ended");
+    failOpen(new Error("no browser"));
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(client.mcpServer.finishSignIn).not.toHaveBeenCalled();
+    expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "closed" });
+    expect(port.cancel).toHaveBeenCalledWith("l-1");
   });
 
   it("goes back to the form on Cancel, closes the listener, and ignores a return that comes late", async () => {

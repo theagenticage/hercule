@@ -18,6 +18,7 @@ import { Schema } from "effect";
 import { readValidationIssues } from "../errors";
 import { BROWSER_SIGN_IN_LABEL, offersBrowserSignIn } from "./sign-in-words";
 import type { TextPart } from "./project-boxes";
+import type { FlowProblem } from "./url-server-flows";
 
 /** The host labels that say what a server is and not whose it is, so they never name a server. */
 const GENERIC_HOST_LABELS: readonly string[] = ["mcp", "www", "api"];
@@ -65,6 +66,14 @@ export const describeToolNamePreview = (name: string): readonly TextPart[] => [
   { text: "Agents see its tools as ", code: false },
   { text: `mcp__tools__${name === "" ? "<name>" : name}__<tool>`, code: true },
 ];
+
+/**
+ * The line under the Address field of the Add by URL form. The address is
+ * shown whole everywhere, so a key written into it would be too: the line
+ * says a key goes in the token field, which the next step shows.
+ */
+export const ADDRESS_FIELD_HINT =
+  "A remote MCP server, reached over HTTPS. The controller calls it, so it must be reachable from there. If it needs a key, leave it out of the address: the next step asks for it in a token field.";
 
 const NAME_RULE =
   "A name holds lowercase letters, digits and single _ between them, 1 to 16 characters, and is not hercule.";
@@ -196,6 +205,17 @@ export interface TokenFormWords {
     readonly label: typeof BROWSER_SIGN_IN_LABEL;
     readonly pasteToggle: "Paste a token instead";
   } | null;
+  /**
+   * What the form opens with. `browser` shows the browser choice first, with
+   * the token field behind "Paste a token instead". `token` shows the token
+   * field. A server that holds a pasted token (a refused token, or "Replace
+   * token…") and one that cannot sign in through the browser open with
+   * `token`; a server whose browser sign-in was refused, or that holds none,
+   * opens with `browser` when it offers one.
+   */
+  readonly method: "browser" | "token";
+  /** The reason to show with the token field for the last write's `problem`, or `undefined`. */
+  readonly problemText: string | undefined;
   /** The line under the field. */
   readonly note: "Kept on the controller. It never reaches a runner.";
   /** The sentence that says checking waits, or `null` while the server is switched on. */
@@ -214,6 +234,27 @@ export const describeSignInHeading = (server: McpServer): string =>
     : `Replace the token of ${server.name}`;
 
 /**
+ * Returns the text to show beside the token field for the problem of the last
+ * token write: the controller's reason for the token, any other reason, or the
+ * failure's own message. `undefined` when there is none. The refusals of a
+ * create (`exists`, `plugin-origin`) never answer a token write.
+ */
+const describeTokenProblem = (problem: FlowProblem | null): string | undefined => {
+  switch (problem?.kind) {
+    case "invalid":
+      return (
+        [problem.issues.token, problem.issues.other].filter((text) => text !== null).join(" ") ||
+        undefined
+      );
+    case "failed":
+    case "sign-in-unsupported":
+      return problem.message;
+    default:
+      return undefined;
+  }
+};
+
+/**
  * Returns the words of the token form for `server`, a server added by URL.
  * Add, the page's "Replace token…" and the "Sign in…" of a thread line and of
  * the band all draw these words.
@@ -221,22 +262,41 @@ export const describeSignInHeading = (server: McpServer): string =>
  * - A server that signs in through the browser: the browser is the primary
  *   choice (`browser`), and the pasted token the other way, which `intro`
  *   words as one. It never calls pasting a token signing in.
- * - A server that refused its token: "The server refused its token. Paste a new one."
+ * - A server that holds a pasted token and needs sign-in: the token was
+ *   refused, so "The server refused its token. Paste a new one." and the
+ *   token field first, even when the server offers the browser.
+ * - A server that holds a token and does not need sign-in (Replace token…):
+ *   the new token replaces the old, in the token field first.
+ * - A server that offers the browser and holds no token: the browser choice
+ *   first (`method` is `browser`).
  * - A server that needs a token: "This server needs a token."
- * - Any other (Replace token…): the new token replaces the old.
+ *
+ * `problem` is what the last write of the form left (`FlowProblem`). When it
+ * says only a pasted token works, the browser choice is dropped (`browser` is
+ * `null`), and any problem puts the token field first.
  */
-export const describeTokenForm = (server: McpServer): TokenFormWords => {
+export const describeTokenForm = (
+  server: McpServer,
+  problem: FlowProblem | null = null,
+): TokenFormWords => {
   const { source } = server;
-  const asksForOAuth = offersBrowserSignIn(server);
-  const intro = asksForOAuth
-    ? "Paste a token, if the service gives you one."
-    : server.status === "needs-sign-in"
-      ? source.kind === "url" && source.signIn === "token"
-        ? "The server refused its token. Paste a new one."
-        : "This server needs a token."
-      : "Paste a new token. It replaces the one this server holds.";
+  const holdsToken = source.kind === "url" && source.signIn === "token";
+  const asksForOAuth = offersBrowserSignIn(server) && problem?.kind !== "sign-in-unsupported";
+  const needsSignIn = server.status === "needs-sign-in";
+  const problemText = describeTokenProblem(problem);
+  const intro = holdsToken
+    ? needsSignIn
+      ? "The server refused its token. Paste a new one."
+      : "Paste a new token. It replaces the one this server holds."
+    : asksForOAuth
+      ? "Paste a token, if the service gives you one."
+      : needsSignIn
+        ? "This server needs a token."
+        : "Paste a new token. It replaces the one this server holds.";
   return {
     intro,
+    method: !asksForOAuth || holdsToken || problemText !== undefined ? "token" : "browser",
+    problemText,
     browser: asksForOAuth
       ? {
           intro: "This server signs in through your browser.",

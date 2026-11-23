@@ -453,8 +453,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
   {
     name: "settings-mcp-sign-in-waiting",
     path: "settings-mcp-servers.html?state=sign-in-waiting",
-    contentSelector: "dialog.url-dialog .setup-lead",
-    nonTextParts: [],
+    contentSelector: "dialog.url-dialog .hx-row",
+    nonTextParts: [{ selector: "dialog.url-dialog .hx-mark svg", kind: "mark" }],
   },
   {
     name: "settings-mcp-sign-in-refused",

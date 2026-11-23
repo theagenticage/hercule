@@ -11,7 +11,7 @@ import { listConnectionTypes, type ConnectionType } from "../connection-types";
 import { parsePluginId } from "../plugin-id";
 import { formatCount } from "../threads/work-summary";
 import { decideDisplayStatus } from "./display-status";
-import { readMcpServerOffers, type McpServerOffer } from "./offers";
+import { describeOfferAddress, readMcpServerOffers, type McpServerOffer } from "./offers";
 import { MCP_SERVER_STATUS_FACTS, type McpServerDisplayStatus } from "./status";
 
 /** One MCP Server, joined with what a screen needs to draw it. */
@@ -209,6 +209,33 @@ export const describeSignInAction = (view: McpServerView): SignInAction | null =
     return reconnect === null ? null : { kind: "reconnect", ...reconnect };
   }
   return { kind: "sign-in", mcpServerId: view.server.id, label: "Sign in…" };
+};
+
+/** What the heading of a server's page shows besides the name. */
+export interface ServerPageFields {
+  /** The address chip: a server added by URL shows its whole address, a plugin's server the address its plugin offers. `null` when the plugin no longer offers it. */
+  readonly address: string | null;
+  /** The account written beside the name: the Connection's label of a plugin's server, or `null` for a server added by URL, whose address is its account and shows as the chip. */
+  readonly account: string | null;
+}
+
+/**
+ * Returns the address and the account of a server's page from `view` and the
+ * `plugins` that offer servers, so both apps decide them the same way.
+ */
+export const describeServerPageFields = (
+  view: McpServerView,
+  plugins: readonly PluginDetail[],
+): ServerPageFields => {
+  const { source } = view.server;
+  if (source.kind === "url") return { address: source.url, account: null };
+  const offer = readMcpServerOffers(plugins).find(
+    (each) => each.contributionId === source.contributionId,
+  );
+  return {
+    address: offer === undefined ? null : describeOfferAddress(offer.origin),
+    account: view.account ?? null,
+  };
 };
 
 /**

@@ -8,8 +8,11 @@ import {
   createMcpUrlServerFlows,
   decideFollowing,
   describeClosing,
+  describeFailedCheck,
+  describeOpenServerAction,
   findOrCreateMcpUrlServerFlows,
   type McpUrlServerFlows,
+  type ServerOutcome,
   type UrlServerFlowState,
 } from "./url-server-flows";
 import { SENTRY_WORK, buildServer } from "./testing";
@@ -84,6 +87,7 @@ const setup = async () => {
         world.tokenWrites.push(held);
         return held.promise;
       }),
+      check: vi.fn(() => Promise.resolve()),
     },
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -127,11 +131,14 @@ const setup = async () => {
     });
     return flows.readState(attempt) as Extract<UrlServerFlowState, { kind: "following" }>;
   };
+  /** Reads the list of servers from the controller, as a live push of the list does. */
+  const readList = () => catalogue.fetch();
   return {
     world,
     client,
     queryClient,
     flows,
+    readList,
     push,
     stateOf,
     waitFor,
@@ -711,6 +718,7 @@ describe("the token form", () => {
 
   it("returns to the form with the controller's reason when it refuses the token, or the write fails", async () => {
     const { world, flows, waitFor } = await setup();
+    world.records.set("s-docs", holdsOldToken());
     const attempt = flows.openToken("s-docs", "docs");
     flows.submitToken(attempt, TOKEN);
     world.tokenWrites[0]!.reject(
@@ -779,5 +787,270 @@ describe("the token form", () => {
     await vi.waitFor(() => {
       expect(queryClient.getQueryState(DETAIL_KEY("s-docs"))?.isInvalidated).toBe(true);
     });
+  });
+});
+
+describe("Add by URL: the proof that a stale reply never shows", () => {
+  it("delivers the live push before the reply and the read, and never shows or caches the checking record the reply carries", async () => {
+    const { world, queryClient, flows } = await setup();
+    const seenInCache: (string | undefined)[] = [];
+    queryClient.getQueryCache().subscribe((event) => {
+      const queryKey = event.query.queryKey as readonly unknown[];
+      if (event.type === "updated" && queryKey[0] === "mcp-server") {
+        seenInCache.push((event.query.state.data as McpServer | undefined)?.status);
+      }
+    });
+    const seenInDialog: string[] = [];
+    flows.subscribe(() => {
+      const state = flows.readState(attempt);
+      if (state.kind === "following") {
+        seenInDialog.push(`${state.outcome.kind}:${state.server?.status ?? "none"}`);
+      }
+    });
+    const attempt = flows.openAdd();
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    // Hold the read that follows the acknowledgement.
+    const gate = hold();
+    world.holdNextRead = gate.promise;
+
+    // The controller commits, checks and pushes the ready record before the create's reply arrives.
+    world.records.set(
+      "s-docs",
+      urlServer("s-docs", { status: "ready", tools: SENTRY_WORK.tools, checkedAt: "2026-11-20" }),
+    );
+    void queryClient.invalidateQueries({ queryKey: DETAIL_KEY("s-docs") });
+    world.creates[0]!.resolve(urlServer("s-docs", { status: "checking" }));
+    await vi.waitFor(() => {
+      expect(world.reads).toEqual(["s-docs"]);
+    });
+    // The reply is released, and the held read has not answered: nothing of the reply shows.
+    expect(flows.readState(attempt)).toMatchObject({ outcome: { kind: "reading" } });
+    expect(seenInCache).not.toContain("checking");
+
+    gate.resolve();
+    await vi.waitFor(() => {
+      expect(flows.readState(attempt)).toMatchObject({ outcome: { kind: "ready" } });
+    });
+    expect(seenInCache).not.toContain("checking");
+    expect(seenInDialog.some((seen) => seen.endsWith(":checking"))).toBe(false);
+  });
+
+  it("sends every submission to the controller, whatever the address looks like", async () => {
+    const { flows, client } = await setup();
+    const first = flows.openAdd();
+    const second = flows.openAdd();
+    const otherPath = flows.openAdd();
+
+    flows.submitAdd(first, { address: "https://MCP.docs.example/mcp", typedName: null });
+    flows.submitAdd(second, { address: "https://mcp.docs.example:443/mcp", typedName: null });
+    flows.submitAdd(otherPath, { address: "https://mcp.docs.example/v2/mcp", typedName: null });
+
+    expect(client.mcpServer.create).toHaveBeenCalledTimes(3);
+    for (const [n, url] of [
+      [1, "https://MCP.docs.example/mcp"],
+      [2, "https://mcp.docs.example:443/mcp"],
+      [3, "https://mcp.docs.example/v2/mcp"],
+    ] as const) {
+      expect(client.mcpServer.create).toHaveBeenNthCalledWith(n, {
+        payload: { source: { kind: "url", url } },
+      });
+    }
+  });
+});
+
+describe("the duplicate an Add refusal points at, kept current", () => {
+  const conflict = () =>
+    new ApiError("conflict", "Exists.", { reason: "mcp-server-exists", mcpServerId: OTHER_ID });
+
+  it("turns to gone when a read of the list no longer holds it, and back to found when it returns", async () => {
+    const { world, flows, readList } = await setup();
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki" }));
+    await readList();
+    const attempt = flows.openAdd();
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.reject(conflict());
+    await vi.waitFor(() => {
+      expect(flows.readState(attempt)).toMatchObject({
+        problem: { existing: { kind: "found", name: "wiki" } },
+      });
+    });
+
+    world.records.delete(OTHER_ID);
+    await readList();
+    expect(flows.readState(attempt)).toMatchObject({
+      kind: "form",
+      problem: { kind: "exists", existing: { kind: "gone" } },
+    });
+
+    world.records.set(OTHER_ID, urlServer(OTHER_ID, { name: "wiki2" }));
+    await readList();
+    expect(flows.readState(attempt)).toMatchObject({
+      problem: { existing: { kind: "found", name: "wiki2" } },
+    });
+  });
+});
+
+describe("a token dialog kept by id", () => {
+  it("ends with gone when a read of the list shows the server deleted, before the dialog closes", async () => {
+    const { world, flows, readList } = await setup();
+    world.records.set("s-docs", urlServer("s-docs", { status: "needs-sign-in" }));
+    await readList();
+    const attempt = flows.openToken("s-docs", "docs");
+    expect(flows.readState(attempt).kind).toBe("form");
+
+    world.records.delete("s-docs");
+    await readList();
+
+    expect(flows.readState(attempt)).toEqual({
+      kind: "ended",
+      reason: "gone",
+      mcpServerId: "s-docs",
+      name: "docs",
+      message: null,
+    });
+  });
+
+  it("ends with moved when a Replace put the server on a Connection, keeping its name", async () => {
+    const { world, flows, readList } = await setup();
+    world.records.set("s-docs", urlServer("s-docs"));
+    await readList();
+    const attempt = flows.openToken("s-docs", "docs");
+
+    world.records.set("s-docs", buildServer("s-docs", "docs", "c-work"));
+    await readList();
+
+    expect(flows.readState(attempt)).toMatchObject({
+      kind: "ended",
+      reason: "moved",
+      mcpServerId: "s-docs",
+      name: "docs",
+    });
+  });
+
+  it("stays a form while the list still holds the server added by URL", async () => {
+    const { world, flows, readList } = await setup();
+    world.records.set("s-docs", urlServer("s-docs"));
+    await readList();
+    const attempt = flows.openToken("s-docs", "docs");
+
+    world.records.set("s-docs", urlServer("s-docs", { status: "ready" }));
+    await readList();
+
+    expect(flows.readState(attempt)).toEqual({ kind: "form", problem: null });
+  });
+
+  it("stops watching when the dialog closes", async () => {
+    const { world, flows, readList } = await setup();
+    world.records.set("s-docs", urlServer("s-docs"));
+    await readList();
+    const attempt = flows.openToken("s-docs", "docs");
+    flows.close(attempt);
+
+    world.records.delete("s-docs");
+    await readList();
+
+    expect(flows.readState(attempt)).toMatchObject({ kind: "ended", reason: "closed" });
+  });
+});
+
+describe("Check now", () => {
+  it("asks for the check, then reads the server and the list at once, without waiting for a push", async () => {
+    const { world, client, flows, waitForOutcome } = await setup();
+    world.records.set("s-docs", urlServer("s-docs", { status: "unreachable", statusDetail: "x" }));
+    const attempt = flows.openAdd();
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.resolve(urlServer("s-docs"));
+    await waitForOutcome(attempt, "failed");
+    client.mcpServer.query.mockClear();
+
+    // The controller starts the check; no push is delivered.
+    world.records.set("s-docs", urlServer("s-docs", { status: "checking" }));
+    const reason = await flows.checkNow(attempt);
+
+    expect(reason).toBeNull();
+    expect(client.mcpServer.check).toHaveBeenCalledWith({ params: { id: "s-docs" } });
+    await waitForOutcome(attempt, "checking");
+    await vi.waitFor(() => {
+      expect(client.mcpServer.query).toHaveBeenCalled();
+    });
+  });
+
+  it("returns the controller's reason when it refuses the check, and still reads again", async () => {
+    const { world, client, flows, waitForOutcome } = await setup();
+    world.records.set("s-docs", urlServer("s-docs", { status: "error", statusDetail: "x" }));
+    const attempt = flows.openAdd();
+    flows.submitAdd(attempt, { address: ADDRESS, typedName: null });
+    world.creates[0]!.resolve(urlServer("s-docs"));
+    await waitForOutcome(attempt, "failed");
+    client.mcpServer.check.mockRejectedValueOnce(new ApiError("invalid_state", "Switched off."));
+    const readsBefore = world.reads.length;
+
+    expect(await flows.checkNow(attempt)).toBe("Switched off.");
+    await vi.waitFor(() => {
+      expect(world.reads.length).toBeGreaterThan(readsBefore);
+    });
+  });
+});
+
+describe("what a dialog says and offers after the check", () => {
+  it("words a failed check with the host of the address, for both statuses", () => {
+    const server = urlServer("s-docs");
+    expect(describeFailedCheck({ status: "unreachable", detail: "timed out", server })).toEqual({
+      headline: "mcp.docs.example could not be reached.",
+      detail: "timed out",
+    });
+    expect(describeFailedCheck({ status: "error", detail: null, server })).toEqual({
+      headline: "mcp.docs.example answered in a way Hercule could not use.",
+      detail: null,
+    });
+    expect(describeFailedCheck({ status: "error", detail: null, server: null }).headline).toBe(
+      "the server answered in a way Hercule could not use.",
+    );
+  });
+
+  const following = (outcome: ServerOutcome): UrlServerFlowState => ({
+    kind: "following",
+    mcpServerId: "s-docs",
+    server: urlServer("s-docs"),
+    outcome,
+    problem: null,
+  });
+
+  it("offers Open on a failed check wherever the dialog was opened from, even a thread, but never on the server's own page", () => {
+    const failed = following({ kind: "failed", status: "unreachable", detail: null });
+
+    expect(describeOpenServerAction(failed, "elsewhere")).toEqual({
+      mcpServerId: "s-docs",
+      label: "Open docs",
+    });
+    expect(describeOpenServerAction(failed, "server-page")).toBeNull();
+  });
+
+  it("offers Open for a record that moved onto a Connection, and for a ready server this dialog created, but for no other outcome", () => {
+    const moved: UrlServerFlowState = {
+      kind: "ended",
+      reason: "moved",
+      mcpServerId: "s-docs",
+      name: "docs",
+      message: null,
+    };
+    expect(describeOpenServerAction(moved, "elsewhere")).toEqual({
+      mcpServerId: "s-docs",
+      label: "Open docs",
+    });
+    expect(describeOpenServerAction({ ...moved, reason: "gone" }, "elsewhere")).toBeNull();
+    expect(
+      describeOpenServerAction(
+        following({ kind: "ready", toolCount: 1, newServer: true }),
+        "elsewhere",
+      ),
+    ).not.toBeNull();
+    expect(
+      describeOpenServerAction(
+        following({ kind: "ready", toolCount: 1, newServer: false }),
+        "elsewhere",
+      ),
+    ).toBeNull();
+    expect(describeOpenServerAction(following({ kind: "checking" }), "elsewhere")).toBeNull();
   });
 });

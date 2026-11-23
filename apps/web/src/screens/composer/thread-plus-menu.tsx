@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Thread, ThreadChoice } from "@hercule/client-core";
+import type { McpServer } from "@hercule/contract";
 import { decideDraftServersPick, type McpListChoice } from "@hercule/client-core/mcp-servers";
 import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
 import { TokenDialog } from "../mcp-url-server/token-dialog";
@@ -76,10 +77,13 @@ export function ThreadPlusMenu({
     if (next) setServersPressed(false);
     onOpenChange(next);
   };
-  // The server added by URL whose token dialog is open. It opens from the submenu, which closes.
-  const [signingInId, setSigningInId] = useState<string | null>(null);
+  // The server added by URL whose token dialog is open, as the submenu showed it. It opens from
+  // the submenu, which closes. The dialog is kept by the id until the user closes it, also when a
+  // live change deletes the server or moves it onto a Connection: the dialog then says so.
+  const [signingIn, setSigningIn] = useState<McpServer | null>(null);
   // One state for the submenu and the picker, so the handoff from one to the other never drops it.
-  const editing = showsServers || picking || signingInId !== null;
+  // The open sign-in dialog needs the live topic as well, which follows the server it signs in to.
+  const editing = showsServers || picking || signingIn !== null;
   useEffect(() => {
     setEditing(editing);
     return () => {
@@ -109,7 +113,11 @@ export function ThreadPlusMenu({
     if (picked !== undefined) recordThreadChoice(picked);
   };
   const apply = session === null ? applyToDraft : edit.apply;
-  const signingInServer = views?.find((view) => view.server.id === signingInId);
+  // The newest record of the server the dialog was opened for, or the one it opened with once the list lost it.
+  const signingInServer =
+    signingIn === null
+      ? null
+      : (views?.find((view) => view.server.id === signingIn.id)?.server ?? signingIn);
   const refusal = edit.problem();
 
   return (
@@ -138,7 +146,7 @@ export function ThreadPlusMenu({
                 onOpenChange(false);
               }}
               onSignIn={(mcpServerId) => {
-                setSigningInId(mcpServerId);
+                setSigningIn(views.find((view) => view.server.id === mcpServerId)?.server ?? null);
                 onOpenChange(false);
               }}
             />
@@ -152,12 +160,13 @@ export function ThreadPlusMenu({
           )
         }
       />
-      {signingInServer === undefined ? null : (
+      {signingInServer === null ? null : (
         <TokenDialog
           client={client}
-          server={signingInServer.server}
+          server={signingInServer}
+          openedOn="elsewhere"
           onClose={() => {
-            setSigningInId(null);
+            setSigningIn(null);
           }}
         />
       )}

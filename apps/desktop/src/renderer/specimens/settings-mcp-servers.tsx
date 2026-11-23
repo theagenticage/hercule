@@ -29,8 +29,9 @@
  * - `url-page`: the page of Notion, a server added by URL that needs sign-in.
  *
  * Two more draw the sign-in through the browser, on the page of Atlas, a
- * server added by URL that signs in through the browser. The specimen has no
- * listener, so the dialog shows the paste step:
+ * server added by URL that signs in through the browser. Main's listener
+ * answers, as it does on a Mac, so the dialog shows the card that waits for
+ * the browser, with the way to paste the address under it:
  * - `sign-in-waiting`: the dialog after "Sign in with your browser", at "Finish
  *   in your browser";
  * - `sign-in-refused`: the dialog after the controller refused to start the
@@ -126,6 +127,7 @@ function chooseScene(name: string): McpScene {
       return {
         ...scene,
         mcp: MCP_OAUTH_RECORDS,
+        signInListens: true,
         signIn: {
           status: 200,
           body: {
@@ -217,11 +219,7 @@ if (state === "add-token" || state === "add-duplicate") {
 if (state === "sign-in-waiting" || state === "sign-in-refused") {
   await pressPart(".mcp-band button");
   await pressPart("dialog[open] .setup-acts .btn--accent");
-  await waitForPart(
-    state === "sign-in-waiting"
-      ? 'dialog[open] input[placeholder^="http://127.0.0.1"]'
-      : "dialog[open] .warn",
-  );
+  await waitForPart(state === "sign-in-waiting" ? "dialog[open] .url-stuck" : "dialog[open] .warn");
 }
 if (state === "replace") {
   await pressPart('[role="switch"][aria-label="Offer posthog webshop to threads"]');

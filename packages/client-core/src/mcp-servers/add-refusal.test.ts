@@ -141,6 +141,33 @@ describe("describePluginOriginRefusal", () => {
     });
   });
 
+  it("names where to act in words, with no button, in an app that has no Plugins page", () => {
+    const described = (patch: Partial<PluginDetail>) =>
+      describePluginOriginRefusal({
+        refusal: refusal("c-work"),
+        message: MESSAGE,
+        plugins: withSentry(patch),
+        connections: CONNECTIONS,
+        pluginsSettings: "web-app",
+      });
+
+    expect(described({ enabled: false })).toEqual({
+      sentence: [
+        {
+          text: `${OFFERS} Switch the Sentry plugin on in Settings > Plugins in the web app to use it.`,
+          code: false,
+        },
+      ],
+      action: null,
+    });
+    expect(described({ status: { _tag: "errored", message: "boom" } })).toMatchObject({
+      sentence: [
+        { text: expect.stringContaining("See Settings > Plugins in the web app.") as string },
+      ],
+      action: null,
+    });
+  });
+
   it("points a plugin that is on and did not start at Settings > Plugins", () => {
     expect(
       describe_({ plugins: withSentry({ status: { _tag: "errored", message: "boom" } }) }),

@@ -4,30 +4,6 @@ import { describeTokenForm, type FlowProblem } from "@hercule/client-core/mcp-se
 import { Button, Field, Input } from "@hercule/ui";
 
 /**
- * Returns the text to show for the problem of a token write, or `undefined`:
- * the controller's reason for the token field, any other reason, or the
- * failure's own message.
- */
-const readProblemText = (problem: FlowProblem | null): string | undefined => {
-  if (problem === null) return undefined;
-  switch (problem.kind) {
-    case "invalid":
-      return (
-        [problem.issues.token, problem.issues.other].filter((text) => text !== null).join(" ") ||
-        undefined
-      );
-    case "failed":
-      return problem.message;
-    case "sign-in-unsupported":
-      return problem.message;
-    case "exists":
-    case "plugin-origin":
-      // These only answer a create, never a token write.
-      return undefined;
-  }
-};
-
-/**
  * The sign-in form of a server added by URL: what the server asks for, the
  * sign-in through the browser first when the server offers it (`onSignIn`),
  * one token field, and the note that the token stays on the controller. Add,
@@ -35,8 +11,10 @@ const readProblemText = (problem: FlowProblem | null): string | undefined => {
  * thread line and of the band all draw it.
  *
  * For a server that offers the browser, the token field is the quieter second
- * choice: it shows after "Paste a token instead", or at once when a token
- * was refused or the controller says only a token works.
+ * choice: it shows after "Paste a token instead". It shows at once (the
+ * words' `method` is `token`) when the token the server holds was refused, for
+ * "Replace token…", and when the controller says only a token works. The
+ * words come from `describeTokenForm`, which also decides the problem text.
  *
  * The token lives in this form's state alone, so it is gone when the form
  * leaves the screen, whether the write was acknowledged or refused. The
@@ -66,12 +44,11 @@ export function TokenForm({
   readonly onCancel: () => void;
 }): JSX.Element {
   const [token, setToken] = useState("");
-  const words = describeTokenForm(server);
-  const problemText = readProblemText(problem);
-  // The browser is offered unless the controller said it does not work for this server.
-  const browser = problem?.kind === "sign-in-unsupported" ? null : words.browser;
-  const [pasting, setPasting] = useState(browser === null || problemText !== undefined);
-  if (browser !== null && !pasting) {
+  const words = describeTokenForm(server, problem);
+  const { browser, problemText } = words;
+  // The user's press of "Paste a token instead" adds to what the words say the form opens with.
+  const [choseToken, setChoseToken] = useState(false);
+  if (browser !== null && words.method === "browser" && !choseToken) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-row text-muted">{browser.intro}</p>
@@ -89,7 +66,7 @@ export function TokenForm({
           <Button
             type="button"
             onClick={() => {
-              setPasting(true);
+              setChoseToken(true);
             }}
           >
             {browser.pasteToggle}

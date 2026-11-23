@@ -21,6 +21,6 @@ export function SignInDialog({
   return action.kind === "reconnect" ? (
     <ReconnectDialog connectionId={action.connectionId} onClose={onClose} />
   ) : (
-    <TokenDialog mcpServerId={action.mcpServerId} onClose={onClose} />
+    <TokenDialog mcpServerId={action.mcpServerId} openedOn="elsewhere" onClose={onClose} />
   );
 }

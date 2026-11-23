@@ -12,8 +12,7 @@ import {
   buildServerSwitchTarget,
   decideServerPageSwitch,
   decideStatusBand,
-  describeOfferAddress,
-  readMcpServerOffers,
+  describeServerPageFields,
 } from "@hercule/client-core/mcp-servers";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
 import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
@@ -102,18 +101,8 @@ function McpServerPage(): JSX.Element {
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   // One server in, one view out.
   const view = buildMcpServerViews([query.data], connections, plugins)[0]!;
-  const { source } = query.data;
-  const offer =
-    source.kind === "plugin"
-      ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
-      : undefined;
   // A server added by URL shows its whole address, a plugin's server the address its plugin offers.
-  const address =
-    source.kind === "url"
-      ? source.url
-      : offer === undefined
-        ? null
-        : describeOfferAddress(offer.origin);
+  const fields = describeServerPageFields(view, plugins);
   const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data), query.data.id);
   // The switch shows the server's record in the list of servers, the value a
   // press is decided on. While this page's own read shows another value, it
@@ -156,7 +145,7 @@ function McpServerPage(): JSX.Element {
       <ServerHead
         view={view}
         plugins={plugins}
-        address={address}
+        fields={fields}
         band={band}
         busy={check.isPending}
         onBandAction={(action) => {
@@ -184,7 +173,11 @@ function McpServerPage(): JSX.Element {
       <RemoveSection view={view} />
       {signingIn && (
         <Suspense fallback={null}>
-          <TokenDialog mcpServerId={query.data.id} onClose={() => setSigningIn(false)} />
+          <TokenDialog
+            mcpServerId={query.data.id}
+            openedOn="server-page"
+            onClose={() => setSigningIn(false)}
+          />
         </Suspense>
       )}
       {reconnecting && view.connection !== undefined && connectionType !== undefined && (

@@ -63,8 +63,10 @@ export function PlusMenu({
   // Whether the submenu is open. It closes with the menu, in `onClosed`.
   const [showsServers, setShowsServers] = useState(false);
   const [signingIn, setSigningIn] = useState<SignInAction | null>(null);
-  // One state for the submenu and the picker, so the handoff from one to the other never drops it.
-  const editing = showsServers || picking;
+  // One state for the submenu, the picker and the sign-in dialog, so the handoff from one to the
+  // other never drops it. The sign-in dialog follows its server's check on the `mcpServer` topic,
+  // which the thread holds only while this is true, and the menu that opened it is closed by then.
+  const editing = showsServers || picking || signingIn !== null;
   useEffect(() => {
     setEditing(editing);
     return () => {

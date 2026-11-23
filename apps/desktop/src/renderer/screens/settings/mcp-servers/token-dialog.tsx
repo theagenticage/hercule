@@ -4,11 +4,16 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { isNotFound, readErrorMessage } from "@hercule/client-core";
 import {
   describeClosing,
+  describeOpenServerAction,
   describeSignInHeading,
-  describeTokenForm,
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
-import { buildSignInActions, useCheckNow, useUrlServerAttempt } from "../../../app/mcp-url-flows";
+import {
+  buildSignInActions,
+  describeAttemptTokenForm,
+  useCheckNow,
+  useUrlServerAttempt,
+} from "../../../app/mcp-url-flows";
 import { mcpServerQuery } from "../../../app/queries";
 import { WaitLine, Warning } from "../../step";
 import { QuestionIcon } from "../../../icons/question";
@@ -22,22 +27,27 @@ import { FlowBody, TokenForm, UrlServerDialogFrame } from "./url-server-dialog-p
  * browser when the server offers it, or asks for a token and writes it with
  * `mcpServer.setToken`, and follows what the controller's check finds.
  *
- * The token lives in this dialog's field and in the write, nowhere else. When
- * the server is removed while the dialog is open, it says so. `onClose` is
- * called whenever the dialog closes; the caller then unmounts it.
+ * The token lives in the form's field and in the write, nowhere else. The
+ * dialog is kept by the server's id: when the server is removed, or moves onto
+ * a Connection, while the dialog is open, the dialog shows why before it closes.
+ * `openedOn` is where the dialog was opened: the server's own page, which
+ * has no "Open <name>" button to offer, or `elsewhere`. `onClose` is called
+ * whenever the dialog closes; the caller then unmounts it.
  */
 export function TokenDialog({
   mcpServerId,
+  openedOn,
   onClose,
 }: {
   readonly mcpServerId: string;
+  readonly openedOn: "server-page" | "elsewhere";
   readonly onClose: () => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const server = useQuery(mcpServerQuery(client, mcpServerId));
   const dialogRef = useRef<HTMLDialogElement>(null);
   if (server.data !== undefined) {
-    return <TokenDialogFor server={server.data} onClose={onClose} />;
+    return <TokenDialogFor server={server.data} openedOn={openedOn} onClose={onClose} />;
   }
   const failure = server.error;
   return (
@@ -75,55 +85,64 @@ export function TokenDialog({
 /** Renders the dialog once the server is read: the attempt belongs to this server. */
 function TokenDialogFor({
   server,
+  openedOn,
   onClose,
 }: {
   readonly server: McpServer;
+  readonly openedOn: "server-page" | "elsewhere";
   readonly onClose: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const { flows, attemptId, state } = useUrlServerAttempt({
+  // The attempt is kept by the server's id and the name it was opened with, so a rename
+  // that arrives while the dialog is open never replaces the attempt and its sign-in.
+  const [openedName] = useState(server.name);
+  // The heading stays what the dialog opened with: a server that moves onto a Connection while
+  // the dialog is open changes the record, not what the user asked for.
+  const [heading] = useState(() => describeSignInHeading(server));
+  const { flows, attemptId, state, closeAttempt } = useUrlServerAttempt({
     kind: "token",
     mcpServerId: server.id,
-    name: server.name,
+    name: openedName,
   });
-  const check = useCheckNow();
-  const [token, setToken] = useState("");
-  const close = (): void => dialogRef.current?.close();
+  const check = useCheckNow(flows, attemptId);
+  // Ends the attempt before the dialog closes, so no late result reaches it.
+  const close = (): void => {
+    closeAttempt();
+    dialogRef.current?.close();
+  };
   const actions = {
     onClose: close,
     onOpenServer: (mcpServerId: string) => {
       close();
       void navigate({ to: "/settings/mcp-servers/$id", params: { id: mcpServerId } });
     },
-    onCheckNow: () => {
-      check.run(server.id);
-    },
+    onCheckNow: check.run,
     onRetryRead: () => {
       if (attemptId !== null) flows.retryRead(attemptId);
     },
-    onTokenChange: setToken,
-    onSaveToken: () => {
+    onSaveToken: (token: string) => {
       if (attemptId !== null) flows.submitToken(attemptId, token);
     },
     ...buildSignInActions(flows, attemptId),
   };
   // The words follow the record the attempt last read, which a check may have changed.
   const followed = state.kind === "following" ? (state.server ?? server) : server;
-  const words = describeTokenForm(followed);
+  const words = describeAttemptTokenForm(followed, state);
   return (
     <UrlServerDialogFrame
       dialogRef={dialogRef}
-      heading={describeSignInHeading(server)}
-      onClose={onClose}
+      heading={heading}
+      onClose={() => {
+        closeAttempt();
+        onClose();
+      }}
+      onCloseRequest={close}
     >
       {state.kind === "form" ? (
         <TokenForm
           words={words}
-          token={token}
-          problem={state.problem}
           refusedReason={null}
-          onTokenChange={setToken}
           onSubmit={actions.onSaveToken}
           onSignIn={actions.onStartSignIn}
           onCancel={close}
@@ -132,7 +151,7 @@ function TokenDialogFor({
         <FlowBody
           state={state}
           tokenWords={words}
-          token={token}
+          openAction={describeOpenServerAction(state, openedOn)}
           closingNote={describeClosing(state)}
           checkBusy={check.busy}
           checkError={check.error}

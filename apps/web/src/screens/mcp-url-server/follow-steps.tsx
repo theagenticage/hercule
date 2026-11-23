@@ -1,14 +1,16 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import type { McpServer } from "@hercule/contract";
 import {
   NEW_SERVER_NOTE,
   describeClosing,
+  describeFailedCheck,
   describeOffOutcome,
+  describeOpenServerAction,
   describeReadyTools,
   type FlowProblem,
+  type OpenServerAction,
   type ServerOutcome,
   type UrlServerFlowState,
 } from "@hercule/client-core/mcp-servers";
@@ -26,26 +28,26 @@ import { WaitLine } from "./wait-line";
  *
  * - `server` is the record the dialog was opened for, used until the attempt
  *   has read a newer one.
- * - `openServer` is `true` for the Add dialog, which offers "Open <name>" as
- *   the way to the new server's page. A dialog opened on a server's own page
- *   or on a thread's line has no such button.
+ * - `openedOn` is where the dialog was opened: on the server's own page, or
+ *   elsewhere (the Add dialog, a thread). Whether "Open <name>" is offered is
+ *   decided by `describeOpenServerAction`, which offers it only when it leads
+ *   somewhere new.
  */
 export function FollowSteps({
-  client,
   flow,
   state,
   fallbackServer,
-  openServer,
+  openedOn,
   onClose,
 }: {
-  readonly client: HerculeClient;
   readonly flow: UrlServerFlow;
   readonly state: Exclude<UrlServerFlowState, { kind: "form" }>;
   readonly fallbackServer: McpServer | null;
-  readonly openServer: boolean;
+  readonly openedOn: "server-page" | "elsewhere";
   readonly onClose: () => void;
 }): JSX.Element {
   const closingNote = describeClosing(state);
+  const openAction = describeOpenServerAction(state, openedOn);
   const closeRow = (
     <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
       {closingNote === null ? null : (
@@ -79,16 +81,7 @@ export function FollowSteps({
                 `${state.name ?? "This server"} is reached with a Connection now, so its sign-in is the Connection's.`)}
           </p>
           <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
-            {openServer && state.reason === "moved" && state.mcpServerId !== null ? (
-              <Link
-                to="/settings/mcp-servers/$id"
-                params={{ id: state.mcpServerId }}
-                onClick={onClose}
-                className={buildButtonClassName("form", "")}
-              >
-                Open {state.name ?? "server"}
-              </Link>
-            ) : null}
+            {openAction === null ? null : <OpenServerLink action={openAction} onClose={onClose} />}
             <Button type="button" onClick={onClose}>
               Close
             </Button>
@@ -99,14 +92,12 @@ export function FollowSteps({
       const server = state.server ?? fallbackServer;
       return (
         <Outcome
-          client={client}
           flow={flow}
           outcome={state.outcome}
           server={server}
-          mcpServerId={state.mcpServerId}
           problem={state.problem}
           closingNote={closingNote}
-          openServer={openServer}
+          openAction={openAction}
           onClose={onClose}
         />
       );
@@ -114,42 +105,49 @@ export function FollowSteps({
   }
 }
 
-/** Draws the step of a followed server's outcome. */
-function Outcome({
-  client,
-  flow,
-  outcome,
-  server,
-  mcpServerId,
-  problem,
-  closingNote,
-  openServer,
+/** Draws the link from a dialog to the server's page. It closes the dialog, because the dialog covers the page it leads from. */
+function OpenServerLink({
+  action,
   onClose,
 }: {
-  readonly client: HerculeClient;
-  readonly flow: UrlServerFlow;
-  readonly outcome: ServerOutcome;
-  readonly server: McpServer | null;
-  readonly mcpServerId: string;
-  readonly problem: FlowProblem | null;
-  readonly closingNote: string | null;
-  readonly openServer: boolean;
+  readonly action: OpenServerAction;
   readonly onClose: () => void;
 }): JSX.Element {
-  const check = useMutation({
-    mutationFn: () => client.mcpServer.check({ params: { id: mcpServerId } }),
-  });
-  const name = server?.name ?? "server";
-  const openButton = !openServer ? null : (
+  return (
     <Link
       to="/settings/mcp-servers/$id"
-      params={{ id: mcpServerId }}
+      params={{ id: action.mcpServerId }}
       onClick={onClose}
       className={buildButtonClassName("form", "")}
     >
-      Open {name}
+      {action.label}
     </Link>
   );
+}
+
+/** Draws the step of a followed server's outcome. */
+function Outcome({
+  flow,
+  outcome,
+  server,
+  problem,
+  closingNote,
+  openAction,
+  onClose,
+}: {
+  readonly flow: UrlServerFlow;
+  readonly outcome: ServerOutcome;
+  readonly server: McpServer | null;
+  readonly problem: FlowProblem | null;
+  readonly closingNote: string | null;
+  readonly openAction: OpenServerAction | null;
+  readonly onClose: () => void;
+}): JSX.Element {
+  // The reason the controller gave when it refused the check, or `null`.
+  const check = useMutation({ mutationFn: flow.checkNow });
+  const name = server?.name ?? "server";
+  const openButton =
+    openAction === null ? null : <OpenServerLink action={openAction} onClose={onClose} />;
   const footer = (extra: JSX.Element | null, closeLabel: string): JSX.Element => (
     <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
       {closingNote === null ? null : (
@@ -217,7 +215,7 @@ function Outcome({
             )}
             {outcome.newServer ? <p className="text-fine text-faint">{NEW_SERVER_NOTE}</p> : null}
           </div>
-          {footer(outcome.newServer ? openButton : null, "Done")}
+          {footer(openButton, "Done")}
         </>
       );
     case "needs-token":
@@ -234,18 +232,20 @@ function Outcome({
           onCancel={onClose}
         />
       );
-    case "failed":
+    case "failed": {
+      const failed = describeFailedCheck({
+        status: outcome.status,
+        detail: outcome.detail,
+        server,
+      });
       return (
         <>
           <p className="text-row text-fail" role="alert">
-            {outcome.status === "unreachable"
-              ? "The server did not answer."
-              : "The check ended in an error."}{" "}
-            {outcome.detail}
+            {failed.headline} {failed.detail}
           </p>
-          {check.error === null ? null : (
+          {check.data == null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {readErrorMessage(check.error)}
+              {check.data}
             </p>
           )}
           <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
@@ -269,6 +269,7 @@ function Outcome({
           </div>
         </>
       );
+    }
     case "off":
       return (
         <>

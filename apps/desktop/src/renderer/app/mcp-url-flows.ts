@@ -3,17 +3,20 @@
  * `url-server-flows.ts` in client-core): how this app's query cache holds the
  * servers, and the hook the Add by URL dialog and the token dialog use.
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { isWebLink, readErrorMessage } from "@hercule/client-core";
+import { isWebLink } from "@hercule/client-core";
 import {
   buildMcpListQuery,
+  describeTokenForm,
   findOrCreateMcpUrlServerFlows,
   type BrowserSignInPort,
   type McpUrlServerFlows,
+  type TokenFormWords,
   type UrlServerFlowState,
 } from "@hercule/client-core/mcp-servers";
+import type { McpServer } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
 import { mcpServerQuery, mcpServersQuery } from "./queries";
 
@@ -21,6 +24,8 @@ import { mcpServerQuery, mcpServersQuery } from "./queries";
  * Returns the port through which the attempts catch the browser's return,
  * over the main process's `signInReturn` channels and its `link.open`. Main
  * opens only web addresses, so the port refuses any other with a reason.
+ * When main could not open the browser, `open` fails with main's own
+ * sentence, which holds no part of the address.
  */
 const buildBrowserSignInPort = (bridge: Bridge): BrowserSignInPort => ({
   listen: async () => {
@@ -36,10 +41,12 @@ const buildBrowserSignInPort = (bridge: Bridge): BrowserSignInPort => ({
       : { kind: outcome._tag };
   },
   cancel: (listenerId) => bridge.signInReturn.cancel({ listenerId }),
-  open: (url) =>
-    isWebLink(url)
-      ? bridge.link.open({ url })
-      : Promise.reject(new Error(`The sign-in page is not a web address: ${url}`)),
+  open: async (url) => {
+    // The refusal names no part of the address: its query holds the sign-in's one-time `state`.
+    if (!isWebLink(url)) throw new Error("The sign-in page is not a web address.");
+    const outcome = await bridge.link.open({ url });
+    if (outcome._tag === "NotOpened") throw new Error(outcome.reason);
+  },
 });
 
 /** What a dialog opens an attempt for: a new server, or the token of the server `mcpServerId`, named `name`. */
@@ -80,6 +87,14 @@ export interface UrlServerAttempt {
   /** The attempt's id, or `null` until the dialog's first effect has opened it. */
   readonly attemptId: string | null;
   readonly state: UrlServerFlowState;
+  /**
+   * Ends the attempt at once: a sign-in result or a push that arrives after
+   * this call changes nothing. A dialog calls it the moment the user asks to
+   * close it (Esc, the scrim, a button), not when the browser's `close` event
+   * comes later. The unmount ends the attempt too, for a dialog that goes
+   * away with its page.
+   */
+  readonly closeAttempt: () => void;
 }
 
 /**
@@ -124,8 +139,25 @@ export function useUrlServerAttempt(target: UrlServerAttemptTarget): UrlServerAt
   const state = useSyncExternalStore(flows.subscribe, () =>
     attemptId === null ? UNOPENED : flows.readState(attemptId),
   );
-  return { flows, attemptId, state };
+  const closeAttempt = useCallback((): void => {
+    if (attemptId !== null) flows.close(attemptId);
+  }, [flows, attemptId]);
+  return { flows, attemptId, state, closeAttempt };
 }
+
+/**
+ * Returns the words of the token form for the server the dialog follows,
+ * `server`, with the problem the attempt's last write left, so a rejected
+ * token and the unsupported browser sign-in show where they belong.
+ */
+export const describeAttemptTokenForm = (
+  server: McpServer,
+  state: UrlServerFlowState,
+): TokenFormWords =>
+  describeTokenForm(
+    server,
+    state.kind === "form" || state.kind === "following" ? state.problem : null,
+  );
 
 /** What a dialog calls to drive the sign-in through the browser of its attempt. */
 export interface SignInActions {
@@ -133,7 +165,7 @@ export interface SignInActions {
   readonly onStartSignIn: () => void;
   /** Ends the sign-in and returns the dialog to its form. */
   readonly onCancelSignIn: () => void;
-  /** Opens the sign-in page in the browser again. */
+  /** Opens the sign-in page in the browser. */
   readonly onOpenSignInPage: () => void;
   /** Finishes the sign-in with the address the user pasted. */
   readonly onFinishSignIn: (pasted: string) => void;
@@ -151,7 +183,7 @@ export const buildSignInActions = (
     if (attemptId !== null) flows.cancelSignIn(attemptId);
   },
   onOpenSignInPage: () => {
-    if (attemptId !== null) void flows.openSignInPageAgain(attemptId);
+    if (attemptId !== null) void flows.openSignInPage(attemptId);
   },
   onFinishSignIn: (pasted) => {
     if (attemptId !== null) void flows.finishSignInByPaste(attemptId, pasted);
@@ -160,39 +192,31 @@ export const buildSignInActions = (
 
 /** What `useCheckNow` returns. */
 export interface CheckNow {
-  /** Asks the controller to check the server `mcpServerId` again. Does nothing while a check was asked for and the answer is not in. */
-  readonly run: (mcpServerId: string) => void;
+  /** Asks the controller to check the followed server again. Does nothing while a check was asked for and the answer is not in. */
+  readonly run: () => void;
   readonly busy: boolean;
   /** Why the controller refused the check, or `null`. */
   readonly error: string | null;
 }
 
 /**
- * Returns "Check now" for a dialog that follows a server. The result of the
- * check arrives on the `mcpServer` topic; the list and the server's read are
- * read again here so the dialog's attempt, which observes that read, sees the
- * status `checking` at once.
+ * Returns "Check now" for the attempt `attemptId` of a dialog that follows a
+ * server. The refresh itself, the read of the server and of the list that
+ * shows the status `checking` at once, is `flows.checkNow`.
  */
-export function useCheckNow(): CheckNow {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const queryClient = useQueryClient();
-  const check = useMutation({
-    mutationFn: (mcpServerId: string) => client.mcpServer.check({ params: { id: mcpServerId } }),
-    onSettled: async (_result, _error, mcpServerId) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: mcpServersQuery(client).queryKey, exact: true }),
-        queryClient.invalidateQueries({
-          queryKey: mcpServerQuery(client, mcpServerId).queryKey,
-          exact: true,
-        }),
-      ]);
-    },
-  });
+export function useCheckNow(flows: McpUrlServerFlows, attemptId: string | null): CheckNow {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return {
-    run: (mcpServerId) => {
-      if (!check.isPending) check.mutate(mcpServerId);
+    run: () => {
+      if (busy || attemptId === null) return;
+      setBusy(true);
+      void flows.checkNow(attemptId).then((reason) => {
+        setError(reason);
+        setBusy(false);
+      });
     },
-    busy: check.isPending,
-    error: check.error === null ? null : readErrorMessage(check.error),
+    busy,
+    error,
   };
 }

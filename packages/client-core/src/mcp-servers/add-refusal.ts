@@ -109,6 +109,10 @@ export interface PluginOriginRefusal {
  * - it runs and every Connection of the type needs attention: Settings >
  *   Connections, to fix it first.
  *
+ * `pluginsSettings` says whether the app has Settings > Plugins. An app that
+ * has none (the desktop app) says where to act in words and gives no button:
+ * the plugin is switched on in the web app's Settings > Plugins.
+ *
  * `message` is the controller's own sentence. It is the text, without a
  * button, when `plugins` or `connections` is `undefined` (not read yet) and
  * when the plugin or its offer is not in `plugins` any more, because then no
@@ -119,11 +123,14 @@ export const describePluginOriginRefusal = ({
   message,
   plugins,
   connections,
+  pluginsSettings = "here",
 }: {
   readonly refusal: PluginOriginRefusal;
   readonly message: string;
   readonly plugins: readonly PluginDetail[] | undefined;
   readonly connections: readonly Connection[] | undefined;
+  /** `here`: the app opens Settings > Plugins. `web-app`: only the web app has that page. */
+  readonly pluginsSettings?: "here" | "web-app";
 }): RefusalDescription => {
   const fallback: RefusalDescription = { sentence: [text(message)], action: null };
   if (plugins === undefined || connections === undefined) return fallback;
@@ -139,24 +146,26 @@ export const describePluginOriginRefusal = ({
     plugin.displayName;
   const offers = `The ${plugin.displayName} plugin already offers this server. It is reached with a ${typeName} Connection, with no second sign-in, so it is not added by hand.`;
 
+  const pluginsPage =
+    pluginsSettings === "here" ? "Settings > Plugins" : "Settings > Plugins in the web app";
+  const pluginsAction: RefusalAction | null =
+    pluginsSettings === "here" ? { kind: "open-plugins", label: "Open Plugins" } : null;
   if (!plugin.enabled) {
     return {
       sentence: [
-        text(
-          `${offers} Switch the ${plugin.displayName} plugin on in Settings > Plugins to use it.`,
-        ),
+        text(`${offers} Switch the ${plugin.displayName} plugin on in ${pluginsPage} to use it.`),
       ],
-      action: { kind: "open-plugins", label: "Open Plugins" },
+      action: pluginsAction,
     };
   }
   if (plugin.status._tag !== "active") {
     return {
       sentence: [
         text(
-          `${offers} The ${plugin.displayName} plugin is switched on but did not start. See Settings > Plugins.`,
+          `${offers} The ${plugin.displayName} plugin is switched on but did not start. See ${pluginsPage}.`,
         ),
       ],
-      action: { kind: "open-plugins", label: "Open Plugins" },
+      action: pluginsAction,
     };
   }
 

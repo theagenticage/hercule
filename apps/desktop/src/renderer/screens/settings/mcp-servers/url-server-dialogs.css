@@ -1,10 +1,8 @@
 /* The dialogs that write a server added by URL: Add by URL, the token form
    and Replace (#1211). Built from the Connection setup dialog's parts
-   (connection-setup.css); only what those do not draw is here. */
+   (connection-setup.css), which give them its 448px width; only what those
+   do not draw is here. */
 
-.url-dialog {
-  width: 480px;
-}
 /* The Address, the refusal under it and the Name, one gap apart. */
 .url-form {
   display: grid;
@@ -30,8 +28,56 @@
 .url-wait > .url-note {
   margin-top: 10px;
 }
+/* A paragraph of the sign-in steps: body size, with the same gap under it as
+   the lead paragraphs above it, so a field that follows does not touch it. */
 p.setup-lead.url-note {
+  margin-bottom: 10px;
   font-size: inherit;
+}
+
+/* The waiting card says who asks for the approval in a whole sentence, which wraps beside the
+   buttons instead of being cut short as a record's address is. */
+.url-waiting > .hx {
+  margin-top: 0;
+}
+.url-waiting .hx-name > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+/* The paste field of the waiting card: the field under the card's text, and its button at the end. */
+.url-paste {
+  display: grid;
+  gap: 8px;
+}
+.url-paste .field > input {
+  width: 100%;
+}
+.url-paste .setup-acts {
+  margin-top: 0;
+}
+/* Under the waiting card: the way out when the browser never comes back, as one line that ends
+   in its button. The card over it has its own border, so the line has no rule. */
+.url-stuck {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  /* The question is two lines beside its button, broken into even halves. */
+  text-wrap: balance;
+}
+/* The tools a new server offered, under its done row: a name beside what it does, as on the page. */
+.url-tools {
+  max-height: 30vh;
+  margin-top: 10px;
+  overflow-y: auto;
+}
+.url-tools .mcp-tool {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 12px;
 }
 
 /* What Replace keeps, changes and deletes: three labelled lines. */
