@@ -374,7 +374,12 @@ export const createMcpServerSwitches = ({
     if (winner !== null) {
       return {
         kind: "refused",
-        message: `Nothing was replaced. This Connection's server was added meanwhile.${unreadNote}`,
+        // After a lost reply, the write may have committed before the winner appeared, so only the list is described.
+        message: `${
+          confirmed?.replyLost === true
+            ? "The controller's reply was lost, and the list shows another server on this Connection. It is not known whether the server you chose was moved first."
+            : "Nothing was replaced. This Connection's server was added meanwhile."
+        }${unreadNote}`,
         winnerServerId: winner,
         unread: unread !== null,
       };
@@ -396,8 +401,9 @@ export const createMcpServerSwitches = ({
     const stillListed = servers.some(({ id }) => id === confirmed.serverId);
     return {
       kind: "refused",
+      // After a lost reply the list only shows where the record is now, not what the write did.
       message: confirmed.replyLost
-        ? `Nothing was replaced. The controller's reply was lost, and the list shows ${stillListed ? "the server did not move" : "no server on this Connection"}.`
+        ? `The controller's reply was lost. The list shows ${stillListed ? "the server you chose, but not on this Connection" : "no server on this Connection, and the server you chose is not listed either"}. It is not known whether the replace was applied. Replace again if you still want it.`
         : "The server you chose was removed or moved by another client right after the write, so it is not on this Connection.",
       winnerServerId: null,
       unread: false,

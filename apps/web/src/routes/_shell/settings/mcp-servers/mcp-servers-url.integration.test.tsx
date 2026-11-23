@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Connection, McpServer, PluginDetail } from "@hercule/contract";
+import { findOrCreateMcpServerSwitches } from "@hercule/client-core/mcp-servers";
 import {
   buildConnection,
   buildMcpControllerHandlers,
@@ -831,6 +832,36 @@ describe("Settings > MCP servers > Replace", () => {
       `/settings/mcp-servers/${S_DOCS.id}`,
     );
     expect(listWrites(api)).toHaveLength(1);
+  });
+
+  it("forgets the dialog and its refusal when the user leaves Settings with the dialog open", async () => {
+    const user = userEvent.setup();
+    const { router, queryClient } = await openList(buildWorld([S_HAND, S_DOCS]), {
+      [`PATCH /api/v1/mcp-servers/${S_HAND.id}`]: conflict("Another server holds it.", {
+        reason: "mcp-server-exists",
+        mcpServerId: S_DOCS.id,
+      }),
+    });
+    await user.click(within(await findRow("Offer sentry work to threads")).getByRole("switch"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Replace" }));
+    await within(dialog).findByRole("alert");
+
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+
+    // The app's switches are one instance for its query client, so this call returns the app's own.
+    const switches = findOrCreateMcpServerSwitches({
+      queryClient,
+      client: undefined as never,
+      cache: undefined as never,
+    });
+    expect(
+      switches.readReplaceDialog({
+        kind: "plugin",
+        contributionId: SENTRY_CONTRIBUTION,
+        connectionId: C_WORK,
+      }),
+    ).toBeNull();
   });
 });
 

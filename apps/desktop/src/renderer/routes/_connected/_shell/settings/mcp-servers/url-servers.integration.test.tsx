@@ -230,6 +230,42 @@ describe("Add by URL", () => {
     await within(dialog).findByText("ready · 2 tools");
   });
 
+  it("discards a refused token: the token field opens empty, and a retry sends only the new value", async () => {
+    const app = await openList({ servers: [] });
+    const dialog = await openAddDialog();
+    await checkAddress(dialog, DOCS_URL);
+    await within(dialog).findByText("Asking mcp.docs.example for its tools…");
+    finishCheck(app, CREATED_ID, {
+      status: "needs-sign-in",
+      source: { kind: "url", url: DOCS_URL, signIn: "none", signInOffered: "token" },
+    });
+    await userEvent.type(await within(dialog).findByLabelText("Token"), TOKEN);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await waitFor(() => {
+      expect(app.world.tokens).toHaveLength(1);
+    });
+
+    finishCheck(app, CREATED_ID, {
+      status: "needs-sign-in",
+      statusDetail: "docs.example refused the token (401).",
+    });
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "docs.example refused the token (401).",
+    );
+    // The refused token is not handed back: the field opens empty, and a retry sends only what is typed now.
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Token").value).toBe("");
+    expect(dialog.innerHTML).not.toContain(TOKEN);
+    await userEvent.type(within(dialog).getByLabelText("Token"), "a-second-token-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await waitFor(() => {
+      expect(app.world.tokens).toEqual([
+        { id: CREATED_ID, token: TOKEN },
+        { id: CREATED_ID, token: "a-second-token-1" },
+      ]);
+    });
+  });
+
   it("says apart a check that failed, and checks again from the dialog", async () => {
     const app = await openList({ servers: [] });
     const dialog = await openAddDialog();
@@ -937,6 +973,43 @@ describe("Signing in to a server added by URL through the browser", () => {
       await flushTasks();
     });
 
+    expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
+      [],
+    );
+  });
+
+  it("retires the sign-in in the commit that unmounts the dialog, before the dialog leaves the DOM, so a return delivered at that boundary finishes nothing", async () => {
+    const signInReturn = buildSignInReturn();
+    const { app, dialog } = await openSignInDialog(signInReturn);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Sign in with your browser" }),
+    );
+    await within(dialog).findByText("Finish in your browser");
+    // The moment React takes the dialog out of the DOM is the boundary: the browser's return is
+    // delivered there, and the listener must have been retired by then. A passive cleanup runs after it.
+    // Called with the node it was taken from, so it is not unbound.
+    // oxlint-disable-next-line typescript/unbound-method
+    const removeChild = Node.prototype.removeChild;
+    let cancelsWhenRemoved: number | null = null;
+    Node.prototype.removeChild = function <T extends Node>(this: Node, child: T): T {
+      if (cancelsWhenRemoved === null && child.contains(dialog)) {
+        cancelsWhenRemoved = signInReturn.cancel.mock.calls.length;
+        signInReturn.comeBack();
+      }
+      return removeChild.call(this, child) as T;
+    };
+    try {
+      await act(async () => {
+        await app.router.navigate({ to: "/settings/connections" });
+        await flushTasks();
+      });
+    } finally {
+      Node.prototype.removeChild = removeChild;
+    }
+
+    expect(document.contains(dialog)).toBe(false);
+    expect(cancelsWhenRemoved).toBe(1);
+    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
     expect(findCalls(app.calls, "POST", `${SERVER_LIST_PATH}/${DOCS_ID}/sign-in/finish`)).toEqual(
       [],
     );

@@ -994,7 +994,7 @@ describe("the Replace dialog", () => {
       expect(switches.readState(WORK).refusal).toBeNull();
     });
 
-    it("says nothing was replaced, and what the list shows, when the server did not move", async () => {
+    it("says what the list shows, and that the outcome is not known, when the server is not on the Connection", async () => {
       const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
       world.updateFails = new ConnectionError("http://controller.test", new Error("reset"));
 
@@ -1007,8 +1007,56 @@ describe("the Replace dialog", () => {
         notice: {
           kind: "refused",
           message:
-            "Nothing was replaced. The controller's reply was lost, and the list shows the server did not move.",
+            "The controller's reply was lost. The list shows the server you chose, but not on this Connection. It is not known whether the replace was applied. Replace again if you still want it.",
         },
+      });
+    });
+
+    it("does not say the server did not move when another client deleted it before the list was read", async () => {
+      const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
+      const read = hold();
+      world.losesReply = true;
+      world.holdQuery = read.promise;
+
+      switches.confirmReplace(WORK);
+      await vi.waitFor(() => {
+        expect(world.holdQuery).toBeNull();
+      });
+      // The write committed, and then another client deleted the server.
+      world.servers = [];
+      read.resolve();
+      await settle(WORK);
+
+      expect(view()).toMatchObject({
+        done: false,
+        notice: {
+          kind: "refused",
+          message:
+            "The controller's reply was lost. The list shows no server on this Connection, and the server you chose is not listed either. It is not known whether the replace was applied. Replace again if you still want it.",
+          winner: null,
+        },
+      });
+    });
+
+    it("names the winner, and not that nothing was replaced, when the list shows another server on the Connection", async () => {
+      const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
+      const read = hold();
+      world.losesReply = true;
+      world.holdQuery = read.promise;
+
+      switches.confirmReplace(WORK);
+      await vi.waitFor(() => {
+        expect(world.holdQuery).toBeNull();
+      });
+      world.servers = [winnerRecord()];
+      read.resolve();
+      await settle(WORK);
+
+      expect(view().notice).toMatchObject({
+        kind: "refused",
+        message:
+          "The controller's reply was lost, and the list shows another server on this Connection. It is not known whether the server you chose was moved first.",
+        winner: { serverId: WINNER_ID },
       });
     });
 
@@ -1095,6 +1143,8 @@ describe("the Replace dialog", () => {
       expect(switches.readState(WORK).blocked).toBe(true);
       gate.resolve();
       await settle(WORK);
+      // The write reconciled, and left nothing of the closed dialog behind.
+      expect(switches.readReplaceDialog(WORK)).toBeNull();
     });
   });
 });

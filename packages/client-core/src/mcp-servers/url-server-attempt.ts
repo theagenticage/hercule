@@ -431,7 +431,7 @@ interface FollowingPhase {
 interface EndedPhase {
   readonly kind: "ended";
   state: StateOf<"ended">;
-  readonly release: () => void;
+  release: () => void;
 }
 
 type Phase = FormPhase | WritingPhase | SigningInPhase | FollowingPhase | EndedPhase;
@@ -475,11 +475,18 @@ export const openUrlServerAttempt = (
     for (const listener of listeners) listener();
   };
 
-  /** Makes `next` the phase, after releasing what the phase that is left holds. */
-  const enter = (next: Phase): void => {
+  /**
+   * Makes `next` the phase, after releasing what the phase that is left holds.
+   * `attach` takes what `next` holds (watchers, observers) and returns the
+   * function that releases it. It runs before the phase is published: a
+   * subscriber that closes the attempt from that notification then releases
+   * `next` like any other phase, and no observer outlives the attempt.
+   */
+  const enter = (next: Phase, attach?: () => () => void): void => {
     const left = phase;
     phase = next;
     left.release();
+    if (attach !== undefined) next.release = attach();
     publish();
   };
 
@@ -515,7 +522,8 @@ export const openUrlServerAttempt = (
   const followRecord = (id: string, onReading: (reading: RecordReading) => void): (() => void) => {
     let stopped = false;
     let stopWatching = noRelease;
-    const { queryKey, queryFn } = queries.readServerQuery(id);
+    const serverQuery = queries.readServerQuery(id);
+    const { queryKey } = serverQuery;
     void (async () => {
       await queryClient.cancelQueries({ queryKey, exact: true });
       if (stopped) return;
@@ -534,8 +542,7 @@ export const openUrlServerAttempt = (
         }
       });
       const stopObserver = new QueryObserver(queryClient, {
-        queryKey,
-        queryFn,
+        ...serverQuery,
         retry: false,
         staleTime: 0,
         refetchOnMount: "always",
@@ -564,18 +571,30 @@ export const openUrlServerAttempt = (
       if (
         event.type !== "updated" ||
         event.action.type !== "success" ||
-        !matchQuery({ queryKey, exact: true }, event.query) ||
-        phase !== owner ||
-        (owner.kind === "signing-in" && owner.state.step.kind === "finishing")
+        !matchQuery({ queryKey, exact: true }, event.query)
       ) {
         return;
       }
-      const servers = queries.readServers();
-      if (servers === undefined) return;
-      const record = servers.find((server) => server.id === id);
-      if (record !== undefined && record.source.kind === "url") return;
-      end(record === undefined ? "gone" : "moved", null, record?.name ?? null);
+      endIfCatalogueDisagrees(owner, id);
     });
+  };
+
+  /**
+   * Ends the attempt with `gone` or `moved` when the servers the cache holds
+   * now show that the server `id` was deleted or is reached with a plugin's
+   * Connection. Does nothing while `owner` is not the phase, while a sign-in
+   * is being finished, and while the list is not read yet: an unread list
+   * decides nothing, and its first read does.
+   */
+  const endIfCatalogueDisagrees = (owner: FormPhase | SigningInPhase, id: string): void => {
+    if (phase !== owner || (owner.kind === "signing-in" && owner.state.step.kind === "finishing")) {
+      return;
+    }
+    const servers = queries.readServers();
+    if (servers === undefined) return;
+    const record = servers.find((server) => server.id === id);
+    if (record !== undefined && record.source.kind === "url") return;
+    end(record === undefined ? "gone" : "moved", null, record?.name ?? null);
   };
 
   /** Reads the list of servers again, so the list shows what a write did. Never fails. */
@@ -603,25 +622,31 @@ export const openUrlServerAttempt = (
       sent,
       release: noRelease,
     };
-    enter(owner);
-    const stops: (() => void)[] = [];
-    if (mcpServerId !== null) stops.push(watchCatalogue(owner, mcpServerId));
-    if (problem?.kind === "exists") {
-      // The refusal's button leads to the server it names: its own record decides whether it is there.
-      stops.push(
-        followRecord(problem.mcpServerId, (reading) => {
-          const existing = describeExisting(reading);
-          const { state } = owner;
-          if (state.problem?.kind !== "exists" || sameExisting(state.problem.existing, existing)) {
-            return;
-          }
-          show(owner, { kind: "form", problem: { ...state.problem, existing } });
-        }),
-      );
-    }
-    owner.release = () => {
-      for (const stop of stops) stop();
-    };
+    enter(owner, () => {
+      const stops: (() => void)[] = [];
+      if (mcpServerId !== null) stops.push(watchCatalogue(owner, mcpServerId));
+      if (problem?.kind === "exists") {
+        // The refusal's button leads to the server it names: its own record decides whether it is there.
+        stops.push(
+          followRecord(problem.mcpServerId, (reading) => {
+            const existing = describeExisting(reading);
+            const { state } = owner;
+            if (
+              state.problem?.kind !== "exists" ||
+              sameExisting(state.problem.existing, existing)
+            ) {
+              return;
+            }
+            show(owner, { kind: "form", problem: { ...state.problem, existing } });
+          }),
+        );
+      }
+      return () => {
+        for (const stop of stops) stop();
+      };
+    });
+    // The list may already show that the server is gone, such as when a dialog opens after a delete.
+    if (mcpServerId !== null) endIfCatalogueDisagrees(owner, mcpServerId);
   };
 
   /** Shows the phase `back` names, with `problem` for its form. */
@@ -725,17 +750,18 @@ export const openUrlServerAttempt = (
       pendingCheck: null,
       release: noRelease,
     };
-    enter(owner);
-    const stopFollowing = followRecord(id, (reading) => {
-      owner.reading = reading;
-      if (reading.kind === "found") name = reading.server.name;
-      answerCheck(owner);
-      refresh(owner);
+    enter(owner, () => {
+      const stopFollowing = followRecord(id, (reading) => {
+        owner.reading = reading;
+        if (reading.kind === "found") name = reading.server.name;
+        answerCheck(owner);
+        refresh(owner);
+      });
+      return () => {
+        stopFollowing();
+        if (owner.pendingCheck?.timer != null) clearTimeout(owner.pendingCheck.timer);
+      };
     });
-    owner.release = () => {
-      stopFollowing();
-      if (owner.pendingCheck?.timer != null) clearTimeout(owner.pendingCheck.timer);
-    };
   };
 
   // ---- the token write

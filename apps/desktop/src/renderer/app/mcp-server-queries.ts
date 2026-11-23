@@ -16,7 +16,8 @@ export const buildMcpServerQueries = (
   readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey),
   readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
   readServerQuery: (mcpServerId) => {
-    const { queryKey } = mcpServerQuery(client, mcpServerId);
-    return { queryKey, queryFn: () => client.mcpServer.read({ params: { id: mcpServerId } }) };
+    const { queryKey, queryFn } = mcpServerQuery(client, mcpServerId);
+    // The page query's options type its read as optional, so it is passed on only when there is one.
+    return { queryKey, ...(queryFn === undefined ? {} : { queryFn }) };
   },
 });

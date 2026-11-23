@@ -124,8 +124,13 @@ export interface BrowserSignInHost {
   readonly port: BrowserSignInPort | undefined;
   /** Returns true while `owner` is the attempt's current phase. */
   readonly isCurrent: (owner: SigningInPhase) => boolean;
-  /** Makes `owner` the attempt's phase, after releasing what the phase that is left holds. */
-  readonly enter: (owner: SigningInPhase) => void;
+  /**
+   * Makes `owner` the attempt's phase, after releasing what the phase that is
+   * left holds. `attach` takes what the phase holds and returns the function
+   * that releases it. It runs before the phase is published, so a subscriber
+   * that ends the attempt from that notification releases it too.
+   */
+  readonly enter: (owner: SigningInPhase, attach: () => () => void) => void;
   /** Shows `state` for `owner`, unless the attempt left the phase meanwhile. */
   readonly show: (owner: SigningInPhase, state: SigningInState) => void;
   /** Ends the attempt with `gone` (the server was deleted) or `moved` (a Connection reaches it now). */
@@ -324,12 +329,15 @@ export const createBrowserSignIn = (host: BrowserSignInHost): BrowserSignIn => {
       listenerId: null,
       release: () => {},
     };
-    host.enter(owner);
-    const stopWatching = host.watchCatalogue(owner, id);
-    owner.release = () => {
-      stopWatching();
-      retireListener(owner);
-    };
+    host.enter(owner, () => {
+      const stopWatching = host.watchCatalogue(owner, id);
+      return () => {
+        stopWatching();
+        retireListener(owner);
+      };
+    });
+    // A subscriber may have ended the attempt while the phase was published.
+    if (!host.isCurrent(owner)) return;
 
     let started: McpServerSignInStart;
     try {

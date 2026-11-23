@@ -3,7 +3,7 @@
  * in client-core): how this app's query cache holds the servers, and the
  * hook the switch of a row and the switch of a server's page use.
  */
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
@@ -31,6 +31,12 @@ export interface McpServerSwitch {
     readonly connectionLabel: string;
     readonly typeName: string;
   }) => void;
+  /**
+   * Closes the Replace dialog of this target and forgets its refusal, and does nothing when none is
+   * open. A write that still runs keeps its guard. The function stays the same while the target does,
+   * so a control can release the dialog from an effect when it unmounts.
+   */
+  readonly closeReplace: () => void;
   /** Whether a write of the switch runs, started by any control, or the list could not be read again after one. */
   readonly blocked: boolean;
   /** Returns why the last press made no change, or that a saved change could not be read again, or `null`. */
@@ -74,11 +80,15 @@ export function useMcpServerSwitch(
     const mine = JSON.parse(key) as McpServerSwitchTarget;
     return switches.attach(mine);
   }, [switches, key]);
+  const closeReplace = useCallback(() => {
+    switches.closeReplace(JSON.parse(key) as McpServerSwitchTarget);
+  }, [switches, key]);
   return {
     press: (on) => switches.apply(target, on, existingRecordId),
     openReplace: (words) => {
       switches.openReplace(target, words);
     },
+    closeReplace,
     blocked: state.blocked,
     problem: describeMcpListProblem(state),
   };

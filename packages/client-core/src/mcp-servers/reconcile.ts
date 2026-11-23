@@ -13,7 +13,12 @@
  * - Only a fetch counts. `setQueryData` also marks a query as a success, but
  *   it proves nothing about what the controller holds.
  */
-import { matchQuery, type QueryClient, type QueryKey } from "@tanstack/query-core";
+import {
+  matchQuery,
+  type QueryClient,
+  type QueryKey,
+  type QueryObserverOptions,
+} from "@tanstack/query-core";
 import type { McpServer } from "@hercule/contract";
 
 /** A query the module reads: its key, and a read of it that never answers from the cache. */
@@ -39,10 +44,9 @@ export interface McpServerQueries {
    * stale when a write of a closed attempt or of a switch leaves the server
    * changed.
    */
-  readServerQuery(mcpServerId: string): {
-    readonly queryKey: QueryKey;
-    readonly queryFn: () => Promise<McpServer>;
-  };
+  readServerQuery(
+    mcpServerId: string,
+  ): Pick<QueryObserverOptions<McpServer>, "queryKey" | "queryFn">;
 }
 
 /** Watches one query for a fetch that succeeded after the watch started. */

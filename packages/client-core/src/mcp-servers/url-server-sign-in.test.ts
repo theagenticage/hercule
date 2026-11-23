@@ -13,6 +13,7 @@ import {
   hold,
   oauthServer,
   setupUrlServers,
+  urlServer,
 } from "./url-server-attempt.testing";
 
 const TOKEN_OF_DOCS = { kind: "token", mcpServerId: DOCS_ID, name: "docs" } as const;
@@ -288,6 +289,22 @@ describe("the browser sign-in of the desktop app", () => {
       kind: "following",
       outcome: { kind: "needs-token", refusedWrite: null },
     });
+  });
+});
+
+describe("a sign-in that a subscriber ends as it starts", () => {
+  it("opens no listener and holds no watcher when the attempt is closed from the first signing-in notification", async () => {
+    const { open, port, spies } = await setupUrlServers({ servers: [oauthServer()] });
+    const attempt = open(TOKEN_OF_DOCS);
+    attempt.subscribe(() => {
+      if (attempt.read().kind === "signing-in") attempt.close();
+    });
+
+    await attempt.startSignIn();
+
+    expect(attempt.read()).toMatchObject({ kind: "ended", reason: "closed" });
+    expect(port.listen).not.toHaveBeenCalled();
+    expect(spies.startSignIn).not.toHaveBeenCalled();
   });
 });
 
@@ -620,10 +637,12 @@ describe("a sign-in the controller refuses", () => {
   });
 
   it("ends the attempt when the server is gone or reached with a Connection now", async () => {
-    const { open } = await setupUrlServers({
+    const { open, queryClient } = await setupUrlServers({
       servers: [buildServer(DOCS_ID, "docs", CONNECTION_ID)],
       withPort: false,
     });
+    // The list the cache holds is older than the controller's records, so only the controller's answer ends the attempts.
+    queryClient.setQueryData(["mcp-servers"], [urlServer(), urlServer({}, OTHER_ID)]);
     const gone = open({ kind: "token", mcpServerId: OTHER_ID, name: "docs" });
     await gone.startSignIn();
     expect(gone.read()).toMatchObject({ kind: "ended", reason: "gone" });

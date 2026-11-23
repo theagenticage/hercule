@@ -1,4 +1,4 @@
-import { Suspense, useState, type JSX } from "react";
+import { Suspense, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -32,6 +32,10 @@ export function ServerRow({ row }: { readonly row: McpServerSettingsRow }): JSX.
   const offerSwitch = useMcpServerSwitch(offerTarget);
   // True while the Replace dialog is open.
   const [replacing, setReplacing] = useState(false);
+  const { closeReplace } = offerSwitch;
+  // The row owns the Replace attempt: leaving the row (the user navigates away, or the offer goes)
+  // releases it, even when its dialog never finished loading. A write that runs still reconciles.
+  useEffect(() => (replacing ? closeReplace : undefined), [replacing, closeReplace]);
   return (
     <>
       <ServerRowView

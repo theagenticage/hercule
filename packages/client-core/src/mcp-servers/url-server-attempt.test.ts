@@ -322,6 +322,45 @@ describe("closing", () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves no observer when a subscriber closes the attempt from the notification of the first following state", async () => {
+    const { open, queryClient, spies, settled } = await setupUrlServers();
+    const attempt = open(ADD);
+    attempt.subscribe(() => {
+      if (attempt.read().kind === "following") attempt.close();
+    });
+
+    attempt.submitAdd(FIELDS);
+    await vi.waitFor(() => {
+      expect(attempt.read()).toMatchObject({ kind: "ended", reason: "closed" });
+    });
+    await settled();
+    await flush();
+
+    expect(queryClient.getQueryCache().find({ queryKey: detailKey(DOCS_ID) })).toBeUndefined();
+    expect(spies.read).not.toHaveBeenCalled();
+  });
+
+  it("leaves no observer when a subscriber closes the attempt from the notification of a refusal that follows the duplicate", async () => {
+    const context = await setupUrlServers({ servers: [urlServer({ name: "wiki" }, OTHER_ID)] });
+    const attempt = context.open(ADD);
+    attempt.subscribe(() => {
+      const state = attempt.read();
+      if (state.kind === "form" && state.problem?.kind === "exists") attempt.close();
+    });
+
+    attempt.submitAdd(FIELDS);
+    await vi.waitFor(() => {
+      expect(attempt.read()).toMatchObject({ kind: "ended", reason: "closed" });
+    });
+    await context.settled();
+    await flush();
+
+    expect(
+      context.queryClient.getQueryCache().find({ queryKey: detailKey(OTHER_ID) }),
+    ).toBeUndefined();
+    expect(context.spies.read).not.toHaveBeenCalled();
+  });
+
   it("gives a stable state until something changes, and tells subscribers of every change", async () => {
     const { open, waitForOutcome } = await setupUrlServers();
     const attempt = open(ADD);
@@ -650,7 +689,11 @@ describe("the token form", () => {
   });
 
   it("ends the attempt with the controller's words when the server now uses a Connection, and keeps its name to open it", async () => {
-    const { open, waitForKind } = await setupUrlServers({ servers: [onConnection()] });
+    const { open, queryClient, waitForKind } = await setupUrlServers({
+      servers: [onConnection()],
+    });
+    // The list the cache holds is older than the controller's record, so only the controller's answer ends the attempt.
+    queryClient.setQueryData(["mcp-servers"], [urlServer()]);
     const attempt = open(TOKEN_OF_DOCS);
 
     attempt.submitToken(TOKEN);
@@ -851,6 +894,64 @@ describe("a token dialog kept by the server's id", () => {
     await readList();
 
     expect(attempt.read()).toEqual({ kind: "form", problem: null });
+  });
+
+  describe("opened after the list already changed", () => {
+    it("ends at once with gone when the list it already holds lacks the server", async () => {
+      const { world, readList, open } = await setupUrlServers({ servers: [urlServer()] });
+      world.servers = [];
+      await readList();
+
+      const attempt = open(TOKEN_OF_DOCS);
+
+      expect(attempt.read()).toEqual({
+        kind: "ended",
+        reason: "gone",
+        mcpServerId: DOCS_ID,
+        name: "docs",
+        message: null,
+      });
+    });
+
+    it("ends at once with moved when the list it already holds shows the server on a Connection", async () => {
+      const { world, readList, open } = await setupUrlServers({ servers: [urlServer()] });
+      world.servers = [onConnection()];
+      await readList();
+
+      const attempt = open(TOKEN_OF_DOCS);
+
+      expect(attempt.read()).toMatchObject({
+        kind: "ended",
+        reason: "moved",
+        mcpServerId: DOCS_ID,
+        name: "docs",
+      });
+    });
+
+    it("stays a form for a server the list holds, and sends the token", async () => {
+      const { open, spies } = await setupUrlServers({ servers: [urlServer()] });
+
+      const attempt = open(TOKEN_OF_DOCS);
+      attempt.submitToken(TOKEN);
+
+      expect(attempt.read().kind).toBe("writing");
+      expect(spies.setToken).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for the first read of a list that is not read yet, and then ends with gone", async () => {
+      const { world, queryClient, readList, open, spies } = await setupUrlServers({
+        servers: [urlServer()],
+      });
+      queryClient.removeQueries({ queryKey: ["mcp-servers"] });
+      const attempt = open(TOKEN_OF_DOCS);
+      expect(attempt.read()).toEqual({ kind: "form", problem: null });
+
+      world.servers = [];
+      await readList();
+
+      expect(attempt.read()).toMatchObject({ kind: "ended", reason: "gone" });
+      expect(spies.setToken).not.toHaveBeenCalled();
+    });
   });
 
   it("stops watching when the dialog closes", async () => {

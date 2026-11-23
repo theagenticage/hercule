@@ -1,4 +1,4 @@
-import { Suspense, useState, type JSX, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { HerculeClient } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
@@ -48,6 +48,10 @@ export function ServerRow({
   const offerTarget = buildOfferSwitchTarget(row);
   const switchServer = useMcpServerSwitch(client, offerTarget);
   const [replacing, setReplacing] = useState(false);
+  const { closeReplace } = switchServer;
+  // The row owns the Replace attempt: leaving the row (the user navigates away, or the offer goes)
+  // releases it, even when its dialog never finished loading. A write that runs still reconciles.
+  useEffect(() => (replacing ? closeReplace : undefined), [replacing, closeReplace]);
   const press = (on: boolean): void => {
     const pressed = switchServer.press(on);
     if (pressed.kind !== "replace") return;
