@@ -3,7 +3,8 @@
  * app for a Connection, and the check of the access token.
  */
 import { describe, expect, it } from "vitest";
-import { Context, Effect, Layer, Logger, Result } from "effect";
+import { Context, Duration, Effect, Fiber, Layer, Logger, Result } from "effect";
+import { TestClock } from "effect/testing";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
@@ -60,6 +61,8 @@ interface StubAnswer {
   readonly status?: number;
   readonly body?: unknown;
   readonly transportFailure?: string;
+  /** Never answers, so the request ends only by its timeout. */
+  readonly hangs?: true;
 }
 
 /**
@@ -81,6 +84,7 @@ const stubSlack = (answerFor: StubAnswer | ((url: string) => StubAnswer)) => {
       body: body === undefined ? undefined : JSON.parse(new TextDecoder().decode(body.body)),
       redirect: Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit)?.redirect,
     });
+    if (answer.hangs) return Effect.never;
     if (answer.transportFailure !== undefined) {
       return Effect.fail(
         new HttpClientError.HttpClientError({
@@ -185,6 +189,40 @@ describe("creating the Slack app of a Connection", () => {
     );
 
     expect(message).toContain(expected);
+  });
+
+  it.each(["restricted_action", "no_permission", "access_denied", "accesslimited"])(
+    "says the workspace restricts who can create apps when Slack answers %s",
+    async (error) => {
+      const stub = stubSlack({ body: { ok: false, error } });
+
+      const message = readFailure(
+        await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+      );
+
+      expect(message).toBe(
+        `Your Slack workspace restricts who can create apps (error code: ${error}). Ask a Slack admin to create the configuration token for you, or to allow it.`,
+      );
+    },
+  );
+
+  it("says an app may have been left in the workspace when creating it times out", async () => {
+    const stub = stubSlack({ hangs: true });
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          Effect.result(createClient({ configurationToken: CONFIGURATION_TOKEN })),
+        );
+        yield* TestClock.adjust(Duration.seconds(30));
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(stub.layer), Effect.provide(TestClock.layer())),
+    );
+
+    const message = readFailure(result);
+    expect(message).toContain("did not answer within 30 seconds");
+    expect(message).toContain("An app named Hercule may have been left");
+    expect(message).toContain("delete it at api.slack.com/apps");
   });
 
   it("tells the user to make a new token when Slack refuses it", async () => {

@@ -57,11 +57,7 @@ const QUOTABLE_ERROR_CODES = [
   "fatal_error",
   "service_unavailable",
   "request_timeout",
-  "accesslimited",
   "missing_scope",
-  "access_denied",
-  "no_permission",
-  "restricted_action",
 ];
 
 /**
@@ -197,6 +193,9 @@ const readAnswerJson = (
  * larger than `MAX_ANSWER_BYTES` or not JSON. Slack reports its own failures
  * in a 200 answer with `ok: false`, which the caller reads.
  *
+ * `adviceAfterTimeout` ends the message for a request that Slack did not
+ * answer in time.
+ *
  * Every message is fixed text: it never quotes the answer, which can hold
  * secrets, nor the transport's error, which can hold the request.
  */
@@ -204,6 +203,7 @@ const postToSlack = (
   url: string,
   token: string,
   jsonBody?: string,
+  adviceAfterTimeout = "Try again.",
 ): Effect.Effect<unknown, ConnectionValidationFailed, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const baseRequest = HttpClientRequest.post(url, {
@@ -244,7 +244,7 @@ const postToSlack = (
       duration: SLACK_REQUEST_TIMEOUT,
       orElse: () =>
         failValidation(
-          `Slack did not answer within ${String(Duration.toSeconds(SLACK_REQUEST_TIMEOUT))} seconds. Try again.`,
+          `Slack did not answer within ${String(Duration.toSeconds(SLACK_REQUEST_TIMEOUT))} seconds. ${adviceAfterTimeout}`,
         ),
     }),
   );
@@ -334,6 +334,11 @@ const describeCreateAppError = (code: string | undefined): string => {
       return `Slack refused the app that Hercule asked it to create. This is a bug in Hercule: report it.`;
     case "ratelimited":
       return "Slack is limiting how often Hercule may ask. Try again in a minute.";
+    case "restricted_action":
+    case "no_permission":
+    case "access_denied":
+    case "accesslimited":
+      return `Your Slack workspace restricts who can create apps (error code: ${code}). Ask a Slack admin to create the configuration token for you, or to allow it.`;
     default:
       return `Slack could not create the app and answered with ${nameUnmappedError(code)}. Try again, and if it keeps failing, report it.`;
   }
@@ -412,6 +417,7 @@ const createOAuthClient: NonNullable<ConnectionTypeContribution["createOAuthClie
       CREATE_APP_URL,
       token,
       JSON.stringify({ manifest: buildAppManifest() }),
+      "An app named Hercule may have been left in your Slack workspace: you can delete it at api.slack.com/apps. Then try again.",
     );
     const answer = yield* decodeAnswer(CreateAppAnswer, json);
     if (!answer.ok) return yield* failValidation(describeCreateAppError(answer.error));
@@ -504,6 +510,8 @@ const SETUP_INSTRUCTIONS = [
   "1. Open Slack's app page, [api.slack.com/apps](https://api.slack.com/apps).",
   "2. Under Your App Configuration Tokens, choose Generate Token, pick your workspace, and copy the Access Token.",
   "3. Paste it here.",
+  "",
+  "If Slack says an admin must approve the app, ask them to approve it, then start again here.",
 ].join("\n");
 
 export const connectionType: ConnectionTypeContribution = {
