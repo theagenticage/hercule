@@ -1164,6 +1164,14 @@ describe("the access token a plugin asks the core for", () => {
       expect(status).toBe("connected");
     });
 
+    it("keeps the connection signed in for any error code answered with HTTP 429, listed or not", async () => {
+      const { status } = await refreshAgainst(() =>
+        buildJsonResponse({ error: "a_throttling_code_nobody_listed" }, 429),
+      );
+
+      expect(status).toBe("connected");
+    });
+
     it("still sends the connection to be signed in again for a code the type does not list", async () => {
       const { status } = await refreshAgainst(() =>
         buildJsonResponse({ ok: false, error: "invalid_refresh_token" }),

@@ -564,6 +564,21 @@ const redactPastedValues = (
     .reduce((text, value) => text.split(value).join(REMOVED), message);
 
 /**
+ * Returns the message of a failed check of the account with the tokens the
+ * provider just issued removed from it, whatever their length. A provider or a
+ * plugin may echo the token it was sent, and the message goes on to the user.
+ */
+const removeTokensFromMessage = (message: string, tokens: TokenSet): string =>
+  redactPastedValues(
+    message,
+    {
+      accessToken: tokens.accessToken,
+      ...(tokens.refreshToken === undefined ? {} : { refreshToken: tokens.refreshToken }),
+    },
+    new Set(["accessToken", "refreshToken"]),
+  );
+
+/**
  * Builds the fixed message of a refused start whose plugin failed while
  * creating the OAuth client in a way it did not report, or answered with no
  * client id. The failure itself is not quoted, because the plugin handled what
@@ -1433,7 +1448,9 @@ const make = Effect.gen(function* () {
               Effect.retry(ACCOUNT_CHECK_RETRY),
               Effect.catchTag("ConnectionValidationFailed", (failure) =>
                 Effect.fail({
-                  accountCheckFailed: truncateMessage(failure.message),
+                  accountCheckFailed: truncateMessage(
+                    removeTokensFromMessage(failure.message, tokens),
+                  ),
                 } satisfies AccountCheckFailed),
               ),
             );
@@ -2254,7 +2271,7 @@ const make = Effect.gen(function* () {
             status: "failed",
             message:
               `the provider approved the sign-in, but checking the account failed: ` +
-              `${account.failure.message}. Start again to get a new code`,
+              `${removeTokensFromMessage(account.failure.message, exchange.tokens)}. Start again to get a new code`,
           } as const;
         }
         const { result: written, observer: started } = yield* writeAndStartObserver(

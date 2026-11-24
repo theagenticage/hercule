@@ -312,14 +312,35 @@ export const readBoundedText = (
 };
 
 /**
+ * What `postForm` does with answers that need a caller's judgment.
+ *
+ * - `rateLimited`: what an HTTP 429 means when its body is an OAuth error.
+ *   `unreachable` is for a code exchange and a refresh: a 429 says the
+ *   provider is throttling, and never that the grant is bad, so a body that
+ *   looks like an error (Slack's `ratelimited`, or a throttling code nobody
+ *   listed) must not send a healthy Connection to be signed in again. Left out,
+ *   the error is read as it is, which a device poll needs: RFC 8628 has the
+ *   provider answer `slow_down` with a 429.
+ * - `transientErrors`: error codes that mean "try again later", whatever the
+ *   status (an HTTP 200 with `ok: false`, for Slack).
+ *
+ * A 429 with no OAuth error is a rate limit in every case.
+ */
+export interface PostFormPolicy {
+  readonly rateLimited?: "unreachable";
+  readonly transientErrors?: ReadonlyArray<string>;
+}
+
+/**
  * Sends a form-encoded request to one of the provider's OAuth endpoints, and
  * returns the response body when it is not an OAuth error.
  *
  * - Fails with `ProviderRefused` when the body is an OAuth error, whatever the
  *   status, or when the status is any other client error, also when its body
  *   is empty, breaks while it is read, or is over `MAX_ANSWER_BYTES`. The
- *   exception is an error code the caller lists in `transientErrors`: the
- *   provider says "try again later", and that is `ProviderUnreachable`.
+ *   exceptions are in `policy` (`PostFormPolicy`): an error code the caller lists
+ *   as transient, and a 429 where the caller says it never means a refusal.
+ *   Both are `ProviderUnreachable`.
  * - Fails with `ProviderUnreachable` when the endpoint cannot be reached, answers
  *   with a redirect, answers with a server error, answers 200 with a body that
  *   is not JSON, breaks while it is read or is over `MAX_ANSWER_BYTES`, or
@@ -343,7 +364,7 @@ export const postForm = (
   form: Record<string, string>,
   endpointName: string,
   headers: Record<string, string> = {},
-  transientErrors: ReadonlyArray<string> = [],
+  policy: PostFormPolicy = {},
 ): Effect.Effect<unknown, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -363,6 +384,13 @@ export const postForm = (
       }
       if (response.status >= 500) {
         return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
+      }
+      // What a 429 means is decided here, by status, before any body is read:
+      // see `PostFormPolicy.rateLimited`.
+      if (response.status === 429 && policy.rateLimited === "unreachable") {
+        return yield* failProviderUnreachable(
+          `the ${endpointName} returned HTTP ${status}: it is rate limiting requests`,
+        );
       }
       // A body that cannot be read is no body for a client error: the status
       // alone says the provider refused. Only an answer of 200 needs its body.
@@ -389,7 +417,7 @@ export const postForm = (
         // A provider that answers its own failures with an error code and a
         // 200 (Slack's `internal_error`) says "try again", and a grant that was
         // refused is another thing: the caller names the codes that mean it.
-        if (transientErrors.includes(error)) {
+        if (policy.transientErrors?.includes(error) === true) {
           return yield* failProviderUnreachable(
             `the ${endpointName} answered that it cannot serve the request now`,
           );
@@ -477,10 +505,10 @@ const requestTokenAnswer = (
   form: Record<string, string>,
   headers: Record<string, string>,
   bearerOnly: boolean,
-  transientErrors: ReadonlyArray<string> = [],
+  policy: PostFormPolicy = {},
 ): Effect.Effect<TokenAnswer, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const answer = yield* postForm(tokenUrl, form, "token endpoint", headers, transientErrors);
+    const answer = yield* postForm(tokenUrl, form, "token endpoint", headers, policy);
     const body = yield* decodeTokenResponse(answer).pipe(
       Effect.catchTag("SchemaError", () =>
         failProviderUnreachable(
@@ -622,7 +650,12 @@ export const exchangeCode = (request: {
     },
     authentication.headers,
     request.bearerOnly === true,
-    request.transientErrors,
+    {
+      rateLimited: "unreachable",
+      ...(request.transientErrors === undefined
+        ? {}
+        : { transientErrors: request.transientErrors }),
+    },
   ).pipe(
     Effect.flatMap((answer) =>
       answer.unusableReason === undefined
@@ -662,6 +695,11 @@ export const refreshAccess = (request: {
     },
     authentication.headers,
     request.bearerOnly === true,
-    request.transientErrors,
+    {
+      rateLimited: "unreachable",
+      ...(request.transientErrors === undefined
+        ? {}
+        : { transientErrors: request.transientErrors }),
+    },
   );
 };

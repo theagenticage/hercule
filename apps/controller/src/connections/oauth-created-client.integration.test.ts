@@ -53,6 +53,10 @@ import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } 
 import { ConnectionService, ConnectionServiceLayer } from "./service";
 import { buildAccount, buildJsonResponse } from "./testing";
 
+/** The tokens the in-test provider issues. */
+const ACCESS_TOKEN = "good-first@account-1";
+const REFRESH_TOKEN = "refresh-1";
+
 /** What the user pastes for the client. Appears in no row, log line or error. */
 const SENTINEL = "xoxe-sentinel-config-token-0123456789";
 
@@ -165,7 +169,7 @@ interface PluginLog {
    */
   readonly createGate: { current: Promise<void> | undefined };
   /** How many more checks of the account fail, with a message that says the provider is down. */
-  readonly validateFailures: { remaining: number; calls: number };
+  readonly validateFailures: { remaining: number; calls: number; echoTokens: boolean };
 }
 
 /**
@@ -184,7 +188,7 @@ const buildCreatedClientType = (
     deleted: [],
     deleteGate: { current: undefined },
     createGate: { current: undefined },
-    validateFailures: { remaining: 0, calls: 0 },
+    validateFailures: { remaining: 0, calls: 0, echoTokens: false },
   };
   const type: RegisteredConnectionType = {
     pluginId: "forge",
@@ -212,7 +216,14 @@ const buildCreatedClientType = (
           log.validateFailures.calls += 1;
           if (log.validateFailures.remaining > 0) {
             log.validateFailures.remaining -= 1;
-            return Effect.fail(new ConnectionValidationFailed({ message: "Forge answered 502" }));
+            // A check that quotes the tokens it was sent.
+            return Effect.fail(
+              new ConnectionValidationFailed({
+                message: log.validateFailures.echoTokens
+                  ? `Forge refused ${credentials["accessToken"] ?? ""} and ${REFRESH_TOKEN}`
+                  : "Forge answered 502",
+              }),
+            );
           }
           const token = credentials["accessToken"] ?? credentials["pat"] ?? "";
           return token.startsWith("good-")
@@ -1554,10 +1565,11 @@ describe("an expired sign-in, while its client is being deleted at the provider"
 
 describe("the check of the account after the browser returns", () => {
   /** Starts a sign-in, finishes it while the account check fails `failures` times, and returns what the finish did. */
-  const finishWithFailingChecks = (failures: number) => {
+  const finishWithFailingChecks = (failures: number, echoTokens = false) => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
     log.validateFailures.remaining = failures;
+    log.validateFailures.echoTokens = echoTokens;
     return run(
       [type],
       Effect.gen(function* () {
@@ -1586,6 +1598,16 @@ describe("the check of the account after the browser returns", () => {
 
     expect(result._tag).toBe("Success");
     expect(calls).toBe(3);
+  });
+
+  it("removes the tokens from the plugin's message, because a check may quote what it was sent", async () => {
+    const { result } = await finishWithFailingChecks(3, true);
+
+    expect(result._tag).toBe("Failure");
+    const message = readMessage((result as { failure: unknown }).failure);
+    expect(message).toContain("checking the account failed: Forge refused [removed] and [removed]");
+    expect(message).not.toContain(ACCESS_TOKEN);
+    expect(message).not.toContain(REFRESH_TOKEN);
   });
 
   it("passes the plugin's own message on when every try fails, and does not blame the account", async () => {
