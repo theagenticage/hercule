@@ -3,10 +3,12 @@ import { buildServer } from "./testing";
 import { describePasteRefusal, describeSignInRefusal, offersBrowserSignIn } from "./sign-in-words";
 
 describe("describeSignInRefusal", () => {
-  it("has its own sentence for each reason, and the controller's words for any other failure", () => {
+  it("has its own sentence for most reasons, and the controller's words for a source it cannot read or any other failure", () => {
     expect(describeSignInRefusal("sign-in-expired", "x")).toContain("Start again");
     expect(describeSignInRefusal("sign-in-refused", "x")).toContain("refused the sign-in");
-    expect(describeSignInRefusal("source-unreadable", "x")).toContain("Try again later");
+    expect(describeSignInRefusal("source-unreadable", "The server is down.")).toBe(
+      "The server is down.",
+    );
     expect(describeSignInRefusal("timed-out", "x")).toContain("10 minutes");
     expect(describeSignInRefusal("failed", "The network is down.")).toBe("The network is down.");
   });

@@ -328,7 +328,8 @@ function chooseScene(name: string): McpScene {
           body: {
             error: {
               code: "invalid_state",
-              message: "The sign-in service could not be reached.",
+              message:
+                "The sign-in of atlas could not start: the protected resource metadata is for an address that does not cover the server's. Try again later.",
               details: { reason: "source-unreadable" },
             },
           },

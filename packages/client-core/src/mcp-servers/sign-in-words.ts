@@ -11,7 +11,7 @@ export type SignInRefusalReason =
   | "sign-in-expired"
   /** The user or the provider said no, the provider refused the code, or the answer came from another issuer. */
   | "sign-in-refused"
-  /** The server, its authorization server or its token endpoint could not be reached. */
+  /** The server, its authorization server or its token endpoint could not be reached, or answered what OAuth does not allow. */
   | "source-unreadable"
   /** The browser did not come back within 10 minutes. Only the desktop app waits for it. */
   | "timed-out"
@@ -28,8 +28,11 @@ export const offersBrowserSignIn = (server: McpServer): boolean =>
 
 /**
  * Returns the sentence that says why a browser sign-in ended, and what to do.
- * `detail` is the controller's own message for `failed`, and is ignored for
- * the other reasons, which have a sentence of their own.
+ * `detail` is the controller's own message. It is the sentence for `failed`
+ * and `source-unreadable`, and is ignored for the other reasons, which have a
+ * sentence of their own. A server that cannot be signed in to has many
+ * possible causes, from an outage to metadata that breaks the rules, and only
+ * the controller's message names the one that happened.
  */
 export const describeSignInRefusal = (reason: SignInRefusalReason, detail: string): string => {
   switch (reason) {
@@ -37,10 +40,9 @@ export const describeSignInRefusal = (reason: SignInRefusalReason, detail: strin
       return "This sign-in ran out, or another one for this server replaced it. Start again.";
     case "sign-in-refused":
       return "The browser or the provider refused the sign-in. Nothing was changed. You can start again.";
-    case "source-unreadable":
-      return "The server or its sign-in service could not be reached. Try again later.";
     case "timed-out":
       return "The browser did not come back within 10 minutes. Start again.";
+    case "source-unreadable":
     case "failed":
       return detail;
   }

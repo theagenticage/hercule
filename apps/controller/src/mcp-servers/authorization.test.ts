@@ -312,10 +312,59 @@ describe("discoverAuthorization", () => {
     expect(outcome).toMatchObject({ _tag: "Success" });
   });
 
+  it("accepts a resource that names the server's origin, as a challenge points at it", async () => {
+    // Slack's server at https://mcp.slack.com/mcp does this.
+    const { outcome } = await discover({
+      [`POST ${SERVER}`]: new Response(null, {
+        status: 401,
+        headers: {
+          "www-authenticate": `Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"`,
+        },
+      }),
+      "GET https://mcp.example.com/.well-known/oauth-protected-resource": {
+        resource: "https://mcp.example.com",
+        authorization_servers: [ISSUER],
+      },
+      [`GET ${AS_URL}`]: AS,
+    });
+
+    expect(outcome).toMatchObject({ success: { resource: "https://mcp.example.com" } });
+  });
+
+  it.each([
+    ["the origin", "https://mcp.example.com/"],
+    ["a parent path", "https://mcp.example.com/a"],
+    ["a parent path with a trailing slash", "https://mcp.example.com/a/"],
+    ["the server's address without its query", "https://mcp.example.com/a/mcp"],
+  ])("accepts a resource at %s", async (_name, resource) => {
+    const server = "https://mcp.example.com/a/mcp?k=1";
+    const { outcome } = await discover(
+      {
+        "GET https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp?k=1": {
+          resource,
+          authorization_servers: [ISSUER],
+        },
+        [`GET ${AS_URL}`]: AS,
+      },
+      server,
+    );
+
+    expect(outcome).toMatchObject({ success: { resource } });
+  });
+
   it.each([
     ["another address", { ...PRM, resource: "https://evil.example/mcp" }],
+    ["a sibling path", { ...PRM, resource: "https://mcp.example.com/other/mcp" }],
+    [
+      "a path that is a prefix but not a whole segment",
+      { ...PRM, resource: "https://mcp.example.com/mc" },
+    ],
+    ["a path below the server's", { ...PRM, resource: `${SERVER}/tools` }],
+    ["another port", { ...PRM, resource: "https://mcp.example.com:8443/mcp" }],
+    ["another scheme", { ...PRM, resource: "http://mcp.example.com/mcp" }],
     ["a fragment", { ...PRM, resource: `${SERVER}#x` }],
     ["a query that the server's address lacks", { ...PRM, resource: `${SERVER}?k=1` }],
+    ["a query on a parent path", { ...PRM, resource: "https://mcp.example.com/?k=1" }],
     ["no resource", leaveOut(PRM, "resource")],
     ["an address that is not one", { ...PRM, resource: "nope" }],
     ["no authorization server", { ...PRM, authorization_servers: [] }],
@@ -325,10 +374,13 @@ describe("discoverAuthorization", () => {
     expect(await discoveryFailure(prm, AS)).toBe("AuthorizationUnreadable");
   });
 
-  it("refuses protected resource metadata that drops the query of the server's address", async () => {
+  it("refuses a resource with a query that is not the server's own", async () => {
     const server = `${SERVER}?k=1`;
     const { outcome } = await discover(
-      { [`GET ${PRM_URL}?k=1`]: PRM, [`GET ${AS_URL}`]: AS },
+      {
+        [`GET ${PRM_URL}?k=1`]: { ...PRM, resource: `${SERVER}?k=2` },
+        [`GET ${AS_URL}`]: AS,
+      },
       server,
     );
     expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
