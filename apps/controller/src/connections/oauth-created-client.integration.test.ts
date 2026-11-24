@@ -23,6 +23,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -1230,6 +1231,177 @@ describe("who owns the cleanup of a created client", () => {
       }),
     );
 
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+/**
+ * Wraps a clock so that a test can hold one of its reads. Set `held.armed` to
+ * N to hold the Nth read from then on: the read resolves `held.reached`, waits
+ * for `held.go`, and then answers. Every other read answers at once.
+ */
+const buildHoldableClock = (
+  real: Clock.Clock,
+): {
+  readonly clock: Clock.Clock;
+  readonly held: {
+    armed: number;
+    readonly reached: ReturnType<typeof Promise.withResolvers<void>>;
+    readonly go: ReturnType<typeof Promise.withResolvers<void>>;
+  };
+} => {
+  const held = {
+    armed: 0,
+    reached: Promise.withResolvers<void>(),
+    go: Promise.withResolvers<void>(),
+  };
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => real.currentTimeMillisUnsafe(),
+    currentTimeNanosUnsafe: () => real.currentTimeNanosUnsafe(),
+    monotonicTimeNanosUnsafe: () => real.monotonicTimeNanosUnsafe(),
+    currentTimeNanos: real.currentTimeNanos,
+    monotonicTimeNanos: real.monotonicTimeNanos,
+    sleep: (duration) => real.sleep(duration),
+    currentTimeMillis: Effect.suspend(() => {
+      if (held.armed === 0) return real.currentTimeMillis;
+      held.armed -= 1;
+      if (held.armed > 0) return real.currentTimeMillis;
+      held.reached.resolve();
+      return Effect.andThen(
+        Effect.promise(() => held.go.promise),
+        real.currentTimeMillis,
+      );
+    }),
+  };
+  return { clock, held };
+};
+
+describe("the expiry timer's last look before it deletes a created client", () => {
+  it("does not delete early when the clock rolled back while the timer waited for a frozen controller", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { afterThaw } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const promotion = yield* PromotionState;
+        yield* service.startOAuth(startInput());
+        yield* promotion.freeze("promotion-1", new Date(Date.now() + 60_000));
+        // The timer is due, and waits at the gate.
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+        // The clock is corrected backwards while it waits, to before the deadline.
+        yield* TestClock.setTime(1000);
+        yield* promotion.thaw("promotion-1");
+        yield* settle;
+        const afterThaw = [...log.deleted];
+        // Once the clock really reaches the due time, the client goes.
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+        return { afterThaw };
+      }),
+    );
+
+    expect(afterThaw).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("keeps the client for a finish that begins its claim after the timer is due and before it looks at the entry", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { early } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const release = yield* Deferred.make<void>();
+        const { clock, held } = buildHoldableClock(yield* Clock.Clock);
+        // The timer is forked from the start, so it reads this clock.
+        const started = yield* asActor(
+          SESSION,
+          service.startOAuth(startInput()).pipe(Effect.provideService(Clock.Clock, clock)),
+        );
+        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
+        yield* settle;
+        // The timer's next look at the clock, once it is due, is held.
+        held.armed = 1;
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* Effect.promise(() => held.reached.promise);
+        // A finish begins its claim, which waits for the writer, while the timer is held.
+        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
+        yield* settle;
+        const finish = yield* Effect.forkChild(
+          Effect.flip(asActor(SESSION, service.finishOAuth({ callbackQuery }))),
+        );
+        yield* settle;
+        held.go.resolve();
+        yield* settle;
+        const early = [...log.deleted];
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(finish);
+        yield* settle;
+        return { early };
+      }),
+    );
+
+    // The timer looked at the entry after the claim began and left the client to
+    // it. The claim came after the deadline, so it ended without a Connection and
+    // deleted the client.
+    expect(early).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("keeps the client for a finish that begins its claim while another claim's end waits for the clock", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { early } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const release = yield* Deferred.make<void>();
+        const { clock, held } = buildHoldableClock(yield* Clock.Clock);
+        const started = yield* asActor(SESSION, service.startOAuth(startInput()));
+        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
+        // The deadline has passed, so a claim that ends without success deletes the client.
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
+        // The first claim reads the clock for its claim and then for its end;
+        // it is held at the second read, which is its end.
+        held.armed = 2;
+        const first = yield* Effect.forkChild(
+          Effect.flip(asActor(OTHER_SESSION, service.finishOAuth({ callbackQuery }))).pipe(
+            Effect.provideService(Clock.Clock, clock),
+          ),
+        );
+        yield* Effect.promise(() => held.reached.promise);
+        // Another finish begins its claim, which waits for the writer, in that gap.
+        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
+        yield* settle;
+        const second = yield* Effect.forkChild(
+          Effect.flip(asActor(SESSION, service.finishOAuth({ callbackQuery }))),
+        );
+        yield* settle;
+        held.go.resolve();
+        yield* Fiber.join(first);
+        yield* settle;
+        const early = [...log.deleted];
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(second);
+        yield* settle;
+        return { early };
+      }),
+    );
+
+    expect(early).toEqual([]);
     expect(log.deleted).toEqual(["made-1"]);
   });
 });

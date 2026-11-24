@@ -758,34 +758,45 @@ const make = Effect.gen(function* () {
     Effect.uninterruptible(
       Effect.gen(function* () {
         createdClients.set(state, { deleteClient, deadlineMillis, claims: 0 });
-        // Sleeps until the deadline plus the grace period by the clock, and
-        // asks the clock again on waking: a clock that moved while the fiber
-        // slept must not make the timer early.
-        const waitUntilDue: Effect.Effect<void> = Effect.flatMap(Clock.currentTimeMillis, (now) => {
-          const remaining = deadlineMillis + CREATED_CLIENT_GRACE_MS - now;
-          return remaining <= 0
-            ? Effect.void
-            : Effect.andThen(Effect.sleep(Duration.millis(remaining)), waitUntilDue);
-        });
-        yield* Effect.forkIn(
-          waitUntilDue.pipe(
-            Effect.andThen(
-              promotion.whenServingOr(
-                Effect.suspend(() => {
-                  const entry = createdClients.get(state);
-                  if (entry === undefined || entry.claims > 0) return Effect.void;
-                  createdClients.delete(state);
-                  return deleteCreatedClient(entry.deleteClient);
-                }),
-                () =>
-                  Effect.sync(() => {
-                    createdClients.delete(state);
-                  }),
-              ),
-            ),
+        // Sleeps until the deadline plus the grace period by the clock, and asks
+        // the clock again on waking: a clock that moved while the fiber slept
+        // must not make the timer early. The whole decision is made again inside
+        // the promotion gate, after any wait there, in one synchronous step with
+        // the delete, so a clock that rolled back during a freeze, or a finish
+        // that began its claim meanwhile, is seen.
+        const expire: Effect.Effect<void> = Effect.flatMap(
+          promotion.whenServingOr(
+            Effect.flatMap(Clock.currentTimeMillis, (now) => {
+              const entry = createdClients.get(state);
+              if (entry === undefined) return Effect.succeed("done" as const);
+              if (now < entry.deadlineMillis + CREATED_CLIENT_GRACE_MS) {
+                return Effect.succeed("early" as const);
+              }
+              // A claim in flight owns the entry, and the last claim to end
+              // without success deletes the client.
+              if (entry.claims > 0) return Effect.succeed("done" as const);
+              createdClients.delete(state);
+              return Effect.as(deleteCreatedClient(entry.deleteClient), "done" as const);
+            }),
+            () =>
+              Effect.sync(() => {
+                createdClients.delete(state);
+                return "done" as const;
+              }),
           ),
-          serviceScope,
+          (outcome) => (outcome === "early" ? waitThenExpire : Effect.void),
         );
+        const waitThenExpire: Effect.Effect<void> = Effect.flatMap(
+          Clock.currentTimeMillis,
+          (now) => {
+            const remaining = deadlineMillis + CREATED_CLIENT_GRACE_MS - now;
+            return Effect.andThen(
+              remaining <= 0 ? Effect.void : Effect.sleep(Duration.millis(remaining)),
+              expire,
+            );
+          },
+        );
+        yield* Effect.forkIn(waitThenExpire, serviceScope);
       }),
     );
 
@@ -812,9 +823,12 @@ const make = Effect.gen(function* () {
       const entry = createdClients.get(state);
       if (entry === undefined) return Effect.void;
       entry.claims = Math.max(0, entry.claims - 1);
-      if (entry.claims > 0) return Effect.void;
+      // Every condition is checked again after the clock was read, in the step
+      // that deletes: another finish may have begun its claim while this one
+      // waited for the clock.
       return Effect.flatMap(Clock.currentTimeMillis, (now) => {
-        if (now < entry.deadlineMillis || createdClients.get(state) !== entry) return Effect.void;
+        if (now < entry.deadlineMillis) return Effect.void;
+        if (entry.claims > 0 || createdClients.get(state) !== entry) return Effect.void;
         createdClients.delete(state);
         return deleteCreatedClient(entry.deleteClient);
       });
