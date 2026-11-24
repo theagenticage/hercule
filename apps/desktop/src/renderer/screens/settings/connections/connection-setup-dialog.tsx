@@ -32,44 +32,46 @@ import {
 } from "./connection-setup";
 
 /**
- * An OAuth sign-in that is finishing in the browser: the provider's page at
- * `authorizationUrl` is open, and `before` holds the Connections read when
- * the sign-in started.
- */
-interface BrowserSignIn {
-  readonly authorizationUrl: string;
-  readonly before: readonly Connection[];
-}
-
-/**
- * An OAuth sign-in whose return is caught on this machine: `signIn` holds the
- * provider's page and the listener, and `attempt` is the sign-in's lifetime,
- * which aborts when the dialog closes or the user starts again. Everything
- * that answers late (a return, the controller, the browser) first checks that
- * its attempt has not aborted, so it never touches a later sign-in or a closed
- * dialog.
+ * Where an OAuth sign-in stands. Each phase holds only what it needs, so a
+ * finished phase leaves nothing behind. The sign-in's abort controller is not
+ * part of it: it is the synchronous handle that ends the sign-in (see
+ * `attemptRef`), and a result that arrives late checks it before touching the
+ * phase.
  *
- * - `endedMessage`: why the sign-in ended without a Connection, or null.
- * - `finishing`: the controller is finishing the sign-in.
- * - `pasted`, `pasteProblem`: the address the user pastes when nothing
- *   listens, and why the last one was refused.
+ * - `idle`: the form. `error` is why the last start was refused, or null.
+ * - `starting`: the controller has not answered the start.
+ * - `legacy-wait`: the browser is at the provider and returns to the
+ *   controller. `before` holds the Connections read when the sign-in started,
+ *   so the one it writes is told from those there already.
+ * - `return-wait`: the browser returns to this machine. `signIn` holds the
+ *   provider's page and the listener. `pasted` and `pasteProblem` are the
+ *   address the user pastes when nothing listens, and why the last was refused.
+ * - `finishing`: the controller is finishing the sign-in the browser returned
+ *   to this machine.
+ * - `refused`: the sign-in ended without a Connection, for `message`.
+ *
+ * `linkError` says why the provider's page did not open, or is null.
  */
-interface LocalReturnProgress {
-  readonly signIn: LocalReturnSignIn;
-  readonly attempt: AbortController;
-  readonly endedMessage: string | null;
-  readonly finishing: boolean;
-  readonly pasted: string;
-  readonly pasteProblem: string | null;
-}
+type OAuthPhase =
+  | { readonly kind: "idle"; readonly error: string | null }
+  | { readonly kind: "starting" }
+  | {
+      readonly kind: "legacy-wait";
+      readonly authorizationUrl: string;
+      readonly before: readonly Connection[];
+      readonly linkError: string | null;
+    }
+  | {
+      readonly kind: "return-wait";
+      readonly signIn: LocalReturnSignIn;
+      readonly linkError: string | null;
+      readonly pasted: string;
+      readonly pasteProblem: string | null;
+    }
+  | { readonly kind: "finishing"; readonly signIn: LocalReturnSignIn }
+  | { readonly kind: "refused"; readonly message: string };
 
-/** Where the start of an OAuth sign-in stands: `busy` while the controller answers, and `error` for its refusal. */
-interface OAuthStart {
-  readonly busy: boolean;
-  readonly error: string | null;
-}
-
-const NOT_STARTING: OAuthStart = { busy: false, error: null };
+const IDLE: OAuthPhase = { kind: "idle", error: null };
 
 /** Returns the line that says why the browser did not open the sign-in page. */
 const describeOpenFailure = (error: unknown): string =>
@@ -126,15 +128,13 @@ export function ConnectionSetupDialog({
   // Undefined when the type offers no flow this version can show.
   const [flow, setFlow] = useState<SetupFlow | undefined>(listSetupFlows(type)[0]);
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
-  const [browserSignIn, setBrowserSignIn] = useState<BrowserSignIn | null>(null);
-  const [localReturn, setLocalReturn] = useState<LocalReturnProgress | null>(null);
-  const [oauthStart, setOauthStart] = useState<OAuthStart>(NOT_STARTING);
+  const [phase, setPhase] = useState<OAuthPhase>(IDLE);
   // The attempt of the sign-in that is starting or running, if any.
   const attemptRef = useRef<AbortController | null>(null);
   // A reconnect signs in with the client the Connection has. It asks for the
   // values to make the client again only when the user chooses to.
   const [clientSetupAsked, setClientSetupAsked] = useState(connection === undefined);
-  // Why the sign-in page did not open, shown until the user moves on.
+  // Why the page of a device flow did not open, shown until the user moves on.
   const [linkError, setLinkError] = useState<string | null>(null);
 
   /**
@@ -147,17 +147,20 @@ export function ConnectionSetupDialog({
     dialogRef.current?.close();
   };
   const port = useMemo(() => buildBrowserSignInPort(bridge), [bridge]);
-  const openLink = (url: string): void => {
-    // Main opens only web addresses, so anything else would fail there
-    // without a word.
+  /**
+   * Opens `url` in the browser through the port, and reports to `report` why it
+   * did not open, or null when it is opening. Main opens only web addresses,
+   * so anything else would fail there without a word.
+   */
+  const openPage = (url: string, report: (message: string | null) => void): void => {
     if (!isWebLink(url)) {
-      setLinkError(`The sign-in page is not a web address, so it was not opened: ${url}`);
+      report(`The sign-in page is not a web address, so it was not opened: ${url}`);
       return;
     }
-    setLinkError(null);
+    report(null);
     // The port reports a refusal of main too, which `link.open` answers without failing.
     port.open(url).catch((error: unknown) => {
-      setLinkError(describeOpenFailure(error));
+      report(describeOpenFailure(error));
     });
   };
 
@@ -194,15 +197,18 @@ export function ConnectionSetupDialog({
   const abandonSignIn = (): void => {
     attemptRef.current?.abort();
     attemptRef.current = null;
-    setLocalReturn(null);
-    setOauthStart(NOT_STARTING);
+    setPhase(IDLE);
   };
   /** Shows why `attempt` ended without a Connection, unless it was abandoned. */
-  const endLocalReturn = (attempt: AbortController, message: string): void => {
+  const refuseSignIn = (attempt: AbortController, message: string): void => {
+    if (!attempt.signal.aborted) setPhase({ kind: "refused", message });
+  };
+  /** Shows why the provider's page of `attempt` did not open, unless it was abandoned or has ended. */
+  const showLinkError = (attempt: AbortController, message: string | null): void => {
     if (attempt.signal.aborted) return;
-    setLocalReturn((current) =>
-      current?.attempt === attempt
-        ? { ...current, endedMessage: message, finishing: false }
+    setPhase((current) =>
+      current.kind === "legacy-wait" || current.kind === "return-wait"
+        ? { ...current, linkError: message }
         : current,
     );
   };
@@ -214,32 +220,19 @@ export function ConnectionSetupDialog({
    */
   const finishLocalReturn = async (
     attempt: AbortController,
+    signIn: LocalReturnSignIn,
     callbackQuery: string,
   ): Promise<void> => {
     if (attempt.signal.aborted) return;
-    setLocalReturn((current) =>
-      current?.attempt === attempt ? { ...current, finishing: true, pasted: "" } : current,
-    );
+    setPhase({ kind: "finishing", signIn });
     try {
       await client.connection.finishOAuth({ payload: { callbackQuery } });
     } catch (error) {
-      endLocalReturn(attempt, readErrorMessage(error));
+      refuseSignIn(attempt, readErrorMessage(error));
       return;
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
     if (!attempt.signal.aborted) close();
-  };
-  /** Opens the provider's page of `attempt` through the port, and shows why it did not open. */
-  const openLocalReturnPage = async (
-    signIn: LocalReturnSignIn,
-    attempt: AbortController,
-  ): Promise<void> => {
-    setLinkError(null);
-    try {
-      await signIn.openPage();
-    } catch (error) {
-      if (!attempt.signal.aborted) setLinkError(describeOpenFailure(error));
-    }
   };
   /**
    * Starts an OAuth sign-in that returns to this machine. The wait for the
@@ -251,32 +244,40 @@ export function ConnectionSetupDialog({
     start: Parameters<typeof startLocalReturnSignIn>[1],
   ): Promise<void> => {
     const signIn = await startLocalReturnSignIn({ client, port }, start, attempt.signal);
-    setOauthStart(NOT_STARTING);
-    setLocalReturn({
-      signIn,
-      attempt,
-      endedMessage: null,
-      finishing: false,
-      pasted: "",
-      pasteProblem: null,
-    });
+    setPhase({ kind: "return-wait", signIn, linkError: null, pasted: "", pasteProblem: null });
     if (signIn.returnBy === "listener") {
       void signIn.awaitReturn().then((outcome) => {
         if (attempt.signal.aborted) return;
-        if (outcome.kind === "received") void finishLocalReturn(attempt, outcome.callbackQuery);
-        else endLocalReturn(attempt, outcome.message);
+        if (outcome.kind === "received") {
+          void finishLocalReturn(attempt, signIn, outcome.callbackQuery);
+        } else {
+          refuseSignIn(attempt, outcome.message);
+        }
       });
     }
-    await openLocalReturnPage(signIn, attempt);
+    await openReturnPage(attempt, signIn);
+  };
+  /** Opens the provider's page of the sign-in that returns to this machine, and shows why it did not open. */
+  const openReturnPage = async (
+    attempt: AbortController,
+    signIn: LocalReturnSignIn,
+  ): Promise<void> => {
+    showLinkError(attempt, null);
+    try {
+      await signIn.openPage();
+    } catch (error) {
+      showLinkError(attempt, describeOpenFailure(error));
+    }
   };
   const finishPasted = (): void => {
-    if (localReturn === null) return;
-    const reading = readPastedReturn(localReturn.signIn.authorizationUrl, localReturn.pasted);
+    const attempt = attemptRef.current;
+    if (attempt === null || phase.kind !== "return-wait") return;
+    const reading = readPastedReturn(phase.signIn.authorizationUrl, phase.pasted);
     if (reading.kind === "refused") {
-      setLocalReturn({ ...localReturn, pasteProblem: reading.message });
+      setPhase({ ...phase, pasteProblem: reading.message });
       return;
     }
-    void finishLocalReturn(localReturn.attempt, reading.callbackQuery);
+    void finishLocalReturn(attempt, phase.signIn, reading.callbackQuery);
   };
   /**
    * Starts an OAuth sign-in and opens the provider's page. The pasted values
@@ -289,7 +290,7 @@ export function ConnectionSetupDialog({
     attemptRef.current = attempt;
     const sent = clientSetupAsked ? clientValues : undefined;
     setValues({});
-    setOauthStart({ busy: true, error: null });
+    setPhase({ kind: "starting" });
     // Read before the sign-in starts, so a Connection it writes is never
     // taken for one that was there already.
     const before = connections;
@@ -307,11 +308,12 @@ export function ConnectionSetupDialog({
         payload: { ...start, origin },
       });
       if (attempt.signal.aborted) return;
-      setOauthStart(NOT_STARTING);
-      setBrowserSignIn({ authorizationUrl, before });
-      openLink(authorizationUrl);
+      setPhase({ kind: "legacy-wait", authorizationUrl, before, linkError: null });
+      openPage(authorizationUrl, (message) => {
+        showLinkError(attempt, message);
+      });
     } catch (error) {
-      if (!attempt.signal.aborted) setOauthStart({ busy: false, error: readErrorMessage(error) });
+      if (!attempt.signal.aborted) setPhase({ kind: "idle", error: readErrorMessage(error) });
     }
   };
 
@@ -319,12 +321,9 @@ export function ConnectionSetupDialog({
   // Connection it writes on the `connection` topic, and the shell reads the
   // list again, so the dialog learns of it here.
   const oauthConnection =
-    browserSignIn === null
-      ? undefined
-      : findOAuthConnection(browserSignIn.before, connections, {
-          type: type.type,
-          ...reconnectPayload,
-        });
+    phase.kind === "legacy-wait"
+      ? findOAuthConnection(phase.before, connections, { type: type.type, ...reconnectPayload })
+      : undefined;
   useEffect(() => {
     if (oauthConnection !== undefined) close();
   }, [oauthConnection]);
@@ -345,9 +344,9 @@ export function ConnectionSetupDialog({
           reconnect: connection !== undefined,
         };
   const oauthForm = {
-    busy: oauthStart.busy,
+    busy: phase.kind === "starting",
     fieldErrors: {},
-    error: oauthStart.error,
+    error: phase.kind === "idle" ? phase.error : null,
     ...(clientSetup === undefined ? {} : { clientSetup }),
   };
 
@@ -365,8 +364,7 @@ export function ConnectionSetupDialog({
         credentialsForm,
         oauthForm,
         deviceSignIn: deviceSignIn.progress,
-        browserSignIn,
-        localReturn,
+        oauthPhase: phase,
         linkError,
       })}
       values={values}
@@ -379,7 +377,7 @@ export function ConnectionSetupDialog({
           // would drop the save's answer, and the dialog would stay open.
           if (saveCredentials.isError) saveCredentials.reset();
           // The refusal of a start was about the value that has left the form.
-          if (oauthStart.error !== null) setOauthStart(NOT_STARTING);
+          if (phase.kind === "idle" && phase.error !== null) setPhase(IDLE);
           setValues((current) => ({ ...current, [name]: value }));
         },
         onSubmit: () => {
@@ -410,15 +408,25 @@ export function ConnectionSetupDialog({
           else deviceSignIn.start();
         },
         onOpen: (url) => {
-          if (localReturn === null) openLink(url);
-          else void openLocalReturnPage(localReturn.signIn, localReturn.attempt);
+          const attempt = attemptRef.current;
+          if (phase.kind === "return-wait" && attempt !== null) {
+            void openReturnPage(attempt, phase.signIn);
+          } else if (phase.kind === "legacy-wait" && attempt !== null) {
+            openPage(url, (message) => {
+              showLinkError(attempt, message);
+            });
+          } else {
+            openPage(url, setLinkError);
+          }
         },
         onAskClientSetup: () => {
           setClientSetupAsked(true);
         },
         onPasteChange: (text) => {
-          setLocalReturn((current) =>
-            current === null ? null : { ...current, pasted: text, pasteProblem: null },
+          setPhase((current) =>
+            current.kind === "return-wait"
+              ? { ...current, pasted: text, pasteProblem: null }
+              : current,
           );
         },
         onFinishPasted: finishPasted,
@@ -434,8 +442,8 @@ type FormState = Omit<Extract<ConnectionSetupState, { kind: "form" }>, "kind" | 
 
 /**
  * Decides what the setup shows for `flow`, from the state of each flow's
- * form and sign-in. `linkError` says why the sign-in page did not open, or
- * is null.
+ * form and sign-in. `linkError` says why the page of a device flow did not
+ * open, or is null.
  */
 const decideSetupState = (
   flow: SetupFlow | undefined,
@@ -443,8 +451,7 @@ const decideSetupState = (
     readonly credentialsForm: FormState;
     readonly oauthForm: FormState;
     readonly deviceSignIn: DeviceSignInProgress;
-    readonly browserSignIn: BrowserSignIn | null;
-    readonly localReturn: LocalReturnProgress | null;
+    readonly oauthPhase: OAuthPhase;
     readonly linkError: string | null;
   },
 ): ConnectionSetupState => {
@@ -456,25 +463,7 @@ const decideSetupState = (
     case "credentials":
       return { kind: "form", flow, ...read.credentialsForm };
     case "oauth":
-      if (read.localReturn !== null) {
-        const { signIn, endedMessage, finishing, pasted, pasteProblem } = read.localReturn;
-        return endedMessage !== null
-          ? describeSignInFailure(endedMessage)
-          : {
-              kind: "returning",
-              authorizationUrl: signIn.authorizationUrl,
-              linkError: read.linkError,
-              finishing,
-              paste: signIn.returnBy === "paste" ? { text: pasted, problem: pasteProblem } : null,
-            };
-      }
-      return read.browserSignIn === null
-        ? { kind: "form", flow, ...read.oauthForm }
-        : {
-            kind: "browser",
-            authorizationUrl: read.browserSignIn.authorizationUrl,
-            linkError: read.linkError,
-          };
+      return decideOAuthState(read.oauthPhase, { kind: "form", flow, ...read.oauthForm });
     case "device":
       switch (read.deviceSignIn.kind) {
         case "idle":
@@ -491,5 +480,48 @@ const decideSetupState = (
         case "ended":
           return read.deviceSignIn;
       }
+  }
+};
+
+/**
+ * Decides what the setup shows for the phase of an OAuth sign-in: `form`, the
+ * form, for a sign-in that has not left it, or the card that waits for the
+ * browser, or the way the sign-in ended.
+ */
+const decideOAuthState = (
+  phase: OAuthPhase,
+  form: Extract<ConnectionSetupState, { kind: "form" }>,
+): ConnectionSetupState => {
+  switch (phase.kind) {
+    case "idle":
+    case "starting":
+      return form;
+    case "legacy-wait":
+      return {
+        kind: "browser",
+        authorizationUrl: phase.authorizationUrl,
+        linkError: phase.linkError,
+      };
+    case "return-wait":
+      return {
+        kind: "returning",
+        authorizationUrl: phase.signIn.authorizationUrl,
+        linkError: phase.linkError,
+        finishing: false,
+        paste:
+          phase.signIn.returnBy === "paste"
+            ? { text: phase.pasted, problem: phase.pasteProblem }
+            : null,
+      };
+    case "finishing":
+      return {
+        kind: "returning",
+        authorizationUrl: phase.signIn.authorizationUrl,
+        linkError: null,
+        finishing: true,
+        paste: phase.signIn.returnBy === "paste" ? { text: "", problem: null } : null,
+      };
+    case "refused":
+      return describeSignInFailure(phase.message);
   }
 };
