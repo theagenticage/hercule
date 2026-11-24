@@ -62,10 +62,17 @@ interface StubAnswer {
   readonly transportFailure?: string;
 }
 
-/** Builds an `HttpClient` that answers every request with `answer` and records the requests. */
-const stubSlack = (answer: StubAnswer) => {
+/**
+ * Builds an `HttpClient` that answers every request with `answerFor` and
+ * records the requests and the abort signal of each. A signal is aborted when
+ * the plugin closes the response.
+ */
+const stubSlack = (answerFor: StubAnswer | ((url: string) => StubAnswer)) => {
   const requests: Array<StubRequest> = [];
-  const client = HttpClient.make((request, _url, _signal, fiber) => {
+  const signals: Array<AbortSignal> = [];
+  const client = HttpClient.make((request, _url, signal, fiber) => {
+    const answer = typeof answerFor === "function" ? answerFor(request.url) : answerFor;
+    signals.push(signal);
     const body = request.body._tag === "Uint8Array" ? request.body : undefined;
     requests.push({
       url: request.url,
@@ -89,7 +96,7 @@ const stubSlack = (answer: StubAnswer) => {
       HttpClientResponse.fromWeb(request, new Response(text, { status: answer.status ?? 200 })),
     );
   });
-  return { layer: Layer.succeed(HttpClient.HttpClient, client), requests };
+  return { layer: Layer.succeed(HttpClient.HttpClient, client), requests, signals };
 };
 
 /** Runs an effect that calls Slack against the stub, and returns how it ended. */
@@ -328,6 +335,88 @@ describe("creating the Slack app of a Connection", () => {
         { app_id: "A0INVENTED" },
       ],
     ]);
+  });
+
+  it("removes the app even when the credentials object is malformed", async () => {
+    const stub = stubSlack({ body: { ok: true, app_id: "A0INVENTED", credentials: "oops" } });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toContain("Hercule removed it");
+    expect(stub.requests[1]?.body).toEqual({ app_id: "A0INVENTED" });
+  });
+
+  it.each([
+    ["Slack answers ok: false", { body: { ok: false, error: "invalid_auth" } }],
+    ["Slack answers HTTP 500", { status: 500 }],
+    ["Slack cannot be reached", { transportFailure: "offline" }],
+  ])("tells the user to remove the app when the delete fails: %s", async (_name, deleteAnswer) => {
+    const stub = stubSlack((url) =>
+      url.endsWith("apps.manifest.delete")
+        ? deleteAnswer
+        : { body: { ok: true, app_id: "A0INVENTED", credentials: {} } },
+    );
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toContain("could not remove it");
+    expect(message).toContain("delete the app named Hercule at api.slack.com/apps");
+    expect(message).not.toContain("Hercule removed it");
+  });
+
+  it.each([
+    ["an app id that is not Slack's shape", "evil\nforged log line", "111.222"],
+    ["an app id of the wrong type", 12345, "111.222"],
+    ["an app id with lowercase letters", "a0invented", "111.222"],
+  ])("treats %s as absent: no delete, nothing quoted", async (_name, appId, clientId) => {
+    const stub = stubSlack({
+      body: { ok: true, app_id: appId, credentials: { client_id: clientId } },
+    });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toContain("did not say which app");
+    expect(message).not.toContain("forged");
+    expect(stub.requests).toHaveLength(1);
+  });
+
+  it.each([
+    ["a client id that is not Slack's shape", "javascript:alert(1)"],
+    ["a client id of the wrong type", 111.222],
+    ["an empty client id", ""],
+  ])("treats %s as absent and removes the app", async (_name, clientId) => {
+    const stub = stubSlack({
+      body: { ok: true, app_id: "A0INVENTED", credentials: { client_id: clientId } },
+    });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toContain("Hercule removed it");
+    expect(message).not.toContain("javascript");
+    expect(stub.requests).toHaveLength(2);
+  });
+
+  it.each([
+    ["succeeds", { body: CREATED_APP_ANSWER }],
+    ["is refused with HTTP 429", { status: 429 }],
+    ["is refused with HTTP 500", { status: 500, body: "unread body" }],
+    ["is refused with a redirect", { status: 302 }],
+    ["has a body that is not JSON", { body: "<html></html>" }],
+  ])("closes the response when the request %s", async (_name, answer) => {
+    const stub = stubSlack(answer);
+
+    await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub);
+
+    expect(stub.signals).toHaveLength(1);
+    expect(stub.signals.every((signal) => signal.aborted)).toBe(true);
   });
 
   it("fails without a delete when Slack does not say which app it made", async () => {
