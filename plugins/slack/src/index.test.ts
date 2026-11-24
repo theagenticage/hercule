@@ -50,7 +50,7 @@ describe("what the slack plugin registers", () => {
       oauth: {
         authorizationUrl: "https://slack.com/oauth/v2_user/authorize",
         tokenUrl: "https://slack.com/api/oauth.v2.user.access",
-        extraParams: { resource: "https://mcp.slack.com" },
+        resource: "https://mcp.slack.com",
         publicClient: {
           createdAtSetup: {
             fields: [{ name: "configurationToken", secret: true }],

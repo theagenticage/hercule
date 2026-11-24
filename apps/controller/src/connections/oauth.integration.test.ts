@@ -176,6 +176,8 @@ const buildConnectionTypePlugin = (options: {
    * pasted API key beside it.
    */
   readonly publicClient?: boolean;
+  /** The RFC 8707 resource the type's tokens are for. */
+  readonly resource?: string;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
   const provider = options.oauth;
@@ -211,6 +213,7 @@ const buildConnectionTypePlugin = (options: {
                 tokenUrl: `${provider.base}/token`,
                 scopes: ["read", "write"],
                 extraParams: { access_type: "offline", prompt: "consent" },
+                ...(options.resource === undefined ? {} : { resource: options.resource }),
                 ...(options.publicClient === true
                   ? {
                       publicClient: {
@@ -243,6 +246,12 @@ const buildPlugins = (provider: AuthServer) => ({
   oauth: buildConnectionTypePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
   second: buildConnectionTypePlugin({ id: "second", type: "second-type", oauth: provider }),
   pasted: buildConnectionTypePlugin({ id: "pasted", type: "pasted-type" }),
+  resourceful: buildConnectionTypePlugin({
+    id: "resourceful",
+    type: "resource-type",
+    oauth: provider,
+    resource: RESOURCE,
+  }),
   public: buildConnectionTypePlugin({
     id: "public",
     type: "public-type",
@@ -284,6 +293,9 @@ const withOAuth = async (
     await provider.stop();
   }
 };
+
+/** The resource the `resource-type` declares its tokens are for. */
+const RESOURCE = "https://mcp.example";
 
 /** The browser's origin, which the redirect URI is built from. */
 const ORIGIN = "http://h.test:4000";
@@ -509,6 +521,58 @@ describe("POST /oauth/start, given client values that cannot be decoded", () => 
         { path: ["clientValues"], message: expect.stringContaining("not valid") as string },
       ]);
     });
+  });
+});
+
+describe("the resource a type declares", () => {
+  /** Signs a type in, expires its token, refreshes it, and returns what the provider received. */
+  const signInAndRefresh = async (
+    plugin: "oauthy" | "resourceful",
+    type: "oauth-type" | "resource-type",
+  ) => {
+    let received:
+      | { authorization: URL; requests: ReadonlyArray<Record<string, string>> }
+      | undefined;
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({ access_token: FIRST_TOKEN, refresh_token: "refresh-1", expires_in: 0 });
+      await setClientId(base, token, plugin);
+      await setClientSecret(base, token, plugin);
+      const url = await startOAuthOrFail(base, token, { type: `${plugin}/${type}` });
+      const response = await sendOAuthCallback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "the-code",
+      });
+      expect(response.headers.get("location")).toBe("/connections?oauth=ok");
+      const [one] = await listConnections(base, token);
+      await Effect.runPromise(
+        readConnectionsSurface(
+          plugin === "oauthy" ? registry.oauth : registry.resourceful,
+        ).credentials(one?.id ?? ""),
+      );
+      received = { authorization: url, requests: provider.requests };
+    });
+    if (received === undefined) throw new Error("the scenario did not run");
+    return received;
+  };
+
+  it("is sent on the authorization request, the code exchange and the refresh", async () => {
+    const { authorization, requests } = await signInAndRefresh("resourceful", "resource-type");
+
+    expect(authorization.searchParams.get("resource")).toBe(RESOURCE);
+    expect(requests.map((request) => request["grant_type"])).toEqual([
+      "authorization_code",
+      "refresh_token",
+    ]);
+    expect(requests.map((request) => request["resource"])).toEqual([RESOURCE, RESOURCE]);
+  });
+
+  it("is sent nowhere by a type that declares none", async () => {
+    const { authorization, requests } = await signInAndRefresh("oauthy", "oauth-type");
+
+    expect(authorization.searchParams.has("resource")).toBe(false);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expect(request).not.toHaveProperty("resource");
   });
 });
 

@@ -514,8 +514,9 @@ export const connectionType: ConnectionTypeContribution = {
     authorizationUrl: "https://slack.com/oauth/v2_user/authorize",
     tokenUrl: "https://slack.com/api/oauth.v2.user.access",
     scopes: SLACK_USER_SCOPES,
-    // Slack's MCP server names itself as the resource the token is for.
-    extraParams: { resource: SLACK_MCP_ORIGIN },
+    // Slack's MCP server names itself as the resource the token is for. The
+    // core sends it on the authorization request and on every token request.
+    resource: SLACK_MCP_ORIGIN,
     publicClient: {
       createdAtSetup: {
         fields: [

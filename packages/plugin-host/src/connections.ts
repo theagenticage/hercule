@@ -75,6 +75,13 @@ export const OAuthDeclaration = Schema.Struct({
   scopes: Schema.Array(Schema.String),
   extraParams: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /**
+   * The resource the tokens are for, as an address (RFC 8707). The core sends it
+   * on the authorization request and on every token request, the code exchange
+   * and each refresh, because a provider that scopes tokens by resource needs it
+   * on all of them. Leave it out when the provider does not.
+   */
+  resource: Schema.optionalKey(Schema.String),
+  /**
    * A public client, for a provider that accepts a code exchange and a
    * refresh with the client id and the PKCE code verifier alone. The core
    * then sends no client secret and reads nothing from the plugin's settings.

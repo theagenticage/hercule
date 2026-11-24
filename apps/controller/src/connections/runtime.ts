@@ -422,7 +422,11 @@ const make = Effect.gen(function* () {
       const { oauth, device } = type;
       if (oauth !== undefined) {
         const client = yield* Effect.orDie(findOAuthClient(row.pluginId, oauth, row.oauthClientId));
-        return Option.map(client, (found) => ({ tokenUrl: oauth.tokenUrl, client: found }));
+        return Option.map(client, (found) => ({
+          tokenUrl: oauth.tokenUrl,
+          client: found,
+          ...(oauth.resource === undefined ? {} : { resource: oauth.resource }),
+        }));
       }
       if (device !== undefined) {
         return Option.some({ tokenUrl: device.tokenUrl, client: { clientId: device.clientId } });

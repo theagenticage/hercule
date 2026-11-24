@@ -120,6 +120,7 @@ export const buildAuthorizationUrl = (
     // The type's extra parameters go first, so they cannot override a
     // parameter the protocol needs.
     ...(oauth.extraParams ?? {}),
+    ...(oauth.resource === undefined ? {} : { resource: oauth.resource }),
     response_type: "code",
     client_id: parts.clientId,
     redirect_uri: parts.redirectUri,

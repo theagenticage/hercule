@@ -1596,6 +1596,7 @@ const make = Effect.gen(function* () {
             code: callback.code,
             redirectUri: buildSetupRedirectUri(setup),
             codeVerifier: setup.codeVerifier,
+            ...(oauth.resource === undefined ? {} : { resource: oauth.resource }),
           }).pipe(
             Effect.provide(FetchHttpClient.layer),
             Effect.catch(() => Effect.fail("exchange-failed" as const)),
