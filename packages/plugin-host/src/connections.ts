@@ -75,15 +75,29 @@ export const OAuthDeclaration = Schema.Struct({
   scopes: Schema.Array(Schema.String),
   extraParams: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /**
-   * A public client the plugin ships, for a provider that accepts a code
-   * exchange and a refresh with the client id and the PKCE code verifier
-   * alone. The core then sends no client secret and reads nothing from the
-   * plugin's settings. `redirectUris` are exactly the URIs the provider has
-   * registered for the client, because a shared client cannot register every
-   * user's address.
+   * A public client, for a provider that accepts a code exchange and a
+   * refresh with the client id and the PKCE code verifier alone. The core
+   * then sends no client secret and reads nothing from the plugin's
+   * settings. There are two ways to get the client:
+   *
+   * - The plugin ships it: `clientId` is part of the declaration, and every
+   *   Connection shares the client. `redirectUris` are exactly the URIs the
+   *   provider has registered for it, because a shared client cannot
+   *   register every user's address.
+   * - The plugin creates it for each Connection when the Connection is set
+   *   up (`createdAtSetup`): the user pastes the `fields` once, the type's
+   *   `createOAuthClient` turns them into a client at the provider, and the
+   *   core never stores the pasted values. `redirectUris` are the URIs the
+   *   plugin registers on the clients it creates.
    */
   publicClient: Schema.optionalKey(
-    Schema.Struct({ clientId: Schema.String, redirectUris: Schema.Array(Schema.String) }),
+    Schema.Union([
+      Schema.Struct({ clientId: Schema.String, redirectUris: Schema.Array(Schema.String) }),
+      Schema.Struct({
+        createdAtSetup: Schema.Struct({ fields: Schema.Array(CredentialField) }),
+        redirectUris: Schema.Array(Schema.String),
+      }),
+    ]),
   ),
 });
 
@@ -150,6 +164,13 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
   { message: Schema.String },
 ) {}
 
+/** A public client a plugin created for one Connection. */
+export interface CreatedOAuthClient {
+  readonly clientId: string;
+  /** Deletes the client at the provider. It holds what it needs in memory (Slack: the configuration token) and is dropped once the sign-in succeeds. Never fails: it logs nothing secret and swallows its own errors. */
+  readonly deleteClient: Effect.Effect<void, never, HttpClient.HttpClient>;
+}
+
 /** The external account a set of credentials belongs to, as the type's `validate` returns it. */
 export interface ExternalAccount {
   /** The account's name, which the Connections screen shows: the GitHub login, the Gmail address. */
@@ -211,6 +232,17 @@ export interface ConnectionTypeContribution extends ConnectionType {
     field: string,
     connection: { readonly credentials: Record<string, string>; readonly config: unknown },
   ) => Effect.Effect<ReadonlyArray<ConfigChoice>, PluginError, HttpClient.HttpClient>;
+
+  /**
+   * Creates a public client at the provider from the values of
+   * `publicClient.createdAtSetup.fields`, and returns its client id. Required
+   * when, and only when, the type declares `createdAtSetup`. The values are
+   * used once and never stored. Fails with `ConnectionValidationFailed`,
+   * whose message the user sees, saying what was wrong and what to do.
+   */
+  readonly createOAuthClient?: (
+    values: Record<string, string>,
+  ) => Effect.Effect<CreatedOAuthClient, ConnectionValidationFailed, HttpClient.HttpClient>;
 }
 
 /** What `register` may declare: the connection types this plugin supports. */

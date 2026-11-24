@@ -162,7 +162,7 @@ export const oauthClients: Effect.Effect<
 
   return (pluginId: string, oauth: OAuthDeclaration) =>
     Effect.gen(function* () {
-      if (oauth.publicClient !== undefined) {
+      if (oauth.publicClient !== undefined && "clientId" in oauth.publicClient) {
         return Option.some<OAuthClient>({ clientId: oauth.publicClient.clientId });
       }
       const config = yield* plugins.of(pluginId);

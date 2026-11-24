@@ -49,6 +49,7 @@ export {
   type ConnectionsRuntime,
   type ConnectionSummary,
   type ConnectionTypeContribution,
+  type CreatedOAuthClient,
   type ExternalAccount,
 } from "./connections";
 

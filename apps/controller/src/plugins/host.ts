@@ -326,7 +326,8 @@ const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[:
 const checkPublicClient = (type: ConnectionType): string | undefined => {
   const client = type.oauth?.publicClient;
   if (client === undefined) return undefined;
-  if (client.clientId === "") return "the public client's clientId is empty";
+  if ("clientId" in client && client.clientId === "")
+    return "the public client's clientId is empty";
   if (client.redirectUris.length === 0) return "the public client has no redirectUris";
   const unusable = client.redirectUris.find((uri) => {
     const url = URL.parse(uri);
