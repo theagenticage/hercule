@@ -3,7 +3,19 @@
  * frames the controller sends can be read and answered one by one.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { Deferred, Duration, Effect, Fiber, Layer, Logger, Option, Redacted, Stream } from "effect";
+import {
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Logger,
+  Option,
+  Redacted,
+  Stream,
+} from "effect";
+import { TestClock } from "effect/testing";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1648,9 +1660,28 @@ describe("the announcement of an expiring token", () => {
     }
   });
 
+  /**
+   * Waits in real time, whatever the controlled clock says, until `done` is
+   * true, for at most three seconds. The tests below drive the driver with a
+   * `TestClock`, so `Effect.sleep` would wait for the test to move the clock.
+   */
+  const waitUntilInRealTime = (done: () => boolean) =>
+    Effect.promise(async () => {
+      for (let attempt = 0; attempt < 300 && !done(); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    });
+
+  /** Lets what is ready to run on the driver's fibers run, in real time. */
+  const letDriverRun = Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 30)));
+
   it("plans again when a snapshot is stored, so a token that now expires sooner is announced on time", async () => {
+    // The driver sleeps on a controlled clock, so the expiry cannot pass while
+    // the probe runs, however slow the machine is: it passes when the test moves
+    // the clock.
     const announcedAfterChange = await runAnnouncing((announced) =>
       Effect.gen(function* () {
+        yield* TestClock.setTime(Date.now());
         const probing = yield* ProviderAccountProbing;
         const account = yield* addAccount({ kind: TOKEN_KIND });
         const sql = yield* SqlClient.SqlClient;
@@ -1665,14 +1696,17 @@ describe("the announcement of an expiring token", () => {
         const runner = yield* addRunner("laptop");
         // The driver plans with no expiry at all: its next wake is the hourly sweep.
         const driver = yield* Effect.forkChild(probing.driving);
-        yield* Effect.sleep(Duration.millis(30));
-        yield* setTokenExpiry(account.id, new Date(Date.now() + 250).toISOString());
+        yield* letDriverRun;
+        const now = yield* Clock.currentTimeMillis;
+        yield* setTokenExpiry(account.id, new Date(now + 250).toISOString());
         // A sign-in ends in a stored snapshot, which is what makes the driver plan again.
         yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
+        yield* letDriverRun;
         const afterProbe = announced.filter((change) =>
           announcesProvider(change, account.id),
         ).length;
-        yield* waitUntil(
+        yield* TestClock.adjust(Duration.millis(250));
+        yield* waitUntilInRealTime(
           () =>
             announced.filter((change) => announcesProvider(change, account.id)).length > afterProbe,
         );
@@ -1680,20 +1714,23 @@ describe("the announcement of an expiring token", () => {
         return (
           announced.filter((change) => announcesProvider(change, account.id)).length - afterProbe
         );
-      }),
+      }).pipe(Effect.provide(TestClock.layer())),
     );
 
     expect(announcedAfterChange).toBe(1);
   });
 
   it("plans again when a usage read stores an expiry, so the account is announced when the key expires", async () => {
-    const expiry = new Date(Date.now() + 300).toISOString();
+    // The controlled clock starts at this moment, and the key expires 300 ms later.
+    const start = Date.now();
     const api = buildFakeProviderApi(
-      () => new Response(JSON.stringify({ used: 40, expires: expiry })),
+      () =>
+        new Response(JSON.stringify({ used: 40, expires: new Date(start + 300).toISOString() })),
     );
     const announcedAfterRead = await runAnnouncing(
       (announced) =>
         Effect.gen(function* () {
+          yield* TestClock.setTime(start);
           const probing = yield* ProviderAccountProbing;
           const account = yield* addAccount({
             providerId: METERED_PROVIDER_ID,
@@ -1702,13 +1739,15 @@ describe("the announcement of an expiring token", () => {
           yield* storeCredential(account.id, "apiKey", "sk-live");
           // The driver plans with no expiry at all: its next wake is the hourly sweep.
           const driver = yield* Effect.forkChild(probing.driving);
-          yield* Effect.sleep(Duration.millis(30));
+          yield* letDriverRun;
           // No probe runs in this test: the read alone stores the expiry.
           yield* (yield* ProviderAccountService).readUsageWithKey(account.id);
+          yield* letDriverRun;
           const afterRead = announced.filter((change) =>
             announcesProvider(change, account.id),
           ).length;
-          yield* waitUntil(
+          yield* TestClock.adjust(Duration.millis(300));
+          yield* waitUntilInRealTime(
             () =>
               announced.filter((change) => announcesProvider(change, account.id)).length >
               afterRead,
@@ -1717,7 +1756,7 @@ describe("the announcement of an expiring token", () => {
           return (
             announced.filter((change) => announcesProvider(change, account.id)).length - afterRead
           );
-        }),
+        }).pipe(Effect.provide(TestClock.layer())),
       api.client,
     );
 
