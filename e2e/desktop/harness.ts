@@ -124,7 +124,7 @@ export interface LaunchedApp {
  * Starts the test package for the current test, waits for its first window to
  * load and to be on screen for 200 ms, and quits the app when the test
  * finishes. Without a `userDataDir`, the app gets a fresh one. Fails if the
- * window is not on screen within the poll timeout.
+ * window is not on screen within 30 seconds.
  *
  * The page loads while the window is still hidden: main shows the window once
  * the page reports that its first screen has reached the window, or 3 seconds
@@ -210,7 +210,12 @@ export async function launchForTest(
       { cause: error },
     );
   }
-  await expect.poll(() => isWindowVisible(app), { message: "the window did not show" }).toBe(true);
+  // Main may show the window only 3 seconds after the first paint, and a busy
+  // macOS runner can be slow to get there, so this waits as long as
+  // `launchPlainAppForTest` does for the same window.
+  await expect
+    .poll(() => isWindowVisible(app), { timeout: 30_000, message: "the window did not show" })
+    .toBe(true);
   await sleep(200);
   return { app, page, userDataDir, readMainOutput: () => mainOutput, close };
 }
