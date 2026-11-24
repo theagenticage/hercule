@@ -5,7 +5,6 @@ import {
   buildRedirectUriToRegister,
   decideOAuthReturnPath,
   describeConnectionTypeName,
-  describePasteRefusal,
   describeSignInFailure,
   findOAuthConnection,
   isWebLink,
@@ -16,12 +15,13 @@ import {
   readClientValues,
   readConfigIssues,
   readErrorMessage,
+  readPastedReturn,
   startLocalReturnSignIn,
   type ConnectionType,
   type LocalReturnSignIn,
   type SetupFlow,
 } from "@hercule/client-core";
-import { parseCallbackQuery, type Connection } from "@hercule/contract";
+import type { Connection } from "@hercule/contract";
 import { buildBrowserSignInPort } from "../../../app/browser-sign-in-port";
 import { useDeviceSignIn, type DeviceSignInProgress } from "../../../app/device-sign-in";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
@@ -43,17 +43,37 @@ interface BrowserSignIn {
 
 /**
  * An OAuth sign-in whose return is caught on this machine: `signIn` holds the
- * listener and the provider's page. `endedMessage` is why the sign-in ended
- * without a Connection, or null while it goes on. `pasted` is the address the
- * user pastes when nothing listens, and `pasteProblem` why the last one was
- * refused.
+ * provider's page and the listener, and `attempt` is the sign-in's lifetime,
+ * which aborts when the dialog closes or the user starts again. Everything
+ * that answers late (a return, the controller, the browser) first checks that
+ * its attempt has not aborted, so it never touches a later sign-in or a closed
+ * dialog.
+ *
+ * - `endedMessage`: why the sign-in ended without a Connection, or null.
+ * - `finishing`: the controller is finishing the sign-in.
+ * - `pasted`, `pasteProblem`: the address the user pastes when nothing
+ *   listens, and why the last one was refused.
  */
 interface LocalReturnProgress {
   readonly signIn: LocalReturnSignIn;
+  readonly attempt: AbortController;
   readonly endedMessage: string | null;
+  readonly finishing: boolean;
   readonly pasted: string;
   readonly pasteProblem: string | null;
 }
+
+/** Where the start of an OAuth sign-in stands: `busy` while the controller answers, and `error` for its refusal. */
+interface OAuthStart {
+  readonly busy: boolean;
+  readonly error: string | null;
+}
+
+const NOT_STARTING: OAuthStart = { busy: false, error: null };
+
+/** Returns the line that says why the browser did not open the sign-in page. */
+const describeOpenFailure = (error: unknown): string =>
+  `The browser did not open the sign-in page: ${readErrorMessage(error)}`;
 
 /**
  * Renders the setup of a Connection of `type` in a glass dialog, or, with
@@ -108,6 +128,9 @@ export function ConnectionSetupDialog({
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [browserSignIn, setBrowserSignIn] = useState<BrowserSignIn | null>(null);
   const [localReturn, setLocalReturn] = useState<LocalReturnProgress | null>(null);
+  const [oauthStart, setOauthStart] = useState<OAuthStart>(NOT_STARTING);
+  // The attempt of the sign-in that is starting or running, if any.
+  const attemptRef = useRef<AbortController | null>(null);
   // A reconnect signs in with the client the Connection has. It asks for the
   // values to make the client again only when the user chooses to.
   const [clientSetupAsked, setClientSetupAsked] = useState(connection === undefined);
@@ -115,6 +138,7 @@ export function ConnectionSetupDialog({
   const [linkError, setLinkError] = useState<string | null>(null);
 
   const close = (): void => dialogRef.current?.close();
+  const port = useMemo(() => buildBrowserSignInPort(bridge), [bridge]);
   const openLink = (url: string): void => {
     // Main opens only web addresses, so anything else would fail there
     // without a word.
@@ -123,8 +147,9 @@ export function ConnectionSetupDialog({
       return;
     }
     setLinkError(null);
-    bridge.link.open({ url }).catch((error: unknown) => {
-      setLinkError(`The browser did not open the sign-in page: ${readErrorMessage(error)}`);
+    // The port reports a refusal of main too, which `link.open` answers without failing.
+    port.open(url).catch((error: unknown) => {
+      setLinkError(describeOpenFailure(error));
     });
   };
 
@@ -148,116 +173,138 @@ export function ConnectionSetupDialog({
     onDone: close,
   });
   const clientValues = readClientValues(type, values);
-  // The values go only with a start that asks for them, and a start for a
-  // client that is not made again must not send a value typed and hidden.
-  const clientValuesPayload =
-    clientSetupAsked && clientValues !== undefined ? { clientValues } : {};
   const returnPath = decideOAuthReturnPath(type, "desktop");
-  const startOAuth = useMutation({
-    mutationFn: () =>
-      client.connection.startOAuth({
-        payload: { type: type.type, origin, ...reconnectPayload, ...clientValuesPayload },
-      }),
-  });
-  const port = useMemo(() => buildBrowserSignInPort(bridge), [bridge]);
-  // The listener of a return to this machine ends with the dialog, also when
-  // the dialog is gone before the start answered.
-  const localReturnLifetime = useRef<{ disposed: boolean; signIn: LocalReturnSignIn | null }>({
-    disposed: false,
-    signIn: null,
-  });
-  useEffect(() => {
-    const lifetime = localReturnLifetime.current;
-    lifetime.disposed = false;
-    return () => {
-      lifetime.disposed = true;
-      lifetime.signIn?.close();
-    };
-  }, []);
-  const startLocalReturn = useMutation({
-    mutationFn: async () => {
-      const signIn = await startLocalReturnSignIn(
-        { client, port },
-        { type: type.type, ...reconnectPayload, ...clientValuesPayload },
-      );
-      localReturnLifetime.current.signIn = signIn;
-      if (localReturnLifetime.current.disposed) signIn.close();
-      return signIn;
+  // The sign-in ends with the dialog, also while the controller has not answered the start.
+  useEffect(
+    () => () => {
+      attemptRef.current?.abort();
     },
-  });
-  // The answer of `connection.finishOAuth` closes the dialog, not a read of
-  // the list, which would also close it for another sign-in's Connection.
-  const finishOAuth = useMutation({
-    mutationFn: (callbackQuery: string) =>
-      client.connection.finishOAuth({ payload: { callbackQuery } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
-  });
-  /** Shows why `signIn` ended without a Connection, unless the user has started another sign-in since. */
-  const endLocalReturn = (signIn: LocalReturnSignIn, message: string): void => {
+    [],
+  );
+
+  /** Ends the sign-in that starts or runs: its listener closes, and what it still awaits is dropped. */
+  const abandonSignIn = (): void => {
+    attemptRef.current?.abort();
+    attemptRef.current = null;
+    setLocalReturn(null);
+    setOauthStart(NOT_STARTING);
+  };
+  /** Shows why `attempt` ended without a Connection, unless it was abandoned. */
+  const endLocalReturn = (attempt: AbortController, message: string): void => {
+    if (attempt.signal.aborted) return;
     setLocalReturn((current) =>
-      current?.signIn === signIn ? { ...current, endedMessage: message } : current,
+      current?.attempt === attempt
+        ? { ...current, endedMessage: message, finishing: false }
+        : current,
     );
   };
-  const finishLocalReturn = (signIn: LocalReturnSignIn, callbackQuery: string): void => {
-    finishOAuth.mutate(callbackQuery, {
-      onSuccess: close,
-      onError: (error) => {
-        endLocalReturn(signIn, readErrorMessage(error));
-      },
-    });
+  /**
+   * Hands what the browser came back with to `connection.finishOAuth`. The
+   * request is not a mutation, so the one-time code stays out of the mutation
+   * cache. Its answer closes the dialog, unless the attempt was abandoned: the
+   * Connection exists then all the same, so the list is read again.
+   */
+  const finishLocalReturn = async (
+    attempt: AbortController,
+    callbackQuery: string,
+  ): Promise<void> => {
+    if (attempt.signal.aborted) return;
+    setLocalReturn((current) =>
+      current?.attempt === attempt ? { ...current, finishing: true, pasted: "" } : current,
+    );
+    try {
+      await client.connection.finishOAuth({ payload: { callbackQuery } });
+    } catch (error) {
+      endLocalReturn(attempt, readErrorMessage(error));
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+    if (!attempt.signal.aborted) close();
   };
-  /** Starts an OAuth sign-in that returns to this machine, and opens the provider's page. */
-  const startLocalReturnSignInFlow = (): void => {
-    startLocalReturn.mutate(undefined, {
-      onSuccess: (signIn) => {
-        // What was pasted is a credential, so it goes as soon as it was sent.
-        setValues({});
-        setLocalReturn({ signIn, endedMessage: null, pasted: "", pasteProblem: null });
-        openLink(signIn.authorizationUrl);
-        if (signIn.returnBy !== "listener") return;
-        void signIn.awaitReturn().then((outcome) => {
-          if (outcome.kind === "received") finishLocalReturn(signIn, outcome.callbackQuery);
-          else endLocalReturn(signIn, outcome.message);
-        });
-      },
-    });
+  /** Opens the provider's page of `attempt` through the port, and shows why it did not open. */
+  const openLocalReturnPage = async (
+    signIn: LocalReturnSignIn,
+    attempt: AbortController,
+  ): Promise<void> => {
+    setLinkError(null);
+    try {
+      await signIn.openPage();
+    } catch (error) {
+      if (!attempt.signal.aborted) setLinkError(describeOpenFailure(error));
+    }
   };
-  /** Closes the listener and shows the form again. */
-  const resetLocalReturn = (): void => {
-    localReturn?.signIn.close();
-    localReturnLifetime.current.signIn = null;
-    startLocalReturn.reset();
-    finishOAuth.reset();
-    setLocalReturn(null);
+  /**
+   * Starts an OAuth sign-in that returns to this machine. The wait for the
+   * browser is armed before the browser opens, because the listener refuses a
+   * return until it knows which sign-in to expect.
+   */
+  const startLocalReturnFlow = async (
+    attempt: AbortController,
+    start: Parameters<typeof startLocalReturnSignIn>[1],
+  ): Promise<void> => {
+    const signIn = await startLocalReturnSignIn({ client, port }, start, attempt.signal);
+    setOauthStart(NOT_STARTING);
+    setLocalReturn({
+      signIn,
+      attempt,
+      endedMessage: null,
+      finishing: false,
+      pasted: "",
+      pasteProblem: null,
+    });
+    if (signIn.returnBy === "listener") {
+      void signIn.awaitReturn().then((outcome) => {
+        if (attempt.signal.aborted) return;
+        if (outcome.kind === "received") void finishLocalReturn(attempt, outcome.callbackQuery);
+        else endLocalReturn(attempt, outcome.message);
+      });
+    }
+    await openLocalReturnPage(signIn, attempt);
   };
   const finishPasted = (): void => {
     if (localReturn === null) return;
-    const parsed = parseCallbackQuery(localReturn.pasted);
-    if (parsed._tag === "Refused") {
-      setLocalReturn({ ...localReturn, pasteProblem: describePasteRefusal(parsed.reason) });
+    const reading = readPastedReturn(localReturn.signIn.authorizationUrl, localReturn.pasted);
+    if (reading.kind === "refused") {
+      setLocalReturn({ ...localReturn, pasteProblem: reading.message });
       return;
     }
-    setLocalReturn({ ...localReturn, pasteProblem: null });
-    finishLocalReturn(localReturn.signIn, localReturn.pasted.trim());
+    void finishLocalReturn(localReturn.attempt, reading.callbackQuery);
   };
   /**
-   * Starts an OAuth sign-in and opens the provider's page. A switch of flow
-   * resets the mutation, which drops an answer that arrives after it.
+   * Starts an OAuth sign-in and opens the provider's page. The pasted values
+   * are one-shot: they leave the form as the request starts, and the request
+   * is no mutation, so they are not kept in the mutation cache either.
    */
-  const startBrowserSignIn = (): void => {
+  const startBrowserSignIn = async (): Promise<void> => {
+    abandonSignIn();
+    const attempt = new AbortController();
+    attemptRef.current = attempt;
+    const sent = clientSetupAsked ? clientValues : undefined;
+    setValues({});
+    setOauthStart({ busy: true, error: null });
     // Read before the sign-in starts, so a Connection it writes is never
     // taken for one that was there already.
     const before = connections;
-    if (returnPath === "local-listener") {
-      startLocalReturnSignInFlow();
-      return;
+    const start = {
+      type: type.type,
+      ...reconnectPayload,
+      ...(sent === undefined ? {} : { clientValues: sent }),
+    };
+    try {
+      if (returnPath === "local-listener") {
+        await startLocalReturnFlow(attempt, start);
+        return;
+      }
+      const { authorizationUrl } = await client.connection.startOAuth({
+        payload: { ...start, origin },
+      });
+      if (attempt.signal.aborted) return;
+      setOauthStart(NOT_STARTING);
+      setBrowserSignIn({ authorizationUrl, before });
+      openLink(authorizationUrl);
+    } catch (error) {
+      if (!attempt.signal.aborted) setOauthStart({ busy: false, error: readErrorMessage(error) });
     }
-    startOAuth.mutate(undefined, {
-      onSuccess: ({ authorizationUrl }) => {
-        setBrowserSignIn({ authorizationUrl, before });
-        openLink(authorizationUrl);
-      },
-    });
   };
 
   // An OAuth sign-in ends in the browser. The controller announces the
@@ -280,7 +327,6 @@ export function ConnectionSetupDialog({
     fieldErrors: issues.perField,
     error: issues.rest ? readErrorMessage(saveCredentials.error) : null,
   };
-  const oauthStart = returnPath === "local-listener" ? startLocalReturn : startOAuth;
   const clientSetup: ClientSetupForm | undefined =
     type.clientSetupFields.length === 0
       ? undefined
@@ -291,9 +337,9 @@ export function ConnectionSetupDialog({
           reconnect: connection !== undefined,
         };
   const oauthForm = {
-    busy: oauthStart.isPending,
+    busy: oauthStart.busy,
     fieldErrors: {},
-    error: oauthStart.error === null ? null : readErrorMessage(oauthStart.error),
+    error: oauthStart.error,
     ...(clientSetup === undefined ? {} : { clientSetup }),
   };
 
@@ -313,7 +359,6 @@ export function ConnectionSetupDialog({
         deviceSignIn: deviceSignIn.progress,
         browserSignIn,
         localReturn,
-        finishing: finishOAuth.isPending,
         linkError,
       })}
       values={values}
@@ -325,9 +370,8 @@ export function ConnectionSetupDialog({
           // The fields cannot change while a save is pending: resetting then
           // would drop the save's answer, and the dialog would stay open.
           if (saveCredentials.isError) saveCredentials.reset();
-          // The refusal of a start was about the old value, and the field keeps it to be fixed.
-          if (startLocalReturn.isError) startLocalReturn.reset();
-          if (startOAuth.isError) startOAuth.reset();
+          // The refusal of a start was about the value that has left the form.
+          if (oauthStart.error !== null) setOauthStart(NOT_STARTING);
           setValues((current) => ({ ...current, [name]: value }));
         },
         onSubmit: () => {
@@ -336,14 +380,13 @@ export function ConnectionSetupDialog({
           // dialog is on screen, so a late answer cannot close another dialog.
           if (flow === "credentials") saveCredentials.mutate(undefined, { onSuccess: close });
           else if (flow === "device") deviceSignIn.start();
-          else startBrowserSignIn();
+          else void startBrowserSignIn();
         },
         onSwitchFlow: (next) => {
           // The switches are disabled while a save is pending, so only a
           // settled error is reset here.
           if (saveCredentials.isError) saveCredentials.reset();
-          startOAuth.reset();
-          resetLocalReturn();
+          abandonSignIn();
           deviceSignIn.cancel();
           setValues({});
           setLinkError(null);
@@ -355,10 +398,13 @@ export function ConnectionSetupDialog({
         },
         onStartAgain: () => {
           setLinkError(null);
-          if (flow === "oauth") resetLocalReturn();
+          if (flow === "oauth") abandonSignIn();
           else deviceSignIn.start();
         },
-        onOpen: openLink,
+        onOpen: (url) => {
+          if (localReturn === null) openLink(url);
+          else void openLocalReturnPage(localReturn.signIn, localReturn.attempt);
+        },
         onAskClientSetup: () => {
           setClientSetupAsked(true);
         },
@@ -390,7 +436,6 @@ const decideSetupState = (
     readonly deviceSignIn: DeviceSignInProgress;
     readonly browserSignIn: BrowserSignIn | null;
     readonly localReturn: LocalReturnProgress | null;
-    readonly finishing: boolean;
     readonly linkError: string | null;
   },
 ): ConnectionSetupState => {
@@ -403,14 +448,14 @@ const decideSetupState = (
       return { kind: "form", flow, ...read.credentialsForm };
     case "oauth":
       if (read.localReturn !== null) {
-        const { signIn, endedMessage, pasted, pasteProblem } = read.localReturn;
+        const { signIn, endedMessage, finishing, pasted, pasteProblem } = read.localReturn;
         return endedMessage !== null
           ? describeSignInFailure(endedMessage)
           : {
               kind: "returning",
               authorizationUrl: signIn.authorizationUrl,
               linkError: read.linkError,
-              finishing: read.finishing,
+              finishing,
               paste: signIn.returnBy === "paste" ? { text: pasted, problem: pasteProblem } : null,
             };
       }

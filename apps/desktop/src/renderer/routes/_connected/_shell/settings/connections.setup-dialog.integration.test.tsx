@@ -8,6 +8,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { Connection, PluginDetail } from "@hercule/contract";
 import type { Bridge } from "../../../../../ipc/bridge";
+import type { LinkOpenOutcome } from "../../../../../ipc/contract";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
 import {
   buildErrorBody,
@@ -118,7 +119,22 @@ const buildClientPlugin = (
   };
 };
 
+/** A plugin whose checklist tries to load an image, embed HTML and link to a script. */
+const PIXEL_CHECKLIST = [
+  "Read this first.",
+  "",
+  "![the Generate Token button](https://tracker.example/pixel.png)",
+  "",
+  '<img src="https://tracker.example/embedded.png"> and [a script](javascript:alert(1)).',
+  "",
+  "1. Open [the page](https://api.example/apps).",
+].join("\n");
+
 const PLUGINS: readonly PluginDetail[] = [
+  buildPlugin("pixel", "pixel", "Pixel", [
+    { kind: "checklist", markdown: PIXEL_CHECKLIST },
+    { kind: "oauth" },
+  ]),
   buildPlugin("github", "github", "GitHub", [
     { kind: "device" },
     {
@@ -202,7 +218,10 @@ const buildDeviceStart = () => ({
 const openConnections = async (
   handlers: Readonly<Record<string, Handler>> = {},
   connections: () => readonly Connection[] = () => [OFFICE_PAPERS],
-  signInReturn?: Bridge["signInReturn"],
+  bridgeOptions: {
+    readonly signInReturn?: Bridge["signInReturn"];
+    readonly openLink?: (url: string) => Promise<LinkOpenOutcome>;
+  } = {},
 ) => {
   const calls = stubApi({
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, plugins: PLUGINS }),
@@ -212,7 +231,7 @@ const openConnections = async (
   const fake = createFakeBridge({
     controllerUrl: CONTROLLER_URL,
     token: "bearer",
-    ...(signInReturn === undefined ? {} : { signInReturn }),
+    ...bridgeOptions,
   });
   const app = await renderApp(fake, { path: "/settings/connections" });
   return { calls, fake, ...app };
@@ -783,7 +802,7 @@ const buildSignInReturn = (listens = true) => {
 const START_OAUTH = "/api/v1/oauth/start";
 const FINISH_OAUTH = "/api/v1/oauth/finish";
 const SLACK_AUTHORIZATION_URL = "https://slack.example/authorize?state=s1";
-const SLACK_TOKEN = "xoxe.xoxp-1-abc";
+const SLACK_TOKEN = "not-a-real-configuration-token-1";
 
 const NEEDS_REAUTH_SLACK: Connection = {
   ...buildConnection("01a06d02-7700-7000-8000-000000000009", "slack/slack", "work"),
@@ -797,6 +816,7 @@ const SLACK_CONNECTED: Connection = { ...NEEDS_REAUTH_SLACK, status: "connected"
 const openSlackSetup = async (
   handlers: Readonly<Record<string, Handler>> = {},
   signInReturn = buildSignInReturn(),
+  openLink?: (url: string) => Promise<LinkOpenOutcome>,
 ) => {
   const app = await openConnections(
     {
@@ -804,7 +824,7 @@ const openSlackSetup = async (
       ...handlers,
     },
     () => [],
-    signInReturn,
+    { signInReturn, ...(openLink === undefined ? {} : { openLink }) },
   );
   const dialog = await openSetup("Slack");
   return { ...app, signInReturn, dialog, view: within(dialog) };
@@ -836,21 +856,26 @@ describe("the setup of a Connection whose client is created at setup", () => {
 
   it("sends the token with the listener's address, waits, and closes on the answer of the finish", async () => {
     let answerStart: (answer: { body: unknown }) => void = () => undefined;
-    const { calls, fake, signInReturn, dialog, view } = await openSlackSetup({
+    let answerFinish: (answer: { body: unknown }) => void = () => undefined;
+    const { calls, fake, signInReturn, dialog, view, context } = await openSlackSetup({
       [`POST ${START_OAUTH}`]: () =>
         new Promise((resolve) => {
           answerStart = resolve;
         }),
-      [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+      [`POST ${FINISH_OAUTH}`]: () =>
+        new Promise((resolve) => {
+          answerFinish = resolve;
+        }),
     });
     const token = view.getByLabelText<HTMLInputElement>("Configuration token");
     await userEvent.type(token, `${SLACK_TOKEN}{Enter}`);
 
-    // While Slack makes the app, the field keeps what was sent.
+    // While Slack makes the app, the token has left the form and no mutation holds it.
     expect(
       view.getByRole("button", { name: "Creating the Slack app…" }).getAttribute("aria-busy"),
     ).toBe("true");
-    expect(token.readOnly).toBe(true);
+    expect(token.value).toBe("");
+    expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
     answerStart({ body: { authorizationUrl: SLACK_AUTHORIZATION_URL } });
 
     expect(
@@ -868,10 +893,20 @@ describe("the setup of a Connection whose client is created at setup", () => {
       listenerId: "l-1",
       authorizationUrl: SLACK_AUTHORIZATION_URL,
     });
-    // Slack has the token now, so the dialog no longer holds it.
     expect(dialog.textContent).not.toContain(SLACK_TOKEN);
+    // The user is approving in the browser, so nothing is working yet: no spinner.
+    expect(view.getByRole("status").querySelector(".spin")).toBeNull();
 
     signInReturn.comeBack("code=c1&state=s1");
+
+    // The finish is a request that ends by itself, so it has the spinner, and the
+    // one-time code is held by the request alone.
+    await waitFor(() => {
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+    });
+    expect(view.getByRole("status").querySelector(".spin")).not.toBeNull();
+    expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
+    answerFinish({ body: SLACK_CONNECTED });
 
     await waitForClosed();
     expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
@@ -879,7 +914,33 @@ describe("the setup of a Connection whose client is created at setup", () => {
     ]);
   });
 
-  it("shows why the app could not be made, and keeps the token to fix", async () => {
+  it("arms the wait for the browser's return before it opens the browser", async () => {
+    const { fake, signInReturn, view } = await openSlackSetup();
+    const open = vi.spyOn(fake.bridge.link, "open");
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(signInReturn.wait.mock.invocationCallOrder[0]).toBeLessThan(
+      open.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("says why the browser did not open, also when the system answers that it did not", async () => {
+    const { view } = await openSlackSetup({}, buildSignInReturn(), () =>
+      Promise.resolve({
+        _tag: "NotOpened",
+        reason: "The system could not open your default browser.",
+      }),
+    );
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "The browser did not open the sign-in page: The system could not open your default browser.",
+    );
+  });
+
+  it("shows why the app could not be made, with the token gone and the field ready for a new one", async () => {
     const { view } = await openSlackSetup({
       [`POST ${START_OAUTH}`]: {
         status: 400,
@@ -893,10 +954,12 @@ describe("the setup of a Connection whose client is created at setup", () => {
     expect((await view.findByRole("alert")).textContent).toBe(
       "This configuration token has expired. Make a new one.",
     );
-    expect(token.value).toBe(SLACK_TOKEN);
-    expect(
-      view.getByRole<HTMLButtonElement>("button", { name: "Continue in Slack" }).disabled,
-    ).toBe(false);
+    expect(token.value).toBe("");
+    const button = view.getByRole<HTMLButtonElement>("button", { name: "Continue in Slack" });
+    expect(button.disabled).toBe(true);
+    await userEvent.type(token, "not-a-real-configuration-token-2");
+    expect(button.disabled).toBe(false);
+    expect(view.queryByRole("alert")).toBeNull();
   });
 
   it("ends the listener on Cancel", async () => {
@@ -910,9 +973,9 @@ describe("the setup of a Connection whose client is created at setup", () => {
     expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
   });
 
-  it("ends a listener that was opened after the dialog closed", async () => {
+  it("ends a listener that was opened after the dialog closed, and opens and awaits nothing", async () => {
     let answerStart: (answer: { body: unknown }) => void = () => undefined;
-    const { signInReturn, view } = await openSlackSetup({
+    const { fake, signInReturn, view } = await openSlackSetup({
       [`POST ${START_OAUTH}`]: () =>
         new Promise((resolve) => {
           answerStart = resolve;
@@ -921,12 +984,35 @@ describe("the setup of a Connection whose client is created at setup", () => {
     await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
     await userEvent.keyboard("{Escape}");
     await waitForClosed();
+    // The listener is closed as soon as the dialog is, before the controller answers.
+    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
 
     answerStart({ body: { authorizationUrl: SLACK_AUTHORIZATION_URL } });
-
-    await waitFor(() => {
-      expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
     });
+
+    expect(fake.openedLinks).toEqual([]);
+    expect(signInReturn.wait).not.toHaveBeenCalled();
+    expect(signInReturn.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishes nothing when the browser's return arrives after the dialog closed", async () => {
+    const { calls, signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    await userEvent.click(view.getByRole("button", { name: "Cancel" }));
+    await waitForClosed();
+
+    // A return that was already queued when the user cancelled.
+    signInReturn.comeBack("code=c1&state=s1");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(0);
   });
 
   it("shows why the sign-in did not finish, and starts again with an empty field", async () => {
@@ -947,38 +1033,138 @@ describe("the setup of a Connection whose client is created at setup", () => {
     expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
   });
 
-  it("asks the user to paste the address when nothing can listen, and finishes with it", async () => {
-    const { calls, view } = await openSlackSetup(
-      { [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED } },
-      buildSignInReturn(false),
-    );
-    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+  it("draws a plugin's checklist as text, lists and web links only", async () => {
+    await openConnections({}, () => []);
+    const dialog = await openSetup("Pixel");
+    const view = within(dialog);
 
-    expect(
-      await view.findByText(
-        "After you approve, your browser shows a page that does not load. Copy its address and paste it here.",
-      ),
-    ).toBeTruthy();
-    expect(
-      (readCalls(calls, "POST", START_OAUTH)[0]?.body as { redirectUri: string }).redirectUri,
-    ).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
-
-    await userEvent.type(view.getByLabelText("Address"), "not an address");
-    await userEvent.click(view.getByRole("button", { name: "Finish" }));
-    expect((await view.findByText(/That is not what the browser ended on/)).textContent).toContain(
-      "there is no state",
-    );
-    expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(0);
-
-    const pasted = "http://127.0.0.1:51234/callback?code=c1&state=s1";
-    await userEvent.clear(view.getByLabelText("Address"));
-    await userEvent.type(view.getByLabelText("Address"), pasted);
-    await userEvent.click(view.getByRole("button", { name: "Finish" }));
-
-    await waitForClosed();
-    expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
-      { callbackQuery: pasted },
+    expect(dialog.querySelector("img")).toBeNull();
+    // The image shows as its alternative text, and the embedded HTML as the characters written.
+    expect(view.getByText(/the Generate Token button/)).toBeTruthy();
+    expect(dialog.textContent).toContain('<img src="https://tracker.example/embedded.png">');
+    expect([...dialog.querySelectorAll("a")].map((link) => link.getAttribute("href"))).toEqual([
+      "https://api.example/apps",
     ]);
+    expect(dialog.textContent).toContain("a script");
+  });
+
+  describe("when nothing can listen and the user pastes the address", () => {
+    /** Answers each start with its own state, as the controller does. */
+    const answerStarts = () => {
+      let attempts = 0;
+      return () => {
+        attempts += 1;
+        return { body: { authorizationUrl: `https://slack.example/authorize?state=s${attempts}` } };
+      };
+    };
+    /** Returns the address the browser ends on for the start that sent `redirectUri`. */
+    const buildReturnAddress = (calls: readonly Call[], attempt: number, state: string): string => {
+      const body = readCalls(calls, "POST", START_OAUTH)[attempt - 1]?.body as {
+        redirectUri: string;
+      };
+      return `${body.redirectUri}?code=c-${state}&state=${state}`;
+    };
+
+    it("asks for the address, refuses text that is no address, and finishes with the right one", async () => {
+      const { calls, view } = await openSlackSetup(
+        {
+          [`POST ${START_OAUTH}`]: answerStarts(),
+          [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+        },
+        buildSignInReturn(false),
+      );
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+
+      expect(
+        await view.findByText(
+          "After you approve, your browser shows a page that does not load. Copy its address and paste it here.",
+        ),
+      ).toBeTruthy();
+      expect(buildReturnAddress(calls, 1, "s1")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback\?/);
+
+      await userEvent.type(view.getByLabelText("Address"), "not an address");
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+      expect(
+        (await view.findByText(/That is not what the browser ended on/)).textContent,
+      ).toContain("there is no state");
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+
+      const pasted = buildReturnAddress(calls, 1, "s1");
+      await userEvent.clear(view.getByLabelText("Address"));
+      await userEvent.type(view.getByLabelText("Address"), pasted);
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+      await waitForClosed();
+      expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
+        { callbackQuery: pasted },
+      ]);
+    });
+
+    it("refuses the address of another sign-in before the controller completes that one", async () => {
+      const { calls, view } = await openSlackSetup(
+        {
+          [`POST ${START_OAUTH}`]: answerStarts(),
+          [`POST ${FINISH_OAUTH}`]: (call) => ({
+            status: 409,
+            body: buildErrorBody("invalid_state", `Refused ${String(call.body)}.`),
+          }),
+        },
+        buildSignInReturn(false),
+      );
+      // Attempt 1 ends in a refusal, so the user starts again.
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      await userEvent.type(
+        await view.findByLabelText("Address"),
+        buildReturnAddress(calls, 1, "s1"),
+      );
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+      await userEvent.click(await view.findByRole("button", { name: "Start again" }));
+      await userEvent.type(
+        view.getByLabelText("Configuration token"),
+        `${"not-a-real-configuration-token-2"}{Enter}`,
+      );
+      const second = await view.findByLabelText("Address");
+      expect(readCalls(calls, "POST", START_OAUTH)).toHaveLength(2);
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+
+      // The address of attempt 1 belongs to the sign-in that ended.
+      await userEvent.type(second, buildReturnAddress(calls, 1, "s1"));
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+      expect(
+        await view.findByText(
+          "This address is from another sign-in: paste the address the browser ended on for this one.",
+        ),
+      ).toBeTruthy();
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+    });
+
+    it("keeps the pasted address out of the page and the mutation cache while the controller finishes", async () => {
+      let answerFinish: (answer: { body: unknown }) => void = () => undefined;
+      const { calls, view, context } = await openSlackSetup(
+        {
+          [`POST ${START_OAUTH}`]: answerStarts(),
+          [`POST ${FINISH_OAUTH}`]: () =>
+            new Promise((resolve) => {
+              answerFinish = resolve;
+            }),
+        },
+        buildSignInReturn(false),
+      );
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      const address = await view.findByLabelText<HTMLInputElement>("Address");
+      await userEvent.type(address, buildReturnAddress(calls, 1, "s1"));
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+      await waitFor(() => {
+        expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+      });
+      expect(address.value).toBe("");
+      expect(view.getByRole("status").querySelector(".spin")).not.toBeNull();
+      expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
+      answerFinish({ body: SLACK_CONNECTED });
+      await waitForClosed();
+    });
   });
 
   describe("on a reconnect", () => {
@@ -990,7 +1176,7 @@ describe("the setup of a Connection whose client is created at setup", () => {
           [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
         },
         () => [NEEDS_REAUTH_SLACK],
-        signInReturn,
+        { signInReturn },
       );
       await chooseMenuItem(
         await screen.findByRole("button", { name: "More for Slack · work" }),
@@ -1045,7 +1231,7 @@ describe("the setup of a Connection whose client is created at setup", () => {
     const { calls, fake } = await openConnections(
       { [`POST ${START_OAUTH}`]: { body: { authorizationUrl: "https://linear.example/a" } } },
       () => [],
-      signInReturn,
+      { signInReturn },
     );
     const view = within(await openSetup("Linear"));
 

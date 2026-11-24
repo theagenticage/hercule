@@ -1,15 +1,14 @@
-import { useState, type FormEvent, type JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type FormEvent, type JSX } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, buildButtonClassName, Field, Input } from "@hercule/ui";
 import {
-  describePasteRefusal,
   describeSignInFailure,
   isWebLink,
   queryKeys,
   readErrorMessage,
+  readPastedReturn,
   type HerculeClient,
 } from "@hercule/client-core";
-import { parseCallbackQuery } from "@hercule/contract";
 
 /**
  * The second half of a redirect flow that returns to the user's machine: the
@@ -18,8 +17,15 @@ import { parseCallbackQuery } from "@hercule/contract";
  * because nothing listens at that address, and its address holds the one-time
  * code that `connection.finishOAuth` needs.
  *
- * `onDone` is called once the controller finished the sign-in. When it
- * refuses, the component shows why and offers to start again.
+ * The address must belong to this sign-in (`readPastedReturn` compares its
+ * `state` with `authorizationUrl`'s), because the controller would complete
+ * the sign-in the address belongs to and this form would show a success it
+ * did not make. The pasted address leaves the field when it is sent, and the
+ * request is no mutation, so the code is kept nowhere but in the request.
+ *
+ * `onDone` is called once the controller finished the sign-in, and only while
+ * this panel is on screen. When the controller refuses, the panel shows why
+ * and focuses "Start again".
  */
 export function PasteReturnSignIn({
   client,
@@ -40,17 +46,19 @@ export function PasteReturnSignIn({
   const queryClient = useQueryClient();
   const [pasted, setPasted] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  // The panel may be gone when the controller answers, and then it must close nothing.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
 
-  const finish = useMutation({
-    mutationFn: (callbackQuery: string) =>
-      client.connection.finishOAuth({ payload: { callbackQuery } }),
-    // The connection exists from this reply on, even when the panel is gone,
-    // so the list is fetched again either way.
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
-  });
-
-  if (finish.isError) {
-    const ending = describeSignInFailure(readErrorMessage(finish.error));
+  if (refusal !== null) {
+    const ending = describeSignInFailure(refusal);
     return (
       <>
         <div className="flex max-w-[52ch] flex-col gap-0.5" role="alert">
@@ -61,7 +69,7 @@ export function PasteReturnSignIn({
           <Button type="button" className="-ml-2" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="button" variant="form" onClick={onRestart}>
+          <Button type="button" variant="form" onClick={onRestart} autoFocus>
             Start again
           </Button>
         </div>
@@ -71,15 +79,27 @@ export function PasteReturnSignIn({
 
   const send = (event: FormEvent): void => {
     event.preventDefault();
-    const parsed = parseCallbackQuery(pasted);
-    if (parsed._tag === "Refused") {
-      setProblem(describePasteRefusal(parsed.reason));
+    if (finishing) return;
+    const reading = readPastedReturn(authorizationUrl, pasted);
+    if (reading.kind === "refused") {
+      setProblem(reading.message);
       return;
     }
     setProblem(null);
-    // React Query calls a callback passed to `mutate` only while this panel is
-    // on screen, so a reply that arrives after Cancel cannot close another form.
-    finish.mutate(pasted.trim(), { onSuccess: onDone });
+    setPasted("");
+    setFinishing(true);
+    client.connection.finishOAuth({ payload: { callbackQuery: reading.callbackQuery } }).then(
+      () => {
+        // The connection exists from this reply on, even when the panel is gone.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+        if (shown.current) onDone();
+      },
+      (error: unknown) => {
+        if (!shown.current) return;
+        setFinishing(false);
+        setRefusal(readErrorMessage(error));
+      },
+    );
   };
 
   return (
@@ -105,10 +125,12 @@ export function PasteReturnSignIn({
       <Field id="oauth-return-address" label="Address" error={problem ?? undefined}>
         <Input
           id="oauth-return-address"
+          autoFocus
           spellCheck={false}
           autoComplete="off"
           placeholder="http://127.0.0.1:…/callback?code=…"
           value={pasted}
+          readOnly={finishing}
           onChange={(event) => {
             setPasted(event.target.value);
             setProblem(null);
@@ -119,7 +141,7 @@ export function PasteReturnSignIn({
         <Button type="button" className="-ml-2" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" variant="form" disabled={finish.isPending || pasted.trim() === ""}>
+        <Button type="submit" variant="form" disabled={finishing || pasted.trim() === ""}>
           Finish
         </Button>
       </div>

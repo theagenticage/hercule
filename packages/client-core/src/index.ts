@@ -163,14 +163,17 @@ export {
   type SignInEnding,
 } from "./connection-device-flow";
 export { describePasteRefusal } from "./browser-return-words";
+export { readChecklist, type ChecklistBlock, type ChecklistInline } from "./checklist-text";
 export {
   decideOAuthReturnPath,
   readClientValues,
+  readPastedReturn,
   startLocalReturnSignIn,
   type LocalReturn,
   type LocalReturnSignIn,
   type OAuthReturnApp,
   type OAuthReturnPath,
+  type PastedReturn,
 } from "./connection-oauth-return";
 export {
   SUGGESTED_TOPICS,
