@@ -485,7 +485,50 @@ describe("POST /oauth/start", () => {
   });
 });
 
+describe("POST /oauth/start, given client values that cannot be decoded", () => {
+  it("answers with one issue at clientValues that quotes no key and no value, since either may be a token", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      const pasted = "xoxe-pasted-where-a-name-belongs-0123456789";
+
+      const response = await post(
+        base,
+        "/api/v1/oauth/start",
+        {
+          type: "oauthy/oauth-type",
+          origin: ORIGIN,
+          clientValues: { [pasted]: 42, other: pasted.repeat(200) },
+        },
+        token,
+      );
+
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      expect(text).not.toContain(pasted);
+      const error = (JSON.parse(text) as ErrorBody).error;
+      expect(error.details?.issues).toEqual([
+        { path: ["clientValues"], message: expect.stringContaining("not valid") as string },
+      ]);
+    });
+  });
+});
+
 describe("GET /oauth/callback", () => {
+  it("reads everything after the first question mark as the query, so a later one belongs to a value", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      await setClientId(base, token, "oauthy");
+      await setClientSecret(base, token, "oauthy");
+      const url = await startOAuthOrFail(base, token);
+      const state = url.searchParams.get("state") ?? "";
+
+      const response = await fetch(`${base}/oauth/callback?error=access_denied?x&state=${state}`, {
+        redirect: "manual",
+        headers: { connection: "close" },
+      });
+
+      expect(response.headers.get("location")).toBe("/connections?oauth=denied");
+    });
+  });
+
   it("exchanges the code with a standard token request and creates the connection the start described", async () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");

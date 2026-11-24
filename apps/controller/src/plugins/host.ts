@@ -43,6 +43,7 @@ import {
 import {
   createDecodeValidationError,
   MAX_CLIENT_VALUES,
+  SignInRedirectUri,
   summarizeCause,
   truncateMessage,
   type IntakeOverrides,
@@ -306,8 +307,16 @@ const checkCredentialFieldNames = (type: ConnectionType): string | undefined => 
     : undefined;
 };
 
-/** The hosts the desktop app's own return catcher answers for. */
-const CATCHER_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1"];
+/**
+ * Checks that a redirect URI on the catcher's path is one the desktop app's
+ * catcher can be sent to, by the rules of `SignInRedirectUri`, which every
+ * start with an address on the user's machine must pass. A URI without a port
+ * stands for every port, so one concrete port stands in for it.
+ */
+const isCatcherRegistration = (url: URL): boolean =>
+  Schema.is(SignInRedirectUri)(
+    url.port === "" ? `${url.protocol}//${url.hostname}:1${url.pathname}` : url.href,
+  );
 
 /** The hostnames a public client's redirect URIs may use: the loopback names of this machine. */
 const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[::1]"];
@@ -334,8 +343,10 @@ const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[:
  * - Each redirect URI must have no query and no fragment, and its path must
  *   be one of the two the core can receive a return on: the controller's
  *   callback path, or the path of the desktop app's own catcher. A URI on the
- *   catcher's path must be plain http on `127.0.0.1` or `localhost`, because
- *   that is all the catcher listens on.
+ *   catcher's path must follow the rules of `SignInRedirectUri`: plain http on
+ *   `127.0.0.1`, with no port or a port from 1 to 65535, because that is all
+ *   the catcher listens on and all a start with an address on the user's
+ *   machine accepts.
  */
 const checkPublicClient = (type: ConnectionType, createsClients: boolean): string | undefined => {
   const client = type.oauth?.publicClient;
@@ -387,8 +398,7 @@ const checkPublicClient = (type: ConnectionType, createsClients: boolean): strin
       // The desktop app's catcher listens on plain http at the loopback
       // address, so a `/callback` URI on any other scheme or host could never
       // be the address a sign-in returns to.
-      (url.pathname === CATCHER_PATH &&
-        (url.protocol !== "http:" || !CATCHER_HOSTNAMES.includes(url.hostname))) ||
+      (url.pathname === CATCHER_PATH && !isCatcherRegistration(url)) ||
       uri !== `${url.origin}${url.pathname}`
     );
   });
@@ -477,7 +487,8 @@ const buildRegistrationHost = (
                 serializable.oauth as { readonly publicClient?: object } | undefined
               )?.publicClient;
               if (
-                declaredClient !== undefined &&
+                typeof declaredClient === "object" &&
+                declaredClient !== null &&
                 "clientId" in declaredClient &&
                 "createdAtSetup" in declaredClient
               ) {

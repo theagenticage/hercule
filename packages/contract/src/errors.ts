@@ -457,7 +457,40 @@ export const listSchemaIssues = (
  * issues either way.
  */
 export const listDecodeIssues = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
-  listSchemaIssues(error.issue);
+  describeSecretInputIssues(listSchemaIssues(error.issue));
+
+/**
+ * The input fields that hold secrets the caller pasted, with the one message
+ * that describes any problem with them. The schema library names the key of a
+ * bad entry in the path and quotes the value in its message, and either may be
+ * the secret itself (a token pasted where a name belongs), so a problem with
+ * one of these fields is reported as one issue at the field, whatever the
+ * problem is.
+ */
+const SECRET_INPUT_FIELDS: ReadonlyMap<string, string> = new Map([
+  [
+    "clientValues",
+    "clientValues is not valid: give an object with one short text value for each field the " +
+      "type declares. The values are not quoted here, because they may be secrets",
+  ],
+]);
+
+/** Replaces every issue under a secret input field with the field's one fixed issue. */
+const describeSecretInputIssues = (issues: ReadonlyArray<Issue>): ReadonlyArray<Issue> => {
+  const described: Array<Issue> = [];
+  const reported = new Set<string>();
+  for (const issue of issues) {
+    const field = issue.path[0];
+    const message = field === undefined ? undefined : SECRET_INPUT_FIELDS.get(field);
+    if (field === undefined || message === undefined) {
+      described.push(issue);
+    } else if (!reported.has(field)) {
+      reported.add(field);
+      described.push({ path: [field], message });
+    }
+  }
+  return described;
+};
 
 /** Creates the validation error for a Schema decode failure, with one issue per problem. */
 export const createDecodeValidationError = (error: Schema.SchemaError): Validation =>

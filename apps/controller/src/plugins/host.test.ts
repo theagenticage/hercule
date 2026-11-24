@@ -1529,6 +1529,30 @@ describe("a connection type's token flows", () => {
       "the public client's redirect URI https://127.0.0.1/callback is not",
     ],
     [
+      "a catcher redirect URI on localhost, which the catcher's own address rules refuse",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["http://localhost/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI http://localhost/callback is not",
+    ],
+    [
+      "a catcher redirect URI with port 0",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["http://127.0.0.1:0/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI http://127.0.0.1:0/callback is not",
+    ],
+    [
       "a catcher redirect URI on the IPv6 loopback address",
       {
         setup: [{ kind: "oauth" }],
@@ -1636,6 +1660,15 @@ describe("a connection type's token flows", () => {
 
     expect(stored).toContain('"createdAtSetup":{"fields":[{"name":"token"');
     expect(stored).not.toContain("createOAuthClient");
+  });
+
+  it("refuses a public client that is not an object with a message, and fails no other plugin", async () => {
+    const status = await bootWithType({
+      setup: [{ kind: "oauth" }],
+      oauth: { ...OAUTH, publicClient: "shipped" },
+    });
+
+    expect(readErroredMessage(status)).toContain("publicClient");
   });
 
   it("accepts a device flow beside a pasted token", async () => {

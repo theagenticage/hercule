@@ -1,7 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { Forbidden } from "@hercule/contract";
+import { Conflict, Forbidden } from "@hercule/contract";
 import { CurrentActor } from "../../actor";
 import { absorbFailures } from "../../absorbing";
 import { ConnectionObserver, type CreatedConnection } from "../../connections";
@@ -85,13 +85,19 @@ const addServer = (
           Effect.provideService(CurrentActor, created.actor),
           Effect.asVoid,
           Effect.catch((error) =>
-            error instanceof Forbidden
-              ? Effect.logWarning(
-                  `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because whoever created the Connection may not manage MCP servers (${error.message}). The Connection is created. Add the server in Settings > MCP servers.`,
+            error instanceof Conflict
+              ? // The account already has the server, so adding it by hand would
+                // meet the same refusal: there is nothing to do.
+                Effect.logInfo(
+                  `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because that account already has one (${error.error.message}). Nothing needs to be done.`,
                 )
-              : Effect.logError(
-                  `The ${contribution.displayName} MCP server could not be added for the new Connection ${created.connectionId}: ${error.message}. The Connection is created. Add the server in Settings > MCP servers.`,
-                ),
+              : error instanceof Forbidden
+                ? Effect.logWarning(
+                    `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because whoever created the Connection may not manage MCP servers (${error.message}). The Connection is created. Add the server in Settings > MCP servers.`,
+                  )
+                : Effect.logError(
+                    `The ${contribution.displayName} MCP server could not be added for the new Connection ${created.connectionId}: ${error.message}. The Connection is created. Add the server in Settings > MCP servers.`,
+                  ),
           ),
         );
 

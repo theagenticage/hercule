@@ -36,6 +36,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { holdWriter } from "../db/client";
 import { inTransaction } from "../db/testing";
 import { PromotionState } from "../promotion";
+import { withReadSnapshot } from "../db/client";
 import { CREATED_CLIENT_GRACE_MS, SETUP_LIFETIME_MS } from "./oauth";
 import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
 import { ConnectionService } from "./service";
@@ -145,6 +146,8 @@ interface PluginLog {
   readonly created: Array<Record<string, string>>;
   /** The client ids whose `deleteClient` ran. */
   readonly deleted: Array<string>;
+  /** A weak reference to what each created client's `deleteClient` holds, to see when nothing retains it. */
+  readonly held: Array<WeakRef<object>>;
 }
 
 /**
@@ -158,7 +161,7 @@ const buildCreatedClientType = (
   tokenBase: string,
   fieldName = "configToken",
 ): { readonly type: RegisteredConnectionType; readonly log: PluginLog } => {
-  const log: PluginLog = { created: [], deleted: [] };
+  const log: PluginLog = { created: [], deleted: [], held: [] };
   const type: RegisteredConnectionType = {
     pluginId: "forge",
     contribution: {
@@ -205,10 +208,12 @@ const buildCreatedClientType = (
         }
         log.created.push(values);
         const clientId = `made-${log.created.length}`;
+        const holder = { clientId };
+        log.held.push(new WeakRef(holder));
         const client: CreatedOAuthClient = {
           clientId,
           deleteClient: Effect.sync(() => {
-            log.deleted.push(clientId);
+            log.deleted.push(holder.clientId);
           }),
         };
         return Effect.succeed(client);
@@ -1449,5 +1454,197 @@ describe("the refusal of an origin the app does not accept", () => {
     expect(readMessage(failure)).toContain("desktop app");
     expect(readMessage(failure)).toContain("paste");
     expect(readMessage(failure)).toContain("with its own port");
+  });
+});
+
+describe("the clean-up of a created client, when the finish is cut short or the claim is slow", () => {
+  it("keeps the client of a committed Connection, although a read snapshot older than the commit is open", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const committed = Promise.withResolvers<void>();
+    // The observer is told after the commit and never answers, so the finish
+    // stays there until it is interrupted.
+    const observer = {
+      connectionCreated: () =>
+        Effect.andThen(
+          Effect.sync(() => committed.resolve()),
+          Effect.never,
+        ),
+      connectionDeleted: () => Effect.void,
+    };
+
+    const stored = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const releaseSnapshot = yield* Deferred.make<void>();
+        const started = yield* service.startOAuth(startInput());
+        // A reader whose view is older than the commit that is about to happen.
+        yield* Effect.forkChild(withReadSnapshot(sql, Deferred.await(releaseSnapshot)));
+        yield* settle;
+        const finish = yield* Effect.forkChild(
+          service.finishOAuth({
+            callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+          }),
+        );
+        yield* Effect.promise(() => committed.promise);
+        yield* Fiber.interrupt(finish);
+        yield* settle;
+        yield* Deferred.succeed(releaseSnapshot, undefined);
+        yield* settle;
+        return yield* readStoredClientIds;
+      }),
+      { stack: { observer } },
+    );
+
+    expect(stored).toEqual(["made-1"]);
+    expect(log.deleted).toEqual([]);
+  });
+
+  it("leaves the client to the finish when the expiry timer fires during a slow claim, and the finish deletes it once", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { early, failure } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const release = yield* Deferred.make<void>();
+        const started = yield* service.startOAuth(startInput());
+        // The writer is busy, so the claim waits for it.
+        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
+        yield* settle;
+        const finish = yield* Effect.forkChild(
+          Effect.flip(
+            service.finishOAuth({
+              callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+            }),
+          ),
+        );
+        yield* settle;
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+        const early = [...log.deleted];
+        yield* Deferred.succeed(release, undefined);
+        const failure = yield* Fiber.join(finish);
+        yield* settle;
+        return { early, failure };
+      }),
+    );
+
+    // The timer fired and found the client claimed, so it deleted nothing.
+    expect(early).toEqual([]);
+    // The claim came too late, and the finish, which saw the deadline had passed, deleted the client.
+    expect(failure).toMatchObject({ error: { code: "validation" } });
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("leaves the client to the timer again when a claim by someone else is refused", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* asActor(SESSION, service.startOAuth(startInput()));
+        const refused = yield* Effect.flip(
+          service.finishOAuth({
+            callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+          }),
+        );
+        expect(refused).toMatchObject({ error: { code: "validation" } });
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+      }),
+    );
+
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("drops the client without deleting it, and keeps nothing of it, when the controller is sealed", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const held = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        yield* service.startOAuth(startInput());
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+        // Looked at while the service still lives, so only its own map can hold it.
+        Bun.gc(true);
+        return log.held[0]?.deref();
+      }),
+      { stack: { sealed: true } },
+    );
+
+    expect(log.deleted).toEqual([]);
+    // Nothing keeps what the client's cleanup held, such as the configuration token.
+    expect(held).toBeUndefined();
+  });
+});
+
+describe("what the observer is told about a created Connection", () => {
+  it("still gets it when the request is cancelled after the commit", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+    const gate = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const done: Array<string> = [];
+    const observer = {
+      connectionCreated: (created: { readonly connectionId: string }) =>
+        Effect.gen(function* () {
+          reached.resolve();
+          yield* Effect.promise(() => gate.promise);
+          done.push(created.connectionId);
+        }),
+      connectionDeleted: () => Effect.void,
+    };
+
+    await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(startInput());
+        const finish = yield* Effect.forkChild(
+          service.finishOAuth({
+            callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+          }),
+        );
+        yield* Effect.promise(() => reached.promise);
+        yield* Fiber.interrupt(finish);
+        gate.resolve();
+        yield* settle;
+      }),
+      { stack: { observer } },
+    );
+
+    expect(done).toHaveLength(1);
+  });
+});
+
+describe("a plugin's refusal that quotes a short value of a field the type declares secret", () => {
+  it("has the value removed, at any length", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+
+    const failure = await run(
+      [type],
+      Effect.flatMap(ConnectionService, (service) =>
+        Effect.flip(service.startOAuth(startInput({ clientValues: { configToken: "echo-1" } }))),
+      ),
+    );
+
+    expect(readMessage(failure)).toBe("the provider refused the token [removed]: it is invalid");
   });
 });

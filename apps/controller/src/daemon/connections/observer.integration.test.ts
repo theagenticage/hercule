@@ -17,7 +17,7 @@
  *   checked there; one that the session finishes with `connection.finishOAuth`
  *   adds the server, stamped with the session.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@hercule/contract";
 import {
   HOST_API,
@@ -177,6 +177,36 @@ describe("a Connection whose plugin's server sets addWhenConnected", () => {
           .toSorted(),
       ).toEqual([first, second].toSorted());
     }, PLUGINS);
+  });
+});
+
+describe("a Connection of an account that already has the server", () => {
+  it("is told so plainly in the log, with no advice to add the server by hand", async () => {
+    const lines: Array<string> = [];
+    const spies = (["log", "info", "warn", "error"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation((...parts: Array<unknown>) => {
+        lines.push(parts.map(String).join(" "));
+      }),
+    );
+    try {
+      await withSetUpController(async (controller) => {
+        await createConnectionOrFail(controller.base, controller.token, "acme/desk", "one");
+        const sameAccount = await requestConnection(
+          controller.base,
+          controller.token,
+          "acme/desk",
+          "one",
+        );
+        expect(sameAccount.status).toBe(201);
+      }, PLUGINS);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    const said = lines.filter((line) => line.includes("MCP server was not added"));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("already has one");
+    expect(said[0]).not.toContain("Settings > MCP servers");
   });
 });
 

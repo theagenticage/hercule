@@ -21,6 +21,7 @@ import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { get } from "../http/testing";
 import { NotifierLayer } from "../notifications";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
+import { PromotionState } from "../promotion";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { masterKeyLayer, SecretLayer, Secrets, secretsLayer, type SecretOwner } from "../secrets";
 import { ConnectionEntityFacts } from "./entity-facts";
@@ -195,6 +196,12 @@ export interface ConnectionServiceStackOptions {
    * effect is taken out of the cell before it runs, so it runs once.
    */
   readonly beforeTokenRead?: { current: Effect.Effect<void> | undefined };
+  /**
+   * Makes the controller sealed, as it is after a promotion: work that waits
+   * for the gate is answered with the seal at once, and `whenServing` never
+   * returns.
+   */
+  readonly sealed?: true;
 }
 
 /**
@@ -223,6 +230,16 @@ export const buildConnectionServiceStack = (
               }),
           })),
         ).pipe(Layer.provide(realSecrets));
+  const promotion =
+    options.sealed === undefined
+      ? ServingPromotionStateLayer
+      : Layer.effect(PromotionState)(
+          Effect.map(PromotionState, (real): PromotionState["Service"] => ({
+            ...real,
+            whenServing: () => Effect.never,
+            whenServingOr: (_work, onSealed) => onSealed(undefined as never),
+          })),
+        ).pipe(Layer.provide(ServingPromotionStateLayer));
   return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
     Layer.provide(
@@ -249,7 +266,7 @@ export const buildConnectionServiceStack = (
     Layer.provideMerge(AuditLogLayer),
     // The ingest records Task facts, which are Platform Events.
     Layer.provideMerge(PlatformEventsLayer),
-    Layer.provideMerge(ServingPromotionStateLayer),
+    Layer.provideMerge(promotion),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
