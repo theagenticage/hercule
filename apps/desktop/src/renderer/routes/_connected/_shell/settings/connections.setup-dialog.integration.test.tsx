@@ -983,6 +983,57 @@ describe("the setup of a Connection whose client is created at setup", () => {
     await waitForClosed();
   });
 
+  it("keeps the browser's return in the field when the controller cannot be reached, and finishes with it on Finish", async () => {
+    let attempts = 0;
+    const { calls, signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("The network is down.");
+        return { body: SLACK_CONNECTED };
+      },
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+
+    // The sign-in is not over: the return is in the field, with what happened.
+    expect(
+      await view.findByText(
+        "The controller could not be reached, so the sign-in is not finished. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(view.getByLabelText<HTMLInputElement>("Address").value).toBe("code=c1&state=s1");
+    expect(view.queryByText(/page that does not load/)).toBeNull();
+    await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+    await waitForClosed();
+    expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
+      { callbackQuery: "code=c1&state=s1" },
+      { callbackQuery: "code=c1&state=s1" },
+    ]);
+  });
+
+  it("also keeps it for a server error, but ends the sign-in on a refusal of the controller", async () => {
+    const answers: { status: number; body: unknown }[] = [
+      { status: 500, body: buildErrorBody("internal", "Something broke.") },
+      { status: 409, body: buildErrorBody("invalid_state", "Slack refused the code.") },
+    ];
+    const { signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: () => answers.shift()!,
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+    expect(
+      await view.findByText("The controller failed while finishing the sign-in. Try again."),
+    ).toBeTruthy();
+
+    await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+    expect(await view.findByText(/Slack refused the code\./)).toBeTruthy();
+    expect(view.getByRole("button", { name: "Start again" })).toBeTruthy();
+  });
+
   it("shows why the app could not be made, with the token gone and the field ready for a new one", async () => {
     const { view } = await openSlackSetup({
       [`POST ${START_OAUTH}`]: {

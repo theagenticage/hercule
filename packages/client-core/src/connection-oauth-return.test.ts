@@ -4,11 +4,13 @@ import { createClient } from "./client";
 import {
   decideOAuthReturnPath,
   readClientValues,
+  readFinishFailure,
   readPastedReturn,
   readTypedValue,
   startLocalReturnSignIn,
 } from "./connection-oauth-return";
 import type { ConnectionType } from "./connection-types";
+import { ApiError, ConnectionError } from "./errors";
 import type { BrowserSignInPort } from "./mcp-servers/browser-sign-in";
 
 const buildType = (overrides: Partial<ConnectionType>): ConnectionType => ({
@@ -347,5 +349,31 @@ describe("readTypedValue", () => {
     expect(readTypedValue(typed, "other")).toBe("");
     expect(readTypedValue(typed, "constructor")).toBe("");
     expect(readTypedValue(typed, "__proto__")).toBe("");
+  });
+});
+
+describe("readFinishFailure", () => {
+  it("leaves the sign-in open when the controller did not answer, or failed", () => {
+    expect(
+      readFinishFailure(new ConnectionError("http://127.0.0.1:4937", new Error("down"))),
+    ).toEqual({
+      kind: "retry",
+      message: "The controller could not be reached, so the sign-in is not finished. Try again.",
+    });
+    expect(readFinishFailure(new ApiError("internal", "boom"))).toEqual({
+      kind: "retry",
+      message: "The controller failed while finishing the sign-in. Try again.",
+    });
+  });
+
+  it("ends the sign-in on an answer of the controller, in the controller's words", () => {
+    expect(readFinishFailure(new ApiError("invalid_state", "Slack refused the code."))).toEqual({
+      kind: "refused",
+      message: "Slack refused the code.",
+    });
+    expect(readFinishFailure(new ApiError("validation", "Not a redirect answer."))).toEqual({
+      kind: "refused",
+      message: "Not a redirect answer.",
+    });
   });
 });

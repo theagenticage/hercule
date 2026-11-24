@@ -11,7 +11,7 @@ import {
 } from "@hercule/contract";
 import type { HerculeClient } from "./client";
 import type { ConnectionType } from "./connection-types";
-import { readErrorMessage } from "./errors";
+import { ApiError, ConnectionError, readErrorMessage } from "./errors";
 import { buildPastedRedirectUri } from "./mcp-server-sign-in";
 import type { BrowserSignInPort } from "./mcp-servers/browser-sign-in";
 import {
@@ -231,4 +231,39 @@ export const readPastedReturn = (authorizationUrl: string, pasted: string): Past
     };
   }
   return { kind: "callback", callbackQuery: pasted.trim() };
+};
+
+/**
+ * What a failed `connection.finishOAuth` means for the sign-in:
+ *
+ * - `retry`: the controller did not answer, or failed (a server error), so the
+ *   sign-in may still be open there. The same address can be sent again.
+ *   `message` says that, and to try again.
+ * - `refused`: the controller answered that the sign-in is over. `message` is
+ *   its own wording, which says why and what to do.
+ */
+export type FinishFailure =
+  | { readonly kind: "retry"; readonly message: string }
+  | { readonly kind: "refused"; readonly message: string };
+
+/**
+ * Reads the error of a failed `connection.finishOAuth`. Only an answer of the
+ * controller ends the sign-in. No answer at all (the network, a timeout) or a
+ * server error leaves it open, because the controller may not have seen the
+ * request, or may have failed before it used the one-time code.
+ */
+export const readFinishFailure = (error: unknown): FinishFailure => {
+  if (error instanceof ConnectionError) {
+    return {
+      kind: "retry",
+      message: "The controller could not be reached, so the sign-in is not finished. Try again.",
+    };
+  }
+  if (error instanceof ApiError && error.status >= 500) {
+    return {
+      kind: "retry",
+      message: "The controller failed while finishing the sign-in. Try again.",
+    };
+  }
+  return { kind: "refused", message: readErrorMessage(error) };
 };

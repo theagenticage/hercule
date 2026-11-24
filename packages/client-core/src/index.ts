@@ -167,9 +167,11 @@ export { readChecklist, type ChecklistBlock, type ChecklistInline } from "./chec
 export {
   decideOAuthReturnPath,
   readClientValues,
+  readFinishFailure,
   readPastedReturn,
   readTypedValue,
   startLocalReturnSignIn,
+  type FinishFailure,
   type LocalReturn,
   type LocalReturnSignIn,
   type OAuthReturnApp,
