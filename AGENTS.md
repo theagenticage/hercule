@@ -101,6 +101,7 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | `packages/service` | `@hercule/service` | The service role (`hercule service`): the Service Unit on launchd and systemd that keeps the controller or a runner running. `hercule runner join` installs the runner's unit through it, so it links nothing of the controller |
 | `packages/contract` | `@hercule/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hercule/protocol` | The controller-runner WebSocket protocol in Effect Schema |
+| `packages/acp` | `@hercule/acp` | A client for the Agent Client Protocol (JSON-RPC 2.0 over an agent's stdio), copied from T3 Code under MIT; `README.md` there lists what was copied. Depends on `effect` only. `src/_generated` is written by `scripts/gen-acp-types.ts` and checked in |
 | `packages/plugin-host` | `@hercule/plugin-host` | The API a plugin is written against: its manifest, its hooks and the services the host passes them, and the contributions it registers (harnesses, event sources, Connection types, workflow actions with `ActionContext` and `ActionError`). Uses no controller internals |
 | `packages/client-core` | `@hercule/client-core` | The client library. The only client package that writes Effect code |
 | `packages/ui` | `@hercule/ui` | The React component library |

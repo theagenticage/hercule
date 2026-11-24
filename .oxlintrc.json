@@ -21,7 +21,8 @@
     "apps/web/src/routeTree.gen.ts",
     "apps/desktop/src/renderer/routeTree.gen.ts",
     "apps/desktop/out/**",
-    "apps/runner/src/harnesses/codex/generated/**"
+    "apps/runner/src/harnesses/codex/generated/**",
+    "packages/acp/src/_generated/**"
   ],
   "rules": {
     "typescript/await-thenable": "error",

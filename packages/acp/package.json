@@ -1,0 +1,22 @@
+{
+  "name": "@hercule/acp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./client": "./src/client.ts",
+    "./schema": "./src/schema.ts",
+    "./compat": "./src/compat.ts",
+    "./rpc": "./src/rpc.ts",
+    "./protocol": "./src/protocol.ts",
+    "./errors": "./src/errors.ts",
+    "./schema-v1": "./src/_generated/schema-v1.gen.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.7"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "4.0.7"
+  }
+}

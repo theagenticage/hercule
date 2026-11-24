@@ -12,6 +12,7 @@
     "apps/web/src/routeTree.gen.ts",
     "apps/desktop/src/renderer/routeTree.gen.ts",
     "apps/runner/src/harnesses/codex/generated/",
+    "packages/acp/src/_generated/",
     ".playwright-cli",
     // The Android app's Gradle state and build output.
     "apps/android/.gradle/",

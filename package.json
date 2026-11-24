@@ -15,6 +15,7 @@
     "test:speed": "RUN_SPEED_TESTS=1 bun --bun run vitest run --project node packages/client-core/src/markdown.speed.test.ts apps/controller/src/tasks/board.speed.test.ts apps/controller/src/external-entities/inbox.speed.test.ts apps/controller/src/runner-metrics/runner-metrics.speed.test.ts apps/controller/src/workspaces/disk-usage.speed.test.ts",
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
+    "gen:acp-types": "bun run scripts/gen-acp-types.ts",
     "gen:android-tokens": "bun run scripts/gen-android-tokens.ts",
     "gen:markdown-parity": "bun run scripts/gen-markdown-parity-fixtures.ts",
     "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --splitting --outfile hercule",
@@ -26,6 +27,8 @@
     "compare:bureau": "pnpm --filter @hercule/desktop compare:bureau"
   },
   "devDependencies": {
+    "@effect/openapi-generator": "4.0.7",
+    "@effect/platform-node": "4.0.7",
     "@effect/vitest": "4.0.7",
     "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
