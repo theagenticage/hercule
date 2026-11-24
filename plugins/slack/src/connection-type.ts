@@ -9,7 +9,7 @@
  * workspace from a configuration token they paste once. Hercule does not store that token: it uses it to create the app, and
  * holds it in memory only to delete the app again if the sign-in fails.
  */
-import { Duration, Effect, Schema, Stream } from "effect";
+import { Duration, Effect, Option, Schema, Stream } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -213,9 +213,13 @@ const postToSlack = (
         : HttpClientRequest.bodyText(jsonBody, "application/json; charset=utf-8")(baseRequest);
     // The token must go to Slack only. `fetch` follows a redirect with the
     // Authorization header, so a redirect is refused here instead.
-    const response = yield* HttpClient.execute(request).pipe(
-      Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-    );
+    //
+    // The response is tied to the scope this function ends, so a refusal
+    // before the body is read (a status check) still closes the connection.
+    const client = HttpClient.withScope(yield* HttpClient.HttpClient);
+    const response = yield* client
+      .execute(request)
+      .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
     if (response.status === 429) {
       return yield* failValidation(
         "Slack is limiting how often Hercule may ask. Try again in a minute.",
@@ -228,6 +232,7 @@ const postToSlack = (
     }
     return yield* readAnswerJson(response);
   }).pipe(
+    Effect.scoped,
     Effect.catchTag("HttpClientError", () =>
       failValidation(
         "Slack could not be reached. Check the connection to the internet and try again.",
@@ -272,14 +277,41 @@ const nameUnmappedError = (code: string | undefined): string =>
  * Only the fields of `apps.manifest.create`'s answer that Hercule reads. The
  * answer also holds the app's client secret, signing secret and verification
  * token. Decoding drops every field not named here, so those secrets never
- * reach a value of this plugin.
+ * reach a value of this plugin. The app id and the client id are read apart
+ * from it, by `readCreatedIds`.
  */
 const CreateAppAnswer = Schema.Struct({
   ok: Schema.Boolean,
   error: Schema.optionalKey(Schema.String),
-  app_id: Schema.optionalKey(Schema.String),
-  credentials: Schema.optionalKey(Schema.Struct({ client_id: Schema.optionalKey(Schema.String) })),
 });
+
+const AppIdField = Schema.Struct({ app_id: Schema.String });
+const ClientIdField = Schema.Struct({ credentials: Schema.Struct({ client_id: Schema.String }) });
+
+/** The shape of a Slack app id, such as `A0123ABCD`. */
+const APP_ID_SHAPE = /^A[A-Z0-9]{6,}$/;
+
+/** The shape of a Slack client id, such as `12677091710663.12690536129654`. */
+const CLIENT_ID_SHAPE = /^\d+\.\d+$/;
+
+/**
+ * Reads the app id and the client id from the answer that created an app.
+ * Each is read on its own, so that a malformed `credentials` object does not
+ * lose a valid app id, which the cleanup needs. A value that is missing or
+ * does not have Slack's shape is returned as undefined: it is never logged,
+ * returned or kept, because it is not known to be an id.
+ */
+const readCreatedIds = (
+  answer: unknown,
+): { readonly appId: string | undefined; readonly clientId: string | undefined } => {
+  const appId = Option.getOrUndefined(Schema.decodeUnknownOption(AppIdField)(answer))?.app_id;
+  const clientId = Option.getOrUndefined(Schema.decodeUnknownOption(ClientIdField)(answer))
+    ?.credentials.client_id;
+  return {
+    appId: appId !== undefined && APP_ID_SHAPE.test(appId) ? appId : undefined,
+    clientId: clientId !== undefined && CLIENT_ID_SHAPE.test(clientId) ? clientId : undefined,
+  };
+};
 
 /**
  * Returns the message that tells the user what Slack's error code from
@@ -339,26 +371,28 @@ const checkConfigurationToken = (
 const DeleteAppAnswer = Schema.Struct({ ok: Schema.Boolean });
 
 /**
- * Returns an effect that deletes the app that `createOAuthClient` made, with
- * the configuration token that made it. The core runs it when the sign-in is
- * abandoned or fails, so no unused Hercule app stays in the workspace.
+ * Returns an effect that deletes a Slack app that `createOAuthClient` made,
+ * with the configuration token that made it, and returns whether Slack
+ * confirmed the delete (`ok: true`).
  *
  * It never fails. When Slack refuses, cannot be reached or answers something
  * unreadable, it logs a warning that names the app id (which is not a secret)
- * and says how the user can remove the app. The sign-in has already ended, so
- * the user has nothing to retry.
+ * and says how the user can remove the app, and returns false.
  */
 const deleteApp = (
   token: string,
   appId: string,
-): Effect.Effect<void, never, HttpClient.HttpClient> =>
+): Effect.Effect<boolean, never, HttpClient.HttpClient> =>
   postToSlack(DELETE_APP_URL, token, JSON.stringify({ app_id: appId })).pipe(
     Effect.flatMap((json) => decodeAnswer(DeleteAppAnswer, json)),
-    Effect.flatMap((answer) => (answer.ok ? Effect.void : failValidation("Slack refused."))),
-    Effect.catch(() =>
-      Effect.logWarning(
-        `Hercule could not delete the Slack app ${appId} that it created. The user can remove the app named Hercule at api.slack.com/apps.`,
-      ),
+    Effect.map((answer) => answer.ok),
+    Effect.catch(() => Effect.succeed(false)),
+    Effect.tap((deleted) =>
+      deleted
+        ? Effect.void
+        : Effect.logWarning(
+            `Hercule could not delete the Slack app ${appId} that it created. The user can remove the app named Hercule at api.slack.com/apps.`,
+          ),
     ),
   );
 
@@ -372,26 +406,31 @@ const deleteApp = (
 const createOAuthClient: NonNullable<ConnectionTypeContribution["createOAuthClient"]> = (values) =>
   Effect.gen(function* () {
     const token = yield* checkConfigurationToken(values[CONFIGURATION_TOKEN_FIELD]);
-    const answer = yield* postToSlack(
+    const json = yield* postToSlack(
       CREATE_APP_URL,
       token,
       JSON.stringify({ manifest: buildAppManifest() }),
-    ).pipe(Effect.flatMap((json) => decodeAnswer(CreateAppAnswer, json)));
+    );
+    const answer = yield* decodeAnswer(CreateAppAnswer, json);
     if (!answer.ok) return yield* failValidation(describeCreateAppError(answer.error));
-    const clientId = answer.credentials?.client_id;
-    const appId = answer.app_id;
-    if (appId === undefined || appId === "") {
+    const { appId, clientId } = readCreatedIds(json);
+    if (appId === undefined) {
       return yield* failValidation(
         "Slack did not say which app it created. If an app named Hercule appeared at api.slack.com/apps, delete it, then try again.",
       );
     }
-    if (clientId === undefined || clientId === "") {
-      yield* deleteApp(token, appId);
+    if (clientId === undefined) {
+      const removed = yield* deleteApp(token, appId);
       return yield* failValidation(
-        "Slack did not finish creating the app. Hercule removed it. Try again.",
+        removed
+          ? "Slack did not finish creating the app. Hercule removed it. Try again."
+          : "Slack did not finish creating the app, and Hercule could not remove it: delete the app named Hercule at api.slack.com/apps, then try again.",
       );
     }
-    return { clientId, deleteClient: deleteApp(token, appId) } satisfies CreatedOAuthClient;
+    return {
+      clientId,
+      deleteClient: Effect.asVoid(deleteApp(token, appId)),
+    } satisfies CreatedOAuthClient;
   });
 
 /** The fields of `auth.test`'s answer that `validate` reads. */
