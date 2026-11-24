@@ -137,7 +137,15 @@ export function ConnectionSetupDialog({
   // Why the sign-in page did not open, shown until the user moves on.
   const [linkError, setLinkError] = useState<string | null>(null);
 
-  const close = (): void => dialogRef.current?.close();
+  /**
+   * Closes the dialog. The attempt of a sign-in ends first, in the same step:
+   * the native close event, and the unmount it leads to, come later, and a
+   * result delivered in between must not open, finish or show anything.
+   */
+  const close = (): void => {
+    attemptRef.current?.abort();
+    dialogRef.current?.close();
+  };
   const port = useMemo(() => buildBrowserSignInPort(bridge), [bridge]);
   const openLink = (url: string): void => {
     // Main opens only web addresses, so anything else would fail there
@@ -318,7 +326,7 @@ export function ConnectionSetupDialog({
           ...reconnectPayload,
         });
   useEffect(() => {
-    if (oauthConnection !== undefined) dialogRef.current?.close();
+    if (oauthConnection !== undefined) close();
   }, [oauthConnection]);
 
   const issues = readConfigIssues(saveCredentials.error, fields, "credentials");
@@ -415,6 +423,7 @@ export function ConnectionSetupDialog({
         },
         onFinishPasted: finishPasted,
       }}
+      onCloseRequest={close}
       onClose={onClose}
     />
   );

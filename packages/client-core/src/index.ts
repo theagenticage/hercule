@@ -168,6 +168,7 @@ export {
   decideOAuthReturnPath,
   readClientValues,
   readPastedReturn,
+  readTypedValue,
   startLocalReturnSignIn,
   type LocalReturn,
   type LocalReturnSignIn,

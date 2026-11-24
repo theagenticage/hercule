@@ -5,6 +5,7 @@ import {
   decideOAuthReturnPath,
   readClientValues,
   readPastedReturn,
+  readTypedValue,
   startLocalReturnSignIn,
 } from "./connection-oauth-return";
 import type { ConnectionType } from "./connection-types";
@@ -75,6 +76,28 @@ describe("readClientValues", () => {
   it("returns nothing while a value is blank", () => {
     expect(readClientValues(CREATED_CLIENT, {})).toBeUndefined();
     expect(readClientValues(CREATED_CLIENT, { configurationToken: "  " })).toBeUndefined();
+  });
+
+  it("reads a field named like an inherited property as an ordinary key", () => {
+    const odd = buildType({
+      clientSetupFields: [
+        { name: "constructor", label: "Constructor" },
+        { name: "__proto__", label: "Prototype" },
+        { name: "toString", label: "To string" },
+      ],
+    });
+    // Nothing typed: the inherited functions are no input, and nothing throws.
+    expect(readClientValues(odd, {})).toBeUndefined();
+
+    const typed = Object.fromEntries([
+      ["constructor", "a"],
+      ["__proto__", "b"],
+      ["toString", "c"],
+    ]) as Record<string, string>;
+    const values = readClientValues(odd, typed);
+    expect(Object.keys(values ?? {})).toEqual(["constructor", "__proto__", "toString"]);
+    expect(Object.getPrototypeOf(values)).toBe(Object.prototype);
+    expect(JSON.stringify(values)).toBe('{"constructor":"a","__proto__":"b","toString":"c"}');
   });
 
   it("returns nothing for a type whose client is not created at setup", () => {
@@ -314,5 +337,15 @@ describe("readPastedReturn", () => {
     expect((reading as { message: string }).message).toContain(
       "That is not what the browser ended on",
     );
+  });
+});
+
+describe("readTypedValue", () => {
+  it("returns what was typed for a name, an empty string for none, and no inherited property", () => {
+    const typed = Object.fromEntries([["token", "abc"]]) as Record<string, string>;
+    expect(readTypedValue(typed, "token")).toBe("abc");
+    expect(readTypedValue(typed, "other")).toBe("");
+    expect(readTypedValue(typed, "constructor")).toBe("");
+    expect(readTypedValue(typed, "__proto__")).toBe("");
   });
 });

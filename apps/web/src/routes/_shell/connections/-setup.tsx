@@ -11,6 +11,7 @@ import {
   listSetupFlows,
   listFlowSwitches,
   readClientValues,
+  readTypedValue,
   startLocalReturnSignIn,
   type ConnectionType,
   type HerculeClient,
@@ -323,7 +324,7 @@ export function ConnectionSetup({
                 type="password"
                 autoComplete="off"
                 required
-                value={pasted[field.name] ?? ""}
+                value={readTypedValue(pasted, field.name)}
                 onChange={(event) => {
                   // Clears the last attempt's error, because that error was about
                   // the old value, not the one being typed now.
@@ -354,7 +355,7 @@ export function ConnectionSetup({
                 // A pasted value is never read back, so it is never prefilled.
                 type="password"
                 autoComplete="off"
-                value={pasted[field.name] ?? ""}
+                value={readTypedValue(pasted, field.name)}
                 onChange={(event) => {
                   // The refusal of a start was about the value that has left the form.
                   if (oauthStart.error !== null) setOauthStart({ busy: false, error: null });

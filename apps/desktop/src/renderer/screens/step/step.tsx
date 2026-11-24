@@ -8,7 +8,7 @@
  * presentational: it takes values and callbacks and reads nothing.
  */
 import { useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
-import type { CredentialField } from "@hercule/client-core";
+import { readTypedValue, type CredentialField } from "@hercule/client-core";
 import { CheckIcon } from "../../icons/check";
 import { ExternalIcon } from "../../icons/external";
 import "./step.css";
@@ -378,7 +378,7 @@ export function CredentialFields({
             // A pasted credential is never read back, so it is never prefilled.
             type="password"
             className="mono"
-            value={values[field.name] ?? ""}
+            value={readTypedValue(values, field.name)}
             onChange={(event) => onChange(field.name, event.target.value)}
             spellCheck={false}
             autoComplete="off"

@@ -142,8 +142,10 @@ const ENDING_ICONS = {
  * own, and `flowSwitches` the links to the type's other flows, which the form and an
  * ended sign-in show.
  *
- * Esc, a click on the scrim and Cancel close the dialog through `dialogRef`;
- * `onClose` is called whenever it closes, and the caller then unmounts it.
+ * Esc, a click on the scrim and Cancel call `onCloseRequest`, which closes the
+ * dialog through `dialogRef`. The caller ends what runs in the dialog there, in
+ * the same step, because the native close event arrives later than the close.
+ * `onClose` is called whenever the dialog closes, and the caller then unmounts it.
  */
 export function ConnectionSetup({
   dialogRef,
@@ -155,6 +157,7 @@ export function ConnectionSetup({
   redirectUri,
   flowSwitches,
   actions,
+  onCloseRequest,
   onClose,
 }: {
   readonly dialogRef: RefObject<HTMLDialogElement | null>;
@@ -166,19 +169,27 @@ export function ConnectionSetup({
   readonly redirectUri: string | undefined;
   readonly flowSwitches: ReadonlyArray<FlowSwitch>;
   readonly actions: ConnectionSetupActions;
+  /** Esc, the scrim and Cancel call it. It closes the dialog, so the caller ends what runs in it first. */
+  readonly onCloseRequest: () => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const renderMark = (size: number): JSX.Element => (
     <ConnectionTypeMark type={type.type} plugins={plugins} size={size} />
   );
-  const close = (): void => dialogRef.current?.close();
+  const close = onCloseRequest;
   const cancelButton = (
     <button type="button" className="btn btn--quiet" onClick={close}>
       Cancel
     </button>
   );
   return (
-    <GlassDialog dialogRef={dialogRef} className="setup-dialog" label={heading} onClose={onClose}>
+    <GlassDialog
+      dialogRef={dialogRef}
+      className="setup-dialog"
+      label={heading}
+      onCloseRequest={onCloseRequest}
+      onClose={onClose}
+    >
       <div className="pop-h">
         <b>{heading}</b>
       </div>
