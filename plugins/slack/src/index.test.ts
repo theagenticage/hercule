@@ -66,6 +66,16 @@ describe("what the slack plugin registers", () => {
     expect(types[0]?.createOAuthClient).toBeDefined();
   });
 
+  it("tells a user in a workspace with app approval what to do, in the setup checklist", async () => {
+    const { types } = await collectContributions();
+
+    const checklist = types[0]?.setup.find((step) => step.kind === "checklist");
+
+    expect(checklist?.kind === "checklist" && checklist.markdown).toContain(
+      "If Slack says an admin must approve the app, ask them to approve it, then start again here.",
+    );
+  });
+
   it("contributes one MCP server for its own connection type", async () => {
     const { mcpServers } = await collectContributions();
 
