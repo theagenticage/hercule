@@ -47,7 +47,8 @@ import {
  *   provider's page and the listener. `pasted` and `pasteProblem` are the
  *   address the user pastes when nothing listens, and why the last was refused.
  * - `finishing`: the controller is finishing the sign-in the browser returned
- *   to this machine.
+ *   to this machine. The provider's page can still be opened again, and a
+ *   refusal to open it still shows.
  * - `refused`: the sign-in ended without a Connection, for `message`.
  *
  * `linkError` says why the provider's page did not open, or is null.
@@ -68,7 +69,11 @@ type OAuthPhase =
       readonly pasted: string;
       readonly pasteProblem: string | null;
     }
-  | { readonly kind: "finishing"; readonly signIn: LocalReturnSignIn }
+  | {
+      readonly kind: "finishing";
+      readonly signIn: LocalReturnSignIn;
+      readonly linkError: string | null;
+    }
   | { readonly kind: "refused"; readonly message: string };
 
 const IDLE: OAuthPhase = { kind: "idle", error: null };
@@ -207,7 +212,9 @@ export function ConnectionSetupDialog({
   const showLinkError = (attempt: AbortController, message: string | null): void => {
     if (attempt.signal.aborted) return;
     setPhase((current) =>
-      current.kind === "legacy-wait" || current.kind === "return-wait"
+      current.kind === "legacy-wait" ||
+      current.kind === "return-wait" ||
+      current.kind === "finishing"
         ? { ...current, linkError: message }
         : current,
     );
@@ -224,7 +231,11 @@ export function ConnectionSetupDialog({
     callbackQuery: string,
   ): Promise<void> => {
     if (attempt.signal.aborted) return;
-    setPhase({ kind: "finishing", signIn });
+    setPhase((current) => ({
+      kind: "finishing",
+      signIn,
+      linkError: current.kind === "return-wait" ? current.linkError : null,
+    }));
     try {
       await client.connection.finishOAuth({ payload: { callbackQuery } });
     } catch (error) {
@@ -409,7 +420,7 @@ export function ConnectionSetupDialog({
         },
         onOpen: (url) => {
           const attempt = attemptRef.current;
-          if (phase.kind === "return-wait" && attempt !== null) {
+          if ((phase.kind === "return-wait" || phase.kind === "finishing") && attempt !== null) {
             void openReturnPage(attempt, phase.signIn);
           } else if (phase.kind === "legacy-wait" && attempt !== null) {
             openPage(url, (message) => {
@@ -517,7 +528,7 @@ const decideOAuthState = (
       return {
         kind: "returning",
         authorizationUrl: phase.signIn.authorizationUrl,
-        linkError: null,
+        linkError: phase.linkError,
         finishing: true,
         paste: phase.signIn.returnBy === "paste" ? { text: "", problem: null } : null,
       };
