@@ -26,11 +26,12 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { closedRecord } from "../closed";
+import { closedRecord, closedStruct } from "../closed";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { IntakeOverrides, IntakeSettings } from "./intake-settings";
 import { Authenticated } from "../security";
+import { SignInRedirectUri } from "../sign-in-callback";
 import { atMost, bounded, SecretValue } from "../strings";
 import { Label, MAX_TASK_LABELS } from "./task";
 
@@ -194,24 +195,65 @@ export const ConnectionCredentialsInput = Schema.Struct({ credentials: Credentia
 export type ConnectionCredentialsInput = Schema.Schema.Type<typeof ConnectionCredentialsInput>;
 
 /**
- * The payload for starting a redirect flow. `origin` is the browser's origin:
- * the controller cannot see it, and the redirect URI built from it must match
- * what the user registered with the provider, so it has to come from the
- * browser.
+ * The most values a setup may paste for the OAuth client its type creates,
+ * and the longest each may be. A type declares a handful of fields, each a
+ * token or a name.
+ */
+export const MAX_CLIENT_VALUES = 16;
+export const MAX_CLIENT_VALUE_LENGTH = 4096;
+
+/**
+ * The values the user pastes once, to let the type's plugin create an OAuth
+ * client for this Connection (a Slack configuration token, for one), keyed by
+ * the field names the type declared. The controller never stores them.
+ */
+const ClientValues = Schema.Record(
+  bounded(1, MAX_CONTRIBUTION_NAME_LENGTH),
+  bounded(0, MAX_CLIENT_VALUE_LENGTH),
+).check(Schema.isMaxProperties(MAX_CLIENT_VALUES));
+
+/**
+ * The payload for starting a redirect flow. The provider sends the browser
+ * back to a redirect URI, and the caller says which of two it wants. Exactly
+ * one of them is given.
+ *
+ * - `origin` is the browser's origin, when the browser can reach the
+ *   controller there. The controller receives the return itself, at its
+ *   callback path. It cannot see the origin, and the redirect URI built from
+ *   it must match what the provider has registered, so it has to come from
+ *   the browser.
+ * - `redirectUri` is an address on the user's own machine, for a caller that
+ *   catches the return itself, or has the user paste it, and then calls
+ *   `connection.finishOAuth`. It is the only way for a controller that is not
+ *   on the user's machine, because a provider that accepts only loopback
+ *   addresses never sends the browser to it.
  *
  * `label`, `labels` and `config` describe a new connection, and default as
  * they do on `connection.create`. A reconnect keeps the connection's own and
  * is refused when it is given any of them: `connection.update` changes them.
+ *
+ * `clientValues` is for a type whose plugin creates a client for each
+ * Connection (`oauth.publicClient.createdAtSetup`). A new connection must give
+ * exactly the fields the type declared. A reconnect may leave it out, and
+ * then signs in with the client the connection already has.
  */
 export const ConnectionOAuthStartInput = Schema.Struct({
   type: Schema.String,
-  origin: Origin,
+  origin: Schema.optionalKey(Origin),
+  redirectUri: Schema.optionalKey(SignInRedirectUri),
   label: Schema.optionalKey(ConnectionLabel),
   labels: Schema.optionalKey(Topics),
   config: Schema.optionalKey(Config),
   /** Set on a reconnect: the connection whose tokens this flow replaces. */
   connectionId: Schema.optionalKey(Id),
-});
+  clientValues: Schema.optionalKey(ClientValues),
+}).check(
+  Schema.makeFilter((input) =>
+    (input.origin === undefined) === (input.redirectUri === undefined)
+      ? "Give exactly one of origin (the browser reaches the controller there) and redirectUri (the return is caught on the user's machine)."
+      : undefined,
+  ),
+);
 
 export type ConnectionOAuthStartInput = Schema.Schema.Type<typeof ConnectionOAuthStartInput>;
 
@@ -219,6 +261,21 @@ export type ConnectionOAuthStartInput = Schema.Schema.Type<typeof ConnectionOAut
 export const ConnectionOAuthStart = Schema.Struct({ authorizationUrl: Schema.String });
 
 export type ConnectionOAuthStart = Schema.Schema.Type<typeof ConnectionOAuthStart>;
+
+/** The longest callback query `connection.finishOAuth` takes: an address with a code and a state is a few hundred characters. */
+export const MAX_CALLBACK_QUERY_LENGTH = 8192;
+
+/**
+ * The payload of `connection.finishOAuth`: what the browser was sent back
+ * with. It is the whole address the browser ended on, or only its query string
+ * (`code` and `state`, or `error`). The text holds the sign-in's one-time
+ * code, so it is never logged or kept.
+ */
+export const ConnectionOAuthFinishInput = closedStruct({
+  callbackQuery: bounded(1, MAX_CALLBACK_QUERY_LENGTH),
+});
+
+export type ConnectionOAuthFinishInput = Schema.Schema.Type<typeof ConnectionOAuthFinishInput>;
 
 /**
  * The payload for starting a device flow. It names the connection to create,
@@ -380,6 +437,19 @@ export const connection = HttpApiGroup.make("connection")
       // `invalid_state`: the plugin that owns the type has no client
       // credentials. The user fixes that in Settings; a different request
       // cannot.
+      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+    }),
+    // The end of a flow that `redirectUri` started: the caller hands over what
+    // the browser came back with. The query holds the one-time `code`.
+    // `validation`: the text is not a redirect answer, or names no sign-in
+    // this caller started and that is still open.
+    // `invalid_state`: the sign-in ended without a connection (the user
+    // declined, the code could not be exchanged, the account was refused, or
+    // it is another account than the connection's own). The message says
+    // which, and what to do.
+    HttpApiEndpoint.post("finishOAuth", "/oauth/finish", {
+      payload: ConnectionOAuthFinishInput,
+      success: Connection,
       error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
     }),
     // Beside the redirect flow's start, for the same reason: a device flow is

@@ -23,11 +23,14 @@
  * plugin's `credentials()` call triggers is in `./runtime`. Both call into
  * this module.
  *
- * The redirect flow's client comes from one of two places:
+ * The redirect flow's client comes from one of three places:
  *
- * - A type whose `oauth` declaration has a `publicClient` uses the client id
- *   the plugin ships, with no client secret. The provider accepts the PKCE
- *   code verifier alone as proof.
+ * - A type whose `publicClient` declares a `clientId` uses the client id the
+ *   plugin ships, with no client secret. The provider accepts the PKCE code
+ *   verifier alone as proof.
+ * - A type whose `publicClient` is `createdAtSetup` uses the client its
+ *   plugin created for the Connection, also with no client secret. The
+ *   Connection and the pending flow record the client's id.
  * - Any other type uses the client of the plugin that owns it: the client id
  *   is a field of the plugin's config, and the client secret is a secret the
  *   plugin owns, both under fixed names. Each type belongs to one plugin, so
@@ -56,6 +59,12 @@ import { PluginConfigs } from "./plugin-configs";
 
 /** Where the provider sends the browser back to. Appended to the browser's origin. */
 export const CALLBACK_PATH = "/oauth/callback";
+
+/**
+ * The paths a public client may register a redirect URI on: the controller's
+ * callback path, and the path the desktop app's own catcher listens on.
+ */
+export const REDIRECT_URI_PATHS: ReadonlyArray<string> = [CALLBACK_PATH, "/callback"];
 
 /** The name of the only secret an OAuth connection owns: its whole token set, as JSON. */
 export const OAUTH_TOKENS = "oauth.tokens";
@@ -138,12 +147,52 @@ const decodeDeviceCodeResponse = Schema.decodeUnknownEffect(DeviceCodeResponse);
 export const buildRedirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
 
 /**
- * Returns a function that finds the client a type's redirect flow runs as,
- * for both the code exchange and the refresh:
+ * Checks whether a redirect URI is one a public client registered.
  *
- * - For a type whose `oauth` declaration has a `publicClient`, the function
- *   returns its client id with no secret, and reads nothing from the plugin's
- *   settings.
+ * - A registered URI matches the same URI exactly.
+ * - A registered `http` loopback URI with no port also matches the same
+ *   host and path on any port (RFC 8252 section 7.3), because a program on the
+ *   user's machine picks a free port each time it listens. Slack registers
+ *   its clients this way.
+ * - A registered URI with a port matches only that port, because a provider
+ *   such as Linear registered that exact address.
+ *
+ * `redirectUri` with a query, a fragment or user information never matches by
+ * the any-port rule.
+ */
+export const isRegisteredRedirectUri = (registered: string, redirectUri: string): boolean => {
+  if (registered === redirectUri) return true;
+  const registeredUrl = URL.parse(registered);
+  const returnUrl = URL.parse(redirectUri);
+  if (registeredUrl === null || returnUrl === null) return false;
+  // A URL with a port, even the default one, is written differently from its
+  // scheme, host and path alone, so this tells "no port registered" from "port
+  // 80 registered".
+  const registeredWithoutPort =
+    registeredUrl.protocol === "http:" &&
+    registered === `${registeredUrl.protocol}//${registeredUrl.hostname}${registeredUrl.pathname}`;
+  return (
+    registeredWithoutPort &&
+    returnUrl.protocol === "http:" &&
+    returnUrl.hostname === registeredUrl.hostname &&
+    returnUrl.pathname === registeredUrl.pathname &&
+    returnUrl.search === "" &&
+    returnUrl.hash === "" &&
+    returnUrl.username === "" &&
+    returnUrl.password === ""
+  );
+};
+
+/**
+ * Returns a function that finds the client a type's redirect flow runs as,
+ * for both the code exchange and the refresh. `createdClientId` is the id of
+ * the client the plugin created for the Connection or the flow, when there is
+ * one.
+ *
+ * - For a type whose `publicClient` ships a `clientId`, the function returns
+ *   it with no secret, and reads nothing from the plugin's settings.
+ * - For a type whose `publicClient` is `createdAtSetup`, it returns
+ *   `createdClientId` with no secret, or `None` when there is none.
  * - For any other type, it reads the client id and secret the user set for the
  *   plugin, and returns `None` when either is missing. It reads them on every
  *   call rather than once at registration, because the user sets them in
@@ -153,6 +202,7 @@ export const oauthClients: Effect.Effect<
   (
     pluginId: string,
     oauth: OAuthDeclaration,
+    createdClientId: string | undefined,
   ) => Effect.Effect<Option.Option<OAuthClient>, SqlError>,
   never,
   PluginConfigs | Secrets
@@ -160,10 +210,15 @@ export const oauthClients: Effect.Effect<
   const plugins = yield* PluginConfigs;
   const secrets = yield* Secrets;
 
-  return (pluginId: string, oauth: OAuthDeclaration) =>
+  return (pluginId: string, oauth: OAuthDeclaration, createdClientId: string | undefined) =>
     Effect.gen(function* () {
       if (oauth.publicClient !== undefined) {
-        return Option.some<OAuthClient>({ clientId: oauth.publicClient.clientId });
+        if ("clientId" in oauth.publicClient) {
+          return Option.some<OAuthClient>({ clientId: oauth.publicClient.clientId });
+        }
+        return createdClientId === undefined
+          ? Option.none()
+          : Option.some<OAuthClient>({ clientId: createdClientId });
       }
       const config = yield* plugins.of(pluginId);
       const clientId = (config as { readonly [key: string]: unknown } | null)?.[CLIENT_ID_FIELD];

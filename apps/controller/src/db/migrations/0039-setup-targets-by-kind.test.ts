@@ -16,7 +16,6 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import { deviceSetupRepository } from "../../connections/device-setups";
 import { oauthSetupRepository } from "../../connections/oauth-setups";
@@ -141,8 +140,8 @@ describe("the flows in progress during the upgrade", () => {
         const oauth = yield* oauthSetupRepository;
         const device = yield* deviceSetupRepository;
         return {
-          oauthCreate: yield* oauth.consume("create", at),
-          oauthReconnect: yield* oauth.consume("reconnect", at),
+          oauthCreate: yield* oauth.consume("create", at, () => undefined),
+          oauthReconnect: yield* oauth.consume("reconnect", at, () => undefined),
           deviceCreate: yield* device.claimPoll("create", at),
           deviceReconnect: yield* device.claimPoll("reconnect", at),
         };
@@ -150,13 +149,11 @@ describe("the flows in progress during the upgrade", () => {
     );
 
     const reconnect = { kind: "reconnect", connectionId: uuidToString(CONNECTION_ID) };
-    expect(Option.getOrThrow(read.oauthCreate)).toMatchObject({
-      kind: "create",
-      label: "work",
-      labels: ["Code"],
-      config: { watch: "inbox" },
+    expect(read.oauthCreate).toMatchObject({
+      _tag: "claimed",
+      setup: { kind: "create", label: "work", labels: ["Code"], config: { watch: "inbox" } },
     });
-    expect(Option.getOrThrow(read.oauthReconnect)).toMatchObject(reconnect);
+    expect(read.oauthReconnect).toMatchObject({ _tag: "claimed", setup: reconnect });
     expect(read.deviceCreate).toMatchObject({
       _tag: "claimed",
       setup: { kind: "create", label: "work", labels: ["Code"], config: { org: "acme" } },

@@ -7,7 +7,7 @@
 import {
   ERROR_STATUS,
   listDecodeIssues,
-  McpServerSignInRedirectUri,
+  SignInRedirectUri,
   McpServerToken,
   parseCallbackQuery,
   type ConflictDetails,
@@ -335,7 +335,7 @@ const isRedirectAddress = (address: URL, redirectUri: string): boolean => {
  *   the token, ends the server's waiting browser sign-in, and marks the server
  *   `checking` with a pasted token as its sign-in.
  * - `mcpServer.startSignIn` refuses a redirect address that breaks
- *   `McpServerSignInRedirectUri` (`validation`), a plugin server
+ *   `SignInRedirectUri` (`validation`), a plugin server
  *   (`invalid_state`), and a server whose `signInOffered` is `token`
  *   (`sign-in-unsupported`). Otherwise it keeps an attempt in
  *   `world.signIns` with a fresh `state`, and replaces the server's older
@@ -644,7 +644,7 @@ export const buildMcpControllerHandlers = <P extends FakeMcpProject>(
     };
     handlers[`POST /api/v1/mcp-servers/${id}/sign-in`] = (call) => {
       const { redirectUri } = call.body as { redirectUri: string };
-      const invalid = refuseInvalidValue(McpServerSignInRedirectUri, redirectUri, ["redirectUri"]);
+      const invalid = refuseInvalidValue(SignInRedirectUri, redirectUri, ["redirectUri"]);
       if (invalid !== undefined) return invalid;
       const current = world.servers.find((each) => each.id === id);
       if (current === undefined) return notFound();

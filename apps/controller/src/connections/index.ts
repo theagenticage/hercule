@@ -4,7 +4,7 @@
  * plugin.
  */
 export { githubTokens, GithubTokenUnavailable, type GithubToken } from "./github";
-export { CALLBACK_PATH, OAUTH_TOKENS } from "./oauth";
+export { CALLBACK_PATH, OAUTH_TOKENS, REDIRECT_URI_PATHS } from "./oauth";
 export { ActivePlugins } from "./active-plugins";
 export { ConnectionEntityFacts } from "./entity-facts";
 export { ConnectionObserver } from "./observer";

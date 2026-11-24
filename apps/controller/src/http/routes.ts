@@ -277,6 +277,7 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
       )
       .handle("listChoices", ({ params }) => withApiErrors(connections.listChoices(params)))
       .handle("startOAuth", ({ payload }) => withApiErrors(connections.startOAuth(payload)))
+      .handle("finishOAuth", ({ payload }) => withApiErrors(connections.finishOAuth(payload)))
       .handle("startDeviceFlow", ({ payload }) =>
         withApiErrors(connections.startDeviceFlow(payload)),
       )

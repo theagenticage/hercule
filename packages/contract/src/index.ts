@@ -170,9 +170,11 @@ export {
 export { appendPromptContext, splitPromptContext } from "./prompt-context";
 
 export {
+  isRedirectAddress,
   parseCallbackQuery,
   readApprovalHost,
   readAuthorizationState,
+  SignInRedirectUri,
   type ParsedCallback,
   type RefusedCallback,
 } from "./sign-in-callback";
@@ -514,7 +516,6 @@ export {
   McpServerLeftOutReason,
   McpServerName,
   McpServerSetTokenInput,
-  McpServerSignInRedirectUri,
   McpServerSignInStart,
   McpServerSource,
   McpServerStartSignInInput,
@@ -537,8 +538,12 @@ export {
   ConnectionDevicePollInput,
   ConnectionDeviceStart,
   ConnectionDeviceStartInput,
+  ConnectionOAuthFinishInput,
   ConnectionOAuthStart,
   ConnectionOAuthStartInput,
+  MAX_CALLBACK_QUERY_LENGTH,
+  MAX_CLIENT_VALUES,
+  MAX_CLIENT_VALUE_LENGTH,
   ConnectionStatus,
   ConnectionUpdateInput,
   CredentialRef,

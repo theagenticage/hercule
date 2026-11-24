@@ -1455,6 +1455,7 @@ export const buildMcpServerView = ({
                     feedIntervals: {},
                     intake: NO_INTAKE_OVERRIDES,
                     credentialsGeneration: 0,
+                    oauthClientId: undefined,
                     createdAt: at,
                     updatedAt: at,
                   },

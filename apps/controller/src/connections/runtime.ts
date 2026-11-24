@@ -72,7 +72,7 @@ import { connectionRepository, type StoredConnection } from "./repository";
 export interface RegisteredConnectionType {
   readonly pluginId: string;
   readonly contribution: ConnectionType &
-    Pick<ConnectionTypeContribution, "validate" | "listChoices">;
+    Pick<ConnectionTypeContribution, "validate" | "listChoices" | "createOAuthClient">;
   readonly feeds: Readonly<Record<string, FeedDeclaration>>;
 }
 
@@ -400,15 +400,19 @@ const make = Effect.gen(function* () {
   /**
    * Returns the token endpoint and the client a connection of this type
    * refreshes with, or `None` when it has none: a redirect flow whose plugin
-   * has no client id and secret set, or a type with neither flow.
+   * has no client id and secret set, a client the plugin should have created
+   * for the connection and did not, or a type with neither flow.
    *
    * - The type's `oauth` declaration refreshes with the client its redirect
-   *   flow runs as: the public client the plugin ships, with no secret, or
-   *   else the plugin's client and its secret.
+   *   flow runs as: the public client the plugin ships, or the one it created
+   *   for this connection (`row.oauthClientId`), with no secret, or else the
+   *   plugin's client and its secret.
    * - The type's `device` declaration refreshes with its public client id and
    *   no secret.
    *
-   * A type declares at most one of the two.
+   * A type declares at most one of the two. `row` must be read together with
+   * the token set that is refreshed (see `readRowAndTokens`), so the client
+   * belongs to the refresh token it is sent with.
    */
   const findRefreshEndpoint = (
     row: StoredConnection,
@@ -417,7 +421,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { oauth, device } = type;
       if (oauth !== undefined) {
-        const client = yield* Effect.orDie(findOAuthClient(row.pluginId, oauth));
+        const client = yield* Effect.orDie(findOAuthClient(row.pluginId, oauth, row.oauthClientId));
         return Option.map(client, (found) => ({ tokenUrl: oauth.tokenUrl, client: found }));
       }
       if (device !== undefined) {
@@ -425,6 +429,33 @@ const make = Effect.gen(function* () {
       }
       return Option.none();
     });
+
+  /**
+   * Reads a connection's row and its token set in one transaction, so both
+   * are the same version of the credentials: a reconnect writes the tokens,
+   * the client id and the credentials generation in one transaction, and this
+   * read sees all of them or none. Returns `None` when the connection is gone.
+   * The token set is `None` when the connection holds none.
+   */
+  const readRowAndTokens = (
+    connectionId: string,
+  ): Effect.Effect<
+    Option.Option<{
+      readonly row: StoredConnection;
+      readonly stored: Option.Option<Redacted.Redacted<string>>;
+    }>
+  > =>
+    Effect.orDie(
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* connections.one(connectionId);
+          if (Option.isNone(row)) return Option.none();
+          const stored = yield* secrets.get({ kind: "connection", id: connectionId }, OAUTH_TOKENS);
+          return Option.some({ row: row.value, stored });
+        }),
+      ),
+    );
 
   /**
    * Exchanges the refresh token for a new token set, stores it and returns
@@ -450,12 +481,14 @@ const make = Effect.gen(function* () {
    *   needs reconnecting.
    * - It runs `guard` after the permit was taken and fails as the guard does,
    *   before the provider is called.
-   * - When the user reconnected meanwhile, it fails and changes nothing, as
-   *   `writeWhileTokensHeld` explains. The refresh is bound to the generation
-   *   of `row`, so `row` must have been read before the call.
+   * - When the user reconnected while the provider was being called, it fails
+   *   and changes nothing, as `writeWhileTokensHeld` explains. The refresh is
+   *   bound to the generation of the row it read under the permit, which it
+   *   reads again rather than trusting `initial`, so a reconnect that
+   *   finished while it waited for the permit is refreshed as it now is.
    */
   const refreshTokens = <CannotRefresh, GuardFailure>(
-    row: StoredConnection,
+    initial: StoredConnection,
     type: ConnectionType,
     rejectedIdentity: string | undefined,
     cannotRefresh: (row: StoredConnection, held: string) => Effect.Effect<never, CannotRefresh>,
@@ -465,12 +498,14 @@ const make = Effect.gen(function* () {
     ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh | GuardFailure
   > =>
     Effect.gen(function* () {
-      const stored = yield* Effect.orDie(
-        secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
-      );
+      // Read again under the permit, row and tokens together. The caller's
+      // `row` may be older than a reconnect that finished while it waited, and
+      // a new refresh token must never be sent with the old client id.
+      const read = yield* readRowAndTokens(initial.id);
+      const stored = Option.flatMap(read, (found) => found.stored);
       // The caller found a token set before it waited for the semaphore, so
       // finding none now means a reconnect swapped it for pasted credentials.
-      if (Option.isNone(stored)) {
+      if (Option.isNone(read) || Option.isNone(stored)) {
         return yield* Effect.fail(
           new ConnectionCredentialsUnavailable({
             reason: "credentials-replaced",
@@ -478,6 +513,7 @@ const make = Effect.gen(function* () {
           }),
         );
       }
+      const { row } = read.value;
       const held = Redacted.value(stored.value);
       const tokens = yield* parseStoredTokens(row, held);
       const millis = yield* Clock.currentTimeMillis;

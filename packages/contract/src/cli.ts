@@ -3794,7 +3794,7 @@ export const CLI = {
   },
   "connection.startOAuth": {
     command: "connection start-oauth",
-    help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. For a type whose plugin ships its own OAuth client, an --origin that client did not register is refused, and the error names the origins that work. Give --connection to reconnect an existing account instead of creating a second one.",
+    help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. Say where the browser comes back to with exactly one of --origin and --redirect-uri. With --origin the provider sends the browser to this controller, at the redirect URI built from the origin; it must match the one registered with the provider byte for byte. With --redirect-uri the browser goes to an address on your own computer, and you finish the flow with `hercule connection finish-oauth` and the address the browser ended on. For a type whose plugin ships its own OAuth client, an address that client did not register is refused, and the error names the ones that work. Give --connection to reconnect an existing account instead of creating a second one. A type whose plugin creates an OAuth client for each account (Slack, for one) takes the values it needs as a JSON object on stdin (--client-values-stdin): a new account must give every field the type declares, and a reconnect may leave them out to sign in with the client the account already has.",
     examples: [
       {
         args: ["--type", "gmail/gmail", "--origin", "https://hercule.example"],
@@ -3809,12 +3809,26 @@ export const CLI = {
           "1f3a9c2e",
         ],
       },
+      {
+        args: [
+          "--type",
+          "slack/slack",
+          "--redirect-uri",
+          "http://127.0.0.1:53682/callback",
+          "--client-values-stdin",
+        ],
+        stdin: '{"configurationToken":"xoxe.xoxp-1-abc"}',
+      },
     ],
     fields: {
       type: { flag: "type", help: "The connection type as a Qualified Id, such as gmail/gmail." },
       origin: {
         flag: "origin",
-        help: "Where the browser is: scheme and host with no path, like https://hercule.example.",
+        help: "Where the browser is, when it reaches this controller: scheme and host with no path, like https://hercule.example. Give this or --redirect-uri.",
+      },
+      redirectUri: {
+        flag: "redirect-uri",
+        help: "The address on your own computer the browser comes back to: http://127.0.0.1:<port>/callback. Give this or --origin, then finish with `hercule connection finish-oauth`.",
       },
       label: {
         flag: "label",
@@ -3832,10 +3846,43 @@ export const CLI = {
         flag: "connection",
         help: "The Connection whose tokens this flow replaces; leave it off to create one.",
       },
+      clientValues: {
+        stdin: true,
+        secret: true,
+        flag: "client-values",
+        help: "The values the type's plugin needs to create its OAuth client, as a JSON object keyed by the type's field names, such as a provider's configuration token. They are used once and never kept.",
+      },
     },
     errors: {
+      validation:
+        "neither or both of --origin and --redirect-uri were given, or the client values do not match the fields the type declares (missing, unknown, empty, or given to a type that creates no client)",
       invalid_state:
-        "the plugin that owns this type has no OAuth client credentials; set them in settings first",
+        "the plugin that owns this type has no OAuth client credentials, or its client did not register the address you gave, or the provider refused to create the client (the message says what to do), or a reconnect has no client yet and needs --client-values-stdin",
+    },
+  },
+  "connection.finishOAuth": {
+    command: "connection finish-oauth",
+    help: "Finishes a redirect flow that start-oauth began with --redirect-uri, and prints the Connection. Give it what the browser came back with: the whole address it ended on, or only its query (code and state). Only the caller that started the flow can finish it, and a flow can be finished once. The address is read from stdin, so give it from a file (`< return.txt`) or from a password manager: it holds a one-time code, and a value typed on the command line stays in your shell history.",
+    examples: [
+      {
+        args: [],
+        stdin: "http://127.0.0.1:53682/callback?code=abc123&state=q2Zt8sKx",
+      },
+    ],
+    fields: {
+      callbackQuery: {
+        stdin: true,
+        secret: true,
+        required: true,
+        flag: "callback-query",
+        help: "The address the browser ended on, or its query: code and state, or error and state.",
+      },
+    },
+    errors: {
+      validation:
+        "the text is not a redirect answer, it is the address of another sign-in, or no sign-in of yours is waiting for it (it was finished, it ran out after 10 minutes, or another caller started it)",
+      invalid_state:
+        "the sign-in did not produce a Connection: you declined, the code could not be exchanged, the provider rejected the account, it is another account than the Connection's own, or the Connection was deleted or signed in again meanwhile; the message says which and what to do",
     },
   },
   "connection.startDeviceFlow": {

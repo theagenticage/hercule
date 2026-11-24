@@ -75,15 +75,32 @@ export const OAuthDeclaration = Schema.Struct({
   scopes: Schema.Array(Schema.String),
   extraParams: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /**
-   * A public client the plugin ships, for a provider that accepts a code
-   * exchange and a refresh with the client id and the PKCE code verifier
-   * alone. The core then sends no client secret and reads nothing from the
-   * plugin's settings. `redirectUris` are exactly the URIs the provider has
-   * registered for the client, because a shared client cannot register every
-   * user's address.
+   * A public client, for a provider that accepts a code exchange and a
+   * refresh with the client id and the PKCE code verifier alone. The core
+   * then sends no client secret and reads nothing from the plugin's settings.
+   * It comes in two forms.
+   *
+   * - `clientId`: a client the plugin ships. `redirectUris` are exactly the
+   *   URIs the provider has registered for it, because a shared client cannot
+   *   register every user's address.
+   * - `createdAtSetup`: a client the plugin creates for each Connection when
+   *   it is set up, with the plugin's `createOAuthClient`, from values the
+   *   user pastes once (the `fields`). The core never stores those values.
+   *   `redirectUris` are the URIs the plugin registers on every client it
+   *   creates.
+   *
+   * A `redirectUris` entry that is an `http` loopback URI without a port
+   * matches that URI at any port (RFC 8252 section 7.3). An entry with a
+   * port matches only that port.
    */
   publicClient: Schema.optionalKey(
-    Schema.Struct({ clientId: Schema.String, redirectUris: Schema.Array(Schema.String) }),
+    Schema.Union([
+      Schema.Struct({ clientId: Schema.String, redirectUris: Schema.Array(Schema.String) }),
+      Schema.Struct({
+        createdAtSetup: Schema.Struct({ fields: Schema.Array(CredentialField) }),
+        redirectUris: Schema.Array(Schema.String),
+      }),
+    ]),
   ),
 });
 
@@ -150,6 +167,24 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
   { message: Schema.String },
 ) {}
 
+/** The public OAuth client a plugin created for one Connection. */
+export interface CreatedOAuthClient {
+  /** The id the provider gave the client. The core sends it, with no secret, on every exchange and refresh. */
+  readonly clientId: string;
+  /**
+   * Deletes the client at the provider. The core calls it when the sign-in the
+   * client was created for ends without a Connection (the user never came
+   * back, denied, or signed in to another account). It is dropped, uncalled,
+   * once the sign-in succeeds.
+   *
+   * It holds what it needs in memory (for example the configuration token the
+   * user pasted), so that the core never stores it. It never fails: it logs
+   * nothing secret and swallows its own errors, because a client left behind
+   * is a nuisance and not a reason to fail the user's sign-in.
+   */
+  readonly deleteClient: Effect.Effect<void, never, HttpClient.HttpClient>;
+}
+
 /** The external account a set of credentials belongs to, as the type's `validate` returns it. */
 export interface ExternalAccount {
   /** The account's name, which the Connections screen shows: the GitHub login, the Gmail address. */
@@ -198,6 +233,23 @@ export interface ConnectionTypeContribution extends ConnectionType {
   readonly validate: (
     credentials: Record<string, string>,
   ) => Effect.Effect<ExternalAccount, ConnectionValidationFailed, HttpClient.HttpClient>;
+  /**
+   * Creates a public OAuth client for one Connection and returns its id.
+   * Required when, and only when, `oauth.publicClient` is `createdAtSetup`.
+   *
+   * `values` holds exactly the fields `createdAtSetup` declares, as the user
+   * pasted them, none of them empty. The core calls this once per setup, before
+   * it opens the provider's sign-in page, and keeps the returned `clientId`
+   * with the Connection. It keeps nothing else: a value the user pasted, and
+   * anything else the provider returns (a client secret, a signing secret),
+   * must stay inside this function. Fails with `ConnectionValidationFailed`,
+   * whose message the user reads, when the provider refuses: say what was
+   * wrong and what the user should do. The message must not contain a value
+   * the user pasted.
+   */
+  readonly createOAuthClient?: (
+    values: Record<string, string>,
+  ) => Effect.Effect<CreatedOAuthClient, ConnectionValidationFailed, HttpClient.HttpClient>;
   /**
    * Returns the choices for one config field, read from the external account
    * with the connection's credentials. Required when a

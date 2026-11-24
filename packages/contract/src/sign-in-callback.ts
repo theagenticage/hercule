@@ -1,8 +1,29 @@
 /**
- * Reading what the browser came back with after an MCP server's sign-in. The
+ * Reading what the browser came back with after a sign-in of an MCP server or a Connection. The
  * controller, the CLI and the desktop app all judge this return, and they must
  * agree on which returns are well formed, so they all use the one parser here.
  */
+
+import { Schema } from "effect";
+
+/**
+ * The address the browser returns to after a sign-in, for an MCP server or a Connection: exactly
+ * `http://127.0.0.1:<port>/callback`, with a port from 1 to 65535. Nothing else
+ * is a redirect address: not another spelling of the loopback host, not user
+ * information, a query or a fragment. A client that catches the return listens
+ * on that port. A client that cannot listen (the web app) picks a port nothing
+ * listens on, and the user pastes the address the browser ended on.
+ */
+export const SignInRedirectUri = Schema.String.check(
+  Schema.makeFilter((uri) => {
+    const port = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/callback$/.exec(uri)?.[1];
+    return port !== undefined && Number(port) <= 65535
+      ? undefined
+      : "A redirect address is exactly http://127.0.0.1:<port>/callback, with a port from 1 to 65535, and no user name, query or fragment.";
+  }),
+);
+
+export type SignInRedirectUri = Schema.Schema.Type<typeof SignInRedirectUri>;
 
 /** What the browser came back with, read from the text a client sent. */
 export interface ParsedCallback {
@@ -80,6 +101,22 @@ export const parseCallbackQuery = (text: string): ParsedCallback | RefusedCallba
     return { _tag: "Refused", reason: "the answer holds both a code and an error, or neither" };
   }
   return { _tag: "Callback", address, state, code, error, iss: params.get("iss") ?? undefined };
+};
+
+/**
+ * Checks that a pasted address is the redirect address the sign-in started
+ * with, which tells a user who pasted the address of another sign-in or
+ * another window. The port is part of it, and the query is not. An address
+ * with a user name or a password never matches.
+ */
+export const isRedirectAddress = (address: URL, redirectUri: string): boolean => {
+  const expected = new URL(redirectUri);
+  return (
+    address.username === "" &&
+    address.password === "" &&
+    address.origin === expected.origin &&
+    address.pathname === expected.pathname
+  );
 };
 
 /**
