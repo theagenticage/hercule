@@ -180,6 +180,43 @@ describe("a Connection whose plugin's server sets addWhenConnected", () => {
   });
 });
 
+/** Lists the Notifications that say an MCP server was not added for a new Connection. */
+const listNotAddedNotifications = async (
+  controller: SetUpController,
+): Promise<ReadonlyArray<{ readonly title: string; readonly body?: string }>> => {
+  const response = await get(controller.base, "/api/v1/notifications", controller.token);
+  expect(response.status).toBe(200);
+  const { items } = (await response.json()) as {
+    items: ReadonlyArray<{ title: string; body?: string; kind: string }>;
+  };
+  return items.filter(
+    (item) =>
+      item.kind === "core.connection-error" && item.title.includes("MCP server was not added"),
+  );
+};
+
+describe("deleting a Connection whose MCP server was added for it", () => {
+  it("is refused with the server's name and where to remove it", async () => {
+    await withSetUpController(async (controller) => {
+      const id = await createConnectionOrFail(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "one",
+      );
+      const [server] = await listServers(controller);
+
+      const response = await del(controller.base, `/api/v1/connections/${id}`, controller.token);
+
+      expect(response.status).toBe(409);
+      const { error } = (await response.json()) as { error: { code: string; message: string } };
+      expect(error.code).toBe("invalid_state");
+      expect(error.message).toContain(server?.name ?? "no server");
+      expect(error.message).toContain("Settings > MCP servers");
+    }, PLUGINS);
+  });
+});
+
 describe("a Connection of an account that already has the server", () => {
   it("reuses the server it has, and says so in the log with no advice to add one by hand", async () => {
     const lines: Array<string> = [];
@@ -187,6 +224,7 @@ describe("a Connection of an account that already has the server", () => {
       lines.push(JSON.stringify(message));
     });
     let servers: ReadonlyArray<McpServer> = [];
+    let notified: ReadonlyArray<unknown> = [];
     await withSetUpController(
       async (controller) => {
         const first = await createConnectionOrFail(
@@ -203,6 +241,7 @@ describe("a Connection of an account that already has the server", () => {
         );
         expect(sameAccount.status).toBe(201);
         servers = await listServers(controller);
+        notified = await listNotAddedNotifications(controller);
         // The server the first Connection added is the one the account has.
         expect(
           servers.map((server) =>
@@ -215,6 +254,8 @@ describe("a Connection of an account that already has the server", () => {
     );
 
     expect(servers).toHaveLength(1);
+    // The account has its server, so the user has nothing to do and is told nothing.
+    expect(notified).toEqual([]);
     const said = lines.filter((line) => line.includes("MCP server was not added"));
     expect(said).toHaveLength(1);
     expect(said[0]).toContain("already has one");
@@ -244,11 +285,17 @@ describe("a Connection a session creates", () => {
 
           await createConnectionOrFail(controller.base, withoutManage.token, "acme/desk", "one");
           expect(await listServers(controller)).toEqual([]);
+          // The user is told, in a Notification, where to add the server.
+          const told = await listNotAddedNotifications(controller);
+          expect(told).toHaveLength(1);
+          expect(told[0]?.body).toContain("Settings > MCP servers");
 
           await createConnectionOrFail(controller.base, withManage.token, "acme/desk", "two");
           expect(await listServers(controller)).toHaveLength(1);
           const created = await controller.harness.audit("mcpServer.created");
           expect(created.map((entry) => entry.actor)).toEqual([`session:${withManage.session.id}`]);
+          // A server that was added needs no Notification.
+          expect(await listNotAddedNotifications(controller)).toHaveLength(1);
         },
         { plugins: PLUGINS },
       );

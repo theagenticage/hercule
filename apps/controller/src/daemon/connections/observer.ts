@@ -6,6 +6,7 @@ import { CurrentActor } from "../../actor";
 import { absorbFailures } from "../../absorbing";
 import { ConnectionObserver, type CreatedConnection } from "../../connections";
 import { McpServerService } from "../../mcp-servers";
+import { Notifier } from "../../notifications";
 import { PluginHost, type RegisteredMcpServer } from "../../plugins";
 import { WorkflowValidity } from "../../workflows";
 import { makeLateReference, type LateReference } from "../late-reference";
@@ -63,15 +64,42 @@ export const McpServerServiceReferenceFill: Layer.Layer<
  */
 const addServer = (
   servers: McpServerService["Service"],
+  notifier: Notifier["Service"],
   contribution: RegisteredMcpServer,
   created: CreatedConnection,
-): Effect.Effect<void> =>
-  created.actor._tag === "none"
+): Effect.Effect<void> => {
+  /**
+   * Tells the user, with a Notification, that the server was not added and where
+   * to add it by hand. A line in the log is for the operator, and the user who
+   * created the Connection never reads it. Never fails: a Notification that
+   * cannot be raised is logged.
+   */
+  const tellUser = (reason: string): Effect.Effect<void> =>
+    notifier
+      .createCoreNotification({
+        kind: "core.connection-error",
+        title: `The ${contribution.displayName} MCP server was not added for the new Connection`,
+        body: `${reason} The Connection is created. Add the server in Settings > MCP servers.`,
+        subject: [{ kind: "connection", id: created.connectionId }],
+      })
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logError(
+            `The Notification about the MCP server could not be raised: ${error.message}`,
+          ),
+        ),
+      );
+  return created.actor._tag === "none"
     ? // The browser came back to the controller's callback with no credential,
       // and the controller keeps no grants of whoever started the sign-in, so
       // nothing can say that this server may be added.
-      Effect.logWarning(
-        `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because the sign-in came back to the controller with no credential, so nobody's right to manage MCP servers could be checked. The Connection is created. Add the server in Settings > MCP servers.`,
+      Effect.andThen(
+        Effect.logWarning(
+          `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because the sign-in came back to the controller with no credential, so nobody's right to manage MCP servers could be checked. The Connection is created. Add the server in Settings > MCP servers.`,
+        ),
+        tellUser(
+          "The sign-in came back to Hercule with no credential, so nobody's right to manage MCP servers could be checked.",
+        ),
       )
     : servers
         .create({
@@ -92,14 +120,21 @@ const addServer = (
                   `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because that account already has one (${error.error.message}). Nothing needs to be done.`,
                 )
               : error instanceof Forbidden
-                ? Effect.logWarning(
-                    `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because whoever created the Connection may not manage MCP servers (${error.message}). The Connection is created. Add the server in Settings > MCP servers.`,
+                ? Effect.andThen(
+                    Effect.logWarning(
+                      `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because whoever created the Connection may not manage MCP servers (${error.message}). The Connection is created. Add the server in Settings > MCP servers.`,
+                    ),
+                    tellUser("Whoever created the Connection may not manage MCP servers."),
                   )
-                : Effect.logError(
-                    `The ${contribution.displayName} MCP server could not be added for the new Connection ${created.connectionId}: ${error.message}. The Connection is created. Add the server in Settings > MCP servers.`,
+                : Effect.andThen(
+                    Effect.logError(
+                      `The ${contribution.displayName} MCP server could not be added for the new Connection ${created.connectionId}: ${error.message}. The Connection is created. Add the server in Settings > MCP servers.`,
+                    ),
+                    tellUser("It could not be added."),
                   ),
           ),
         );
+};
 
 /**
  * Provides the connections domain's `ConnectionObserver`:
@@ -118,10 +153,11 @@ const addServer = (
 export const ConnectionObserverLayer: Layer.Layer<
   ConnectionObserver,
   never,
-  WorkflowValidity | PluginHost | McpServerServiceReference
+  WorkflowValidity | PluginHost | McpServerServiceReference | Notifier
 > = Layer.effect(ConnectionObserver)(
   Effect.gen(function* () {
     const validity = yield* WorkflowValidity;
+    const notifier = yield* Notifier;
     const plugins = yield* PluginHost;
     const reference = yield* McpServerServiceReference;
 
@@ -137,7 +173,7 @@ export const ConnectionObserverLayer: Layer.Layer<
             );
             yield* Effect.forEach(
               contributions,
-              (contribution) => addServer(servers, contribution, created),
+              (contribution) => addServer(servers, notifier, contribution, created),
               { discard: true },
             );
           }),

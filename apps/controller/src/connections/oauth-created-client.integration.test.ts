@@ -158,6 +158,14 @@ interface PluginLog {
    * flight.
    */
   readonly deleteGate: { current: Promise<void> | undefined };
+  /**
+   * While it holds a promise, `createOAuthClient` answers only when it settles,
+   * after the app exists at the provider, so a test can act while the provider
+   * is creating it.
+   */
+  readonly createGate: { current: Promise<void> | undefined };
+  /** How many more checks of the account fail, with a message that says the provider is down. */
+  readonly validateFailures: { remaining: number; calls: number };
 }
 
 /**
@@ -171,7 +179,13 @@ const buildCreatedClientType = (
   tokenBase: string,
   fieldName = "configToken",
 ): { readonly type: RegisteredConnectionType; readonly log: PluginLog } => {
-  const log: PluginLog = { created: [], deleted: [], deleteGate: { current: undefined } };
+  const log: PluginLog = {
+    created: [],
+    deleted: [],
+    deleteGate: { current: undefined },
+    createGate: { current: undefined },
+    validateFailures: { remaining: 0, calls: 0 },
+  };
   const type: RegisteredConnectionType = {
     pluginId: "forge",
     contribution: {
@@ -192,14 +206,21 @@ const buildCreatedClientType = (
           redirectUris: ["http://127.0.0.1/callback", "http://127.0.0.1/oauth/callback"],
         },
       },
-      validate: (credentials) => {
-        const token = credentials["accessToken"] ?? credentials["pat"] ?? "";
-        return token.startsWith("good-")
-          ? Effect.succeed(buildAccount(token))
-          : Effect.fail(
-              new ConnectionValidationFailed({ message: "that account is not accepted" }),
-            );
-      },
+      // Each run of the check counts, because the controller runs the same check again.
+      validate: (credentials) =>
+        Effect.suspend(() => {
+          log.validateFailures.calls += 1;
+          if (log.validateFailures.remaining > 0) {
+            log.validateFailures.remaining -= 1;
+            return Effect.fail(new ConnectionValidationFailed({ message: "Forge answered 502" }));
+          }
+          const token = credentials["accessToken"] ?? credentials["pat"] ?? "";
+          return token.startsWith("good-")
+            ? Effect.succeed(buildAccount(token))
+            : Effect.fail(
+                new ConnectionValidationFailed({ message: "that account is not accepted" }),
+              );
+        }),
       createOAuthClient: (values) => {
         const pasted = Object.hasOwn(values, fieldName) ? (values[fieldName] ?? "") : "";
         if (pasted === EXPIRED) {
@@ -227,7 +248,11 @@ const buildCreatedClientType = (
             }),
           ),
         };
-        return Effect.succeed(client);
+        // The app exists at the provider now. The answer may come later.
+        return Effect.andThen(
+          Effect.promise(() => log.createGate.current ?? Promise.resolve()),
+          Effect.succeed(client),
+        );
       },
     },
     feeds: {},
@@ -1031,6 +1056,7 @@ describe("the values the user pastes for the client", () => {
     const { type } = buildCreatedClientType(token.base);
 
     const logs: Array<string> = [];
+    let pendingDump = "";
     const everything = await run(
       [type],
       Effect.gen(function* () {
@@ -1039,6 +1065,10 @@ describe("the values the user pastes for the client", () => {
         // A flow that ends in a Connection.
         const started = yield* service.startOAuth(startInput());
         seen.push(started);
+        // While the flow is pending, its row is in `oauth_setups`.
+        const whilePending = yield* dumpDatabase;
+        expect(whilePending).toContain(readState(started.authorizationUrl));
+        pendingDump = whilePending;
         seen.push(
           yield* service.finishOAuth({
             callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
@@ -1071,6 +1101,7 @@ describe("the values the user pastes for the client", () => {
       { logs },
     );
 
+    expect(pendingDump).not.toContain(SENTINEL);
     expect(everything).not.toContain(SENTINEL);
     expect(logs.join("\n")).not.toContain(SENTINEL);
   });
@@ -1445,6 +1476,47 @@ describe("the expiry timer, when the clock does not agree with it", () => {
   });
 });
 
+describe("the promotion gate, while an expired sign-in's client is being deleted", () => {
+  it("is not held by the provider's delete, so a promotion can freeze the controller meanwhile", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const gate = Promise.withResolvers<void>();
+    log.deleteGate.current = gate.promise;
+
+    const { frozen } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const promotion = yield* PromotionState;
+        yield* service.startOAuth(startInput());
+        // The timer fires, deletes the row, and starts the provider's delete, which is held.
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
+        yield* settle;
+        // A promotion freezes the controller by waiting for the work inside the
+        // gate to finish: it must not wait for the provider.
+        let frozen = false;
+        const freezing = yield* Effect.forkChild(
+          Effect.andThen(
+            promotion.freeze("promotion-1", new Date(Date.now() + 60_000)),
+            Effect.sync(() => {
+              frozen = true;
+            }),
+          ),
+        );
+        yield* settle;
+        const frozenBeforeDeleteEnded = frozen;
+        gate.resolve();
+        yield* Fiber.join(freezing);
+        yield* settle;
+        return { frozen: frozenBeforeDeleteEnded };
+      }),
+    );
+
+    expect(frozen).toBe(true);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
 describe("an expired sign-in, while its client is being deleted at the provider", () => {
   it("cannot be finished, even if the clock is set back before its deadline, and no Connection is written", async () => {
     const token = startProvider();
@@ -1477,6 +1549,101 @@ describe("an expired sign-in, while its client is being deleted at the provider"
     expect(connections).toEqual([]);
     expect(deletedWhileHeld).toEqual([]);
     expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+describe("the check of the account after the browser returns", () => {
+  /** Starts a sign-in, finishes it while the account check fails `failures` times, and returns what the finish did. */
+  const finishWithFailingChecks = (failures: number) => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    log.validateFailures.remaining = failures;
+    return run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(startInput());
+        const finish = yield* Effect.forkChild(
+          Effect.result(
+            service.finishOAuth({
+              callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+            }),
+          ),
+        );
+        // The check waits one second and then two between its tries.
+        for (const [index, wait] of [1, 2].entries()) {
+          yield* waitUntil(Effect.sync(() => log.validateFailures.calls >= index + 1));
+          yield* settle;
+          yield* TestClock.adjust(Duration.seconds(wait));
+        }
+        return { result: yield* Fiber.join(finish), calls: log.validateFailures.calls };
+      }),
+    );
+  };
+
+  it("is tried again after a passing failure, and the Connection is written", async () => {
+    const { result, calls } = await finishWithFailingChecks(2);
+
+    expect(result._tag).toBe("Success");
+    expect(calls).toBe(3);
+  });
+
+  it("passes the plugin's own message on when every try fails, and does not blame the account", async () => {
+    const { result } = await finishWithFailingChecks(3);
+
+    expect(result._tag).toBe("Failure");
+    const message = readMessage((result as { failure: unknown }).failure);
+    expect(message).toContain("checking the account failed: Forge answered 502");
+    expect(message).not.toContain("account you mean to use");
+  });
+});
+
+describe("a start that is interrupted while the provider creates the app", () => {
+  it("still deletes the app once the provider answers, and stores no sign-in", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const gate = Promise.withResolvers<void>();
+    log.createGate.current = gate.promise;
+
+    const { setups } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const start = yield* Effect.forkChild(service.startOAuth(startInput()));
+        yield* waitUntil(Effect.sync(() => log.created.length > 0));
+        // The request is cancelled while the provider is still creating the app.
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(start));
+        // The interrupt is waiting at the start, which cannot be cut short now.
+        yield* settle;
+        gate.resolve();
+        yield* Fiber.join(interrupting);
+        yield* settle;
+        return { setups: yield* sql`SELECT state FROM oauth_setups` };
+      }),
+    );
+
+    expect(setups).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("says that an app may have been left at the provider when the plugin fails without saying why", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+
+    const failure = await run(
+      [type],
+      Effect.flatMap(ConnectionService, (service) =>
+        Effect.flip(
+          service.startOAuth(startInput({ clientValues: { configToken: "throws-now" } })),
+        ),
+      ),
+    );
+
+    expect(readMessage(failure)).toContain(
+      "An app named Forge may have been left in your Forge account",
+    );
+    expect(readMessage(failure)).not.toContain("throws-now");
   });
 });
 
@@ -1664,15 +1831,20 @@ describe("the refusal when the app of a reconnect may be gone", () => {
   ])("says to set the app up again, with the CLI way, when %s", async (_, answer) => {
     const failure = await reconnectRefused(answer);
 
-    expect(readMessage(failure)).toContain("set it up again");
-    expect(readMessage(failure)).toContain("configuration token");
-    expect(readMessage(failure)).toContain("--client-values-stdin");
+    const message = readMessage(failure);
+    // The first half is for whoever reads it in an app, and the CLI way comes second.
+    expect(message).toContain(
+      "set up the Forge app again: sign in again with a new configuration token",
+    );
+    expect(message.indexOf("set up the Forge app again")).toBeLessThan(
+      message.indexOf("--client-values-stdin"),
+    );
   });
 
   it("does not suggest it when the app was created for this very sign-in", async () => {
     const failure = await reconnectRefused("code=the-code", { configToken: "new-token" });
 
-    expect(readMessage(failure)).not.toContain("set it up again");
+    expect(readMessage(failure)).not.toContain("app again");
   });
 });
 

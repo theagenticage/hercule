@@ -229,7 +229,8 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   if (mcpServers.length > 0) {
     parts.push(
       `MCP servers call out with this connection's credentials: ${mcpServers.join(", ")}; ` +
-        "remove each server first with `hercule mcp-server delete <id>`, then delete this connection",
+        "remove each server first, in Settings > MCP servers (or with `hercule mcp-server delete <id>`), " +
+        "then delete this connection",
     );
   }
   return parts.join("; ");
@@ -420,7 +421,20 @@ type FinishFailure =
  */
 interface FinishError {
   readonly failure: FinishFailure;
-  readonly reusedApp: ReadonlyArray<CredentialField> | undefined;
+  readonly reusedApp: ReusedApp | undefined;
+  /** For `rejected`: what the type's plugin said when it could not check the account. */
+  readonly detail?: string;
+}
+
+/** The app of a reconnect that signs in with the Connection's own app: the type's name and what sets the app up. */
+interface ReusedApp {
+  readonly displayName: string;
+  readonly fields: ReadonlyArray<CredentialField>;
+}
+
+/** An account check that the type's plugin failed, with its own message. */
+interface AccountCheckFailed {
+  readonly accountCheckFailed: string;
 }
 
 /** Converts a failed finish to the `Outcome` word the callback page's URL carries. */
@@ -435,12 +449,12 @@ const decideCallbackOutcome = (failure: FinishFailure): Outcome =>
  * provider, and signing in again would reuse it. Starting with new values
  * creates a new app.
  */
-const describeAppSetUpAgain = (fields: ReadonlyArray<CredentialField>): string => {
-  const labels = fields.map((field) => lowerFirstWord(field.label));
+const describeAppSetUpAgain = (app: ReusedApp): string => {
+  const labels = app.fields.map((field) => lowerFirstWord(field.label));
   return (
-    ` If the app was deleted at the provider, set it up again: start the sign-in with a new ` +
-    `${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)} ` +
-    `(on the command line, add --client-values-stdin to hercule connection start-oauth)`
+    ` If the app was deleted at the provider, set up the ${app.displayName} app again: sign in ` +
+    `again with a new ${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)}. ` +
+    "On the command line, add --client-values-stdin to hercule connection start-oauth."
   );
 };
 
@@ -452,7 +466,8 @@ const describeAppSetUpAgain = (fields: ReadonlyArray<CredentialField>): string =
  */
 const buildFinishRefusal = (
   failure: FinishFailure,
-  reusedApp: ReadonlyArray<CredentialField> | undefined,
+  reusedApp: ReusedApp | undefined,
+  detail: string | undefined,
 ): Validation | InvalidState => {
   const appHint = reusedApp === undefined ? "" : describeAppSetUpAgain(reusedApp);
   switch (failure) {
@@ -494,9 +509,9 @@ const buildFinishRefusal = (
       );
     case "rejected":
       return createInvalidStateError(
-        "the provider issued tokens, but the check of the account refused them, so nothing " +
-          "was changed. Start the sign-in again, and check that you approve it with the " +
-          "account you mean to use",
+        "the provider issued tokens, but checking the account failed" +
+          (detail === undefined ? "" : `: ${detail}`) +
+          ". Nothing was changed. Start the sign-in again",
       );
     case "other-account":
       return createInvalidStateError(
@@ -549,12 +564,16 @@ const redactPastedValues = (
     .reduce((text, value) => text.split(value).join(REMOVED), message);
 
 /**
- * The fixed message of a refused start whose plugin failed while creating the
- * OAuth client in a way it did not report. The failure itself is not quoted,
- * because the plugin handled what the user pasted.
+ * Builds the fixed message of a refused start whose plugin failed while
+ * creating the OAuth client in a way it did not report, or answered with no
+ * client id. The failure itself is not quoted, because the plugin handled what
+ * the user pasted. The provider may have created the app before the failure, so
+ * the message says what to look for and where.
  */
-const CREATING_CLIENT_FAILED =
-  "the plugin failed while creating the OAuth client, so nothing was set up. Try again";
+const buildCreatingClientFailed = (displayName: string): string =>
+  `the plugin failed while creating the OAuth client for ${displayName}, so nothing was set up. ` +
+  `An app named ${displayName} may have been left in your ${displayName} account: look for it ` +
+  `there and delete it, then try again`;
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 const decodeFinish = Schema.decodeUnknownEffect(ConnectionOAuthFinishInput);
@@ -1267,10 +1286,12 @@ const make = Effect.gen(function* () {
           truncateMessage(redactPastedValues(failure.message, values, secretFields)),
         ),
       ),
-      Effect.catchDefect(() => Effect.fail(createInvalidStateError(CREATING_CLIENT_FAILED))),
+      Effect.catchDefect(() =>
+        Effect.fail(createInvalidStateError(buildCreatingClientFailed(contribution.displayName))),
+      ),
       Effect.filterOrFail(
         (client) => client.clientId !== "",
-        () => createInvalidStateError(CREATING_CLIENT_FAILED),
+        () => createInvalidStateError(buildCreatingClientFailed(contribution.displayName)),
       ),
     );
   };
@@ -1348,13 +1369,17 @@ const make = Effect.gen(function* () {
         const publicClient = registered?.contribution.oauth?.publicClient;
         // A reconnect that signs in with the Connection's own app, which the
         // user may have deleted at the provider.
-        const reusedApp =
+        const reusedApp: ReusedApp | undefined =
+          registered !== undefined &&
           setup.kind === "reconnect" &&
           deleteClient === undefined &&
           setup.clientId !== undefined &&
           publicClient !== undefined &&
           "createdAtSetup" in publicClient
-            ? publicClient.createdAtSetup.fields
+            ? {
+                displayName: registered.contribution.displayName,
+                fields: publicClient.createdAtSetup.fields,
+              }
             : undefined;
 
         // Set when the transaction that writes the Connection commits. The
@@ -1402,7 +1427,15 @@ const make = Effect.gen(function* () {
             .validate({ accessToken: tokens.accessToken })
             .pipe(
               Effect.provide(FetchHttpClient.layer),
-              Effect.catchTag("ConnectionValidationFailed", () => Effect.fail("rejected" as const)),
+              // A check that fails on a passing network error is tried again, as a
+              // device flow's is, before the sign-in is given up. The plugin's own
+              // message goes on to the user: it says whether the account was wrong.
+              Effect.retry(ACCOUNT_CHECK_RETRY),
+              Effect.catchTag("ConnectionValidationFailed", (failure) =>
+                Effect.fail({
+                  accountCheckFailed: truncateMessage(failure.message),
+                } satisfies AccountCheckFailed),
+              ),
             );
 
           const { result: written, observer: started } = yield* Effect.orDie(
@@ -1452,7 +1485,11 @@ const make = Effect.gen(function* () {
         // arrive after the write committed. A reconnect that reused the
         // Connection's own client has nothing to delete.
         return yield* restore(exchangeAndWrite).pipe(
-          Effect.mapError((failure): FinishError => ({ failure, reusedApp })),
+          Effect.mapError((failure): FinishError =>
+            typeof failure === "string"
+              ? { failure, reusedApp }
+              : { failure: "rejected", reusedApp, detail: failure.accountCheckFailed },
+          ),
           Effect.onExit((exit) =>
             Exit.isSuccess(exit) || deleteClient === undefined || connectionCommitted
               ? Effect.void
@@ -1916,26 +1953,29 @@ const make = Effect.gen(function* () {
         const secretFields = new Set(
           (clientFields ?? []).filter((field) => field.secret === true).map((field) => field.name),
         );
-        const { client, created } = yield* clientValues === undefined
-          ? Effect.flatMap(findOAuthClient(pluginId, oauth, knownClientId), (found) =>
-              Option.isNone(found)
-                ? Effect.fail(
-                    createInvalidStateError(describeMissingClient(pluginId, clientFields)),
-                  )
-                : Effect.succeed({ client: found.value, created: undefined }),
-            )
-          : // The client is kept for cleanup in the same uninterruptible step as
-            // its creation, so no interrupt can leave an app at the provider that
-            // nothing will delete.
-            Effect.uninterruptibleMask((restore) =>
-              restore(createClient(contribution, clientValues, secretFields)).pipe(
-                Effect.tap((made) => pending.keepCreatedClient(state, made.deleteClient)),
-                Effect.map((made) => ({ client: { clientId: made.clientId }, created: made })),
-              ),
-            );
-        const clientId = created?.clientId ?? knownClientId;
+        const selectClient =
+          clientValues === undefined
+            ? Effect.flatMap(findOAuthClient(pluginId, oauth, knownClientId), (found) =>
+                Option.isNone(found)
+                  ? Effect.fail(
+                      createInvalidStateError(describeMissingClient(pluginId, clientFields)),
+                    )
+                  : Effect.succeed({ client: found.value, created: undefined }),
+              )
+            : // The plugin bounds its own call to the provider, and nothing here may
+              // cut it short: an interrupt that landed while the provider created the
+              // app would leave an app that nothing knows about. So the creation and
+              // the keeping of its cleanup are one uninterruptible step.
+              Effect.uninterruptible(
+                createClient(contribution, clientValues, secretFields).pipe(
+                  Effect.tap((made) => pending.keepCreatedClient(state, made.deleteClient)),
+                  Effect.map((made) => ({ client: { clientId: made.clientId }, created: made })),
+                ),
+              );
 
-        const storeAndBuildUrl = Effect.gen(function* () {
+        const selectAndStore = Effect.gen(function* () {
+          const { client, created } = yield* selectClient;
+          const clientId = created?.clientId ?? knownClientId;
           const codeVerifier = mintToken();
           const stamp = yield* currentStamp;
           yield* pending.publish({
@@ -1962,10 +2002,14 @@ const make = Effect.gen(function* () {
         });
 
         // A client nothing can sign in with, because the start failed or was
-        // interrupted before the sign-in was stored, is deleted at once.
-        return yield* storeAndBuildUrl.pipe(
+        // interrupted before the sign-in was stored, is deleted at once. The
+        // handler covers the creation too, so an interrupt that arrives just
+        // after the app was created still finds its cleanup.
+        return yield* selectAndStore.pipe(
           Effect.onExit((exit) =>
-            Exit.isSuccess(exit) || created === undefined ? Effect.void : pending.abandon(state),
+            Exit.isSuccess(exit) || clientValues === undefined
+              ? Effect.void
+              : pending.abandon(state),
           ),
         );
       }),
@@ -2031,7 +2075,11 @@ const make = Effect.gen(function* () {
         return yield* finishSetup(parsed, {
           kind: "user-machine",
           actor: yield* currentStamp,
-        }).pipe(Effect.mapError((error) => buildFinishRefusal(error.failure, error.reusedApp)));
+        }).pipe(
+          Effect.mapError((error) =>
+            buildFinishRefusal(error.failure, error.reusedApp, error.detail),
+          ),
+        );
       }),
 
     /**

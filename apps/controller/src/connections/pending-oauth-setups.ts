@@ -98,20 +98,30 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Ends a sign-in whose deadline may have come. In one transaction it deletes
-   * the row only if the controller's clock says it has expired, and then:
+   * Ends a sign-in whose deadline may have come, inside the promotion gate. In
+   * one transaction it deletes the row only if the controller's clock says it
+   * has expired, and then answers:
    *
-   * - `removed`: this call owns the cleanup, and deletes the client at the
-   *   provider;
+   * - `cleanup`: this call deleted the row and so owns the cleanup. It returns
+   *   the cleanup, and does not run it: the caller runs it after the gate,
+   *   because a request to the provider can take long, and a promotion waits for
+   *   the work inside the gate to finish. Whoever deleted the row owns the
+   *   client, so the gate no longer matters to it;
    * - `gone`: whoever deleted the row owns the cleanup, and this call does
    *   nothing;
-   * - `live`: the clock says the deadline has not come (it was set back since
-   *   the timer was set), and nothing is deleted. Returns `early` so the caller
-   *   waits again.
+   * - `early`: the row is there and the clock says its deadline has not come (it
+   *   was set back since the timer was set), so nothing is deleted and the
+   *   caller waits again.
    *
    * When the delete fails, nothing is deleted at the provider.
    */
-  const retire = (state: string): Effect.Effect<"done" | "early"> =>
+  const retire = (
+    state: string,
+  ): Effect.Effect<
+    | { readonly _tag: "early" }
+    | { readonly _tag: "gone" }
+    | { readonly _tag: "cleanup"; readonly run: Effect.Effect<void> }
+  > =>
     Effect.flatMap(
       Effect.orElseSucceed(
         withTransaction(
@@ -120,21 +130,23 @@ const make = Effect.gen(function* () {
         ),
         () => "gone" as const,
       ),
-      (outcome) => {
-        if (outcome === "live") return Effect.succeed("early" as const);
-        if (outcome === "gone") return Effect.succeed("done" as const);
-        return Effect.as(
-          Effect.suspend(() => takeCleanup(state) ?? Effect.void),
-          "done" as const,
-        );
-      },
+      (outcome) =>
+        Effect.sync(() => {
+          if (outcome === "live") return { _tag: "early" } as const;
+          if (outcome === "gone") return { _tag: "gone" } as const;
+          const run = takeCleanup(state);
+          return run === undefined
+            ? ({ _tag: "gone" } as const)
+            : ({ _tag: "cleanup", run } as const);
+        }),
     );
 
   /**
    * Waits for the deadline by the clock, and then retires the sign-in inside
    * the promotion gate. The clock is asked again inside the gate, after any wait
    * there, so a clock that was set back meanwhile makes the retirement early:
-   * the timer then waits for the deadline again.
+   * the timer then waits for the deadline again. The cleanup, when this call
+   * owns it, runs after the gate.
    */
   const retireAtDeadline = (state: string, expiresAt: string): Effect.Effect<void> =>
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
@@ -143,13 +155,14 @@ const make = Effect.gen(function* () {
           promotion.whenServingOr(retire(state), () =>
             Effect.sync(() => {
               cleanups.delete(state);
-              return "done" as const;
+              return { _tag: "gone" } as const;
             }),
           ),
         ),
-        Effect.flatMap((outcome) =>
-          outcome === "early" ? retireAtDeadline(state, expiresAt) : Effect.void,
-        ),
+        Effect.flatMap((outcome) => {
+          if (outcome._tag === "early") return retireAtDeadline(state, expiresAt);
+          return outcome._tag === "cleanup" ? outcome.run : Effect.void;
+        }),
       ),
     );
 
