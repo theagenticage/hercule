@@ -510,8 +510,8 @@ const buildFinishRefusal = (
     case "rejected":
       return createInvalidStateError(
         "the provider issued tokens, but checking the account failed" +
-          (detail === undefined ? "" : `: ${detail}`) +
-          ". Nothing was changed. Start the sign-in again",
+          (detail === undefined ? "." : `: ${endSentence(detail)}`) +
+          " Nothing was changed. Start the sign-in again",
       );
     case "other-account":
       return createInvalidStateError(
@@ -587,8 +587,19 @@ const removeTokensFromMessage = (message: string, tokens: TokenSet): string =>
  */
 const buildCreatingClientFailed = (displayName: string): string =>
   `the plugin failed while creating the OAuth client for ${displayName}, so nothing was set up. ` +
-  `An app named ${displayName} may have been left in your ${displayName} account: look for it ` +
-  `there and delete it, then try again`;
+  "An app that this sign-in created may have been left at the provider: look in the provider's " +
+  "own app settings and delete it, then try again";
+
+/**
+ * Returns the text as a sentence that ends in one stop: unchanged when it
+ * already ends in `.`, `!` or `?`, and with a `.` added otherwise. A plugin's
+ * message is joined to the sentences around it with this, so that it never
+ * ends in two stops.
+ */
+const endSentence = (text: string): string => {
+  const trimmed = text.trimEnd();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+};
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 const decodeFinish = Schema.decodeUnknownEffect(ConnectionOAuthFinishInput);
@@ -2271,7 +2282,8 @@ const make = Effect.gen(function* () {
             status: "failed",
             message:
               `the provider approved the sign-in, but checking the account failed: ` +
-              `${removeTokensFromMessage(account.failure.message, exchange.tokens)}. Start again to get a new code`,
+              `${endSentence(removeTokensFromMessage(account.failure.message, exchange.tokens))} ` +
+              "Start again to get a new code",
           } as const;
         }
         const { result: written, observer: started } = yield* writeAndStartObserver(

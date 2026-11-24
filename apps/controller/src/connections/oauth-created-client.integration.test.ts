@@ -169,7 +169,13 @@ interface PluginLog {
    */
   readonly createGate: { current: Promise<void> | undefined };
   /** How many more checks of the account fail, with a message that says the provider is down. */
-  readonly validateFailures: { remaining: number; calls: number; echoTokens: boolean };
+  readonly validateFailures: {
+    remaining: number;
+    calls: number;
+    echoTokens: boolean;
+    /** What a failing check says. */
+    message: string;
+  };
 }
 
 /**
@@ -188,7 +194,7 @@ const buildCreatedClientType = (
     deleted: [],
     deleteGate: { current: undefined },
     createGate: { current: undefined },
-    validateFailures: { remaining: 0, calls: 0, echoTokens: false },
+    validateFailures: { remaining: 0, calls: 0, echoTokens: false, message: "Forge answered 502" },
   };
   const type: RegisteredConnectionType = {
     pluginId: "forge",
@@ -221,7 +227,7 @@ const buildCreatedClientType = (
               new ConnectionValidationFailed({
                 message: log.validateFailures.echoTokens
                   ? `Forge refused ${credentials["accessToken"] ?? ""} and ${REFRESH_TOKEN}`
-                  : "Forge answered 502",
+                  : log.validateFailures.message,
               }),
             );
           }
@@ -1565,11 +1571,16 @@ describe("an expired sign-in, while its client is being deleted at the provider"
 
 describe("the check of the account after the browser returns", () => {
   /** Starts a sign-in, finishes it while the account check fails `failures` times, and returns what the finish did. */
-  const finishWithFailingChecks = (failures: number, echoTokens = false) => {
+  const finishWithFailingChecks = (
+    failures: number,
+    echoTokens = false,
+    message = "Forge answered 502",
+  ) => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
     log.validateFailures.remaining = failures;
     log.validateFailures.echoTokens = echoTokens;
+    log.validateFailures.message = message;
     return run(
       [type],
       Effect.gen(function* () {
@@ -1610,12 +1621,25 @@ describe("the check of the account after the browser returns", () => {
     expect(message).not.toContain(REFRESH_TOKEN);
   });
 
+  it.each([
+    ["a period", "Forge is down.", "Forge is down. Nothing was changed."],
+    ["other punctuation", "Is Forge down?", "Is Forge down? Nothing was changed."],
+    ["no punctuation", "Forge is down", "Forge is down. Nothing was changed."],
+  ])("ends the plugin's message once, when it ends in %s", async (_, pluginMessage, expected) => {
+    const { result } = await finishWithFailingChecks(3, false, pluginMessage);
+
+    expect(result._tag).toBe("Failure");
+    const message = readMessage((result as { failure: unknown }).failure);
+    expect(message).toContain(`checking the account failed: ${expected}`);
+    expect(message).not.toMatch(/[.!?]\.|\.\./);
+  });
+
   it("passes the plugin's own message on when every try fails, and does not blame the account", async () => {
     const { result } = await finishWithFailingChecks(3);
 
     expect(result._tag).toBe("Failure");
     const message = readMessage((result as { failure: unknown }).failure);
-    expect(message).toContain("checking the account failed: Forge answered 502");
+    expect(message).toContain("checking the account failed: Forge answered 502.");
     expect(message).not.toContain("account you mean to use");
   });
 });
@@ -1663,8 +1687,9 @@ describe("a start that is interrupted while the provider creates the app", () =>
     );
 
     expect(readMessage(failure)).toContain(
-      "An app named Forge may have been left in your Forge account",
+      "An app that this sign-in created may have been left at the provider",
     );
+    expect(readMessage(failure)).not.toContain("An app named");
     expect(readMessage(failure)).not.toContain("throws-now");
   });
 });
