@@ -47,7 +47,7 @@ export type ProviderAccountReachView =
  * Returns how the card shows `reach`, or `null` when it shows nothing: it
  * does not know where the account works, and a card that guessed would be
  * wrong. A machine is ready when the controller's readiness row for the
- * account's default harness there says `ready` (`signedIn`). Connectivity is
+ * account's default harness there says `ready` (`ready`). Connectivity is
  * not part of that row, so an offline machine is as ready as the row says.
  */
 export const describeProviderAccountReach = (
@@ -61,17 +61,17 @@ export const describeProviderAccountReach = (
     case "per-machine": {
       const { machines } = reach;
       if (machines.length === 0) return { form: "none", description: "No machines" };
-      const ready = machines.filter((machine) => machine.signedIn).length;
+      const ready = machines.filter((machine) => machine.ready).length;
       const summary = `Ready on ${ready} of ${machines.length} ${machines.length === 1 ? "machine" : "machines"}`;
       const description = `${summary}. ${machines
-        .map((machine) => `${machine.runnerName}: ${machine.signedIn ? "ready" : "not ready"}`)
+        .map((machine) => `${machine.runnerName}: ${machine.ready ? "ready" : "not ready"}`)
         .join(" · ")}`;
       if (machines.length <= MAX_REACH_PIPS) {
         return {
           form: "pips",
           pips: machines.map((machine) => ({
             runnerId: machine.runnerId,
-            ready: machine.signedIn,
+            ready: machine.ready,
           })),
           description,
         };

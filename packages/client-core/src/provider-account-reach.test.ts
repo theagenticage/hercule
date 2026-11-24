@@ -7,17 +7,18 @@ import { describe, expect, it } from "vitest";
 import type { ProviderAccountMachine, ProviderAccountReach } from "./provider-account-machines";
 import { describeProviderAccountReach } from "./provider-account-reach";
 
-const buildMachine = (name: string, signedIn: boolean): ProviderAccountMachine => ({
+const buildMachine = (name: string, ready: boolean): ProviderAccountMachine => ({
   runnerId: `r-${name}`,
   runnerName: name,
-  signedIn,
+  ready,
   identity: null,
+  problem: ready ? null : "Not signed in",
   action: null,
 });
 
 const buildPerMachineReach = (...ready: ReadonlyArray<boolean>): ProviderAccountReach => ({
   kind: "per-machine",
-  machines: ready.map((signedIn, index) => buildMachine(`m${index + 1}`, signedIn)),
+  machines: ready.map((one, index) => buildMachine(`m${index + 1}`, one)),
 });
 
 describe("describeProviderAccountReach", () => {

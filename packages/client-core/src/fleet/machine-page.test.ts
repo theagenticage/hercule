@@ -378,6 +378,22 @@ describe("listMachineAccounts", () => {
     });
   });
 
+  it("says the harness is too old, with no Sign in, even where the probe found the account signed in", () => {
+    const [row] = list(WITH_CLAUDE, [
+      buildProviderAccount(
+        ANTHROPIC_IDENTITY,
+        [buildSnapshot({ runnerId: WITH_CLAUDE.id, harnessVersion: "2.0.1" })],
+        [{ runnerId: WITH_CLAUDE.id, state: "harness-too-old" }],
+      ),
+    ]);
+
+    expect(row).toMatchObject({
+      text: "Claude Code 2.0.1 is too old",
+      tone: "faint",
+      canSignIn: false,
+    });
+  });
+
   it("gives the reason of a machine whose build cannot run the harness", () => {
     const runner = { ...WITH_CLAUDE, facts: { ...WITH_CLAUDE.facts!, adapters: [] } };
 
