@@ -26,5 +26,8 @@ export const slackMcpServer: McpServerContribution = {
     "Search and read Slack messages, channels, canvases and files, and send messages, as the user who connected.",
   connectionType: SLACK_CONNECTION_TYPE,
   origin: SLACK_MCP_ORIGIN,
+  // A Slack Connection exists to reach this server, so it is added with the
+  // Connection and the user has no second step.
+  addWhenConnected: true,
   buildUpstreamRequest,
 };

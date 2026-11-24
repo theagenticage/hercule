@@ -1470,6 +1470,7 @@ export const buildMcpServerView = ({
                       description: "",
                       connectionType: "acme/desk",
                       origin: "https://desk.example",
+                      addWhenConnected: false,
                       buildUpstreamRequest: () => {
                         throw new Error("a test of a view never builds a request");
                       },

@@ -18,3 +18,9 @@ describe("Slack's MCP server request", () => {
     });
   });
 });
+
+describe("Slack's MCP server contribution", () => {
+  it("is added with the Connection, because a Slack Connection exists to reach it", () => {
+    expect(slackMcpServer.addWhenConnected).toBe(true);
+  });
+});

@@ -86,6 +86,7 @@ export const McpServerDeclaration = Schema.Struct({
   ),
   connectionType: ContributionName,
   origin: McpServerOrigin,
+  addWhenConnected: Schema.optionalKey(Schema.Literal(true)),
 });
 
 /**
@@ -100,7 +101,8 @@ export interface McpServerConnection {
 
 /**
  * Offers one vendor's MCP server to sessions, reached with a Connection of the
- * same plugin. Registering it creates no server: the user switches one on.
+ * same plugin. Registering it creates no server: the user switches one on,
+ * unless the contribution sets `addWhenConnected`.
  */
 export interface McpServerContribution {
   /** The bare word, such as `sentry`. The host qualifies it as `<pluginId>/<id>`. */
@@ -115,6 +117,14 @@ export interface McpServerContribution {
   readonly connectionType: string;
   /** Scheme, host and optional port of the vendor's server, such as `https://mcp.sentry.dev`. */
   readonly origin: string;
+  /**
+   * When a Connection of `connectionType` is created, the controller adds this
+   * server for that Connection, as if the user had added it by hand. A
+   * reconnect adds nothing: the server is there already, or the user removed
+   * it on purpose. Leave it out for a server the user should switch on
+   * themselves.
+   */
+  readonly addWhenConnected?: true;
   /**
    * Builds the URL and the headers of a call to the vendor's server. Pure: no
    * I/O. The URL must be on `origin`. The core passes it the Connection's

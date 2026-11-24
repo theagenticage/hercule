@@ -43,8 +43,10 @@ import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./conn
 import { refreshStoredStatusesOrLog } from "./external-entities";
 import {
   endStrandedInputsAndReportLostWakeUps,
+  ConnectionObserverLayer,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
+  McpServerServiceReferenceLayer,
   EntityObservationsLayer,
   OpenSignalsLayer,
   installCardWorkflowsOrLog,
@@ -58,6 +60,7 @@ import {
   WorkflowServiceWithPortsLayer,
   WorkflowValidityObserversLayer,
   type ProviderAccountProbing,
+  type McpServerServiceReference,
   type RunServiceReference,
   type DiscussionInputsReference,
 } from "./daemon";
@@ -291,6 +294,7 @@ export type ControllerServices =
   | WorkspaceService
   | WorkspaceStepActivity
   | RunServiceReference
+  | McpServerServiceReference
   | DiscussionInputsReference
   | ConnectionService
   | AgentObserver
@@ -456,10 +460,14 @@ export const bootWith = <A, E>(
      * The session service's edit observer reaches `DiscussionInputs` the same
      * way, through `DiscussionInputsReference`.
      *
-     * The plugin and connection services report the changes that can make a
+     * The plugin and agent services report the changes that can make a
      * stored workflow invalid through their observer ports, which the
      * workflows domain's `WorkflowValidity` implements. The workflows domain
-     * depends on both domains, so they are joined here too. The observers are
+     * depends on both domains, so they are joined here too. The connection
+     * service's observer also validates the stored workflows again after a
+     * delete, and adds a plugin's MCP server for a new Connection through
+     * `McpServerServiceReference`, which the operation layers set once they
+     * have built the MCP Server service. The observers are
      * merged, so the agent service, built with the operations, finds its own
      * observer, and the boot finds `WorkflowValidity`. The boot step that
      * installs the shipped workflows needs the workflow service and the task
@@ -474,6 +482,9 @@ export const bootWith = <A, E>(
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
       Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(DiscussionInputsReferenceLayer),
+      Layer.provideMerge(
+        ConnectionObserverLayer.pipe(Layer.provideMerge(McpServerServiceReferenceLayer)),
+      ),
       Layer.provideMerge(WorkflowValidityObserversLayer),
       Layer.provideMerge(WorkflowServiceWithPortsLayer),
       Layer.provideMerge(TaskServiceWithPortsLayer),

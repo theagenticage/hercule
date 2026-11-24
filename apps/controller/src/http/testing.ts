@@ -68,7 +68,9 @@ import {
   SessionInputDeadline,
   TextGenerationDeadline,
   RunServiceReferenceLayer,
+  ConnectionObserverLayer,
   DiscussionInputsReferenceLayer,
+  McpServerServiceReferenceLayer,
   ProviderAccountProbeDeadline,
   ProviderAccountProbeInterval,
   ProviderAccountProbingLayer,
@@ -206,8 +208,13 @@ const buildServices = (
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
         Layer.provideMerge(DiscussionInputsReferenceLayer),
-        // As in the real boot: a plugin's lifecycle change and a Connection's
-        // or an agent's delete validate the stored workflows again.
+        // As in the real boot: a Connection's create adds its plugin's MCP
+        // server, and its delete validates the stored workflows again.
+        Layer.provideMerge(
+          ConnectionObserverLayer.pipe(Layer.provideMerge(McpServerServiceReferenceLayer)),
+        ),
+        // As in the real boot: a plugin's lifecycle change and an agent's
+        // delete validate the stored workflows again.
         Layer.provideMerge(WorkflowValidityObserversLayer),
         // As in the real boot: the step that installs the shipped workflows
         // uses the workflow service and the task service.

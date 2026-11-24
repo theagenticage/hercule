@@ -87,7 +87,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, USER_ACTOR } from "../actor";
+import { CurrentActor, currentStamp, requireGrant, USER_ACTOR, type Actor } from "../actor";
 import { mintToken } from "../credentials";
 import {
   nowIso,
@@ -569,6 +569,9 @@ type TokenFlowWriteResult =
   | { readonly _tag: "credentials-replaced" }
   | { readonly _tag: "other-account"; readonly connectionDisplayName: string };
 
+/** The actor of a caller nobody knows. It holds no grant. */
+const NO_ACTOR: Actor = { _tag: "none" };
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
@@ -665,6 +668,30 @@ const make = Effect.gen(function* () {
       yield* Fiber.interrupt(entry.timer);
       return deleteCreatedClient(entry.deleteClient);
     });
+
+  /**
+   * Who started each redirect sign-in that will create a Connection, by the
+   * sign-in's `state`. The browser comes back to the controller's callback
+   * with no credential, so when the sign-in ends nothing says who started it
+   * except this map, and `ConnectionObserver.connectionCreated` must tell the
+   * listener the actor, not only its stamp.
+   *
+   * An entry leaves the map when its sign-in is claimed, or at the next start
+   * after its lifetime ended. The map lives in memory, so a restart during a
+   * sign-in forgets the actor: the Connection is still created, and the
+   * listener is told the actor is unknown.
+   */
+  const startersOfSignIns = new Map<
+    string,
+    { readonly actor: Actor; readonly expiresAt: string }
+  >();
+
+  /**
+   * Tells `ConnectionObserver` that a Connection was created. Call it after
+   * the create committed. The observer never fails.
+   */
+  const reportCreated = (connection: Connection, actor: Actor): Effect.Effect<void> =>
+    observer.connectionCreated({ connectionId: connection.id, type: connection.type, actor });
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
@@ -1264,6 +1291,12 @@ const make = Effect.gen(function* () {
       if (claim._tag === "refused") return yield* Effect.fail(claim.reason);
       const setup = claim.setup;
       const deleteClient = yield* takeCreatedClient(callback.state);
+      // The controller's callback has no credential, so it is the only finish
+      // that needs the actor the sign-in was started by. The other finish is
+      // the starter's own request.
+      const starter = startersOfSignIns.get(callback.state)?.actor;
+      startersOfSignIns.delete(callback.state);
+      const creator = claimant.kind === "controller" ? starter : yield* CurrentActor;
 
       const exchangeAndWrite = Effect.gen(function* () {
         // The provider sent the user back with an error instead of a code:
@@ -1320,6 +1353,9 @@ const make = Effect.gen(function* () {
         );
         if (written._tag === "other-account") return yield* Effect.fail("other-account" as const);
         if (written._tag !== "written") return yield* Effect.fail("connection-changed" as const);
+        if (setup.kind === "create") {
+          yield* reportCreated(written.connection, creator ?? NO_ACTOR);
+        }
         return written.connection;
       });
 
@@ -1401,7 +1437,7 @@ const make = Effect.gen(function* () {
         const credentials = yield* checkCredentialFields(contribution, decoded.credentials);
         const account = yield* validateCredentials(contribution, credentials);
 
-        return yield* withTransaction(
+        const created = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
@@ -1435,6 +1471,8 @@ const make = Effect.gen(function* () {
             return yield* readConnectionRecord(row);
           }),
         );
+        yield* reportCreated(created, yield* CurrentActor);
+        return created;
       }),
 
     /**
@@ -1797,6 +1835,10 @@ const make = Effect.gen(function* () {
         const state = mintToken();
         const codeVerifier = mintToken();
         const stamp = yield* currentStamp;
+        const expiresAt = new Date(Date.parse(now) + SETUP_LIFETIME_MS).toISOString();
+        for (const [openState, open] of startersOfSignIns) {
+          if (open.expiresAt <= now) startersOfSignIns.delete(openState);
+        }
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -1811,7 +1853,7 @@ const make = Effect.gen(function* () {
               actor: stamp,
               credentialsGeneration,
               codeVerifier,
-              expiresAt: new Date(Date.parse(now) + SETUP_LIFETIME_MS).toISOString(),
+              expiresAt,
               createdAt: now,
             });
           }),
@@ -1822,6 +1864,9 @@ const make = Effect.gen(function* () {
           ),
         );
         if (created !== undefined) yield* keepCreatedClient(state, created.deleteClient);
+        if (target.kind === "create") {
+          startersOfSignIns.set(state, { actor: yield* CurrentActor, expiresAt });
+        }
         return {
           authorizationUrl: buildAuthorizationUrl(oauth, {
             clientId: client.value.clientId,
@@ -2106,6 +2151,9 @@ const make = Effect.gen(function* () {
               message: describeOtherAccount(account.success, written.connectionDisplayName),
             } as const;
           case "written":
+            if (setup.kind === "create") {
+              yield* reportCreated(written.connection, yield* CurrentActor);
+            }
             return { status: "done", connection: written.connection } as const;
         }
       }),

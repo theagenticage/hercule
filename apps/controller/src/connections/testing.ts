@@ -196,7 +196,12 @@ export const buildConnectionServiceStack = (home: string) =>
     Layer.provide(
       Layer.succeed(ConnectionEntityFacts)({ recordFactsOfDeletion: (_id, deletion) => deletion }),
     ),
-    Layer.provide(Layer.succeed(ConnectionObserver)({ connectionDeleted: () => Effect.void })),
+    Layer.provide(
+      Layer.succeed(ConnectionObserver)({
+        connectionCreated: () => Effect.void,
+        connectionDeleted: () => Effect.void,
+      }),
+    ),
     Layer.provideMerge(
       PluginHostLayer.pipe(
         Layer.provide([IngestExecutorLayer, OpenSignalsLayer, EntityObservationsLayer]),
