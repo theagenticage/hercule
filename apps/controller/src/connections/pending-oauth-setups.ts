@@ -98,21 +98,44 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Ends a sign-in whose deadline came: deletes its row, and when that removed a
-   * row, deletes its client. A row that is already gone belongs to whoever
-   * deleted it. When the delete fails, nothing is deleted at the provider.
+   * Ends a sign-in whose deadline may have come. In one transaction it deletes
+   * the row only if the controller's clock says it has expired, and then:
+   *
+   * - `removed`: this call owns the cleanup, and deletes the client at the
+   *   provider;
+   * - `gone`: whoever deleted the row owns the cleanup, and this call does
+   *   nothing;
+   * - `live`: the clock says the deadline has not come (it was set back since
+   *   the timer was set), and nothing is deleted. Returns `early` so the caller
+   *   waits again.
+   *
+   * When the delete fails, nothing is deleted at the provider.
    */
-  const retire = (state: string): Effect.Effect<void> =>
+  const retire = (state: string): Effect.Effect<"done" | "early"> =>
     Effect.flatMap(
-      Effect.orElseSucceed(withTransaction(sql, setups.remove(state)), () => false),
-      (removed) =>
-        Effect.suspend(() => {
-          if (!removed) return Effect.void;
-          return takeCleanup(state) ?? Effect.void;
-        }),
+      Effect.orElseSucceed(
+        withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (now) => setups.removeIfExpired(state, now)),
+        ),
+        () => "gone" as const,
+      ),
+      (outcome) => {
+        if (outcome === "live") return Effect.succeed("early" as const);
+        if (outcome === "gone") return Effect.succeed("done" as const);
+        return Effect.as(
+          Effect.suspend(() => takeCleanup(state) ?? Effect.void),
+          "done" as const,
+        );
+      },
     );
 
-  /** Waits for the deadline, and then retires the sign-in inside the promotion gate. */
+  /**
+   * Waits for the deadline by the clock, and then retires the sign-in inside
+   * the promotion gate. The clock is asked again inside the gate, after any wait
+   * there, so a clock that was set back meanwhile makes the retirement early:
+   * the timer then waits for the deadline again.
+   */
   const retireAtDeadline = (state: string, expiresAt: string): Effect.Effect<void> =>
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sleep(Duration.millis(Math.max(0, Date.parse(expiresAt) - now))).pipe(
@@ -120,8 +143,12 @@ const make = Effect.gen(function* () {
           promotion.whenServingOr(retire(state), () =>
             Effect.sync(() => {
               cleanups.delete(state);
+              return "done" as const;
             }),
           ),
+        ),
+        Effect.flatMap((outcome) =>
+          outcome === "early" ? retireAtDeadline(state, expiresAt) : Effect.void,
         ),
       ),
     );
@@ -160,7 +187,10 @@ const make = Effect.gen(function* () {
             withTransaction(
               sql,
               Effect.gen(function* () {
-                yield* setups.deleteExpiredBefore(cutoff);
+                // A row whose cleanup is still kept has a timer that will end it, and
+                // a purge that took it first, after a jump of the clock, would leave
+                // the client at the provider.
+                yield* setups.deleteExpiredBefore(cutoff, [...cleanups.keys()]);
                 yield* setups.insert(setup);
               }),
             ),

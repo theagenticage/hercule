@@ -148,9 +148,40 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Deletes the rows that expired at or before `cutoff`: flows nobody came back to. */
-    deleteExpiredBefore: (cutoff: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`DELETE FROM oauth_setups WHERE expires_at <= ${cutoff}`),
+    /**
+     * Deletes the setup for this `state` only if it has expired by `now`, and
+     * says what it found: `removed` when it deleted the row, `live` when the row
+     * is there and has not expired, `gone` when there is no such row. Run it in
+     * one transaction, so the answer and the delete cannot disagree.
+     */
+    removeIfExpired: (
+      state: string,
+      now: string,
+    ): Effect.Effect<"removed" | "live" | "gone", SqlError> =>
+      Effect.gen(function* () {
+        const removed = yield* sql<{ readonly state: string }>`
+          DELETE FROM oauth_setups WHERE state = ${state} AND expires_at <= ${now} RETURNING state
+        `;
+        if (removed.length > 0) return "removed" as const;
+        const left = yield* sql<{ readonly state: string }>`
+          SELECT state FROM oauth_setups WHERE state = ${state}
+        `;
+        return left.length > 0 ? ("live" as const) : ("gone" as const);
+      }),
+
+    /**
+     * Deletes the rows that expired at or before `cutoff`, except the ones named
+     * in `keep`: flows nobody came back to.
+     */
+    deleteExpiredBefore: (
+      cutoff: string,
+      keep: ReadonlyArray<string>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        keep.length === 0
+          ? sql`DELETE FROM oauth_setups WHERE expires_at <= ${cutoff}`
+          : sql`DELETE FROM oauth_setups WHERE expires_at <= ${cutoff} AND state NOT IN ${sql.in(keep)}`,
+      ),
   };
 });
 

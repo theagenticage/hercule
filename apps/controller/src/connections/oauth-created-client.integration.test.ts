@@ -1363,7 +1363,7 @@ describe("who owns the cleanup of a created client", () => {
 });
 
 describe("the routine purge of expired setups", () => {
-  it("leaves the row of a sign-in whose timer has not run yet, so the timer still deletes its client", async () => {
+  it("leaves the row of a sign-in whose timer has not run yet, even after a large jump of the clock, so the timer still deletes its client", async () => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
 
@@ -1373,11 +1373,13 @@ describe("the routine purge of expired setups", () => {
         const service = yield* ConnectionService;
         const promotion = yield* PromotionState;
         yield* service.startOAuth(startInput());
-        // The first sign-in's timer is due and waits at the gate of a frozen controller.
+        // The first sign-in's timer is due and waits at the gate of a frozen
+        // controller, while the clock jumps two hours ahead.
         yield* promotion.freeze("promotion-1", new Date(Date.now() + 60_000));
-        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 2 * 60 * 60 * 1000));
         yield* settle;
-        // A new start runs the routine purge of expired rows, and must not take that row.
+        // A new start runs the routine purge of long expired rows, and must not
+        // take the row whose client is still kept.
         yield* service.startOAuth(startInput({ redirectUri: OTHER_REDIRECT_URI }));
         yield* promotion.thaw("promotion-1");
         yield* settle;
@@ -1386,6 +1388,60 @@ describe("the routine purge of expired setups", () => {
 
     // Only the first sign-in's client went. The second sign-in is still open.
     expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+describe("the expiry timer, when the clock does not agree with it", () => {
+  it("does not delete anything while the clock, set back during a freeze, says the deadline has not come", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { afterThaw } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const promotion = yield* PromotionState;
+        yield* service.startOAuth(startInput());
+        yield* promotion.freeze("promotion-1", new Date(Date.now() + 60_000));
+        // The timer wakes and waits at the gate.
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
+        yield* settle;
+        // The clock is set back to before the deadline while it waits.
+        yield* TestClock.setTime(1000);
+        yield* promotion.thaw("promotion-1");
+        yield* settle;
+        const afterThaw = [...log.deleted];
+        // Once the deadline really comes, the client goes.
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
+        yield* settle;
+        return { afterThaw };
+      }),
+    );
+
+    expect(afterThaw).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("leaves a client alone when someone else already deleted its row and has not taken the cleanup yet", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* service.startOAuth(startInput());
+        // What a successful claim has committed when its take of the cleanup is
+        // still to come: the row is gone, and the cleanup is still kept.
+        yield* inTransaction(sql`DELETE FROM oauth_setups`);
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
+        yield* settle;
+      }),
+    );
+
+    // The owner of the cleanup is whoever deleted the row, and it is not the timer.
+    expect(log.deleted).toEqual([]);
   });
 });
 
