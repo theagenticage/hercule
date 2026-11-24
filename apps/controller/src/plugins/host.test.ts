@@ -1535,6 +1535,41 @@ describe("a connection type's token flows", () => {
     expect(readErroredMessage(status)).toBeUndefined();
   });
 
+  it("keeps the fields a client created at setup asks for in the catalog, and the function that creates it out", async () => {
+    const plugin: Plugin = {
+      manifest: {
+        id: "flows",
+        displayName: "Plugin flows",
+        hostApi: HOST_API,
+        capabilities: ["connections"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        registerConnectionType(host, {
+          type: "forge",
+          displayName: "Forge",
+          setup: [{ kind: "oauth" }],
+          oauth: { ...OAUTH, publicClient: CREATED_CLIENT },
+          createOAuthClient,
+          validate: () => Effect.succeed({ displayName: "Forge", accountId: "forge-1" }),
+        }),
+      activate: () => Effect.succeed(Effect.void),
+    };
+
+    const stored = await run(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(PluginHost, (host) => host.boot([plugin]));
+        const contributions = yield* Effect.flatMap(pluginRepository, (repository) =>
+          repository.contributions(),
+        );
+        return JSON.stringify(contributions.get("flows"));
+      }),
+    );
+
+    expect(stored).toContain('"createdAtSetup":{"fields":[{"name":"token"');
+    expect(stored).not.toContain("createOAuthClient");
+  });
+
   it("accepts a device flow beside a pasted token", async () => {
     const status = await bootWithType({
       setup: [

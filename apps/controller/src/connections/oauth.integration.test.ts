@@ -975,6 +975,41 @@ describe("the access token a plugin asks the core for", () => {
     });
   });
 
+  it("marks the connection needs-reauth when the provider refuses the refresh with HTTP 200 and an ok:false body, as Slack does", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      provider.answers["refresh_token"] = () =>
+        buildJsonResponse({ ok: false, error: "invalid_refresh_token" });
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
+
+  it("leaves the connection status unchanged when the provider rate limits the refresh with HTTP 429", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      provider.answers["refresh_token"] = () =>
+        buildJsonResponse({ ok: false, error: "ratelimited" }, 429);
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      // A rate limit says nothing about the refresh token, so the sign-in stays.
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "connected" });
+    });
+  });
+
   describe("when the user reconnects while a refresh is in flight", () => {
     /**
      * Connects with tokens that need a refresh, starts a `credentials()` call

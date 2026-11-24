@@ -316,12 +316,13 @@ export const readBoundedText = (
  * returns the response body when it is not an OAuth error.
  *
  * - Fails with `ProviderRefused` when the body is an OAuth error, whatever the
- *   status, or when the status is any other client error, also when its body
+ *   status except 429, or when the status is any other client error, also when its body
  *   is empty, breaks while it is read, or is over `MAX_ANSWER_BYTES`.
  * - Fails with `ProviderUnreachable` when the endpoint cannot be reached, answers
  *   with a redirect, answers with a server error, answers 200 with a body that
  *   is not JSON, breaks while it is read or is over `MAX_ANSWER_BYTES`, or
- *   answers 403 or 429 with no OAuth error.
+ *   answers 429 (whatever the body, because a provider's rate limit body can
+ *   look like an OAuth error), or answers 403 with no OAuth error.
  *
  * A redirect is never followed: the form holds a secret (a client secret, a
  * refresh token, a code or a device code), and a 307 or 308 makes a client
@@ -379,6 +380,14 @@ export const postForm = (
           );
         }
       }
+      // HTTP 429 is a rate limit whatever the body says. Slack's rate limit
+      // body is `{"ok": false, "error": "ratelimited"}`, which would otherwise
+      // read as the provider refusing the grant.
+      if (response.status === 429) {
+        return yield* failProviderUnreachable(
+          `the ${endpointName} returned HTTP ${status}: it is rate limiting requests`,
+        );
+      }
       const refusal = decodeErrorResponse(body);
       if (Option.isSome(refusal)) {
         const { error, interval } = refusal.value;
@@ -394,10 +403,10 @@ export const postForm = (
           }),
         );
       }
-      // A 403 or 429 with no OAuth error is a rate limit or a temporary block,
-      // as GitHub sends when a client polls too often. It says nothing about the
+      // A 403 with no OAuth error is a rate limit or a temporary block, as
+      // GitHub sends when a client polls too often. It says nothing about the
       // request itself, so the same request may work later.
-      if (response.status === 403 || response.status === 429) {
+      if (response.status === 403) {
         return yield* failProviderUnreachable(
           `the ${endpointName} returned HTTP ${status}: it is rate limiting requests or is ` +
             "temporarily unavailable",
