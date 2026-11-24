@@ -162,7 +162,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the eleven shipped plugins, each one active", async () => {
+  it("lists the thirteen shipped plugins, each one active", async () => {
     // There is no CLI command for this, so the route is called the way the
     // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -188,6 +188,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "github",
       "sentry",
       "linear",
+      "slack",
     ]);
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
@@ -197,8 +198,9 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     // linked repo Resources it watches, the reader of the issues and pull
     // requests that concern the user (entities), and the GitHub workflow
     // actions.
-    // sentry is github without Resources, and linear is sentry without
-    // workflow actions.
+    // sentry is github without Resources, linear is sentry without
+    // workflow actions, and slack is only a connection type and its MCP
+    // server.
     const findCapabilities = (id: string) =>
       plugins.find((plugin) => plugin.id === id)?.capabilities;
     expect(findCapabilities("github")).toEqual([
@@ -225,6 +227,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "entities",
       "mcp-servers",
     ]);
+    expect(findCapabilities("slack")).toEqual(["connections", "mcp-servers"]);
   }, 30_000);
 
   it("lists the five task verbs in help, each with its grant and a line of its own", async () => {
