@@ -1082,7 +1082,7 @@ Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
 
 *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **A call through an MCP Server's Connection needs `mcp.use` and no `connection.use`.** The MCP Gateway forwards a tool call with the credential of the Connection that a plugin's MCP Server uses ([./21-mcp.md](./21-mcp.md#5-credentials-and-status)). That call is not one of the cases above: the session did not choose the Connection, because the user put that server on that thread. So `mcp.use` alone allows it, and `connection.use` is not also required ([./13-security.md](./13-security.md#61-grant-families)).
 
-*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* `connection.delete` is also refused with `invalid_state` while an MCP Server uses the Connection. The message tells the caller to remove the server first with `mcpServer.delete`. It is a new kind of reference beside a Resource, a trigger and a workflow step ([./21-mcp.md](./21-mcp.md#24-what-deleting-does)).
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* `connection.delete` is also refused with `invalid_state` while an MCP Server uses the Connection. The message names the server and tells the caller to remove it first, in Settings > MCP servers or with `mcpServer.delete`. It is a new kind of reference beside a Resource, a trigger and a workflow step ([./21-mcp.md](./21-mcp.md#24-what-deleting-does)).
 
 
 ### runner, plugin, provider, controller (grant family `infra`)
