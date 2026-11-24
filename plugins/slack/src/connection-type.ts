@@ -517,6 +517,16 @@ export const connectionType: ConnectionTypeContribution = {
     // Slack's MCP server names itself as the resource the token is for. The
     // core sends it on the authorization request and on every token request.
     resource: SLACK_MCP_ORIGIN,
+    // Slack answers its own failures as HTTP 200 with `ok: false`, and a Connection
+    // must not be sent to sign in again because Slack is busy. These codes say
+    // "try again". Others, such as `invalid_refresh_token`, still end the sign-in.
+    transientErrors: [
+      "internal_error",
+      "service_unavailable",
+      "fatal_error",
+      "request_timeout",
+      "ratelimited",
+    ],
     publicClient: {
       createdAtSetup: {
         fields: [

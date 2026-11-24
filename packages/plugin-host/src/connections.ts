@@ -82,6 +82,15 @@ export const OAuthDeclaration = Schema.Struct({
    */
   resource: Schema.optionalKey(Schema.String),
   /**
+   * Error codes this provider's token endpoint answers with when it cannot serve
+   * the request now: "try again later", not "refused". The core treats such an
+   * answer to a code exchange or a refresh as an unreachable provider, so a
+   * Connection whose refresh hit one stays connected and is tried again, where
+   * any other error code from the endpoint sends it to be signed in again. List
+   * only codes that never mean the grant is bad.
+   */
+  transientErrors: Schema.optionalKey(Schema.Array(Schema.String)),
+  /**
    * A public client, for a provider that accepts a code exchange and a
    * refresh with the client id and the PKCE code verifier alone. The core
    * then sends no client secret and reads nothing from the plugin's settings.

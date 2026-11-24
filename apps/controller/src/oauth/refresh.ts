@@ -75,6 +75,8 @@ export interface RefreshEndpoint {
   readonly client: OAuthClient;
   readonly resource?: string;
   readonly bearerOnly?: boolean;
+  /** Provider error codes that mean "try again later" and not "refused" (see `postForm`). */
+  readonly transientErrors?: ReadonlyArray<string>;
 }
 
 /**

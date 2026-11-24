@@ -428,6 +428,19 @@ describe("POST /oauth/device/poll", () => {
     });
   });
 
+  it("reads slow_down as a slower interval when the provider sends it with HTTP 429", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const { setupId } = await startDeviceOrFail(base, token);
+      await allowPoll(sql, setupId);
+      provider.answers.token = () => buildJsonResponse({ error: "slow_down", interval: 10 }, 429);
+
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "slow-down",
+        interval: 10,
+      });
+    });
+  });
+
   it("adds at least five seconds, even when the provider names a shorter interval", async () => {
     await withDevice(async ({ base, sql }, _registry, token, provider) => {
       const { setupId } = await startDeviceOrFail(base, token);

@@ -51,6 +51,13 @@ describe("what the slack plugin registers", () => {
         authorizationUrl: "https://slack.com/oauth/v2_user/authorize",
         tokenUrl: "https://slack.com/api/oauth.v2.user.access",
         resource: "https://mcp.slack.com",
+        transientErrors: [
+          "internal_error",
+          "service_unavailable",
+          "fatal_error",
+          "request_timeout",
+          "ratelimited",
+        ],
         publicClient: {
           createdAtSetup: {
             fields: [{ name: "configurationToken", secret: true }],

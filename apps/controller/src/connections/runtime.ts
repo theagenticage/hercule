@@ -426,6 +426,9 @@ const make = Effect.gen(function* () {
           tokenUrl: oauth.tokenUrl,
           client: found,
           ...(oauth.resource === undefined ? {} : { resource: oauth.resource }),
+          ...(oauth.transientErrors === undefined
+            ? {}
+            : { transientErrors: oauth.transientErrors }),
         }));
       }
       if (device !== undefined) {

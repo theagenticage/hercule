@@ -178,6 +178,8 @@ const buildConnectionTypePlugin = (options: {
   readonly publicClient?: boolean;
   /** The RFC 8707 resource the type's tokens are for. */
   readonly resource?: string;
+  /** The error codes the type's token endpoint answers with when it cannot serve the request now. */
+  readonly transientErrors?: ReadonlyArray<string>;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
   const provider = options.oauth;
@@ -214,6 +216,9 @@ const buildConnectionTypePlugin = (options: {
                 scopes: ["read", "write"],
                 extraParams: { access_type: "offline", prompt: "consent" },
                 ...(options.resource === undefined ? {} : { resource: options.resource }),
+                ...(options.transientErrors === undefined
+                  ? {}
+                  : { transientErrors: options.transientErrors }),
                 ...(options.publicClient === true
                   ? {
                       publicClient: {
@@ -251,6 +256,7 @@ const buildPlugins = (provider: AuthServer) => ({
     type: "resource-type",
     oauth: provider,
     resource: RESOURCE,
+    transientErrors: TRANSIENT_ERRORS,
   }),
   public: buildConnectionTypePlugin({
     id: "public",
@@ -293,6 +299,15 @@ const withOAuth = async (
     await provider.stop();
   }
 };
+
+/** The error codes the `resource-type` declares as "try again later". */
+const TRANSIENT_ERRORS = [
+  "internal_error",
+  "service_unavailable",
+  "fatal_error",
+  "request_timeout",
+  "ratelimited",
+];
 
 /** The resource the `resource-type` declares its tokens are for. */
 const RESOURCE = "https://mcp.example";
@@ -1099,21 +1114,62 @@ describe("the access token a plugin asks the core for", () => {
     });
   });
 
-  it("leaves the connection status unchanged when the provider rate limits the refresh with HTTP 429", async () => {
-    await withOAuth(async ({ base }, registry, token, provider) => {
-      makeTokensExpireNow(provider);
-      const one = await connect(base, token);
-      provider.answers["refresh_token"] = () =>
-        buildJsonResponse({ ok: false, error: "ratelimited" }, 429);
+  describe("when the token endpoint answers that it cannot serve the request now", () => {
+    /** Connects the `resource-type`, whose tokens expire at once, and refreshes it against `answer`. */
+    const refreshAgainst = async (answer: () => Response) => {
+      let outcome: { failure: unknown; status: unknown } | undefined;
+      await withOAuth(async ({ base }, registry, token, provider) => {
+        provider.answers["authorization_code"] = () =>
+          buildJsonResponse({
+            access_token: FIRST_TOKEN,
+            refresh_token: "refresh-1",
+            expires_in: 0,
+          });
+        await setClientId(base, token, "resourceful");
+        await setClientSecret(base, token, "resourceful");
+        const url = await startOAuthOrFail(base, token, { type: "resourceful/resource-type" });
+        await sendOAuthCallback(base, {
+          state: url.searchParams.get("state") ?? "",
+          code: "the-code",
+        });
+        const [one] = await listConnections(base, token);
+        provider.answers["refresh_token"] = answer;
+        const failure = await Effect.runPromise(
+          Effect.flip(readConnectionsSurface(registry.resourceful).credentials(one?.id ?? "")),
+        );
+        const response = await get(base, `/api/v1/connections/${one?.id ?? ""}`, token);
+        outcome = { failure, status: ((await response.json()) as ConnectionRecord).status };
+      });
+      if (outcome === undefined) throw new Error("the scenario did not run");
+      return outcome;
+    };
 
-      const failure = await Effect.runPromise(
-        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
+    it.each(TRANSIENT_ERRORS)(
+      "keeps the connection signed in, and tries again later, for %s answered with HTTP 200",
+      async (code) => {
+        const { failure, status } = await refreshAgainst(() =>
+          buildJsonResponse({ ok: false, error: code }),
+        );
+
+        expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+        expect(status).toBe("connected");
+      },
+    );
+
+    it("keeps the connection signed in for a listed code answered with HTTP 429", async () => {
+      const { status } = await refreshAgainst(() =>
+        buildJsonResponse({ ok: false, error: "ratelimited" }, 429),
       );
 
-      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
-      // A rate limit says nothing about the refresh token, so the sign-in stays.
-      const response = await get(base, `/api/v1/connections/${one.id}`, token);
-      expect(await response.json()).toMatchObject({ status: "connected" });
+      expect(status).toBe("connected");
+    });
+
+    it("still sends the connection to be signed in again for a code the type does not list", async () => {
+      const { status } = await refreshAgainst(() =>
+        buildJsonResponse({ ok: false, error: "invalid_refresh_token" }),
+      );
+
+      expect(status).toBe("needs-reauth");
     });
   });
 

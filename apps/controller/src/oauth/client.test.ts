@@ -354,12 +354,34 @@ describe("a token endpoint's answer", () => {
     },
   );
 
-  it("stays unreachable for a rate limit whose body looks like an OAuth error, as Slack's does", async () => {
+  it("reads an OAuth error with HTTP 429 as a refusal, as a device poll's slow_down is", async () => {
     const failure = await failWith(
-      () => new Response(JSON.stringify({ ok: false, error: "ratelimited" }), { status: 429 }),
+      () => new Response(JSON.stringify({ error: "slow_down", interval: 10 }), { status: 429 }),
     );
 
-    expect(failure._tag).toBe("ProviderUnreachable");
+    expect(failure).toMatchObject({ _tag: "ProviderRefused", code: "slow_down" });
+  });
+
+  it("reads an error code the caller lists as transient as an unreachable provider, whatever the status", async () => {
+    const answer = (status: number) => () =>
+      new Response(JSON.stringify({ ok: false, error: "ratelimited" }), { status });
+    const failure = (status: number, transientErrors: ReadonlyArray<string>) =>
+      Effect.runPromise(
+        Effect.flip(
+          refreshAccess({
+            tokenUrl: TOKEN_URL,
+            client: { clientId: "id" },
+            refreshToken: "r",
+            transientErrors,
+          }),
+        ).pipe(Effect.provide(fakeTokenEndpoint(answer(status)).layer)),
+      );
+
+    expect((await failure(429, ["ratelimited"]))._tag).toBe("ProviderUnreachable");
+    expect((await failure(200, ["ratelimited"]))._tag).toBe("ProviderUnreachable");
+    // The same answer from a caller that lists nothing is a refusal.
+    expect((await failure(200, []))._tag).toBe("ProviderRefused");
+    expect((await failure(429, []))._tag).toBe("ProviderRefused");
   });
 
   it("stays unreachable for a rate limit whose body cannot be read", async () => {
