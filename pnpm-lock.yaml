@@ -126,6 +126,9 @@ importers:
       '@hercule/plugin-sentry':
         specifier: workspace:*
         version: link:../../plugins/sentry
+      '@hercule/plugin-slack':
+        specifier: workspace:*
+        version: link:../../plugins/slack
       '@hercule/plugin-zai':
         specifier: workspace:*
         version: link:../../plugins/zai
@@ -637,6 +640,15 @@ importers:
       '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+
+  plugins/slack:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
 
   plugins/zai:
     dependencies:

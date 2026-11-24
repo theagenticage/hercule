@@ -17,6 +17,7 @@ import { openai } from "@hercule/plugin-openai";
 import { openrouter } from "@hercule/plugin-openrouter";
 import { pi } from "@hercule/plugin-pi";
 import { sentry } from "@hercule/plugin-sentry";
+import { slack } from "@hercule/plugin-slack";
 import { zai } from "@hercule/plugin-zai";
 
 export const registry: ReadonlyArray<Plugin> = [
@@ -32,4 +33,5 @@ export const registry: ReadonlyArray<Plugin> = [
   github,
   sentry,
   linear,
+  slack,
 ];
