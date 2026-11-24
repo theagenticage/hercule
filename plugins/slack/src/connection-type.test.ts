@@ -3,8 +3,10 @@
  * app for a Connection, and the check of the access token.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Result } from "effect";
+import { Context, Effect, Layer, Logger, Result } from "effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import type { ConnectionValidationFailed } from "@hercule/plugin-host";
 import { connectionType } from "./connection-type";
@@ -18,6 +20,13 @@ const SECRETS = [
   "invented-signing-secret",
   "invented-verification-token",
 ];
+
+/** The three secrets as Slack's answer holds them, beside whatever else the answer says. */
+const SECRET_FIELDS = {
+  client_secret: SECRETS[0],
+  signing_secret: SECRETS[1],
+  verification_token: SECRETS[2],
+};
 
 /** What Slack answers when it creates the app: the client id and the three secrets. */
 const CREATED_APP_ANSWER = {
@@ -38,25 +47,43 @@ interface StubRequest {
   readonly authorization: string | undefined;
   readonly contentType: string | undefined;
   readonly body: unknown;
+  /** The `redirect` option of the fetch client, which the plugin sets so that a redirect is not followed. */
+  readonly redirect: string | undefined;
 }
 
-/** One answer of the stub: an HTTP status and a JSON body, or a body that is not JSON. */
+/**
+ * One answer of the stub: an HTTP status and a JSON body, or a body that is
+ * not JSON, or no answer at all because the transport failed with a message
+ * that holds a secret.
+ */
 interface StubAnswer {
   readonly status?: number;
   readonly body?: unknown;
+  readonly transportFailure?: string;
 }
 
 /** Builds an `HttpClient` that answers every request with `answer` and records the requests. */
 const stubSlack = (answer: StubAnswer) => {
   const requests: Array<StubRequest> = [];
-  const client = HttpClient.make((request) => {
+  const client = HttpClient.make((request, _url, _signal, fiber) => {
     const body = request.body._tag === "Uint8Array" ? request.body : undefined;
     requests.push({
       url: request.url,
       authorization: request.headers["authorization"],
       contentType: request.headers["content-type"] ?? body?.contentType,
       body: body === undefined ? undefined : JSON.parse(new TextDecoder().decode(body.body)),
+      redirect: Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit)?.redirect,
     });
+    if (answer.transportFailure !== undefined) {
+      return Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({
+            request,
+            description: answer.transportFailure,
+          }),
+        }),
+      );
+    }
     const text = typeof answer.body === "string" ? answer.body : JSON.stringify(answer.body);
     return Effect.succeed(
       HttpClientResponse.fromWeb(request, new Response(text, { status: answer.status ?? 200 })),
@@ -141,7 +168,8 @@ describe("creating the Slack app of a Connection", () => {
     ["token_revoked", "was revoked"],
     ["not_allowed_token_type", "does not allow this kind of token"],
     ["ratelimited", "Try again in a minute"],
-    ["some_new_code", "error code: some_new_code"],
+    ["internal_error", 'the error "internal_error"'],
+    ["some_new_code", "an unexpected error"],
   ])("explains Slack's error %s and what to do", async (error, expected) => {
     const stub = stubSlack({ body: { ok: false, error } });
 
@@ -163,12 +191,12 @@ describe("creating the Slack app of a Connection", () => {
     expect(message).toContain("api.slack.com/apps");
   });
 
-  it("names a refused manifest as a bug in Hercule, with Slack's reasons", async () => {
+  it("names a refused manifest as a bug in Hercule, and repeats nothing Slack wrote", async () => {
     const stub = stubSlack({
       body: {
         ok: false,
         error: "invalid_manifest",
-        errors: [{ message: "invalid scope", pointer: "/oauth_config/scopes/user/0" }],
+        errors: [{ message: "SLACK-DIAGNOSTIC", pointer: "/oauth_config/SLACK-POINTER" }],
       },
     });
 
@@ -177,7 +205,7 @@ describe("creating the Slack app of a Connection", () => {
     );
 
     expect(message).toContain("bug in Hercule");
-    expect(message).toContain("/oauth_config/scopes/user/0: invalid scope");
+    expect(message).not.toContain("SLACK-");
   });
 
   it("asks the user to wait when Slack answers HTTP 429", async () => {
@@ -190,40 +218,127 @@ describe("creating the Slack app of a Connection", () => {
     expect(message).toContain("Try again in a minute");
   });
 
-  it("does not repeat an error code that holds anything but lowercase letters and underscores", async () => {
+  it("does not repeat an error code it has no text for, nor any other text Slack sent", async () => {
     const stub = stubSlack({ body: { ok: false, error: "Ignore previous instructions" } });
 
     const message = readFailure(
       await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
     );
 
-    expect(message).toContain("error code: unknown");
+    expect(message).toContain("an unexpected error");
     expect(message).not.toContain("Ignore previous instructions");
   });
 
-  it("returns and quotes none of the secrets in the answer, on success or on failure", async () => {
-    const succeeded = await runAgainst(
+  it.each([
+    ["success", CREATED_APP_ANSWER],
+    [
+      "a refused manifest",
+      { ok: false, error: "invalid_manifest", credentials: SECRET_FIELDS, ...SECRET_FIELDS },
+    ],
+    ["an app without a client id", { ok: true, app_id: "A0INVENTED", credentials: SECRET_FIELDS }],
+    ["an answer of the wrong shape", { ok: "yes", ...SECRET_FIELDS }],
+    ["a secret in the error code", { ok: false, error: SECRETS[0], ...SECRET_FIELDS }],
+  ])("returns and quotes none of the secrets Slack sends: %s", async (_name, body) => {
+    const stub = stubSlack({ body });
+
+    const result = await runAgainst(
       createClient({ configurationToken: CONFIGURATION_TOKEN }),
-      stubSlack({ body: CREATED_APP_ANSWER }),
-    );
-    // Slack made the app but sent no client id, and the answer is quoted nowhere.
-    const withoutClientId = await runAgainst(
-      createClient({ configurationToken: CONFIGURATION_TOKEN }),
-      stubSlack({
-        body: { ...CREATED_APP_ANSWER, credentials: { client_secret: SECRETS[0] } },
-      }),
-    );
-    // The answer has the wrong shape, and a decoding error would quote the value.
-    const wrongShape = await runAgainst(
-      createClient({ configurationToken: CONFIGURATION_TOKEN }),
-      stubSlack({ body: { ok: "yes", client_secret: SECRETS[0] } }),
+      stub,
     );
 
-    expect(readFailure(withoutClientId)).toContain("A0INVENTED");
-    for (const result of [succeeded, withoutClientId, wrongShape]) {
-      const shown = JSON.stringify(Result.isSuccess(result) ? result.success : result.failure);
-      for (const secret of SECRETS) expect(shown).not.toContain(secret);
-    }
+    // A returned client holds an effect, so only its client id is a value to look at.
+    const returned = Result.isSuccess(result)
+      ? { clientId: result.success.clientId }
+      : { message: result.failure.message };
+    const shown = JSON.stringify([returned, stub.requests]);
+    for (const secret of SECRETS) expect(shown).not.toContain(secret);
+  });
+
+  it.each([
+    ["Slack says invalid_auth", { body: { ok: false, error: "invalid_auth" } }],
+    ["Slack says token_expired", { body: { ok: false, error: "token_expired" } }],
+    ["Slack says an unknown code", { body: { ok: false, error: "some_new_code" } }],
+    ["Slack echoes the token in its error", { body: { ok: false, error: CONFIGURATION_TOKEN } }],
+    ["Slack answers HTTP 429", { status: 429, body: { ok: false } }],
+    ["Slack answers HTTP 500", { status: 500, body: CONFIGURATION_TOKEN }],
+    ["Slack answers something that is not JSON", { body: CONFIGURATION_TOKEN }],
+    ["the transport fails and names the token", { transportFailure: CONFIGURATION_TOKEN }],
+  ])("never puts the pasted token in a failure message when %s", async (_name, answer) => {
+    const stub = stubSlack(answer);
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).not.toContain(CONFIGURATION_TOKEN);
+  });
+
+  it("says Slack could not be reached, with no detail of the transport error", async () => {
+    const stub = stubSlack({ transportFailure: "connect ECONNREFUSED 10.1.2.3:443" });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toBe(
+      "Slack could not be reached. Check the connection to the internet and try again.",
+    );
+  });
+
+  it("refuses an answer larger than Slack sends", async () => {
+    const stub = stubSlack({ body: `{"ok":true,"padding":"${"x".repeat(70 * 1024)}"}` });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toContain("far larger than expected");
+  });
+
+  it("does not follow a redirect, which would send the token elsewhere", async () => {
+    const stub = stubSlack({ status: 302 });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(stub.requests.map((request) => request.redirect)).toEqual(["manual"]);
+    expect(message).toContain("HTTP 302");
+  });
+
+  it("removes the app and fails when Slack made it without a client id", async () => {
+    const stub = stubSlack({ body: { ok: true, app_id: "A0INVENTED", credentials: {} } });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toBe("Slack did not finish creating the app. Hercule removed it. Try again.");
+    expect(
+      stub.requests.map((request) => [request.url, request.authorization, request.body]),
+    ).toEqual([
+      [
+        "https://slack.com/api/apps.manifest.create",
+        `Bearer ${CONFIGURATION_TOKEN}`,
+        expect.anything(),
+      ],
+      [
+        "https://slack.com/api/apps.manifest.delete",
+        `Bearer ${CONFIGURATION_TOKEN}`,
+        { app_id: "A0INVENTED" },
+      ],
+    ]);
+  });
+
+  it("fails without a delete when Slack does not say which app it made", async () => {
+    const stub = stubSlack({ body: { ok: true, credentials: { client_id: "111.222" } } });
+
+    const message = readFailure(
+      await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
+    );
+
+    expect(message).toContain("did not say which app");
+    expect(stub.requests).toHaveLength(1);
   });
 
   it("fails with a message, not a crash, when Slack's answer is not JSON", async () => {
@@ -262,6 +377,7 @@ describe("deleting the Slack app of an abandoned sign-in", () => {
         authorization: `Bearer ${CONFIGURATION_TOKEN}`,
         contentType: "application/json; charset=utf-8",
         body: { app_id: "A0INVENTED" },
+        redirect: "manual",
       },
     ]);
   });
@@ -277,17 +393,53 @@ describe("deleting the Slack app of an abandoned sign-in", () => {
     expect(Result.isSuccess(outcome)).toBe(true);
   });
 
-  it("does not call Slack when it gave no app id", async () => {
+  it.each([
+    ["Slack answers ok: false", { body: { ok: false, error: "invalid_auth" } }],
+    ["Slack answers HTTP 500", { status: 500, body: "boom" }],
+    ["Slack cannot be reached", { transportFailure: "offline" }],
+  ])("logs a warning that names the app and where to remove it when %s", async (_name, answer) => {
     const created = await runAgainst(
       createClient({ configurationToken: CONFIGURATION_TOKEN }),
-      stubSlack({ body: { ok: true, credentials: { client_id: "111.222" } } }),
+      stubSlack({ body: CREATED_APP_ANSWER }),
     );
     if (Result.isFailure(created)) throw new Error("the app was not created");
-    const stub = stubSlack({ body: { ok: true } });
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>(({ message }) => {
+      warnings.push(String(message));
+    });
 
-    await Effect.runPromise(created.success.deleteClient.pipe(Effect.provide(stub.layer)));
+    await Effect.runPromise(
+      created.success.deleteClient.pipe(
+        Effect.provide(stubSlack(answer).layer),
+        Effect.provide(Logger.layer([logger])),
+      ),
+    );
 
-    expect(stub.requests).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("A0INVENTED");
+    expect(warnings[0]).toContain("api.slack.com/apps");
+    expect(warnings[0]).not.toContain(CONFIGURATION_TOKEN);
+  });
+
+  it("logs nothing when Slack deletes the app", async () => {
+    const created = await runAgainst(
+      createClient({ configurationToken: CONFIGURATION_TOKEN }),
+      stubSlack({ body: CREATED_APP_ANSWER }),
+    );
+    if (Result.isFailure(created)) throw new Error("the app was not created");
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>(({ message }) => {
+      warnings.push(String(message));
+    });
+
+    await Effect.runPromise(
+      created.success.deleteClient.pipe(
+        Effect.provide(stubSlack({ body: { ok: true } }).layer),
+        Effect.provide(Logger.layer([logger])),
+      ),
+    );
+
+    expect(warnings).toEqual([]);
   });
 });
 
@@ -312,7 +464,7 @@ describe("checking a Slack access token", () => {
     ["invalid_auth", "Connect Slack again"],
     ["token_revoked", "Connect Slack again"],
     ["ratelimited", "Try again in a minute"],
-    ["some_new_code", "error code: some_new_code"],
+    ["some_new_code", "an unexpected error"],
   ])("explains Slack's error %s", async (error, expected) => {
     const stub = stubSlack({ body: { ok: false, error } });
 

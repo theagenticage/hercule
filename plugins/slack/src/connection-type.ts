@@ -9,9 +9,11 @@
  * workspace from a configuration token they paste once. Hercule does not store that token: it uses it to create the app, and
  * holds it in memory only to delete the app again if the sign-in fails.
  */
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Schema, Stream } from "effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   ConnectionValidationFailed,
   type ConnectionTypeContribution,
@@ -39,8 +41,28 @@ export const SLACK_MCP_ORIGIN = "https://mcp.slack.com";
  */
 const SLACK_REQUEST_TIMEOUT = Duration.seconds(30);
 
-/** The most reasons of a refused manifest that an error message lists. */
-const MAX_MANIFEST_PROBLEMS = 5;
+/**
+ * The most bytes of an answer that Hercule reads. Slack's answers are a few
+ * KiB, so a larger one is not Slack's.
+ */
+const MAX_ANSWER_BYTES = 64 * 1024;
+
+/**
+ * The Slack error codes that a message may quote when it has no text of its
+ * own for them. Any other code is not repeated, because a message shows
+ * nothing that Slack wrote beyond a code Hercule knows.
+ */
+const QUOTABLE_ERROR_CODES = [
+  "internal_error",
+  "fatal_error",
+  "service_unavailable",
+  "request_timeout",
+  "accesslimited",
+  "missing_scope",
+  "access_denied",
+  "no_permission",
+  "restricted_action",
+];
 
 /**
  * The user scopes the Connection asks for. A bot scope here would be refused
@@ -131,14 +153,50 @@ const failValidation = (message: string) =>
   Effect.fail(new ConnectionValidationFailed({ message }));
 
 /**
+ * Reads the whole body of an answer as JSON, refusing a body over
+ * `MAX_ANSWER_BYTES` as soon as it grows past the limit. Fails with a
+ * `ConnectionValidationFailed` when the body is too large, cannot be read, or
+ * is not JSON.
+ */
+const readAnswerJson = (
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<unknown, ConnectionValidationFailed> =>
+  Effect.gen(function* () {
+    const decoder = new TextDecoder();
+    let size = 0;
+    let text = "";
+    yield* Stream.runForEach(response.stream, (chunk) => {
+      size += chunk.length;
+      if (size > MAX_ANSWER_BYTES) {
+        return failValidation("Slack's answer was far larger than expected. Try again later.");
+      }
+      text += decoder.decode(chunk, { stream: true });
+      return Effect.void;
+    }).pipe(
+      Effect.catchTag("HttpClientError", () =>
+        failValidation("Slack's answer could not be read. Try again in a minute."),
+      ),
+    );
+    return yield* Effect.try({
+      try: () => JSON.parse(text + decoder.decode()) as unknown,
+      catch: () =>
+        new ConnectionValidationFailed({
+          message: "Slack's answer could not be read as JSON. Try again in a minute.",
+        }),
+    });
+  });
+
+/**
  * Posts to a Slack Web API method with the token as a Bearer header, and
  * returns the parsed JSON answer, not yet checked against a schema. Fails with
  * a `ConnectionValidationFailed` when Slack cannot be reached, does not answer
- * in time, answers HTTP 429, answers another status that is not 2xx, or
- * answers something that is not JSON. Slack reports its own failures in a 200
- * answer with `ok: false`, which the caller reads.
+ * in time, answers HTTP 429, answers another status that is not 2xx (a
+ * redirect is not followed, so it counts), or answers something that is
+ * larger than `MAX_ANSWER_BYTES` or not JSON. Slack reports its own failures
+ * in a 200 answer with `ok: false`, which the caller reads.
  *
- * The message never quotes the answer, which can hold secrets.
+ * Every message is fixed text: it never quotes the answer, which can hold
+ * secrets, nor the transport's error, which can hold the request.
  */
 const postToSlack = (
   url: string,
@@ -153,7 +211,11 @@ const postToSlack = (
       jsonBody === undefined
         ? baseRequest
         : HttpClientRequest.bodyText(jsonBody, "application/json; charset=utf-8")(baseRequest);
-    const response = yield* HttpClient.execute(request);
+    // The token must go to Slack only. `fetch` follows a redirect with the
+    // Authorization header, so a redirect is refused here instead.
+    const response = yield* HttpClient.execute(request).pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+    );
     if (response.status === 429) {
       return yield* failValidation(
         "Slack is limiting how often Hercule may ask. Try again in a minute.",
@@ -164,17 +226,12 @@ const postToSlack = (
         `Slack answered HTTP ${String(response.status)}. Try again in a minute.`,
       );
     }
-    return yield* response.json.pipe(
-      Effect.mapError(
-        () =>
-          new ConnectionValidationFailed({
-            message: "Slack's answer could not be read as JSON. Try again in a minute.",
-          }),
-      ),
-    );
+    return yield* readAnswerJson(response);
   }).pipe(
-    Effect.catchTag("HttpClientError", (error) =>
-      failValidation(`Slack could not be reached: ${error.message}`),
+    Effect.catchTag("HttpClientError", () =>
+      failValidation(
+        "Slack could not be reached. Check the connection to the internet and try again.",
+      ),
     ),
     Effect.timeoutOrElse({
       duration: SLACK_REQUEST_TIMEOUT,
@@ -203,12 +260,13 @@ const decodeAnswer = <S extends Schema.Decoder<unknown>>(
   );
 
 /**
- * Returns a Slack error code for a message, or `unknown` when the code holds
- * anything but lowercase letters, digits and underscores. A message names
- * Slack's code and nothing else Slack sent.
+ * Returns how a message refers to a Slack error code it has no text for: the
+ * code when it is one of `QUOTABLE_ERROR_CODES`, else "an unexpected error".
  */
-const nameErrorCode = (code: string | undefined): string =>
-  code !== undefined && /^[a-z0-9_]+$/.test(code) ? code : "unknown";
+const nameUnmappedError = (code: string | undefined): string =>
+  code !== undefined && QUOTABLE_ERROR_CODES.includes(code)
+    ? `the error "${code}"`
+    : "an unexpected error";
 
 /**
  * Only the fields of `apps.manifest.create`'s answer that Hercule reads. The
@@ -219,39 +277,15 @@ const nameErrorCode = (code: string | undefined): string =>
 const CreateAppAnswer = Schema.Struct({
   ok: Schema.Boolean,
   error: Schema.optionalKey(Schema.String),
-  errors: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        message: Schema.optionalKey(Schema.String),
-        pointer: Schema.optionalKey(Schema.String),
-      }),
-    ),
-  ),
   app_id: Schema.optionalKey(Schema.String),
   credentials: Schema.optionalKey(Schema.Struct({ client_id: Schema.optionalKey(Schema.String) })),
 });
-
-/** The message for the reasons Slack gives for refusing the manifest. */
-const describeManifestProblems = (
-  problems: ReadonlyArray<{ readonly message?: string; readonly pointer?: string }> | undefined,
-): string => {
-  const listed = (problems ?? [])
-    .slice(0, MAX_MANIFEST_PROBLEMS)
-    .map(({ pointer, message }) =>
-      [pointer, message].filter((part) => part !== undefined).join(": "),
-    )
-    .filter((line) => line !== "");
-  return listed.length === 0 ? "" : ` Slack's reasons: ${listed.join("; ")}.`;
-};
 
 /**
  * Returns the message that tells the user what Slack's error code from
  * `apps.manifest.create` means and what to do about it.
  */
-const describeCreateAppError = (
-  code: string | undefined,
-  problems: ReadonlyArray<{ readonly message?: string; readonly pointer?: string }> | undefined,
-): string => {
+const describeCreateAppError = (code: string | undefined): string => {
   switch (code) {
     case "invalid_auth":
     case "not_authed":
@@ -263,11 +297,11 @@ const describeCreateAppError = (
     case "not_allowed_token_type":
       return `Slack does not allow this kind of token to create an app. Make an app configuration token. ${HOW_TO_MAKE_TOKEN}`;
     case "invalid_manifest":
-      return `Slack refused the app that Hercule asked it to create. This is a bug in Hercule: report it.${describeManifestProblems(problems)}`;
+      return `Slack refused the app that Hercule asked it to create. This is a bug in Hercule: report it.`;
     case "ratelimited":
       return "Slack is limiting how often Hercule may ask. Try again in a minute.";
     default:
-      return `Slack could not create the app (error code: ${nameErrorCode(code)}). Try again, and if it keeps failing, report it.`;
+      return `Slack could not create the app and answered with ${nameUnmappedError(code)}. Try again, and if it keeps failing, report it.`;
   }
 };
 
@@ -301,22 +335,32 @@ const checkConfigurationToken = (
   return Effect.succeed(token);
 };
 
+/** The fields of `apps.manifest.delete`'s answer that Hercule reads. */
+const DeleteAppAnswer = Schema.Struct({ ok: Schema.Boolean });
+
 /**
  * Returns an effect that deletes the app that `createOAuthClient` made, with
  * the configuration token that made it. The core runs it when the sign-in is
  * abandoned or fails, so no unused Hercule app stays in the workspace.
  *
- * It never fails: Slack's answer, a failed request and a timeout are all
- * dropped, because the sign-in has already ended and the user can delete the
- * app at api.slack.com/apps. It does nothing when Slack gave no app id.
+ * It never fails. When Slack refuses, cannot be reached or answers something
+ * unreadable, it logs a warning that names the app id (which is not a secret)
+ * and says how the user can remove the app. The sign-in has already ended, so
+ * the user has nothing to retry.
  */
 const deleteApp = (
   token: string,
-  appId: string | undefined,
+  appId: string,
 ): Effect.Effect<void, never, HttpClient.HttpClient> =>
-  appId === undefined
-    ? Effect.void
-    : postToSlack(DELETE_APP_URL, token, JSON.stringify({ app_id: appId })).pipe(Effect.ignore);
+  postToSlack(DELETE_APP_URL, token, JSON.stringify({ app_id: appId })).pipe(
+    Effect.flatMap((json) => decodeAnswer(DeleteAppAnswer, json)),
+    Effect.flatMap((answer) => (answer.ok ? Effect.void : failValidation("Slack refused."))),
+    Effect.catch(() =>
+      Effect.logWarning(
+        `Hercule could not delete the Slack app ${appId} that it created. The user can remove the app named Hercule at api.slack.com/apps.`,
+      ),
+    ),
+  );
 
 /**
  * Creates a Slack app in the user's workspace from their configuration token,
@@ -333,18 +377,21 @@ const createOAuthClient: NonNullable<ConnectionTypeContribution["createOAuthClie
       token,
       JSON.stringify({ manifest: buildAppManifest() }),
     ).pipe(Effect.flatMap((json) => decodeAnswer(CreateAppAnswer, json)));
-    if (!answer.ok) {
-      return yield* failValidation(describeCreateAppError(answer.error, answer.errors));
-    }
+    if (!answer.ok) return yield* failValidation(describeCreateAppError(answer.error));
     const clientId = answer.credentials?.client_id;
-    if (clientId === undefined || clientId === "") {
-      const appName =
-        answer.app_id === undefined ? "the app named Hercule" : `the app ${answer.app_id}`;
+    const appId = answer.app_id;
+    if (appId === undefined || appId === "") {
       return yield* failValidation(
-        `Slack created the app but did not return its client id. Delete ${appName} at api.slack.com/apps and try again.`,
+        "Slack did not say which app it created. If an app named Hercule appeared at api.slack.com/apps, delete it, then try again.",
       );
     }
-    return { clientId, deleteClient: deleteApp(token, answer.app_id) } satisfies CreatedOAuthClient;
+    if (clientId === undefined || clientId === "") {
+      yield* deleteApp(token, appId);
+      return yield* failValidation(
+        "Slack did not finish creating the app. Hercule removed it. Try again.",
+      );
+    }
+    return { clientId, deleteClient: deleteApp(token, appId) } satisfies CreatedOAuthClient;
   });
 
 /** The fields of `auth.test`'s answer that `validate` reads. */
@@ -365,11 +412,11 @@ const describeAuthTestError = (code: string | undefined): string => {
     case "token_expired":
     case "token_revoked":
     case "account_inactive":
-      return `Slack no longer accepts this sign-in (error code: ${nameErrorCode(code)}). Connect Slack again.`;
+      return "Slack no longer accepts this sign-in. Connect Slack again.";
     case "ratelimited":
       return "Slack is limiting how often Hercule may ask. Try again in a minute.";
     default:
-      return `Slack could not check this sign-in (error code: ${nameErrorCode(code)}). Try again, and if it keeps failing, report it.`;
+      return `Slack could not check this sign-in and answered with ${nameUnmappedError(code)}. Try again, and if it keeps failing, report it.`;
   }
 };
 
