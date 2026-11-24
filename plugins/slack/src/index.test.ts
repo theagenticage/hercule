@@ -79,7 +79,7 @@ describe("what the slack plugin registers", () => {
     const checklist = types[0]?.setup.find((step) => step.kind === "checklist");
 
     expect(checklist?.kind === "checklist" && checklist.markdown).toContain(
-      "If Slack says an admin must approve the app, ask them to approve it, then start again here.",
+      "If Slack says an admin must approve the app, ask them right away. If they approve it within 10 minutes, open Slack's page again from here and finish. A slower approval is not supported yet.",
     );
   });
 
