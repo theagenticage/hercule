@@ -15,28 +15,31 @@ export interface MachineAction {
 
 /**
  * Renders one machine in an account's sheet: its icon (a laptop for this
- * Mac, a server for any other machine), its name, whether the account is
- * signed in there and as whom, and the one `action` the machine offers, if
- * any, such as Sign in. `error` is why the last action failed, shown under
- * the row.
+ * Mac, a server for any other machine), its name, whom the account is signed
+ * in as there when it is ready, else the `problem` that stops it, and the one
+ * `action` the machine offers, if any, such as Sign in or Update. `error` is
+ * why the last action failed, shown under the row.
  */
 export function MachineRow({
   runnerName,
   isThisMac,
-  signedIn,
+  ready,
   identity,
+  problem,
   action,
   error,
 }: {
   readonly runnerName: string;
   readonly isThisMac: boolean;
-  readonly signedIn: boolean;
-  /** Who the account is signed in as there, or `null` when it is not signed in or nobody is named. */
+  readonly ready: boolean;
+  /** Who the account is signed in as there, or `null` when it is not ready or nobody is named. */
   readonly identity: string | null;
+  /** What stops the account there, such as "Codex 0.169.0 is too old", or `null` when it is ready. */
+  readonly problem: string | null;
   readonly action: MachineAction | null;
   readonly error: string | null;
 }): JSX.Element {
-  const status = signedIn ? (identity ?? "Signed in") : "Not signed in";
+  const status = ready ? (identity ?? "Signed in") : (problem ?? "Not ready");
   return (
     <div className="pa-machine-wrap">
       <div className="pa-machine">
@@ -46,10 +49,10 @@ export function MachineRow({
           {isThisMac && <small>this Mac</small>}
         </span>
         <span
-          className={signedIn ? "pa-machine-status" : "pa-machine-status is-you"}
-          title={signedIn && identity !== null ? `Signed in as ${identity}` : undefined}
+          className={ready ? "pa-machine-status" : "pa-machine-status is-you"}
+          title={ready && identity !== null ? `Signed in as ${identity}` : undefined}
         >
-          <i className={signedIn ? "pa-pip" : "pa-pip is-you"} />
+          <i className={ready ? "pa-pip" : "pa-pip is-you"} />
           <span>{status}</span>
         </span>
         {action !== null && (

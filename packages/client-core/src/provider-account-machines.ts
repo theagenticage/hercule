@@ -4,7 +4,14 @@
  * offers, with the reason when it offers none. The card's pips and the
  * account sheet's Machines section both read these, so they cannot disagree.
  */
-import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
+import type {
+  CapabilitySnapshot,
+  Harness,
+  Provider,
+  ProviderAccount,
+  ProviderAccountReadinessState,
+  Runner,
+} from "@hercule/contract";
 import {
   findDefaultHarnessSnapshot,
   findProviderAccountKind,
@@ -14,10 +21,12 @@ import {
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
 /**
- * The one action a machine offers for an account that is not signed in there:
+ * The one action a machine offers for an account that is not ready there:
  *
  * - `sign-in`: start a sign-in on the machine;
  * - `install`: install the harness on the machine, which has an adapter for it;
+ * - `update`: install the version of the harness this Hercule build runs, over
+ *   an installed one that is older than the build supports;
  * - `offline`: the machine is not connected, so it can do nothing now;
  * - `unavailable`: the machine's Hercule build has no adapter for the harness,
  *   so no action could ever work there until the machine is updated.
@@ -28,6 +37,7 @@ import { buildProviderRows, type ProviderRow } from "./provider-rows";
 export type ProviderAccountMachineAction =
   | { readonly kind: "sign-in"; readonly reason: null }
   | { readonly kind: "install"; readonly reason: null }
+  | { readonly kind: "update"; readonly reason: null }
   | { readonly kind: "offline"; readonly reason: string }
   | { readonly kind: "unavailable"; readonly reason: string };
 
@@ -36,14 +46,18 @@ export interface ProviderAccountMachine {
   readonly runnerId: string;
   readonly runnerName: string;
   /**
-   * Whether the account can run in its default harness on the machine, as the
-   * controller's readiness row for that pair says. Anything but `ready` reads
-   * as not signed in here, because the account only signs in per machine.
+   * Whether the account can run in its default harness on the machine: the
+   * controller's readiness row for that pair says `ready`.
    */
-  readonly signedIn: boolean;
-  /** Who the account is signed in as there, or `null` when it is not signed in or the harness named nobody. */
+  readonly ready: boolean;
+  /** Who the account is signed in as there, or `null` when it is not ready or the harness named nobody. */
   readonly identity: string | null;
-  /** What the machine offers, or `null` when the account is signed in there already. */
+  /**
+   * What stands in the way on the machine, in a few words, such as "Codex
+   * 0.169.0 is too old" or "Not signed in"; `null` when the account is ready.
+   */
+  readonly problem: string | null;
+  /** What the machine offers, or `null` when the account is ready there already. */
   readonly action: ProviderAccountMachineAction | null;
 }
 
@@ -67,6 +81,34 @@ export const decideMachineAction = (
     kind: "unavailable",
     reason: `${runner.name} runs a Hercule build that cannot run ${harnessName}.`,
   };
+};
+
+/**
+ * Describes what stops an account on a machine whose readiness is `state`,
+ * in a few words for the machine's row, such as "Codex 0.169.0 is too old".
+ * Returns `null` for `ready`. `snapshot` is the last probe of the account's
+ * default harness there, which holds the harness version the machine reported.
+ */
+const describeMachineProblem = (
+  state: ProviderAccountReadinessState,
+  harnessName: string,
+  snapshot: CapabilitySnapshot | undefined,
+): string | null => {
+  switch (state) {
+    case "ready":
+      return null;
+    case "harness-too-old": {
+      const version = snapshot?.harnessVersion;
+      return `${harnessName}${version == null ? "" : ` ${version}`} is too old`;
+    }
+    case "harness-missing":
+      return `${harnessName} is not installed`;
+    case "token-expired":
+      return "Token expired";
+    case "not-signed-in":
+    case "credential-missing":
+      return "Not signed in";
+  }
 };
 
 /**
@@ -106,15 +148,24 @@ export const decideProviderAccountReach = (
     .filter((runner) => runner.lifecycle !== "retired")
     .map((runner) => {
       const row = buildProviderRows(runner, [account], providers, harnesses)[0];
-      const signedIn =
-        findProviderAccountReadiness(account, account.defaultHarnessId, runner.id) === "ready";
-      const auth = findDefaultHarnessSnapshot(account, runner.id)?.auth;
+      const state = findProviderAccountReadiness(account, account.defaultHarnessId, runner.id);
+      const ready = state === "ready";
+      const snapshot = findDefaultHarnessSnapshot(account, runner.id);
+      const auth = snapshot?.auth;
+      // A sign-in cannot help where the harness is too old, however the
+      // login stands, so the machine offers the update instead.
+      const action: ProviderAccountMachineAction | null = ready
+        ? null
+        : state === "harness-too-old" && runner.connectivity === "online"
+          ? { kind: "update", reason: null }
+          : decideMachineAction(runner, row, harnessName);
       return {
         runnerId: runner.id,
         runnerName: runner.name,
-        signedIn,
-        identity: signedIn && auth?.status === "ok" ? (auth.identity ?? null) : null,
-        action: signedIn ? null : decideMachineAction(runner, row, harnessName),
+        ready,
+        identity: ready && auth?.status === "ok" ? (auth.identity ?? null) : null,
+        problem: describeMachineProblem(state, harnessName, snapshot),
+        action,
       };
     });
   return { kind: "per-machine", machines };
