@@ -42,6 +42,8 @@
 }
 .setup-error {
   margin: 12px 0 0;
+  /* A provider's refusal is a few sentences, and its last line is never one word. */
+  text-wrap: pretty;
 }
 .setup-acts {
   display: flex;
@@ -72,7 +74,61 @@
   display: flex;
   gap: 6px;
 }
+/* The wait line of a sign-in's card breaks into even halves, so one word never stands alone on the
+   second line. Only a card that has Open again and Cancel beside its text is meant. */
+.setup-dialog .hx:has(.setup-row-acts) .wait {
+  text-wrap: balance;
+}
 /* Why the sign-in page did not open, under the wait line. */
 .setup-link-error {
   margin: 8px 0 0;
+}
+/* The type's own instructions: a sentence and numbered steps, in the muted text of `.setup-lead`.
+   Paragraphs and lists have the spacing of a message's markdown, and a link is the ink colour,
+   underlined, so it stands out from the muted words around it. */
+.setup-checklist {
+  margin: 0 0 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.setup-checklist :is(p, ul, ol) {
+  margin: 0 0 10px;
+}
+.setup-checklist > :last-child {
+  margin-bottom: 0;
+}
+.setup-checklist :is(ul, ol) {
+  padding-left: 22px;
+}
+.setup-checklist li > :is(ul, ol) {
+  margin-bottom: 0;
+}
+.setup-checklist a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.setup-checklist code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: var(--t-13);
+}
+/* Where the user pastes the address the browser ended on, in the waiting
+   card: the sentence, the field, and the button that finishes. */
+.setup-paste {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+.setup-paste > p {
+  margin: 0;
+}
+.setup-paste .field > input {
+  width: 100%;
+}
+.setup-paste .setup-acts {
+  margin-top: 0;
 }

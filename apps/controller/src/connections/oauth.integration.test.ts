@@ -176,6 +176,10 @@ const buildConnectionTypePlugin = (options: {
    * pasted API key beside it.
    */
   readonly publicClient?: boolean;
+  /** The RFC 8707 resource the type's tokens are for. */
+  readonly resource?: string;
+  /** The error codes the type's token endpoint answers with when it cannot serve the request now. */
+  readonly transientErrors?: ReadonlyArray<string>;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
   const provider = options.oauth;
@@ -211,6 +215,10 @@ const buildConnectionTypePlugin = (options: {
                 tokenUrl: `${provider.base}/token`,
                 scopes: ["read", "write"],
                 extraParams: { access_type: "offline", prompt: "consent" },
+                ...(options.resource === undefined ? {} : { resource: options.resource }),
+                ...(options.transientErrors === undefined
+                  ? {}
+                  : { transientErrors: options.transientErrors }),
                 ...(options.publicClient === true
                   ? {
                       publicClient: {
@@ -243,6 +251,13 @@ const buildPlugins = (provider: AuthServer) => ({
   oauth: buildConnectionTypePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
   second: buildConnectionTypePlugin({ id: "second", type: "second-type", oauth: provider }),
   pasted: buildConnectionTypePlugin({ id: "pasted", type: "pasted-type" }),
+  resourceful: buildConnectionTypePlugin({
+    id: "resourceful",
+    type: "resource-type",
+    oauth: provider,
+    resource: RESOURCE,
+    transientErrors: TRANSIENT_ERRORS,
+  }),
   public: buildConnectionTypePlugin({
     id: "public",
     type: "public-type",
@@ -284,6 +299,18 @@ const withOAuth = async (
     await provider.stop();
   }
 };
+
+/** The error codes the `resource-type` declares as "try again later". */
+const TRANSIENT_ERRORS = [
+  "internal_error",
+  "service_unavailable",
+  "fatal_error",
+  "request_timeout",
+  "ratelimited",
+];
+
+/** The resource the `resource-type` declares its tokens are for. */
+const RESOURCE = "https://mcp.example";
 
 /** The browser's origin, which the redirect URI is built from. */
 const ORIGIN = "http://h.test:4000";
@@ -485,7 +512,102 @@ describe("POST /oauth/start", () => {
   });
 });
 
+describe("POST /oauth/start, given client values that cannot be decoded", () => {
+  it("answers with one issue at clientValues that quotes no key and no value, since either may be a token", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      const pasted = "xoxe-pasted-where-a-name-belongs-0123456789";
+
+      const response = await post(
+        base,
+        "/api/v1/oauth/start",
+        {
+          type: "oauthy/oauth-type",
+          origin: ORIGIN,
+          clientValues: { [pasted]: 42, other: pasted.repeat(200) },
+        },
+        token,
+      );
+
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      expect(text).not.toContain(pasted);
+      const error = (JSON.parse(text) as ErrorBody).error;
+      expect(error.details?.issues).toEqual([
+        { path: ["clientValues"], message: expect.stringContaining("not valid") as string },
+      ]);
+    });
+  });
+});
+
+describe("the resource a type declares", () => {
+  /** Signs a type in, expires its token, refreshes it, and returns what the provider received. */
+  const signInAndRefresh = async (
+    plugin: "oauthy" | "resourceful",
+    type: "oauth-type" | "resource-type",
+  ) => {
+    let received:
+      | { authorization: URL; requests: ReadonlyArray<Record<string, string>> }
+      | undefined;
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({ access_token: FIRST_TOKEN, refresh_token: "refresh-1", expires_in: 0 });
+      await setClientId(base, token, plugin);
+      await setClientSecret(base, token, plugin);
+      const url = await startOAuthOrFail(base, token, { type: `${plugin}/${type}` });
+      const response = await sendOAuthCallback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "the-code",
+      });
+      expect(response.headers.get("location")).toBe("/connections?oauth=ok");
+      const [one] = await listConnections(base, token);
+      await Effect.runPromise(
+        readConnectionsSurface(
+          plugin === "oauthy" ? registry.oauth : registry.resourceful,
+        ).credentials(one?.id ?? ""),
+      );
+      received = { authorization: url, requests: provider.requests };
+    });
+    if (received === undefined) throw new Error("the scenario did not run");
+    return received;
+  };
+
+  it("is sent on the authorization request, the code exchange and the refresh", async () => {
+    const { authorization, requests } = await signInAndRefresh("resourceful", "resource-type");
+
+    expect(authorization.searchParams.get("resource")).toBe(RESOURCE);
+    expect(requests.map((request) => request["grant_type"])).toEqual([
+      "authorization_code",
+      "refresh_token",
+    ]);
+    expect(requests.map((request) => request["resource"])).toEqual([RESOURCE, RESOURCE]);
+  });
+
+  it("is sent nowhere by a type that declares none", async () => {
+    const { authorization, requests } = await signInAndRefresh("oauthy", "oauth-type");
+
+    expect(authorization.searchParams.has("resource")).toBe(false);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expect(request).not.toHaveProperty("resource");
+  });
+});
+
 describe("GET /oauth/callback", () => {
+  it("reads everything after the first question mark as the query, so a later one belongs to a value", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      await setClientId(base, token, "oauthy");
+      await setClientSecret(base, token, "oauthy");
+      const url = await startOAuthOrFail(base, token);
+      const state = url.searchParams.get("state") ?? "";
+
+      const response = await fetch(`${base}/oauth/callback?error=access_denied?x&state=${state}`, {
+        redirect: "manual",
+        headers: { connection: "close" },
+      });
+
+      expect(response.headers.get("location")).toBe("/connections?oauth=denied");
+    });
+  });
+
   it("exchanges the code with a standard token request and creates the connection the start described", async () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
@@ -972,6 +1094,90 @@ describe("the access token a plugin asks the core for", () => {
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
       const response = await get(base, `/api/v1/connections/${one.id}`, token);
       expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
+
+  it("marks the connection needs-reauth when the provider refuses the refresh with HTTP 200 and an ok:false body, as Slack does", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      provider.answers["refresh_token"] = () =>
+        buildJsonResponse({ ok: false, error: "invalid_refresh_token" });
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
+
+  describe("when the token endpoint answers that it cannot serve the request now", () => {
+    /** Connects the `resource-type`, whose tokens expire at once, and refreshes it against `answer`. */
+    const refreshAgainst = async (answer: () => Response) => {
+      let outcome: { failure: unknown; status: unknown } | undefined;
+      await withOAuth(async ({ base }, registry, token, provider) => {
+        provider.answers["authorization_code"] = () =>
+          buildJsonResponse({
+            access_token: FIRST_TOKEN,
+            refresh_token: "refresh-1",
+            expires_in: 0,
+          });
+        await setClientId(base, token, "resourceful");
+        await setClientSecret(base, token, "resourceful");
+        const url = await startOAuthOrFail(base, token, { type: "resourceful/resource-type" });
+        await sendOAuthCallback(base, {
+          state: url.searchParams.get("state") ?? "",
+          code: "the-code",
+        });
+        const [one] = await listConnections(base, token);
+        provider.answers["refresh_token"] = answer;
+        const failure = await Effect.runPromise(
+          Effect.flip(readConnectionsSurface(registry.resourceful).credentials(one?.id ?? "")),
+        );
+        const response = await get(base, `/api/v1/connections/${one?.id ?? ""}`, token);
+        outcome = { failure, status: ((await response.json()) as ConnectionRecord).status };
+      });
+      if (outcome === undefined) throw new Error("the scenario did not run");
+      return outcome;
+    };
+
+    it.each(TRANSIENT_ERRORS)(
+      "keeps the connection signed in, and tries again later, for %s answered with HTTP 200",
+      async (code) => {
+        const { failure, status } = await refreshAgainst(() =>
+          buildJsonResponse({ ok: false, error: code }),
+        );
+
+        expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+        expect(status).toBe("connected");
+      },
+    );
+
+    it("keeps the connection signed in for a listed code answered with HTTP 429", async () => {
+      const { status } = await refreshAgainst(() =>
+        buildJsonResponse({ ok: false, error: "ratelimited" }, 429),
+      );
+
+      expect(status).toBe("connected");
+    });
+
+    it("keeps the connection signed in for any error code answered with HTTP 429, listed or not", async () => {
+      const { status } = await refreshAgainst(() =>
+        buildJsonResponse({ error: "a_throttling_code_nobody_listed" }, 429),
+      );
+
+      expect(status).toBe("connected");
+    });
+
+    it("still sends the connection to be signed in again for a code the type does not list", async () => {
+      const { status } = await refreshAgainst(() =>
+        buildJsonResponse({ ok: false, error: "invalid_refresh_token" }),
+      );
+
+      expect(status).toBe("needs-reauth");
     });
   });
 

@@ -21,6 +21,7 @@ import { ApiError, readErrorMessage, readValidationIssues } from "../errors";
 import { buildPastedRedirectUri } from "../mcp-server-sign-in";
 import {
   BROWSER_SIGN_IN_UNSUPPORTED,
+  BROWSER_WAIT_STOPPED,
   describePasteRefusal,
   describeSignInRefusal,
   type SignInRefusalReason,
@@ -314,10 +315,7 @@ export const createBrowserSignIn = (host: BrowserSignInHost): BrowserSignIn => {
         showFailure(owner, refused("timed-out", ""));
         return;
       case "cancelled":
-        showFailure(
-          owner,
-          refused("failed", "The app stopped waiting for the browser. Start again."),
-        );
+        showFailure(owner, refused("failed", BROWSER_WAIT_STOPPED));
     }
   };
 

@@ -2,7 +2,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { AgentObserver } from "../../agents";
-import { ConnectionObserver } from "../../connections";
 import { type AuditLog, EventKindsLayer } from "../../events";
 import type { Notifier } from "../../notifications";
 import { EventKindCatalogLayer, PluginObserver, type PluginHost } from "../../plugins";
@@ -15,7 +14,7 @@ import { absorbFailures } from "../../absorbing";
  * the change must still answer as done. A mark this misses is set right at
  * the next change or the next start.
  */
-const revalidate = (validity: WorkflowValidity["Service"]): Effect.Effect<void> =>
+export const revalidateAfterChange = (validity: WorkflowValidity["Service"]): Effect.Effect<void> =>
   absorbFailures(
     "The stored workflows could not be validated again after a change",
     validity.revalidateStoredWorkflows(),
@@ -38,12 +37,13 @@ export const revalidateStoredWorkflowsOrLog: Effect.Effect<void, never, Workflow
   );
 
 /**
- * Provides the plugins, agents and connections domains' observer ports from
- * the workflows domain's `WorkflowValidity`, and the validity service itself
- * for the boot step that validates every stored workflow once the plugins
- * have started. It lives in the controller daemon because the workflows
- * domain depends on all three domains, so none of them can reach it without
- * a cycle.
+ * Provides the plugins and agents domains' observer ports from the workflows
+ * domain's `WorkflowValidity`, and the validity service itself for the boot
+ * step that validates every stored workflow once the plugins have started. It
+ * lives in the controller daemon because the workflows domain depends on both
+ * domains, so neither can reach it without a cycle. The connections domain's
+ * port is implemented in `daemon/connections`, which calls
+ * `revalidateAfterChange` for a delete.
  *
  * Every port validates every stored workflow again, not only those that name
  * the changed plugin, agent or Connection. Finding those would repeat what
@@ -51,23 +51,18 @@ export const revalidateStoredWorkflowsOrLog: Effect.Effect<void, never, Workflow
  * per workflow plus a few indexed reads.
  */
 export const WorkflowValidityObserversLayer: Layer.Layer<
-  PluginObserver | AgentObserver | ConnectionObserver | WorkflowValidity,
+  PluginObserver | AgentObserver | WorkflowValidity,
   never,
   SqlClient.SqlClient | AuditLog | Notifier | PluginHost
 > = Layer.mergeAll(
   Layer.effect(PluginObserver)(
     Effect.map(WorkflowValidity, (validity) => ({
-      pluginStatusChanged: () => revalidate(validity),
+      pluginStatusChanged: () => revalidateAfterChange(validity),
     })),
   ),
   Layer.effect(AgentObserver)(
     Effect.map(WorkflowValidity, (validity) => ({
-      agentDeleted: () => revalidate(validity),
-    })),
-  ),
-  Layer.effect(ConnectionObserver)(
-    Effect.map(WorkflowValidity, (validity) => ({
-      connectionDeleted: () => revalidate(validity),
+      agentDeleted: () => revalidateAfterChange(validity),
     })),
   ),
 ).pipe(

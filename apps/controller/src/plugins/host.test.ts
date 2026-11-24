@@ -1296,6 +1296,11 @@ describe("a connection type's token flows", () => {
     scopes: [],
   };
   const PUBLIC_REDIRECT_URI = "http://127.0.0.1:4937/oauth/callback";
+  const CREATED_CLIENT = {
+    createdAtSetup: { fields: [{ name: "token", label: "Token", secret: true }] },
+    redirectUris: ["http://127.0.0.1/callback"],
+  };
+  const createOAuthClient = () => Effect.succeed({ clientId: "made", deleteClient: Effect.void });
   const DEVICE = {
     clientId: "client",
     deviceCodeUrl: "https://example.test/device/code",
@@ -1380,8 +1385,8 @@ describe("a connection type's token flows", () => {
       // A host that is not this machine.
       "https://hercule.example/oauth/callback",
       "http://192.168.1.20:4937/oauth/callback",
-      // A path other than the callback path.
-      "http://127.0.0.1:4937/callback",
+      // A path other than the two the core can receive a return on.
+      "http://127.0.0.1:4937/other",
       "http://127.0.0.1:4937/base/oauth/callback",
       // A query or a fragment after the callback path.
       "http://127.0.0.1:4937/?next=/oauth/callback",
@@ -1396,8 +1401,178 @@ describe("a connection type's token flows", () => {
           publicClient: { clientId: "public", redirectUris: [PUBLIC_REDIRECT_URI, uri] },
         },
       },
-      `the public client's redirect URI ${uri} is not an http or https URL on localhost, 127.0.0.1 or [::1] whose path is exactly /oauth/callback`,
+      `the public client's redirect URI ${uri} is not an http or https URL on localhost, 127.0.0.1 or [::1] with no query or fragment and a path of /oauth/callback or /callback`,
     ]),
+    [
+      "createOAuthClient without a client created at setup",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { clientId: "public", redirectUris: [PUBLIC_REDIRECT_URI] },
+        },
+        createOAuthClient,
+      },
+      "createOAuthClient is for a client created at setup",
+    ],
+    [
+      "createOAuthClient without any public client",
+      { setup: [{ kind: "oauth" }], oauth: OAUTH, createOAuthClient },
+      "createOAuthClient needs oauth.publicClient.createdAtSetup",
+    ],
+    [
+      "a client created at setup without createOAuthClient",
+      { setup: [{ kind: "oauth" }], oauth: { ...OAUTH, publicClient: CREATED_CLIENT } },
+      "needs a createOAuthClient function",
+    ],
+    [
+      "a client created at setup with no fields",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, createdAtSetup: { fields: [] } },
+        },
+        createOAuthClient,
+      },
+      "createdAtSetup has no fields",
+    ],
+    [
+      "a client created at setup with a field named twice",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: {
+            ...CREATED_CLIENT,
+            createdAtSetup: {
+              fields: [
+                { name: "token", label: "Token" },
+                { name: "token", label: "Again" },
+              ],
+            },
+          },
+        },
+        createOAuthClient,
+      },
+      "names the field token twice",
+    ],
+    [
+      "a client created at setup with a field named like the core's token set",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: {
+            ...CREATED_CLIENT,
+            createdAtSetup: { fields: [{ name: "oauth.tokens", label: "Token" }] },
+          },
+        },
+        createOAuthClient,
+      },
+      "the field name oauth.tokens is reserved",
+    ],
+    [
+      "a client created at setup with more fields than a setup takes",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: {
+            ...CREATED_CLIENT,
+            createdAtSetup: {
+              fields: Array.from({ length: 17 }, (_, index) => ({
+                name: `field${String(index)}`,
+                label: "Field",
+              })),
+            },
+          },
+        },
+        createOAuthClient,
+      },
+      "has 17 fields, and a setup takes at most 16",
+    ],
+    [
+      "a client created at setup with a field name longer than a name may be",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: {
+            ...CREATED_CLIENT,
+            createdAtSetup: { fields: [{ name: "n".repeat(200), label: "Field" }] },
+          },
+        },
+        createOAuthClient,
+      },
+      "a field name of oauth.publicClient.createdAtSetup is 200 characters",
+    ],
+    [
+      "a public client that declares both a clientId and a client created at setup",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: { ...OAUTH, publicClient: { ...CREATED_CLIENT, clientId: "shipped" } },
+        createOAuthClient,
+      },
+      "declares both a clientId and createdAtSetup",
+    ],
+    [
+      "a catcher redirect URI on https",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["https://127.0.0.1/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI https://127.0.0.1/callback is not",
+    ],
+    [
+      "a catcher redirect URI on localhost, which the catcher's own address rules refuse",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["http://localhost/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI http://localhost/callback is not",
+    ],
+    [
+      "a catcher redirect URI with port 0",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["http://127.0.0.1:0/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI http://127.0.0.1:0/callback is not",
+    ],
+    [
+      "a catcher redirect URI on the IPv6 loopback address",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["http://[::1]/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI http://[::1]/callback is not",
+    ],
+    [
+      "a client created at setup with no redirect URIs",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: { ...OAUTH, publicClient: { ...CREATED_CLIENT, redirectUris: [] } },
+        createOAuthClient,
+      },
+      "the public client has no redirectUris",
+    ],
     [
       "a pasted credential field named like the core's token set",
       { setup: [{ kind: "credentials", fields: [{ name: "oauth.tokens", label: "Tokens" }] }] },
@@ -1430,6 +1605,70 @@ describe("a connection type's token flows", () => {
     });
 
     expect(readErroredMessage(status)).toBeUndefined();
+  });
+
+  it("accepts a client created at setup, and redirect URIs without a port or on the desktop catcher's path", async () => {
+    const status = await bootWithType({
+      setup: [{ kind: "oauth" }],
+      oauth: {
+        ...OAUTH,
+        publicClient: {
+          ...CREATED_CLIENT,
+          redirectUris: [
+            "http://127.0.0.1/callback",
+            "http://localhost/oauth/callback",
+            "http://127.0.0.1:4937/callback",
+          ],
+        },
+      },
+      createOAuthClient,
+    });
+
+    expect(readErroredMessage(status)).toBeUndefined();
+  });
+
+  it("keeps the fields a client created at setup asks for in the catalog, and the function that creates it out", async () => {
+    const plugin: Plugin = {
+      manifest: {
+        id: "flows",
+        displayName: "Plugin flows",
+        hostApi: HOST_API,
+        capabilities: ["connections"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        registerConnectionType(host, {
+          type: "forge",
+          displayName: "Forge",
+          setup: [{ kind: "oauth" }],
+          oauth: { ...OAUTH, publicClient: CREATED_CLIENT },
+          createOAuthClient,
+          validate: () => Effect.succeed({ displayName: "Forge", accountId: "forge-1" }),
+        }),
+      activate: () => Effect.succeed(Effect.void),
+    };
+
+    const stored = await run(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(PluginHost, (host) => host.boot([plugin]));
+        const contributions = yield* Effect.flatMap(pluginRepository, (repository) =>
+          repository.contributions(),
+        );
+        return JSON.stringify(contributions.get("flows"));
+      }),
+    );
+
+    expect(stored).toContain('"createdAtSetup":{"fields":[{"name":"token"');
+    expect(stored).not.toContain("createOAuthClient");
+  });
+
+  it("refuses a public client that is not an object with a message, and fails no other plugin", async () => {
+    const status = await bootWithType({
+      setup: [{ kind: "oauth" }],
+      oauth: { ...OAUTH, publicClient: "shipped" },
+    });
+
+    expect(readErroredMessage(status)).toContain("publicClient");
   });
 
   it("accepts a device flow beside a pasted token", async () => {

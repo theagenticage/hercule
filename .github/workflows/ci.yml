@@ -299,13 +299,12 @@ jobs:
   # It runs on Linux in Playwright's Chromium, with no Electron and no
   # controller, so it needs no macOS runner. Its budget is 3 minutes of
   # wall-clock time per shard: it must add nothing to the longest job of this
-  # workflow. The themes are split over three shards that run in parallel, each
-  # a runner of its own, and each shard compares only the baseline keys of its
-  # themes. The first shard holds the first theme, which also measures the
-  # metrics of the whole run (`run/...`), so every key is checked on every
-  # change. Balance the shards by their measured time. If a change makes a
-  # shard slower, add a shard or move the slowest variants to a nightly run
-  # rather than raising the bound.
+  # workflow. Each theme is a shard of its own, six in all, that run in
+  # parallel, each a runner of its own, and each shard compares only the
+  # baseline keys of its theme. The first shard holds the first theme, which
+  # also measures the metrics of the whole run (`run/...`), so every key is
+  # checked on every change. If a change makes a shard slower, move the
+  # slowest variants to a nightly run rather than raising the bound.
   #
   # It runs only when something it reads can have changed. On `main` it
   # always runs. The first step decides, without a third-party action, and the
@@ -318,18 +317,22 @@ jobs:
     strategy:
       # A failure in one shard must not hide the numbers of the other.
       fail-fast: false
-      # Two themes each. The first shard also measures the run-wide metrics.
+      # One theme each. The first shard also measures the run-wide metrics.
       # With two shards of three themes, the measuring step took about 400 s
       # on 2026-11-22, once the app had 38 screens, and a shard on `main`
-      # reached this job's 10 minutes and was cancelled. Two themes take
-      # about two thirds of that. A test
-      # (apps/desktop/scripts/ui-screens.test.ts) fails unless every theme is
-      # in exactly one shard.
+      # reached this job's 10 minutes and was cancelled. Three shards of two
+      # themes ran 5 to 8 minutes until the Slack setup added 7 screens, and
+      # two of them were cancelled at 10 minutes. A theme alone takes about
+      # half of that. A test (apps/desktop/scripts/ui-screens.test.ts) fails
+      # unless every theme is in exactly one shard.
       matrix:
         themes:
-          - whitehaven,styles
-          - blue-train,orient-express
-          - nile,end-house
+          - whitehaven
+          - styles
+          - blue-train
+          - orient-express
+          - nile
+          - end-house
     steps:
       - uses: actions/checkout@v7
         with:

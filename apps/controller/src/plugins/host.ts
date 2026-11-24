@@ -28,6 +28,7 @@ import {
   PluginError,
   PluginManifest,
   listChoiceFields,
+  MAX_CONTRIBUTION_NAME_LENGTH,
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
@@ -41,6 +42,8 @@ import {
 } from "@hercule/plugin-host";
 import {
   createDecodeValidationError,
+  MAX_CLIENT_VALUES,
+  SignInRedirectUri,
   summarizeCause,
   truncateMessage,
   type IntakeOverrides,
@@ -60,8 +63,9 @@ import { Secrets, type SecretOwner } from "../secrets";
 import {
   ActivePlugins,
   ConnectionTypes,
-  CALLBACK_PATH,
+  CATCHER_PATH,
   OAUTH_TOKENS,
+  REDIRECT_URI_PATHS,
   PluginConfigs,
   type RegisteredConnectionType,
 } from "../connections";
@@ -303,30 +307,84 @@ const checkCredentialFieldNames = (type: ConnectionType): string | undefined => 
     : undefined;
 };
 
+/**
+ * Checks that a redirect URI on the catcher's path is one the desktop app's
+ * catcher can be sent to, by the rules of `SignInRedirectUri`, which every
+ * start with an address on the user's machine must pass. A URI without a port
+ * stands for every port, so one concrete port stands in for it.
+ */
+const isCatcherRegistration = (url: URL): boolean =>
+  Schema.is(SignInRedirectUri)(
+    url.port === "" ? `${url.protocol}//${url.hostname}:1${url.pathname}` : url.href,
+  );
+
 /** The hostnames a public client's redirect URIs may use: the loopback names of this machine. */
 const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[::1]"];
 
 /**
- * Checks that the public client a type's redirect flow ships can work.
+ * Checks that the public client a type's redirect flow declares can work.
  * Returns the reason the type is refused, or `undefined` when it is accepted
- * or ships no public client.
+ * or declares no public client.
  *
- * - The client id must not be empty, because the provider would refuse it.
+ * - A shipped client's id must not be empty, because the provider would
+ *   refuse it.
+ * - A client created at setup needs `createOAuthClient` to create it, and
+ *   `createOAuthClient` needs that declaration, so the two come together.
+ *   Its fields need names that are not empty, are all different, and are not
+ *   the name the core stores a token set under, because the user fills the
+ *   fields in by name and the core hands the plugin the values by name.
  * - There must be at least one redirect URI, because a start is refused from
  *   any origin whose redirect URI is not one of them.
  * - Each redirect URI must be an `http` or `https` URL on a loopback host
- *   (`localhost`, `127.0.0.1` or `[::1]`), because a client id shipped in
- *   the plugin is safe only when the provider sends codes to this machine
- *   (spec 13 section 3.1). On any other host a code could cross a network
- *   over plain http.
- * - Each redirect URI must be its origin followed by the core's callback
- *   path and nothing else, because a start compares exactly that URL with
- *   the redirect URIs, so any other URL could never match.
+ *   (`localhost`, `127.0.0.1` or `[::1]`), because a client id is safe in a
+ *   plugin only when the provider sends codes to this machine (spec 13
+ *   section 3.1). On any other host a code could cross a network over plain
+ *   http.
+ * - Each redirect URI must have no query and no fragment, and its path must
+ *   be one of the two the core can receive a return on: the controller's
+ *   callback path, or the path of the desktop app's own catcher. A URI on the
+ *   catcher's path must follow the rules of `SignInRedirectUri`: plain http on
+ *   `127.0.0.1`, with no port or a port from 1 to 65535, because that is all
+ *   the catcher listens on and all a start with an address on the user's
+ *   machine accepts.
  */
-const checkPublicClient = (type: ConnectionType): string | undefined => {
+const checkPublicClient = (type: ConnectionType, createsClients: boolean): string | undefined => {
   const client = type.oauth?.publicClient;
-  if (client === undefined) return undefined;
-  if (client.clientId === "") return "the public client's clientId is empty";
+  if (client === undefined) {
+    return createsClients
+      ? "createOAuthClient needs oauth.publicClient.createdAtSetup to say what the user pastes"
+      : undefined;
+  }
+  if ("clientId" in client) {
+    if (createsClients) {
+      return "createOAuthClient is for a client created at setup: declare oauth.publicClient.createdAtSetup instead of a shipped clientId";
+    }
+    if (client.clientId === "") return "the public client's clientId is empty";
+  } else {
+    if (!createsClients) {
+      return "oauth.publicClient.createdAtSetup needs a createOAuthClient function to create the client";
+    }
+    const names = client.createdAtSetup.fields.map((field) => field.name);
+    if (names.length === 0) {
+      return "oauth.publicClient.createdAtSetup has no fields: declare what the user pastes, or ship a clientId";
+    }
+    // The start operation takes at most this many values, so a type with more
+    // fields could never be set up.
+    if (names.length > MAX_CLIENT_VALUES) {
+      return `oauth.publicClient.createdAtSetup has ${String(names.length)} fields, and a setup takes at most ${String(MAX_CLIENT_VALUES)}`;
+    }
+    const tooLong = names.find((name) => name.length > MAX_CONTRIBUTION_NAME_LENGTH);
+    if (tooLong !== undefined) {
+      return `a field name of oauth.publicClient.createdAtSetup is ${String(tooLong.length)} characters, and the most allowed is ${String(MAX_CONTRIBUTION_NAME_LENGTH)}`;
+    }
+    const duplicate = names.find((name, index) => names.indexOf(name) !== index);
+    if (duplicate !== undefined) {
+      return `oauth.publicClient.createdAtSetup names the field ${duplicate} twice`;
+    }
+    if (names.includes(OAUTH_TOKENS)) {
+      return `the field name ${OAUTH_TOKENS} is reserved for the tokens of a redirect flow: choose another name`;
+    }
+  }
   if (client.redirectUris.length === 0) return "the public client has no redirectUris";
   const unusable = client.redirectUris.find((uri) => {
     const url = URL.parse(uri);
@@ -334,12 +392,19 @@ const checkPublicClient = (type: ConnectionType): string | undefined => {
       url === null ||
       (url.protocol !== "http:" && url.protocol !== "https:") ||
       !LOOPBACK_HOSTNAMES.includes(url.hostname) ||
-      uri !== `${url.origin}${CALLBACK_PATH}`
+      url.search !== "" ||
+      url.hash !== "" ||
+      !REDIRECT_URI_PATHS.includes(url.pathname) ||
+      // The desktop app's catcher listens on plain http at the loopback
+      // address, so a `/callback` URI on any other scheme or host could never
+      // be the address a sign-in returns to.
+      (url.pathname === CATCHER_PATH && !isCatcherRegistration(url)) ||
+      uri !== `${url.origin}${url.pathname}`
     );
   });
   return unusable === undefined
     ? undefined
-    : `the public client's redirect URI ${unusable} is not an http or https URL on localhost, 127.0.0.1 or [::1] whose path is exactly ${CALLBACK_PATH}`;
+    : `the public client's redirect URI ${unusable} is not an http or https URL on localhost, 127.0.0.1 or [::1] with no query or fragment and a path of ${REDIRECT_URI_PATHS.join(" or ")}`;
 };
 
 /**
@@ -413,9 +478,26 @@ const buildRegistrationHost = (
         connections: {
           registerType: (contribution: ConnectionTypeContribution) =>
             Effect.gen(function* () {
-              // Everything except `validate` and `listChoices`, which no JSON
+              // Everything except `validate`, `listChoices` and `createOAuthClient`, which no JSON
               // column can hold, so they are kept in memory instead.
-              const { validate, listChoices, ...serializable } = contribution;
+              const { validate, listChoices, createOAuthClient, ...serializable } = contribution;
+              // The decode below keeps only one variant of a public client, so
+              // a declaration with both is checked before it.
+              const declaredClient = (
+                serializable.oauth as { readonly publicClient?: object } | undefined
+              )?.publicClient;
+              if (
+                typeof declaredClient === "object" &&
+                declaredClient !== null &&
+                "clientId" in declaredClient &&
+                "createdAtSetup" in declaredClient
+              ) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${manifest.id}/${serializable.type}: oauth.publicClient declares both a clientId and createdAtSetup: declare one`,
+                  }),
+                );
+              }
               const decoded = yield* decodeConnectionType(serializable).pipe(
                 Effect.mapError(toPluginError),
               );
@@ -435,7 +517,7 @@ const buildRegistrationHost = (
               const declarationFailure =
                 checkFlowDeclarations(decoded) ??
                 checkCredentialFieldNames(decoded) ??
-                checkPublicClient(decoded);
+                checkPublicClient(decoded, createOAuthClient !== undefined);
               if (declarationFailure !== undefined) {
                 return yield* Effect.fail(
                   new PluginError({
@@ -487,6 +569,7 @@ const buildRegistrationHost = (
                   type,
                   validate: refuseEmptyAccountId(validate, type, manifest.id),
                   ...(listChoices === undefined ? {} : { listChoices }),
+                  ...(createOAuthClient === undefined ? {} : { createOAuthClient }),
                 },
               });
             }),

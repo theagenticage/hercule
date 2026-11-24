@@ -4,6 +4,13 @@
  * web app and the desktop app draw these and add none of their own.
  */
 import type { McpServer } from "@hercule/contract";
+import {
+  BROWSER_WAIT_STOPPED,
+  BROWSER_WAIT_TIMED_OUT,
+  describePasteRefusal,
+} from "../browser-return-words";
+
+export { BROWSER_WAIT_STOPPED, describePasteRefusal };
 
 /** Why a browser sign-in ended without a server that is signed in. */
 export type SignInRefusalReason =
@@ -41,7 +48,7 @@ export const describeSignInRefusal = (reason: SignInRefusalReason, detail: strin
     case "sign-in-refused":
       return "The browser or the provider refused the sign-in. Nothing was changed. You can start again.";
     case "timed-out":
-      return "The browser did not come back within 10 minutes. Start again.";
+      return BROWSER_WAIT_TIMED_OUT;
     case "source-unreadable":
     case "failed":
       return detail;
@@ -51,7 +58,3 @@ export const describeSignInRefusal = (reason: SignInRefusalReason, detail: strin
 /** The sentence over the token field when the controller says only a pasted token works for this server. */
 export const BROWSER_SIGN_IN_UNSUPPORTED =
   "This server does not allow a sign-in through the browser. Paste a token instead.";
-
-/** Returns the text under the paste field for an address that is not a redirect answer. `reason` is the parser's own words. */
-export const describePasteRefusal = (reason: string): string =>
-  `That is not what the browser ended on: ${reason}.`;

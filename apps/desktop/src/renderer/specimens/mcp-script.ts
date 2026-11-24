@@ -38,6 +38,30 @@ export async function pressPart(selector: string): Promise<void> {
 }
 
 /**
+ * Waits for the part `selector` names whose text starts with `text`, and
+ * presses it. Fails like `waitForPart`, naming `selector`, when no part has
+ * that text within five seconds.
+ */
+export async function pressPartWithText(selector: string, text: string): Promise<void> {
+  const deadline = performance.now() + 5000;
+  for (;;) {
+    const part = [...document.querySelectorAll<HTMLElement>(selector)].find((each) =>
+      each.textContent?.startsWith(text),
+    );
+    if (part !== undefined) {
+      part.click();
+      return;
+    }
+    if (performance.now() > deadline) {
+      throw new Error(
+        `The MCP specimen never drew ${selector} with the text "${text}". Check the page's console.`,
+      );
+    }
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
+/**
  * Waits for the text field `selector` names and types `text` into it, as the
  * user would: React reads the field through its `input` event, so the value is
  * set the way the browser sets it before that event is sent.

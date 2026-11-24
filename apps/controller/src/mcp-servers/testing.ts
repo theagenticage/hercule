@@ -1455,6 +1455,7 @@ export const buildMcpServerView = ({
                     feedIntervals: {},
                     intake: NO_INTAKE_OVERRIDES,
                     credentialsGeneration: 0,
+                    oauthClientId: undefined,
                     createdAt: at,
                     updatedAt: at,
                   },
@@ -1469,6 +1470,7 @@ export const buildMcpServerView = ({
                       description: "",
                       connectionType: "acme/desk",
                       origin: "https://desk.example",
+                      addWhenConnected: false,
                       buildUpstreamRequest: () => {
                         throw new Error("a test of a view never builds a request");
                       },

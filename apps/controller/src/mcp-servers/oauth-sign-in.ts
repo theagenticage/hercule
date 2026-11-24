@@ -34,6 +34,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import {
   createInvalidStateError,
   createValidationError,
+  isRedirectAddress,
   parseCallbackQuery,
   type InvalidState,
   type McpServerSignInStart,
@@ -84,22 +85,6 @@ const refuseCallback = (message: string): Effect.Effect<never, Validation> =>
 const readCallback = (text: string): Effect.Effect<ParsedCallback, Validation> => {
   const parsed = parseCallbackQuery(text);
   return parsed._tag === "Refused" ? refuseCallback(parsed.reason) : Effect.succeed(parsed);
-};
-
-/**
- * Checks that a pasted address is the redirect address the sign-in started
- * with, which tells a user who pasted the address of another sign-in or
- * another window. The port is part of it, and the query is not. An address
- * with a user name or a password never matches.
- */
-export const isRedirectAddress = (address: URL, redirectUri: string): boolean => {
-  const expected = new URL(redirectUri);
-  return (
-    address.username === "" &&
-    address.password === "" &&
-    address.origin === expected.origin &&
-    address.pathname === expected.pathname
-  );
 };
 
 /** Compares two secrets in constant time. */

@@ -729,7 +729,7 @@ const make = Effect.gen(function* () {
      * sign-in runs out (ten minutes). It changes nothing that is stored: the
      * attempt is kept in memory, and a newer start for the same server
      * replaces it. `redirectUri` is where the browser returns to
-     * (`McpServerSignInRedirectUri`). Fails with `NotFound` when there is no
+     * (`SignInRedirectUri`). Fails with `NotFound` when there is no
      * such server, and with `InvalidState` for a plugin server (whose
      * Connection is signed in again instead), `sign-in-unsupported` when the
      * server offers no sign-in through the browser, and `source-unreadable`

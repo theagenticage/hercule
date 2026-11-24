@@ -559,3 +559,33 @@ describe("mcp-server set-token", () => {
     ).rejects.toThrow("--token does not exist");
   });
 });
+
+// Tests that a value the command marks secret is never quoted back in an error.
+describe("a secret JSON field on stdin", () => {
+  const startOAuth = lookUpCommand("connection", "start-oauth");
+  const TOKEN = "xoxe-1-secret-token-0123456789";
+  const flags = ["--type", "slack/slack", "--redirect-uri", "http://127.0.0.1:53682/callback"];
+
+  it("reads a JSON object of client values from stdin", async () => {
+    const args = await parseArguments(
+      startOAuth,
+      [...flags, "--client-values-stdin"],
+      stubStdin(`{"configurationToken":"${TOKEN}"}\n`),
+    );
+
+    expect(args.payload["clientValues"]).toEqual({ configurationToken: TOKEN });
+  });
+
+  it("refuses malformed JSON with a fixed message that quotes nothing of it", async () => {
+    const failure = await parseArguments(
+      startOAuth,
+      [...flags, "--client-values-stdin"],
+      stubStdin(`{"configurationToken": ${TOKEN}`),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(UsageError);
+    const message = (failure as UsageError).message;
+    expect(message).toContain("expected a JSON object on stdin");
+    expect(message).not.toContain(TOKEN);
+  });
+});

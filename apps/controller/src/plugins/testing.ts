@@ -375,7 +375,8 @@ export const buildDeskMcpServer = (
  * replaces them.
  *
  * The Connection holds a pasted `token`, or, when `deviceProviderUrl` is
- * given, OAuth tokens that refresh at that provider.
+ * given, OAuth tokens that refresh at that provider. Every Connection is of
+ * the account `desk-1` unless `accountIsToken` makes the token the account.
  */
 export const buildMcpServerPlugin = (
   id: string,
@@ -385,6 +386,8 @@ export const buildMcpServerPlugin = (
     readonly registerType?: boolean;
     readonly capabilities?: ReadonlyArray<PluginCapability>;
     readonly deviceProviderUrl?: string;
+    /** Makes the pasted `token` the external account's id, so each token is a new account. */
+    readonly accountIsToken?: true;
   } = {},
 ): Plugin => ({
   manifest: {
@@ -420,7 +423,12 @@ export const buildMcpServerPlugin = (
                     scopes: [],
                   },
                 }),
-            validate: () => Effect.succeed({ displayName: "Desk", accountId: "desk-1" }),
+            validate: (credentials) =>
+              Effect.succeed({
+                displayName: "Desk",
+                accountId:
+                  options.accountIsToken === true ? (credentials["token"] ?? "desk-1") : "desk-1",
+              }),
           });
     const server = registerMcpServer(host, options.server ?? buildDeskMcpServer(id));
     return options.serverFirst === true

@@ -35,6 +35,8 @@ export interface RegisteredMcpServer {
   readonly connectionType: string;
   /** Scheme, host and optional port of the vendor's server. */
   readonly origin: string;
+  /** True when a new Connection of `connectionType` adds this server for itself. */
+  readonly addWhenConnected: boolean;
   /** Builds the URL and headers of a call to the vendor's server. Pure: no I/O. */
   readonly buildUpstreamRequest: McpServerContribution["buildUpstreamRequest"];
 }
@@ -96,6 +98,7 @@ export const registerMcpServerContribution = (
       description: decoded.description,
       connectionType: decoded.connectionType,
       origin: decoded.origin,
+      addWhenConnected: decoded.addWhenConnected === true,
       buildUpstreamRequest,
     });
   });

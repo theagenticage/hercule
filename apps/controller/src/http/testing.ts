@@ -18,6 +18,7 @@ import type * as Exit from "effect/Exit";
 import type * as Fiber from "effect/Fiber";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Redacted from "effect/Redacted";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -68,7 +69,9 @@ import {
   SessionInputDeadline,
   TextGenerationDeadline,
   RunServiceReferenceLayer,
+  ConnectionObserverLayer,
   DiscussionInputsReferenceLayer,
+  McpServerServiceReferenceLayer,
   ProviderAccountProbeDeadline,
   ProviderAccountProbeInterval,
   ProviderAccountProbingLayer,
@@ -206,8 +209,13 @@ const buildServices = (
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
         Layer.provideMerge(DiscussionInputsReferenceLayer),
-        // As in the real boot: a plugin's lifecycle change and a Connection's
-        // or an agent's delete validate the stored workflows again.
+        // As in the real boot: a Connection's create adds its plugin's MCP
+        // server, and its delete validates the stored workflows again.
+        Layer.provideMerge(
+          ConnectionObserverLayer.pipe(Layer.provideMerge(McpServerServiceReferenceLayer)),
+        ),
+        // As in the real boot: a plugin's lifecycle change and an agent's
+        // delete validate the stored workflows again.
         Layer.provideMerge(WorkflowValidityObserversLayer),
         // As in the real boot: the step that installs the shipped workflows
         // uses the workflow service and the task service.
@@ -604,6 +612,12 @@ export interface ServerOptions {
    */
   readonly expressionBudget?: Duration.Duration;
   /**
+   * A logger that receives every log line the controller writes, in place of
+   * the default one. A test that checks what the controller tells the operator
+   * collects the lines with it.
+   */
+  readonly logger?: Logger.Logger<unknown, void>;
+  /**
    * The plugin registry. The real one is compiled in, so a test passes its
    * own. A harness plugin is added when none of these offers harnesses.
    */
@@ -788,6 +802,10 @@ export const withServer = (
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
       provideTimings(options),
+      (effect) =>
+        options.logger === undefined
+          ? effect
+          : Effect.provide(effect, Logger.layer([options.logger])),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));
 };

@@ -55,7 +55,12 @@ const buildStack = () => {
     Layer.provide(
       Layer.succeed(ConnectionEntityFacts)({ recordFactsOfDeletion: (_id, deletion) => deletion }),
     ),
-    Layer.provide(Layer.succeed(ConnectionObserver)({ connectionDeleted: () => Effect.void })),
+    Layer.provide(
+      Layer.succeed(ConnectionObserver)({
+        connectionCreated: () => Effect.void,
+        connectionDeleted: () => Effect.void,
+      }),
+    ),
     Layer.provide(
       Layer.succeed(ActivePlugins)({ isActive: () => Effect.sync(() => pluginIsActive) }),
     ),

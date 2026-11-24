@@ -79,7 +79,13 @@ export {
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
 export { runHarnessReleaseCheckLoop } from "./harnesses";
-export { ConnectionServiceWithReferencesLayer } from "./connections";
+export {
+  ConnectionObserverLayer,
+  ConnectionServiceWithReferencesLayer,
+  McpServerServiceReference,
+  McpServerServiceReferenceFill,
+  McpServerServiceReferenceLayer,
+} from "./connections";
 export {
   McpServerCheckInterval,
   McpServerListHoldersLayer,

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Connection, PluginDetail } from "@hercule/contract";
+import type { Bridge } from "../../../../../ipc/bridge";
+import type { LinkOpenOutcome } from "../../../../../ipc/contract";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
 import {
   buildErrorBody,
@@ -61,7 +63,85 @@ const buildPlugin = (
   entityKinds: [],
 });
 
+/**
+ * Returns a plugin that declares an OAuth type with the public client
+ * `publicClient`, and, for a client created at setup, the checklist step a
+ * plugin writes in front of the sign-in.
+ */
+const buildClientPlugin = (
+  id: string,
+  word: string,
+  displayName: string,
+  publicClient: {
+    readonly redirectUris: readonly string[];
+    readonly clientId?: string;
+    readonly createdAtSetup?: {
+      readonly fields: readonly {
+        readonly name: string;
+        readonly label: string;
+        readonly secret: boolean;
+        readonly help: string;
+      }[];
+    };
+  },
+): PluginDetail => {
+  const base = buildPlugin(id, word, displayName, []);
+  return {
+    ...base,
+    contributions: [
+      {
+        extensionPoint: "connection-type",
+        id: `${id}/${word}`,
+        definition: {
+          type: `${id}/${word}`,
+          displayName,
+          setup: [
+            ...(publicClient.createdAtSetup !== undefined
+              ? [
+                  {
+                    kind: "checklist",
+                    markdown:
+                      "Hercule adds a small app.\n\n1. Open [api.example/apps](https://api.example/apps).",
+                  },
+                ]
+              : []),
+            { kind: "oauth" },
+          ],
+          oauth: {
+            authorizationUrl: "https://example.test/authorize",
+            tokenUrl: "https://example.test/token",
+            scopes: [],
+            publicClient,
+          },
+        },
+      },
+    ],
+  };
+};
+
+/** A plugin whose checklist tries to load an image, embed HTML and link to a script. */
+const PIXEL_CHECKLIST = [
+  "Read this first.",
+  "",
+  "![the Generate Token button](https://tracker.example/pixel.png)",
+  "",
+  '<img src="https://tracker.example/embedded.png"> and [a script](javascript:alert(1)).',
+  "",
+  "1. Open [the page](https://api.example/apps).",
+].join("\n");
+
 const PLUGINS: readonly PluginDetail[] = [
+  // A field named like an inherited property is an ordinary field.
+  buildClientPlugin("oddsy", "odd", "Oddsy", {
+    createdAtSetup: {
+      fields: [{ name: "constructor", label: "Odd token", secret: true, help: "Used once." }],
+    },
+    redirectUris: ["http://127.0.0.1/callback"],
+  }),
+  buildPlugin("pixel", "pixel", "Pixel", [
+    { kind: "checklist", markdown: PIXEL_CHECKLIST },
+    { kind: "oauth" },
+  ]),
   buildPlugin("github", "github", "GitHub", [
     { kind: "device" },
     {
@@ -81,6 +161,24 @@ const PLUGINS: readonly PluginDetail[] = [
   ]),
   // No plugin in the binary uses OAuth, so this one stands in.
   buildPlugin("mailbox", "mail", "Mailbox", [{ kind: "oauth" }]),
+  buildClientPlugin("slack", "slack", "Slack", {
+    createdAtSetup: {
+      fields: [
+        {
+          name: "configurationToken",
+          label: "Configuration token",
+          secret: true,
+          help: "Hercule uses it once to create the Slack app, and does not keep it.",
+        },
+      ],
+    },
+    redirectUris: ["http://127.0.0.1/oauth/callback", "http://127.0.0.1/callback"],
+  }),
+  // A shipped client that registered the controller's callback only, as Linear's does.
+  buildClientPlugin("linear", "linear", "Linear", {
+    clientId: "linear-client",
+    redirectUris: ["http://127.0.0.1:4937/oauth/callback"],
+  }),
   buildPlugin("chatter", "chat", "Chatter", [{ kind: "pairing" }]),
   // A step kind from a newer host, which this version does not know.
   buildPlugin("pigeon", "coop", "Pigeon Post", [{ kind: "carrier-pigeon" }]),
@@ -127,13 +225,21 @@ const buildDeviceStart = () => ({
 const openConnections = async (
   handlers: Readonly<Record<string, Handler>> = {},
   connections: () => readonly Connection[] = () => [OFFICE_PAPERS],
+  bridgeOptions: {
+    readonly signInReturn?: Bridge["signInReturn"];
+    readonly openLink?: (url: string) => Promise<LinkOpenOutcome>;
+  } = {},
 ) => {
   const calls = stubApi({
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, plugins: PLUGINS }),
     "GET /api/v1/connections": () => ({ body: { items: connections() } }),
     ...handlers,
   });
-  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const fake = createFakeBridge({
+    controllerUrl: CONTROLLER_URL,
+    token: "bearer",
+    ...bridgeOptions,
+  });
   const app = await renderApp(fake, { path: "/settings/connections" });
   return { calls, fake, ...app };
 };
@@ -661,6 +767,667 @@ describe("the setup of a Connection with OAuth", () => {
     expect(dialog.querySelector(".setup-uri")).toBeNull();
     await userEvent.click(view.getByRole("button", { name: "Sign in with Mailbox" }));
     expect((await view.findByRole("alert")).textContent).toBe(reason);
+  });
+});
+
+/** What main answers a wait for the browser's return. */
+type ReturnOutcome =
+  | { readonly _tag: "received"; readonly callbackQuery: string }
+  | { readonly _tag: "cancelled" }
+  | { readonly _tag: "timed-out" };
+
+/**
+ * Plays main's `signInReturn`: a listener on `redirectUri` (or none when
+ * `listens` is false), whose wait the test settles with `comeBack`.
+ */
+const buildSignInReturn = (listens = true) => {
+  const waits: ((outcome: ReturnOutcome) => void)[] = [];
+  return {
+    waits,
+    comeBack: (callbackQuery: string) => waits[0]!({ _tag: "received", callbackQuery }),
+    listen: vi.fn(() =>
+      Promise.resolve(
+        listens
+          ? ({
+              _tag: "listening",
+              listenerId: "l-1",
+              redirectUri: "http://127.0.0.1:51234/callback",
+            } as const)
+          : ({ _tag: "unavailable" } as const),
+      ),
+    ),
+    wait: vi.fn(
+      () =>
+        new Promise<ReturnOutcome>((resolve) => {
+          waits.push(resolve);
+        }),
+    ),
+    cancel: vi.fn(() => Promise.resolve(undefined)),
+  };
+};
+
+const START_OAUTH = "/api/v1/oauth/start";
+const FINISH_OAUTH = "/api/v1/oauth/finish";
+const SLACK_AUTHORIZATION_URL = "https://slack.example/authorize?state=s1";
+const SLACK_TOKEN = "not-a-real-configuration-token-1";
+
+const NEEDS_REAUTH_SLACK: Connection = {
+  ...buildConnection("01a06d02-7700-7000-8000-000000000009", "slack/slack", "work"),
+  status: "needs-reauth",
+};
+
+/** The Connection that `connection.finishOAuth` answers. */
+const SLACK_CONNECTED: Connection = { ...NEEDS_REAUTH_SLACK, status: "connected" };
+
+/** Opens Slack's setup with a listener that the test settles. */
+const openSlackSetup = async (
+  handlers: Readonly<Record<string, Handler>> = {},
+  signInReturn = buildSignInReturn(),
+  openLink?: (url: string) => Promise<LinkOpenOutcome>,
+) => {
+  const app = await openConnections(
+    {
+      [`POST ${START_OAUTH}`]: { body: { authorizationUrl: SLACK_AUTHORIZATION_URL } },
+      ...handlers,
+    },
+    () => [],
+    { signInReturn, ...(openLink === undefined ? {} : { openLink }) },
+  );
+  const dialog = await openSetup("Slack");
+  return { ...app, signInReturn, dialog, view: within(dialog) };
+};
+
+describe("the setup of a Connection whose client is created at setup", () => {
+  it("shows the plugin's steps with a link, and asks for the token in a masked field", async () => {
+    const { dialog, view } = await openSlackSetup();
+    const button = () => view.getByRole<HTMLButtonElement>("button", { name: "Continue in Slack" });
+
+    expect(view.getByText("Hercule adds a small app.")).toBeTruthy();
+    expect(view.getByRole<HTMLAnchorElement>("link", { name: "api.example/apps" }).href).toBe(
+      "https://api.example/apps",
+    );
+    const token = view.getByLabelText<HTMLInputElement>("Configuration token");
+    expect(token.type).toBe("password");
+    expect(
+      view.getByText("Hercule uses it once to create the Slack app, and does not keep it."),
+    ).toBeTruthy();
+    // The plugin's steps say what happens, so no second line repeats it.
+    expect(dialog.textContent).not.toContain("You sign in to Slack in your browser.");
+    expect(button().disabled).toBe(true);
+
+    await userEvent.type(token, "  ");
+    expect(button().disabled).toBe(true);
+    await userEvent.type(token, SLACK_TOKEN);
+    expect(button().disabled).toBe(false);
+  });
+
+  it("sends the token with the listener's address, waits, and closes on the answer of the finish", async () => {
+    let answerStart: (answer: { body: unknown }) => void = () => undefined;
+    let answerFinish: (answer: { body: unknown }) => void = () => undefined;
+    const { calls, fake, signInReturn, dialog, view, context } = await openSlackSetup({
+      [`POST ${START_OAUTH}`]: () =>
+        new Promise((resolve) => {
+          answerStart = resolve;
+        }),
+      [`POST ${FINISH_OAUTH}`]: () =>
+        new Promise((resolve) => {
+          answerFinish = resolve;
+        }),
+    });
+    const token = view.getByLabelText<HTMLInputElement>("Configuration token");
+    await userEvent.type(token, `${SLACK_TOKEN}{Enter}`);
+
+    // While Slack makes the app, the token has left the form and no mutation holds it.
+    expect(
+      view.getByRole("button", { name: "Creating the Slack app…" }).getAttribute("aria-busy"),
+    ).toBe("true");
+    expect(token.value).toBe("");
+    expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
+    answerStart({ body: { authorizationUrl: SLACK_AUTHORIZATION_URL } });
+
+    expect(
+      await view.findByText("Approve Hercule in your browser, then come back here."),
+    ).toBeTruthy();
+    expect(readCalls(calls, "POST", START_OAUTH).map((call) => call.body)).toEqual([
+      {
+        type: "slack/slack",
+        redirectUri: "http://127.0.0.1:51234/callback",
+        clientValues: { configurationToken: SLACK_TOKEN },
+      },
+    ]);
+    expect(fake.openedLinks).toEqual([SLACK_AUTHORIZATION_URL]);
+    expect(signInReturn.wait).toHaveBeenCalledWith({
+      listenerId: "l-1",
+      authorizationUrl: SLACK_AUTHORIZATION_URL,
+    });
+    expect(dialog.textContent).not.toContain(SLACK_TOKEN);
+    // The user is approving in the browser, so nothing is working yet: no spinner.
+    expect(view.getByRole("status").querySelector(".spin")).toBeNull();
+
+    signInReturn.comeBack("code=c1&state=s1");
+
+    // The finish is a request that ends by itself, so it has the spinner, and the
+    // one-time code is held by the request alone.
+    await waitFor(() => {
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+    });
+    expect(view.getByRole("status").querySelector(".spin")).not.toBeNull();
+    expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
+    answerFinish({ body: SLACK_CONNECTED });
+
+    await waitForClosed();
+    expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
+      { callbackQuery: "code=c1&state=s1" },
+    ]);
+  });
+
+  it("arms the wait for the browser's return before it opens the browser", async () => {
+    const { fake, signInReturn, view } = await openSlackSetup();
+    const open = vi.spyOn(fake.bridge.link, "open");
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(signInReturn.wait.mock.invocationCallOrder[0]).toBeLessThan(
+      open.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("says why the browser did not open, also when the system answers that it did not", async () => {
+    const { view } = await openSlackSetup({}, buildSignInReturn(), () =>
+      Promise.resolve({
+        _tag: "NotOpened",
+        reason: "The system could not open your default browser.",
+      }),
+    );
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "The browser did not open the sign-in page: The system could not open your default browser.",
+    );
+  });
+
+  it("says why the browser did not open when Open again is pressed while the controller finishes", async () => {
+    let opens = 0;
+    let answerFinish: (answer: { body: unknown }) => void = () => undefined;
+    const { calls, signInReturn, view } = await openSlackSetup(
+      {
+        [`POST ${FINISH_OAUTH}`]: () =>
+          new Promise((resolve) => {
+            answerFinish = resolve;
+          }),
+      },
+      buildSignInReturn(),
+      () => {
+        opens += 1;
+        return Promise.resolve(
+          opens === 1
+            ? { _tag: "Opened" }
+            : { _tag: "NotOpened", reason: "The system could not open your default browser." },
+        );
+      },
+    );
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+    await waitFor(() => {
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+    });
+
+    await userEvent.click(view.getByRole("button", { name: "Open again" }));
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "The browser did not open the sign-in page: The system could not open your default browser.",
+    );
+    answerFinish({ body: SLACK_CONNECTED });
+    await waitForClosed();
+  });
+
+  it("keeps the browser's return in the field when the controller cannot be reached, and finishes with it on Finish", async () => {
+    let attempts = 0;
+    const { calls, signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("The network is down.");
+        return { body: SLACK_CONNECTED };
+      },
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+
+    // The sign-in is not over: the return is in the field, with what happened.
+    expect(
+      await view.findByText(
+        "The controller could not be reached, so the sign-in is not finished. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(view.getByLabelText<HTMLInputElement>("Address").value).toBe("code=c1&state=s1");
+    expect(view.queryByText(/page that does not load/)).toBeNull();
+    await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+    await waitForClosed();
+    expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
+      { callbackQuery: "code=c1&state=s1" },
+      { callbackQuery: "code=c1&state=s1" },
+    ]);
+  });
+
+  it("also keeps it for a server error, but ends the sign-in on a refusal of the controller", async () => {
+    const answers: { status: number; body: unknown }[] = [
+      { status: 500, body: buildErrorBody("internal", "Something broke.") },
+      { status: 409, body: buildErrorBody("invalid_state", "Slack refused the code.") },
+    ];
+    const { signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: () => answers.shift()!,
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+    expect(
+      await view.findByText("The controller failed while finishing the sign-in. Try again."),
+    ).toBeTruthy();
+
+    await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+    expect(await view.findByText(/Slack refused the code\./)).toBeTruthy();
+    expect(view.getByRole("button", { name: "Start again" })).toBeTruthy();
+  });
+
+  it("shows why the app could not be made, with the token gone and the field ready for a new one", async () => {
+    const { view } = await openSlackSetup({
+      [`POST ${START_OAUTH}`]: {
+        status: 400,
+        body: buildErrorBody("validation", "This configuration token has expired. Make a new one."),
+      },
+    });
+    const token = view.getByLabelText<HTMLInputElement>("Configuration token");
+    await userEvent.type(token, SLACK_TOKEN);
+    await userEvent.click(view.getByRole("button", { name: "Continue in Slack" }));
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "This configuration token has expired. Make a new one.",
+    );
+    expect(token.value).toBe("");
+    const button = view.getByRole<HTMLButtonElement>("button", { name: "Continue in Slack" });
+    expect(button.disabled).toBe(true);
+    await userEvent.type(token, "not-a-real-configuration-token-2");
+    expect(button.disabled).toBe(false);
+    expect(view.queryByRole("alert")).toBeNull();
+  });
+
+  it("ends the listener on Cancel", async () => {
+    const { signInReturn, view } = await openSlackSetup();
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+
+    await userEvent.click(view.getByRole("button", { name: "Cancel" }));
+
+    await waitForClosed();
+    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+  });
+
+  it("ends a listener that was opened after the dialog closed, and opens and awaits nothing", async () => {
+    let answerStart: (answer: { body: unknown }) => void = () => undefined;
+    const { fake, signInReturn, view } = await openSlackSetup({
+      [`POST ${START_OAUTH}`]: () =>
+        new Promise((resolve) => {
+          answerStart = resolve;
+        }),
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await userEvent.keyboard("{Escape}");
+    await waitForClosed();
+    // The listener is closed as soon as the dialog is, before the controller answers.
+    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+
+    answerStart({ body: { authorizationUrl: SLACK_AUTHORIZATION_URL } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(fake.openedLinks).toEqual([]);
+    expect(signInReturn.wait).not.toHaveBeenCalled();
+    expect(signInReturn.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishes nothing when the browser's return arrives after the dialog closed", async () => {
+    const { calls, signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    await userEvent.click(view.getByRole("button", { name: "Cancel" }));
+    await waitForClosed();
+
+    // A return that was already queued when the user cancelled.
+    signInReturn.comeBack("code=c1&state=s1");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+  });
+
+  it("shows why the sign-in did not finish, and starts again with an empty field", async () => {
+    const { signInReturn, view } = await openSlackSetup({
+      [`POST ${FINISH_OAUTH}`]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "Slack refused the code. Start again."),
+      },
+    });
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+
+    expect(await view.findByText(/Slack refused the code\. Start again\./)).toBeTruthy();
+    await userEvent.click(view.getByRole("button", { name: "Start again" }));
+
+    expect(view.getByLabelText<HTMLInputElement>("Configuration token").value).toBe("");
+    expect(signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+  });
+
+  it("draws a plugin's checklist as text, lists and web links only", async () => {
+    await openConnections({}, () => []);
+    const dialog = await openSetup("Pixel");
+    const view = within(dialog);
+
+    expect(dialog.querySelector("img")).toBeNull();
+    // The image shows as its alternative text, and the embedded HTML as the characters written.
+    expect(view.getByText(/the Generate Token button/)).toBeTruthy();
+    expect(dialog.textContent).toContain('<img src="https://tracker.example/embedded.png">');
+    expect([...dialog.querySelectorAll("a")].map((link) => link.getAttribute("href"))).toEqual([
+      "https://api.example/apps",
+    ]);
+    expect(dialog.textContent).toContain("a script");
+  });
+
+  describe("when the browser's return is delivered after the dialog was closed but before it unmounts", () => {
+    /** Starts the sign-in, and returns once the dialog waits for the browser. */
+    const startAndWait = async () => {
+      const app = await openSlackSetup({
+        [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+      });
+      await userEvent.type(app.view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      await app.view.findByText("Approve Hercule in your browser, then come back here.");
+      return app;
+    };
+    /**
+     * Delivers the return right after `closeSynchronously`, while the dialog's
+     * `close` event is still on its way, as it is in a browser: the event is
+     * queued, so everything delivered before it must already find the
+     * sign-in ended. Then the event runs, and the dialog unmounts.
+     */
+    const deliverAfter = async (
+      app: Awaited<ReturnType<typeof startAndWait>>,
+      closeSynchronously: () => void,
+    ) => {
+      const close = vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function (
+        this: HTMLDialogElement,
+      ) {
+        this.removeAttribute("open");
+        setTimeout(() => {
+          this.dispatchEvent(new Event("close"));
+        }, 30);
+      });
+      closeSynchronously();
+      app.signInReturn.comeBack("code=c1&state=s1");
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      // The close event has not run yet, so the dialog is still mounted.
+      expect(app.dialog.isConnected).toBe(true);
+      expect(readCalls(app.calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+      expect(app.signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+      await waitForClosed();
+      expect(readCalls(app.calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+      close.mockRestore();
+    };
+
+    it("finishes nothing after Cancel", async () => {
+      const app = await startAndWait();
+      await deliverAfter(app, () => {
+        fireEvent.click(app.view.getByRole("button", { name: "Cancel" }));
+      });
+    });
+
+    it("finishes nothing after Esc", async () => {
+      const app = await startAndWait();
+      await deliverAfter(app, () => {
+        fireEvent(app.dialog, new Event("cancel", { cancelable: true }));
+      });
+    });
+
+    it("finishes nothing after a click on the scrim", async () => {
+      const app = await startAndWait();
+      await deliverAfter(app, () => {
+        fireEvent.pointerDown(app.dialog);
+        fireEvent.click(app.dialog);
+      });
+    });
+  });
+
+  it("takes a field named like an inherited property as an ordinary field", async () => {
+    const { calls } = await openConnections(
+      { [`POST ${START_OAUTH}`]: { body: { authorizationUrl: SLACK_AUTHORIZATION_URL } } },
+      () => [],
+      { signInReturn: buildSignInReturn() },
+    );
+    const view = within(await openSetup("Oddsy"));
+    const button = view.getByRole<HTMLButtonElement>("button", { name: "Continue in Oddsy" });
+    expect(button.disabled).toBe(true);
+    expect(view.getByLabelText<HTMLInputElement>("Odd token").value).toBe("");
+
+    await userEvent.type(view.getByLabelText("Odd token"), `${SLACK_TOKEN}{Enter}`);
+
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    const [start] = readCalls(calls, "POST", START_OAUTH);
+    expect(Object.keys((start?.body as { clientValues: object }).clientValues)).toEqual([
+      "constructor",
+    ]);
+    expect(
+      Object.getOwnPropertyDescriptor(
+        (start?.body as { clientValues: object }).clientValues,
+        "constructor",
+      )?.value,
+    ).toBe(SLACK_TOKEN);
+  });
+
+  describe("when nothing can listen and the user pastes the address", () => {
+    /** Answers each start with its own state, as the controller does. */
+    const answerStarts = () => {
+      let attempts = 0;
+      return () => {
+        attempts += 1;
+        return { body: { authorizationUrl: `https://slack.example/authorize?state=s${attempts}` } };
+      };
+    };
+    /** Returns the address the browser ends on for the start that sent `redirectUri`. */
+    const buildReturnAddress = (calls: readonly Call[], attempt: number, state: string): string => {
+      const body = readCalls(calls, "POST", START_OAUTH)[attempt - 1]?.body as {
+        redirectUri: string;
+      };
+      return `${body.redirectUri}?code=c-${state}&state=${state}`;
+    };
+
+    it("asks for the address, refuses text that is no address, and finishes with the right one", async () => {
+      const { calls, view } = await openSlackSetup(
+        {
+          [`POST ${START_OAUTH}`]: answerStarts(),
+          [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+        },
+        buildSignInReturn(false),
+      );
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+
+      expect(
+        await view.findByText(
+          "After you approve, your browser shows a page that does not load. Copy its address and paste it here.",
+        ),
+      ).toBeTruthy();
+      expect(buildReturnAddress(calls, 1, "s1")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback\?/);
+
+      await userEvent.type(view.getByLabelText("Address"), "not an address");
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+      expect(
+        (await view.findByText(/That is not what the browser ended on/)).textContent,
+      ).toContain("there is no state");
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+
+      const pasted = buildReturnAddress(calls, 1, "s1");
+      await userEvent.clear(view.getByLabelText("Address"));
+      await userEvent.type(view.getByLabelText("Address"), pasted);
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+      await waitForClosed();
+      expect(readCalls(calls, "POST", FINISH_OAUTH).map((call) => call.body)).toEqual([
+        { callbackQuery: pasted },
+      ]);
+    });
+
+    it("refuses the address of another sign-in before the controller completes that one", async () => {
+      const { calls, view } = await openSlackSetup(
+        {
+          [`POST ${START_OAUTH}`]: answerStarts(),
+          [`POST ${FINISH_OAUTH}`]: (call) => ({
+            status: 409,
+            body: buildErrorBody("invalid_state", `Refused ${String(call.body)}.`),
+          }),
+        },
+        buildSignInReturn(false),
+      );
+      // Attempt 1 ends in a refusal, so the user starts again.
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      await userEvent.type(
+        await view.findByLabelText("Address"),
+        buildReturnAddress(calls, 1, "s1"),
+      );
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+      await userEvent.click(await view.findByRole("button", { name: "Start again" }));
+      await userEvent.type(
+        view.getByLabelText("Configuration token"),
+        `${"not-a-real-configuration-token-2"}{Enter}`,
+      );
+      const second = await view.findByLabelText("Address");
+      expect(readCalls(calls, "POST", START_OAUTH)).toHaveLength(2);
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+
+      // The address of attempt 1 belongs to the sign-in that ended.
+      await userEvent.type(second, buildReturnAddress(calls, 1, "s1"));
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+      expect(
+        await view.findByText(
+          "This address is from another sign-in: paste the address the browser ended on for this one.",
+        ),
+      ).toBeTruthy();
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+    });
+
+    it("keeps the pasted address out of the page and the mutation cache while the controller finishes", async () => {
+      let answerFinish: (answer: { body: unknown }) => void = () => undefined;
+      const { calls, view, context } = await openSlackSetup(
+        {
+          [`POST ${START_OAUTH}`]: answerStarts(),
+          [`POST ${FINISH_OAUTH}`]: () =>
+            new Promise((resolve) => {
+              answerFinish = resolve;
+            }),
+        },
+        buildSignInReturn(false),
+      );
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      const address = await view.findByLabelText<HTMLInputElement>("Address");
+      await userEvent.type(address, buildReturnAddress(calls, 1, "s1"));
+      await userEvent.click(view.getByRole("button", { name: "Finish" }));
+
+      await waitFor(() => {
+        expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+      });
+      expect(address.value).toBe("");
+      expect(view.getByRole("status").querySelector(".spin")).not.toBeNull();
+      expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
+      answerFinish({ body: SLACK_CONNECTED });
+      await waitForClosed();
+    });
+  });
+
+  describe("on a reconnect", () => {
+    const openReconnect = async () => {
+      const signInReturn = buildSignInReturn();
+      const app = await openConnections(
+        {
+          [`POST ${START_OAUTH}`]: { body: { authorizationUrl: SLACK_AUTHORIZATION_URL } },
+          [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+        },
+        () => [NEEDS_REAUTH_SLACK],
+        { signInReturn },
+      );
+      await chooseMenuItem(
+        await screen.findByRole("button", { name: "More for Slack · work" }),
+        "Reconnect…",
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Reconnect Slack · work" });
+      return { ...app, view: within(dialog) };
+    };
+
+    it("signs in again with no field, and sends no token", async () => {
+      const { calls, view } = await openReconnect();
+
+      expect(view.queryByLabelText("Configuration token")).toBeNull();
+      expect(view.queryByRole("link")).toBeNull();
+      await userEvent.click(view.getByRole("button", { name: "Sign in to Slack again" }));
+      await view.findByText("Approve Hercule in your browser, then come back here.");
+
+      expect(readCalls(calls, "POST", START_OAUTH).map((call) => call.body)).toEqual([
+        {
+          type: "slack/slack",
+          connectionId: NEEDS_REAUTH_SLACK.id,
+          redirectUri: "http://127.0.0.1:51234/callback",
+        },
+      ]);
+    });
+
+    it("asks for a new token only after Set up the Slack app again", async () => {
+      const { calls, view } = await openReconnect();
+
+      await userEvent.click(view.getByRole("button", { name: "Set up the Slack app again" }));
+      expect(
+        view.getByText("Use this when the app named Hercule was deleted in Slack."),
+      ).toBeTruthy();
+      expect(view.getByRole("link", { name: "api.example/apps" })).toBeTruthy();
+      expect(view.queryByRole("button", { name: "Set up the Slack app again" })).toBeNull();
+      await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      await view.findByText("Approve Hercule in your browser, then come back here.");
+
+      expect(readCalls(calls, "POST", START_OAUTH).map((call) => call.body)).toEqual([
+        {
+          type: "slack/slack",
+          connectionId: NEEDS_REAUTH_SLACK.id,
+          redirectUri: "http://127.0.0.1:51234/callback",
+          clientValues: { configurationToken: SLACK_TOKEN },
+        },
+      ]);
+    });
+  });
+
+  it("keeps the controller's callback and the origin for a client that registered only that", async () => {
+    const signInReturn = buildSignInReturn();
+    const { calls, fake } = await openConnections(
+      { [`POST ${START_OAUTH}`]: { body: { authorizationUrl: "https://linear.example/a" } } },
+      () => [],
+      { signInReturn },
+    );
+    const view = within(await openSetup("Linear"));
+
+    await userEvent.click(view.getByRole("button", { name: "Sign in with Linear" }));
+
+    await view.findByText("Finish in your browser");
+    expect(readCalls(calls, "POST", START_OAUTH).map((call) => call.body)).toEqual([
+      { type: "linear/linear", origin: "http://controller.test" },
+    ]);
+    expect(signInReturn.listen).not.toHaveBeenCalled();
+    expect(fake.openedLinks).toEqual(["https://linear.example/a"]);
   });
 });
 

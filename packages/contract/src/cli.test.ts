@@ -278,6 +278,7 @@ const COMMANDS: Record<string, string> = {
   "connection.setCredentials": "connection set-credentials",
   "connection.listChoices": "connection list-choices",
   "connection.startOAuth": "connection start-oauth",
+  "connection.finishOAuth": "connection finish-oauth",
   "connection.startDeviceFlow": "connection start-device-flow",
   "connection.pollDeviceFlow": "connection poll-device-flow",
 
@@ -372,6 +373,8 @@ const STDIN_FIELDS = [
   "secret.set value",
   "connection.create credentials",
   "connection.setCredentials credentials",
+  "connection.startOAuth clientValues",
+  "connection.finishOAuth callbackQuery",
   "task.create description",
   "task.update description",
   "notification.create body",

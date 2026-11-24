@@ -13,6 +13,7 @@ import {
   parseTokens,
   postForm,
   refreshAccess,
+  requestTokens,
   serializeTokens,
   TOKEN_REQUEST_TIMEOUT_SECONDS,
   type OAuthClient,
@@ -353,6 +354,56 @@ describe("a token endpoint's answer", () => {
       expect(failure._tag).toBe("ProviderRefused");
     },
   );
+
+  it("reads any answer with HTTP 429 to a refresh as an unreachable provider, whatever error its body names", async () => {
+    for (const error of [
+      "slow_down",
+      "ratelimited",
+      "a_throttling_code_nobody_listed",
+      "invalid_grant",
+    ]) {
+      const failure = await failWith(
+        () => new Response(JSON.stringify({ error, interval: 10 }), { status: 429 }),
+      );
+
+      expect(failure._tag, error).toBe("ProviderUnreachable");
+    }
+  });
+
+  it("reads slow_down with HTTP 429 as a refusal for a device poll, as RFC 8628 has it", async () => {
+    const failure = await Effect.runPromise(
+      Effect.flip(requestTokens(TOKEN_URL, { grant_type: "device_code" })).pipe(
+        Effect.provide(
+          fakeTokenEndpoint(
+            () =>
+              new Response(JSON.stringify({ error: "slow_down", interval: 10 }), { status: 429 }),
+          ).layer,
+        ),
+      ),
+    );
+
+    expect(failure).toMatchObject({ _tag: "ProviderRefused", code: "slow_down" });
+  });
+
+  it("reads an error code the caller lists as transient as an unreachable provider, in a 200 as well", async () => {
+    const answer = (status: number) => () =>
+      new Response(JSON.stringify({ ok: false, error: "internal_error" }), { status });
+    const failure = (status: number, transientErrors: ReadonlyArray<string>) =>
+      Effect.runPromise(
+        Effect.flip(
+          refreshAccess({
+            tokenUrl: TOKEN_URL,
+            client: { clientId: "id" },
+            refreshToken: "r",
+            transientErrors,
+          }),
+        ).pipe(Effect.provide(fakeTokenEndpoint(answer(status)).layer)),
+      );
+
+    expect((await failure(200, ["internal_error"]))._tag).toBe("ProviderUnreachable");
+    // The same answer from a caller that lists nothing is a refusal.
+    expect((await failure(200, []))._tag).toBe("ProviderRefused");
+  });
 
   it("stays unreachable for a rate limit whose body cannot be read", async () => {
     const failure = await failWith(

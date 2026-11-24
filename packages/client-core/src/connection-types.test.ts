@@ -45,6 +45,8 @@ describe("listConnectionTypes", () => {
         pluginName: "Plugin paper-trail",
         setup: PAPER.setup,
         hasPublicClient: false,
+        clientSetupFields: [],
+        registeredRedirectUris: [],
         configSchema: PAPER.configSchema,
         feeds: [],
       },
@@ -85,6 +87,42 @@ describe("listConnectionTypes", () => {
 
     expect(shipped?.hasPublicClient).toBe(true);
     expect(own?.hasPublicClient).toBe(false);
+    expect(shipped?.registeredRedirectUris).toEqual(["http://127.0.0.1:4937/oauth/callback"]);
+    expect(shipped?.clientSetupFields).toEqual([]);
+    expect(own?.registeredRedirectUris).toEqual([]);
+  });
+
+  it("reads the fields a type's client is created from, and the addresses it registers", () => {
+    const [created] = listConnectionTypes([
+      buildPlugin("slack", [
+        {
+          extensionPoint: "connection-type",
+          id: "slack/slack",
+          definition: {
+            type: "slack/slack",
+            displayName: "Slack",
+            setup: [{ kind: "oauth" }],
+            oauth: {
+              authorizationUrl: "https://slack.example/authorize",
+              tokenUrl: "https://slack.example/token",
+              scopes: [],
+              publicClient: {
+                createdAtSetup: {
+                  fields: [{ name: "configurationToken", label: "Configuration token" }],
+                },
+                redirectUris: ["http://127.0.0.1/callback"],
+              },
+            },
+          },
+        },
+      ]),
+    ]);
+
+    expect(created?.hasPublicClient).toBe(true);
+    expect(created?.clientSetupFields).toEqual([
+      { name: "configurationToken", label: "Configuration token" },
+    ]);
+    expect(created?.registeredRedirectUris).toEqual(["http://127.0.0.1/callback"]);
   });
 
   it("gives a type the feeds of the event source that polls for it", () => {
@@ -180,6 +218,8 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   pluginName: "P",
   setup,
   hasPublicClient: false,
+  clientSetupFields: [],
+  registeredRedirectUris: [],
   feeds: [],
 });
 

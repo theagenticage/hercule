@@ -784,10 +784,20 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/connections/:id/choices/:field",
   },
+  // The input may carry the values the user pastes for a type that creates its
+  // OAuth client at setup, such as a provider's configuration token.
   "connection.startOAuth": {
     requires: "connection.manage",
+    carriesSecret: true,
     method: "POST",
     path: "/api/v1/oauth/start",
+  },
+  // The query holds the one-time `code` of the sign-in.
+  "connection.finishOAuth": {
+    requires: "connection.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/oauth/finish",
   },
   "connection.startDeviceFlow": {
     requires: "connection.manage",

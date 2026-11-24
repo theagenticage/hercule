@@ -458,7 +458,7 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three harness plugins, the six provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the three harness plugins, the six provider plugins and the github, sentry, linear and slack plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
@@ -472,6 +472,7 @@ describe("the shipped registry after a boot", () => {
       "github",
       "sentry",
       "linear",
+      "slack",
     ]);
   });
 

@@ -26,6 +26,8 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   pluginName: "P",
   setup,
   hasPublicClient: false,
+  clientSetupFields: [],
+  registeredRedirectUris: [],
   feeds: [],
 });
 

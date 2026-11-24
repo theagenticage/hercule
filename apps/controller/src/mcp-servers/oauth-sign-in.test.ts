@@ -4,7 +4,7 @@
  * tests in the contract.
  */
 import { describe, expect, it } from "vitest";
-import { isRedirectAddress } from "./oauth-sign-in";
+import { isRedirectAddress } from "@hercule/contract";
 
 describe("isRedirectAddress", () => {
   const redirectUri = "http://127.0.0.1:50123/callback";

@@ -44,6 +44,19 @@ export interface ConnectionType {
    * so the user has none to register.
    */
   readonly hasPublicClient: boolean;
+  /**
+   * The values the user pastes once so the type's plugin can create the OAuth
+   * client for each Connection (a Slack configuration token, for one). Empty
+   * unless the public client is created at setup. They are sent as
+   * `clientValues` on the start of the redirect flow and never kept.
+   */
+  readonly clientSetupFields: ReadonlyArray<CredentialField>;
+  /**
+   * The redirect URIs the type's public client registered with the provider.
+   * Empty when the type has no public client. They decide which return a
+   * redirect flow can use (see `decideOAuthReturnPath`).
+   */
+  readonly registeredRedirectUris: ReadonlyArray<string>;
   readonly configSchema?: Record<string, unknown>;
   /**
    * The feeds the type's event source polls, in the order the plugin declares
@@ -123,14 +136,24 @@ export const listConnectionTypes = (
         if (typeof type !== "string" || typeof displayName !== "string") return [];
         const setup = definition?.["setup"];
         const configSchema = readJsonObject(definition?.["configSchema"]);
-        const oauth = readJsonObject(definition?.["oauth"]);
+        const publicClient = readJsonObject(
+          readJsonObject(definition?.["oauth"])?.["publicClient"],
+        );
+        const clientSetupFields = readJsonObject(publicClient?.["createdAtSetup"])?.["fields"];
+        const registeredRedirectUris = publicClient?.["redirectUris"];
         return [
           {
             type,
             displayName,
             pluginName: plugin.displayName,
             setup: Array.isArray(setup) ? (setup as ReadonlyArray<SetupStep>) : [],
-            hasPublicClient: readJsonObject(oauth?.["publicClient"]) !== undefined,
+            hasPublicClient: publicClient !== undefined,
+            clientSetupFields: Array.isArray(clientSetupFields)
+              ? (clientSetupFields as ReadonlyArray<CredentialField>)
+              : [],
+            registeredRedirectUris: Array.isArray(registeredRedirectUris)
+              ? registeredRedirectUris.filter((uri): uri is string => typeof uri === "string")
+              : [],
             ...(configSchema === undefined ? {} : { configSchema }),
             feeds: feedsByType.get(type) ?? [],
           },

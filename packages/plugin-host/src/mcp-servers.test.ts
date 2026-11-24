@@ -74,6 +74,11 @@ describe("McpServerDeclaration", () => {
     expect(isValid(declaration)).toBe(true);
     expect(isValid({ ...declaration, description: "First line.\nSecond line." })).toBe(false);
   });
+
+  it("accepts addWhenConnected only as true", () => {
+    expect(isValid({ ...declaration, addWhenConnected: true })).toBe(true);
+    expect(isValid({ ...declaration, addWhenConnected: false })).toBe(false);
+  });
 });
 
 describe("registerMcpServer", () => {

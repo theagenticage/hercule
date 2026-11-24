@@ -24,6 +24,7 @@
     "@hercule/plugin-openrouter": "workspace:*",
     "@hercule/plugin-pi": "workspace:*",
     "@hercule/plugin-sentry": "workspace:*",
+    "@hercule/plugin-slack": "workspace:*",
     "@hercule/plugin-zai": "workspace:*",
     "@hercule/process-log": "workspace:*",
     "@hercule/protocol": "workspace:*",

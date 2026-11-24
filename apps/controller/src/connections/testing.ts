@@ -5,13 +5,29 @@
  * with a device flow.
  */
 import { expect } from "vitest";
+import { join } from "node:path";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import type {
   ActivationContext,
   ConnectionsRuntime,
   ExternalAccount,
   Plugin,
 } from "@hercule/plugin-host";
+import { buildHomePaths, HerculeHome } from "../config";
+import { EntityObservationsLayer, IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
+import { TestDatabase } from "../db/testing";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { get } from "../http/testing";
+import { NotifierLayer } from "../notifications";
+import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
+import { ServingPromotionStateLayer } from "../promotion/testing";
+import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
+import { ConnectionEntityFacts } from "./entity-facts";
+import { ConnectionObserver } from "./observer";
+import { ConnectionReferences } from "./references";
+import { ConnectionTypesLayer } from "./runtime";
+import { ConnectionServiceLayer } from "./service";
 
 /** A connection as the API returns it. */
 export interface ConnectionRecord {
@@ -167,3 +183,39 @@ export const createDeviceProvider = (): DeviceProvider => {
     },
   };
 };
+
+/**
+ * Builds the real connection service over the real repositories, a temporary
+ * database file and a key file in `home`. The caller removes `home`. This
+ * builds no other domain, so no record names a Connection and a delete
+ * records no Task fact.
+ */
+export const buildConnectionServiceStack = (home: string) =>
+  ConnectionServiceLayer.pipe(
+    Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
+    Layer.provide(
+      Layer.succeed(ConnectionEntityFacts)({ recordFactsOfDeletion: (_id, deletion) => deletion }),
+    ),
+    Layer.provide(
+      Layer.succeed(ConnectionObserver)({
+        connectionCreated: () => Effect.void,
+        connectionDeleted: () => Effect.void,
+      }),
+    ),
+    Layer.provideMerge(
+      PluginHostLayer.pipe(
+        Layer.provide([IngestExecutorLayer, OpenSignalsLayer, EntityObservationsLayer]),
+      ),
+    ),
+    Layer.provideMerge(ConnectionTypesLayer),
+    Layer.provideMerge(PluginConfigsLayer),
+    Layer.provideMerge(SecretLayer),
+    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(AuditLogLayer),
+    // The ingest records Task facts, which are Platform Events.
+    Layer.provideMerge(PlatformEventsLayer),
+    Layer.provideMerge(ServingPromotionStateLayer),
+    Layer.provideMerge(TestDatabase),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
+  );

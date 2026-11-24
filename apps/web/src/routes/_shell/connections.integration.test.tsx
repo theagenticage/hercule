@@ -729,6 +729,443 @@ describe("Connections > a redirect flow", () => {
   });
 });
 
+describe("Connections > a redirect flow that returns to the user's machine", () => {
+  const TOKEN = "not-a-real-configuration-token-1";
+
+  /** A type whose client is created at setup, and whose provider accepts a loopback return only. */
+  const CHATSY_TYPE = {
+    type: "chatsy/chat",
+    displayName: "Chatsy",
+    setup: [
+      {
+        kind: "checklist",
+        markdown:
+          "Chatsy adds a small app.\n\n1. Open [chatsy.test/apps](https://chatsy.test/apps).",
+      },
+      { kind: "oauth" },
+    ],
+    oauth: {
+      authorizationUrl: "https://chatsy.test/authorize",
+      tokenUrl: "https://chatsy.test/token",
+      scopes: [],
+      publicClient: {
+        createdAtSetup: {
+          fields: [
+            {
+              name: "configurationToken",
+              label: "Configuration token",
+              help: "Used once to create the app, and not kept.",
+            },
+          ],
+        },
+        redirectUris: ["http://127.0.0.1/oauth/callback", "http://127.0.0.1/callback"],
+      },
+    },
+  };
+  /** The same type, whose checklist tries to load an image, embed HTML and link to a script. */
+  const PIXEL_TYPE = {
+    ...CHATSY_TYPE,
+    type: "pixelsy/pixel",
+    displayName: "Pixelsy",
+    setup: [
+      {
+        kind: "checklist",
+        markdown: [
+          "Read this first.",
+          "",
+          "![the Generate Token button](https://tracker.test/pixel.png)",
+          "",
+          '<img src="https://tracker.test/embedded.png"> and [a script](javascript:alert(1)).',
+          "",
+          "1. Open [the page](https://chatsy.test/apps).",
+        ].join("\n"),
+      },
+      { kind: "oauth" },
+    ],
+  };
+  /** The same type again, whose field is named like a property every object inherits. */
+  const ODD_TYPE = {
+    ...CHATSY_TYPE,
+    type: "oddsy/odd",
+    displayName: "Oddsy",
+    oauth: {
+      ...CHATSY_TYPE.oauth,
+      publicClient: {
+        ...CHATSY_TYPE.oauth.publicClient,
+        createdAtSetup: { fields: [{ name: "__proto__", label: "Odd token" }] },
+      },
+    },
+  };
+  const CHATSY: Connection = {
+    ...SKY,
+    id: "0199c0ff-dddd-7000-8000-000000000004",
+    type: "chatsy/chat",
+    displayName: "acme · rogier",
+  };
+  const LOOPBACK_ADDRESS = /^http:\/\/127\.0\.0\.1:\d+\/callback$/;
+
+  /** Answers each start with the provider's page of its own state, as the controller does. */
+  const answerStarts = () => {
+    let attempts = 0;
+    return (): Answer => {
+      attempts += 1;
+      return { body: { authorizationUrl: `https://chatsy.test/authorize?state=s-${attempts}` } };
+    };
+  };
+  /** Returns the start payload of the `attempt`th start. */
+  const readStart = (
+    api: { readonly calls: readonly { method: string; path: string; body: unknown }[] },
+    attempt: number,
+  ): Record<string, unknown> =>
+    api.calls.filter((call) => call.path === "/api/v1/oauth/start")[attempt - 1]?.body as Record<
+      string,
+      unknown
+    >;
+  /** Returns the address the browser ends on for the `attempt`th start: its redirect URI, and its state. */
+  const buildReturnAddress = (
+    api: { readonly calls: readonly { method: string; path: string; body: unknown }[] },
+    attempt: number,
+  ): string =>
+    `${String(readStart(api, attempt)["redirectUri"])}?code=c-${attempt}&state=s-${attempt}`;
+  const withoutRedirectUri = (body: unknown): unknown =>
+    Object.fromEntries(
+      Object.entries(body as Record<string, unknown>).filter(([key]) => key !== "redirectUri"),
+    );
+
+  const openChatsy = (
+    connections: readonly Connection[],
+    extra: Readonly<Record<string, Handler>> = {},
+  ) =>
+    openApp(connections, {
+      "GET /api/v1/plugins": {
+        body: [
+          ...CATALOG,
+          buildPlugin("chatsy", CHATSY_TYPE),
+          buildPlugin("pixelsy", PIXEL_TYPE),
+          buildPlugin("oddsy", ODD_TYPE),
+        ],
+      },
+      "POST /api/v1/oauth/start": answerStarts(),
+      ...extra,
+    });
+
+  /** Opens Chatsy's form, pastes the token and presses Continue. Returns the user. */
+  const startChatsy = async (token = TOKEN) => {
+    const user = userEvent.setup();
+    await user.click(
+      within(await findTypeOffer("Chatsy")).getByRole("button", { name: "Connect" }),
+    );
+    await user.type(screen.getByLabelText("Configuration token"), token);
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+    return user;
+  };
+
+  it("asks for the token, starts with a loopback address, and shows where to paste the address the browser ends on", async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const { api } = await openChatsy([]);
+
+    await user.click(
+      within(await findTypeOffer("Chatsy")).getByRole("button", { name: "Connect" }),
+    );
+    expect(screen.getByRole<HTMLAnchorElement>("link", { name: "chatsy.test/apps" }).href).toBe(
+      "https://chatsy.test/apps",
+    );
+    expect(readPageText()).not.toContain("You sign in to Chatsy in your browser.");
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "Continue in Chatsy" });
+    expect(button.disabled).toBe(true);
+    const field = screen.getByLabelText<HTMLInputElement>("Configuration token");
+    expect(field.type).toBe("password");
+    await user.type(field, TOKEN);
+    await user.click(button);
+
+    await screen.findByText(/After you approve, your browser shows a page that does not load/);
+    const [write] = listWrites(api);
+    expect(write).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
+    expect(withoutRedirectUri(write?.body)).toEqual({
+      type: "chatsy/chat",
+      clientValues: { configurationToken: TOKEN },
+    });
+    expect(String(readStart(api, 1)["redirectUri"])).toMatch(LOOPBACK_ADDRESS);
+    expect(open).toHaveBeenCalledWith(
+      "https://chatsy.test/authorize?state=s-1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(screen.getByRole<HTMLAnchorElement>("link", { name: "Open Chatsy" }).href).toBe(
+      "https://chatsy.test/authorize?state=s-1",
+    );
+    // Chatsy has the token now, so the page no longer holds it.
+    expect(readPageText()).not.toContain(TOKEN);
+    // The address field takes the focus, so the user can paste at once.
+    expect(document.activeElement).toBe(screen.getByLabelText("Address"));
+    vi.unstubAllGlobals();
+  });
+
+  it("finishes with the pasted address, and refuses text that is not an address before sending it", async () => {
+    vi.stubGlobal("open", vi.fn());
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": { body: { ...CHATSY, status: "connected" } },
+    });
+    const user = await startChatsy();
+    const address = await screen.findByLabelText("Address");
+
+    await user.type(address, "not an address");
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(await screen.findByText(/That is not what the browser ended on/)).toBeTruthy();
+    expect(listWrites(api)).toHaveLength(1);
+
+    await user.clear(address);
+    await user.type(address, buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(2);
+    });
+    expect(listWrites(api)[1]).toMatchObject({ method: "POST", path: "/api/v1/oauth/finish" });
+    expect(listWrites(api)[1]?.body).toEqual({ callbackQuery: buildReturnAddress(api, 1) });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Address")).toBeNull();
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the pasted address in the field when the controller cannot be reached, and sends it again on Finish", async () => {
+    vi.stubGlobal("open", vi.fn());
+    let attempts = 0;
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("The network is down.");
+        return { body: { ...CHATSY, status: "connected" } };
+      },
+    });
+    const user = await startChatsy();
+    const address = await screen.findByLabelText<HTMLInputElement>("Address");
+    await user.type(address, buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(
+      await screen.findByText(
+        "The controller could not be reached, so the sign-in is not finished. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(address.value).toBe(buildReturnAddress(api, 1));
+    expect(screen.queryByRole("button", { name: "Start again" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Address")).toBeNull();
+    });
+    const finishes = listWrites(api).filter((write) => write.path.endsWith("/finish"));
+    expect(finishes.map((write) => write.body)).toEqual([
+      { callbackQuery: buildReturnAddress(api, 1) },
+      { callbackQuery: buildReturnAddress(api, 1) },
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses the address of another sign-in, so the controller does not complete that one in its place", async () => {
+    vi.stubGlobal("open", vi.fn());
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": {
+        status: 409,
+        body: buildErrorBody("invalid_state", "Chatsy refused the code."),
+      },
+    });
+    // Attempt 1 ends in a refusal, so the user starts again.
+    const user = await startChatsy();
+    await user.type(await screen.findByLabelText("Address"), buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    await user.click(await screen.findByRole("button", { name: "Start again" }));
+    await user.type(
+      screen.getByLabelText("Configuration token"),
+      "not-a-real-configuration-token-2",
+    );
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+    const second = await screen.findByLabelText("Address");
+    expect(readStart(api, 2)).toBeTruthy();
+    expect(listWrites(api).filter((write) => write.path.endsWith("/finish"))).toHaveLength(1);
+
+    // The address of attempt 1 belongs to the sign-in that ended.
+    await user.type(second, buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(
+      await screen.findByText(
+        "This address is from another sign-in: paste the address the browser ended on for this one.",
+      ),
+    ).toBeTruthy();
+    expect(listWrites(api).filter((write) => write.path.endsWith("/finish"))).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the pasted address out of the field and the mutation cache while the controller finishes", async () => {
+    vi.stubGlobal("open", vi.fn());
+    let answerFinish: (answer: Answer) => void = () => undefined;
+    const { api, queryClient } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": () =>
+        new Promise<Answer>((resolve) => {
+          answerFinish = resolve;
+        }),
+    });
+    const user = await startChatsy();
+    const address = await screen.findByLabelText<HTMLInputElement>("Address");
+    await user.type(address, buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(2);
+    });
+    expect(address.value).toBe("");
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+    answerFinish({ body: { ...CHATSY, status: "connected" } });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Address")).toBeNull();
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("shows why the controller refused the sign-in, focuses Start again, and starts again at an empty token field", async () => {
+    vi.stubGlobal("open", vi.fn());
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": {
+        status: 409,
+        body: buildErrorBody("invalid_state", "Chatsy refused the code."),
+      },
+    });
+    const user = await startChatsy();
+    await user.type(await screen.findByLabelText("Address"), buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(await screen.findByText("Chatsy refused the code.")).toBeTruthy();
+    // The button that was pressed is gone, so the focus moves to the way on.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Start again" }));
+    await user.click(screen.getByRole("button", { name: "Start again" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Configuration token").value).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the provider's refusal of the token, with the token gone and the field ready for a new one", async () => {
+    vi.stubGlobal("open", vi.fn());
+    await openChatsy([], {
+      "POST /api/v1/oauth/start": {
+        status: 400,
+        body: buildErrorBody("validation", "This configuration token has expired."),
+      },
+    });
+    const user = await startChatsy();
+
+    expect(await screen.findByText("This configuration token has expired.")).toBeTruthy();
+    expect(screen.getByLabelText<HTMLInputElement>("Configuration token").value).toBe("");
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Continue in Chatsy" }).disabled,
+    ).toBe(true);
+    await user.type(screen.getByLabelText("Configuration token"), "x");
+    expect(screen.queryByText("This configuration token has expired.")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens nothing when the controller answers the start after the user cancelled", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    let answerStart: (answer: Answer) => void = () => undefined;
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/start": () =>
+        new Promise<Answer>((resolve) => {
+          answerStart = resolve;
+        }),
+    });
+    const user = await startChatsy();
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    answerStart({ body: { authorizationUrl: "https://chatsy.test/authorize?state=s-1" } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Address")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("takes a field named like an inherited property as an ordinary field", async () => {
+    vi.stubGlobal("open", vi.fn());
+    const user = userEvent.setup();
+    const { api } = await openChatsy([]);
+
+    await user.click(within(await findTypeOffer("Oddsy")).getByRole("button", { name: "Connect" }));
+    const field = screen.getByLabelText<HTMLInputElement>("Odd token");
+    expect(field.value).toBe("");
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Continue in Oddsy" }).disabled,
+    ).toBe(true);
+    await user.type(field, TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Oddsy" }));
+
+    await screen.findByLabelText("Address");
+    const { clientValues } = readStart(api, 1) as { clientValues: object };
+    expect(Object.keys(clientValues)).toEqual(["__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(clientValues, "__proto__")?.value).toBe(TOKEN);
+    vi.unstubAllGlobals();
+  });
+
+  it("draws a plugin's checklist as text, lists and web links only", async () => {
+    const user = userEvent.setup();
+    await openChatsy([]);
+
+    await user.click(
+      within(await findTypeOffer("Pixelsy")).getByRole("button", { name: "Connect" }),
+    );
+
+    const form = getFormWithField("Configuration token");
+    expect(form.querySelector("img")).toBeNull();
+    expect(readPageText(form)).toContain("the Generate Token button");
+    expect(readPageText(form)).toContain('<img src="https://tracker.test/embedded.png">');
+    expect([...form.querySelectorAll("a")].map((link) => link.getAttribute("href"))).toEqual([
+      "https://chatsy.test/apps",
+    ]);
+  });
+
+  it("signs in again on a reconnect with no token, and asks for one after Set up the app again, with the focus in its field", async () => {
+    vi.stubGlobal("open", vi.fn());
+    const { api } = await openChatsy([CHATSY]);
+    const user = userEvent.setup();
+
+    const row = await findConnectionRow(CHATSY);
+    await user.click(within(row).getByRole("button", { name: "Reconnect" }));
+    expect(screen.queryByLabelText("Configuration token")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Sign in to Chatsy again" }));
+    await screen.findByLabelText("Address");
+    expect(withoutRedirectUri(readStart(api, 1))).toEqual({
+      type: "chatsy/chat",
+      connectionId: CHATSY.id,
+    });
+    expect(String(readStart(api, 1)["redirectUri"])).toMatch(LOOPBACK_ADDRESS);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(
+      within(await findConnectionRow(CHATSY)).getByRole("button", { name: "Reconnect" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Set up the Chatsy app again" }));
+    expect(readPageText()).toContain("Use this when the app named Hercule was deleted in Chatsy.");
+    // The button that was pressed is gone, so the focus moves to the field that took its place.
+    expect(document.activeElement).toBe(screen.getByLabelText("Configuration token"));
+    await user.type(screen.getByLabelText("Configuration token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+    await screen.findByLabelText("Address");
+    expect(readStart(api, 2)).toMatchObject({
+      connectionId: CHATSY.id,
+      clientValues: { configurationToken: TOKEN },
+    });
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("Connections > reconnecting and removing", () => {
   const STALE: Connection = { ...PAPER, status: "needs-reauth", statusDetail: "token revoked" };
 

@@ -4,10 +4,10 @@
  * plugin.
  */
 export { githubTokens, GithubTokenUnavailable, type GithubToken } from "./github";
-export { CALLBACK_PATH, OAUTH_TOKENS } from "./oauth";
+export { CALLBACK_PATH, CATCHER_PATH, OAUTH_TOKENS, REDIRECT_URI_PATHS } from "./oauth";
 export { ActivePlugins } from "./active-plugins";
 export { ConnectionEntityFacts } from "./entity-facts";
-export { ConnectionObserver } from "./observer";
+export { ConnectionObserver, type CreatedConnection } from "./observer";
 export { PluginConfigs } from "./plugin-configs";
 export { ConnectionReferences, type ConnectionReference } from "./references";
 export {

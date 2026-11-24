@@ -30,6 +30,8 @@ import type * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -43,6 +45,8 @@ import {
   decodeAgainst,
   listChoiceFields,
   type ConnectionValidationFailed,
+  type CreatedOAuthClient,
+  type CredentialField,
   type ExternalAccount,
 } from "@hercule/plugin-host";
 import {
@@ -51,6 +55,7 @@ import {
   ConnectionCredentialsInput,
   ConnectionDevicePollInput,
   ConnectionDeviceStartInput,
+  ConnectionOAuthFinishInput,
   ConnectionOAuthStartInput,
   ConnectionStatus,
   ConnectionUpdateInput,
@@ -63,8 +68,10 @@ import {
   createNotFoundError,
   createValidationError,
   formatIssue,
+  isRedirectAddress,
   listDecodeIssues,
   MAX_PLUGIN_MESSAGE_LENGTH,
+  parseCallbackQuery,
   summarizeCause,
   truncateMessage,
   type Connection,
@@ -79,9 +86,10 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, USER_ACTOR } from "../actor";
+import { CurrentActor, currentStamp, requireGrant, USER_ACTOR, type Actor } from "../actor";
 import { mintToken } from "../credentials";
 import {
+  afterCommit,
   nowIso,
   buildPageInputFields,
   refuseCursor,
@@ -97,12 +105,12 @@ import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
 import {
   buildAuthorizationUrl,
-  CALLBACK_PATH,
-  decodeCallback,
   exchangeDeviceCode,
+  isRegisteredRedirectUri,
   oauthClients,
   OAUTH_TOKENS,
   buildRedirectUri,
+  CATCHER_PATH,
   requestDeviceCode,
   SETUP_LIFETIME_MS,
   SLOW_DOWN_STEP_SECONDS,
@@ -119,7 +127,9 @@ import {
   type StoredConnection,
 } from "./repository";
 import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
-import { oauthSetupRepository } from "./oauth-setups";
+import type { StoredSetup } from "./oauth-setups";
+import { pendingOAuthSetups } from "./pending-oauth-setups";
+import { PromotionState } from "../promotion";
 import type { SetupTarget, StoredSetupTarget } from "./setup-target";
 
 /** The input of `connection.query`: filters, page size and sort order. */
@@ -219,7 +229,8 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   if (mcpServers.length > 0) {
     parts.push(
       `MCP servers call out with this connection's credentials: ${mcpServers.join(", ")}; ` +
-        "remove each server first with `hercule mcp-server delete <id>`, then delete this connection",
+        "remove each server first, in Settings > MCP servers (or with `hercule mcp-server delete <id>`), " +
+        "then delete this connection",
     );
   }
   return parts.join("; ");
@@ -302,7 +313,7 @@ const describeUnregisteredOrigin = (
   origin: string,
 ): string => {
   const name = contribution.displayName;
-  const addresses = redirectUris.map((uri) => uri.slice(0, -CALLBACK_PATH.length));
+  const addresses = redirectUris.map((uri) => URL.parse(uri)?.origin ?? uri);
   const labels = contribution.setup.flatMap((step) =>
     step.kind === "credentials" ? step.fields.map((field) => lowerFirstWord(field.label)) : [],
   );
@@ -310,6 +321,18 @@ const describeUnregisteredOrigin = (
     labels.length === 0
       ? ""
       : `, or paste your ${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)} instead`;
+  // A client that registered the desktop app's catcher accepts any port of an
+  // address on this computer, so its registered addresses name no port and
+  // listing them would send the user to port 80.
+  if (redirectUris.some((uri) => URL.parse(uri)?.pathname === CATCHER_PATH)) {
+    return (
+      `Signing in with ${name} works only when your browser comes back to an address on ` +
+      `your own computer, and not to ${origin}. Use the Hercule desktop app, or start the ` +
+      `sign-in from the command line with --redirect-uri and paste the address your browser ` +
+      `ends on, or open Hercule at ${new Intl.ListFormat("en", { type: "disjunction" }).format(addresses)} ` +
+      `with its own port${otherFlow}.`
+    );
+  }
   return (
     `Signing in with ${name} works only at ` +
     `${new Intl.ListFormat("en", { type: "disjunction" }).format(addresses)}, not at ${origin}. ` +
@@ -318,7 +341,268 @@ const describeUnregisteredOrigin = (
   );
 };
 
+/**
+ * Builds the refusal for a flow that asked to return to an address on the
+ * user's machine that the type's public client did not register, or whose
+ * type has no public client at all. The message names what works.
+ */
+const describeUnregisteredReturnAddress = (
+  contribution: Contribution,
+  redirectUris: ReadonlyArray<string> | undefined,
+  redirectUri: string,
+): string => {
+  const name = contribution.displayName;
+  if (redirectUris === undefined) {
+    return (
+      `Signing in with ${name} cannot return to ${redirectUri}: the type has no OAuth client ` +
+      `that registered an address on your computer. Start the sign-in with the origin of the ` +
+      `browser instead, so that the provider sends it back to Hercule.`
+    );
+  }
+  const addresses = redirectUris.map((uri) => `${uri} (on any port, when it names none)`);
+  return (
+    `Signing in with ${name} cannot return to ${redirectUri}: its OAuth client registered only ` +
+    `${new Intl.ListFormat("en", { type: "disjunction" }).format(addresses)}.`
+  );
+};
+
+/**
+ * Builds the refusal for a start that has no OAuth client to sign in with.
+ * `clientFields` is the fields a type that creates its own client declares,
+ * and `undefined` for any other type, whose client is its plugin's settings.
+ */
+const describeMissingClient = (
+  pluginId: string,
+  clientFields: ReadonlyArray<CredentialField> | undefined,
+): string => {
+  if (clientFields === undefined) {
+    return (
+      `the plugin ${pluginId} has no OAuth client credentials: set its clientId ` +
+      `config field and its clientSecret secret before connecting`
+    );
+  }
+  const labels = clientFields.map((field) => lowerFirstWord(field.label));
+  return (
+    `this Connection has no app yet: paste a new ` +
+    `${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)} to set it up again`
+  );
+};
+
+/**
+ * Why a redirect flow ended without a Connection, as a word of its own. The
+ * six `Outcome` words are what the controller's callback page shows, and
+ * these are what `connection.finishOAuth` refuses with, so they tell apart the
+ * ways it refuses before it claims a flow from the ways a claimed flow ends.
+ *
+ * - `no-live-attempt`: no flow of this caller waits for the answer: its
+ *   `state` is unknown, ran out, was finished already, or belongs to a flow
+ *   that returns elsewhere or was started by another caller. Nothing was
+ *   claimed.
+ * - `wrong-address`: the pasted address is not the redirect address the flow
+ *   started with. Nothing was claimed.
+ * - `connection-changed`: the Connection being reconnected was deleted, or its
+ *   credentials were replaced, while the user was at the provider.
+ * - The other four are the `Outcome` words of the same name.
+ */
+type FinishFailure =
+  | "no-live-attempt"
+  | "wrong-address"
+  | "connection-changed"
+  | "denied"
+  | "exchange-failed"
+  | "rejected"
+  | "other-account";
+
+/**
+ * How a finish failed, with what a refusal needs to know about the flow:
+ * `reusedApp` holds the fields of the type's app when the flow was a
+ * reconnect that signed in with the Connection's own app, and is `undefined`
+ * for any other flow.
+ */
+interface FinishError {
+  readonly failure: FinishFailure;
+  readonly reusedApp: ReusedApp | undefined;
+  /** For `rejected`: what the type's plugin said when it could not check the account. */
+  readonly detail?: string;
+}
+
+/** The app of a reconnect that signs in with the Connection's own app: the type's name and what sets the app up. */
+interface ReusedApp {
+  readonly displayName: string;
+  readonly fields: ReadonlyArray<CredentialField>;
+}
+
+/** An account check that the type's plugin failed, with its own message. */
+interface AccountCheckFailed {
+  readonly accountCheckFailed: string;
+}
+
+/** Converts a failed finish to the `Outcome` word the callback page's URL carries. */
+const decideCallbackOutcome = (failure: FinishFailure): Outcome =>
+  failure === "no-live-attempt" || failure === "wrong-address" || failure === "connection-changed"
+    ? "expired"
+    : failure;
+
+/**
+ * Returns the sentence that tells the user what to do when the app a
+ * reconnect signs in with may be gone: the user may have deleted it at the
+ * provider, and signing in again would reuse it. Starting with new values
+ * creates a new app.
+ */
+const describeAppSetUpAgain = (app: ReusedApp): string => {
+  const labels = app.fields.map((field) => lowerFirstWord(field.label));
+  return (
+    ` If the app was deleted at the provider, set up the ${app.displayName} app again: sign in ` +
+    `again with a new ${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)}. ` +
+    "On the command line, add --client-values-stdin to hercule connection start-oauth."
+  );
+};
+
+/**
+ * Builds the refusal `connection.finishOAuth` answers a failed finish with:
+ * what happened, and what to do. `reusedApp` holds the fields of the type's
+ * app when the flow was a reconnect that signed in with the Connection's own
+ * app, which a refusal of the code may mean was deleted.
+ */
+const buildFinishRefusal = (
+  failure: FinishFailure,
+  reusedApp: ReusedApp | undefined,
+  detail: string | undefined,
+): Validation | InvalidState => {
+  const appHint = reusedApp === undefined ? "" : describeAppSetUpAgain(reusedApp);
+  switch (failure) {
+    case "no-live-attempt":
+      return createValidationError(
+        [
+          {
+            path: ["callbackQuery"],
+            message:
+              "no sign-in of yours is waiting for this answer: it was finished already, it " +
+              "ran out after 10 minutes, or someone else started it. Start the sign-in again",
+          },
+        ],
+        "no sign-in of yours is waiting for this answer",
+      );
+    case "wrong-address":
+      return createValidationError([
+        {
+          path: ["callbackQuery"],
+          message:
+            "this is not the address the sign-in was to return to: paste the address your " +
+            "browser ended on after you approved the sign-in",
+        },
+      ]);
+    case "connection-changed":
+      return createInvalidStateError(
+        "the Connection was deleted, or signed in again, while you were at the provider, so " +
+          "nothing was changed. Start the sign-in again if you still want it",
+      );
+    case "denied":
+      return createInvalidStateError(
+        "the provider ended the sign-in without a code: you declined it, or the provider " +
+          `reported an error. Start the sign-in again to try again.${appHint}`,
+      );
+    case "exchange-failed":
+      return createInvalidStateError(
+        "the provider did not accept the code, or could not be reached, so nothing was " +
+          `changed. Start the sign-in again.${appHint}`,
+      );
+    case "rejected":
+      return createInvalidStateError(
+        "the provider issued tokens, but checking the account failed" +
+          (detail === undefined ? "." : `: ${endSentence(detail)}`) +
+          " Nothing was changed. Start the sign-in again",
+      );
+    case "other-account":
+      return createInvalidStateError(
+        "you signed in with another account than the one this Connection belongs to, so " +
+          "nothing was changed. A reconnect must stay with the same account, because the " +
+          "Connection's triggers and resources are tied to it: sign in with that account, " +
+          "or create a new Connection for the other one",
+      );
+  }
+};
+
+/** Returns the redirect URI a stored flow used: its own, or the controller's callback for the flow's origin. */
+const buildSetupRedirectUri = (setup: StoredSetup): string =>
+  setup.redirectUri ?? buildRedirectUri(setup.origin);
+
+/** What replaces a value the user pasted where a plugin's message quotes it. */
+const REMOVED = "[removed]";
+
+/**
+ * The shortest pasted value of a field not declared secret that is removed
+ * from a plugin's message. A shorter value, such as `1`, would blank out
+ * unrelated text.
+ */
+const MIN_REDACTED_LENGTH = 8;
+
+/**
+ * Returns `message` with every value the user pasted replaced by `[removed]`:
+ * the values of the fields in `secretFields` at any length, and any other
+ * value of `MIN_REDACTED_LENGTH` characters or more.
+ * A plugin's refusal is shown to the user and may be stored in a log, and a
+ * provider that echoes what it was sent would otherwise put the pasted token
+ * there. The longest values go first, so a value that contains another is
+ * removed whole.
+ */
+const redactPastedValues = (
+  message: string,
+  values: Record<string, string>,
+  secretFields: ReadonlySet<string>,
+): string =>
+  Object.entries(values)
+    .map(([name, value]) => ({ name, value: value.trim() }))
+    // A field the type declares secret is removed at any length, because the
+    // type says its value must never be shown. The other values are removed
+    // only from `MIN_REDACTED_LENGTH`, as a short one would blank out text.
+    .filter(({ name, value }) =>
+      secretFields.has(name) ? value.length > 0 : value.length >= MIN_REDACTED_LENGTH,
+    )
+    .map(({ value }) => value)
+    .sort((left, right) => right.length - left.length)
+    .reduce((text, value) => text.split(value).join(REMOVED), message);
+
+/**
+ * Returns the message of a failed check of the account with the tokens the
+ * provider just issued removed from it, whatever their length. A provider or a
+ * plugin may echo the token it was sent, and the message goes on to the user.
+ */
+const removeTokensFromMessage = (message: string, tokens: TokenSet): string =>
+  redactPastedValues(
+    message,
+    {
+      accessToken: tokens.accessToken,
+      ...(tokens.refreshToken === undefined ? {} : { refreshToken: tokens.refreshToken }),
+    },
+    new Set(["accessToken", "refreshToken"]),
+  );
+
+/**
+ * Builds the fixed message of a refused start whose plugin failed while
+ * creating the OAuth client in a way it did not report, or answered with no
+ * client id. The failure itself is not quoted, because the plugin handled what
+ * the user pasted. The provider may have created the app before the failure, so
+ * the message says what to look for and where.
+ */
+const buildCreatingClientFailed = (displayName: string): string =>
+  `the plugin failed while creating the OAuth client for ${displayName}, so nothing was set up. ` +
+  "An app that this sign-in created may have been left at the provider: look in the provider's " +
+  "own app settings and delete it, then try again";
+
+/**
+ * Returns the text as a sentence that ends in one stop: unchanged when it
+ * already ends in `.`, `!` or `?`, and with a `.` added otherwise. A plugin's
+ * message is joined to the sentences around it with this, so that it never
+ * ends in two stops.
+ */
+const endSentence = (text: string): string => {
+  const trimmed = text.trimEnd();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+};
+
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
+const decodeFinish = Schema.decodeUnknownEffect(ConnectionOAuthFinishInput);
 const decodeDeviceStart = Schema.decodeUnknownEffect(ConnectionDeviceStartInput);
 const decodeDevicePoll = Schema.decodeUnknownEffect(ConnectionDevicePollInput);
 
@@ -393,24 +677,27 @@ const describeOtherAccount = (account: ExternalAccount, connectionDisplayName: s
  * - `written`: the connection was created or reconnected, and is returned;
  * - `connection-gone`: the connection being reconnected was deleted while
  *   the user was at the provider;
+ * - `credentials-replaced`: the connection's credentials were replaced by
+ *   another sign-in or by pasted credentials after this flow started, so the
+ *   first replacement stands;
  * - `other-account`: the tokens belong to another account than the
  *   connection being reconnected. `connectionDisplayName` is the name of the
  *   connection's own account, for the refusal.
  *
- * Nothing is written in the last two cases.
+ * Nothing is written in the last three cases.
  */
 type TokenFlowWriteResult =
   | { readonly _tag: "written"; readonly connection: Connection }
   | { readonly _tag: "connection-gone" }
+  | { readonly _tag: "credentials-replaced" }
   | { readonly _tag: "other-account"; readonly connectionDisplayName: string };
 
-/** Fails an OAuth callback with the outcome to show the user. */
-const failWithOutcome = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
+/** The actor of a caller nobody knows. It holds no grant. */
+const NO_ACTOR: Actor = { _tag: "none" };
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
-  const setups = yield* oauthSetupRepository;
   const deviceSetups = yield* deviceSetupRepository;
   const findOAuthClient = yield* oauthClients;
   const secrets = yield* Secrets;
@@ -421,6 +708,56 @@ const make = Effect.gen(function* () {
   const observer = yield* ConnectionObserver;
   const activePlugins = yield* ActivePlugins;
   const pluginIntake = yield* PluginIntake;
+
+  const pending = yield* pendingOAuthSetups;
+  const serviceScope = yield* Effect.scope;
+
+  /**
+   * Runs the `write` that creates a Connection and, in the same uninterruptible
+   * step, starts the work `ConnectionObserver` does for it, so no interrupt can
+   * land between the durable commit and that start. Without this, a client that
+   * hangs up just as the commit finishes would leave a Connection that nothing
+   * ever tells the observer about, and a reconnect never repairs that.
+   *
+   * `describeCreated` says, from the write's result, which Connection was
+   * created and who created it, or `undefined` when the write created none.
+   * The observer's work runs in a fiber of the service's own scope and never
+   * fails. Returns the write's result and that fiber. The caller waits for it
+   * with `awaitObserver`, and a cancelled caller stops waiting without stopping
+   * the work.
+   */
+  const writeAndStartObserver = <A, E, R>(
+    write: Effect.Effect<A, E, R>,
+    describeCreated: (
+      result: A,
+    ) => Effect.Effect<{ readonly connection: Connection; readonly actor: Actor } | undefined>,
+  ): Effect.Effect<
+    { readonly result: A; readonly observer: Fiber.Fiber<void> | undefined },
+    E,
+    R
+  > =>
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const result = yield* write;
+        const created = yield* describeCreated(result);
+        const started =
+          created === undefined
+            ? undefined
+            : yield* Effect.forkIn(
+                observer.connectionCreated({
+                  connectionId: created.connection.id,
+                  type: created.connection.type,
+                  actor: created.actor,
+                }),
+                serviceScope,
+              );
+        return { result, observer: started };
+      }),
+    );
+
+  /** Waits for the observer's work that `writeAndStartObserver` started, if any. */
+  const awaitObserver = (started: Fiber.Fiber<void> | undefined): Effect.Effect<void> =>
+    started === undefined ? Effect.void : Fiber.join(started);
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
@@ -676,7 +1013,9 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks the input that starts a token flow, and returns what the flow does
-   * once it has tokens.
+   * once it has tokens, with the connection a reconnect names as it was read
+   * (`undefined` for a new connection), so its id and credentials generation
+   * travel together.
    *
    * - A new connection takes its label, topics and config from the input. The
    *   topics default to none and the config to empty; a missing label is
@@ -697,12 +1036,18 @@ const make = Effect.gen(function* () {
       readonly connectionId?: string;
     },
     contribution: Contribution,
-  ): Effect.Effect<SetupTarget, Validation | SqlError> =>
+  ): Effect.Effect<
+    { readonly target: SetupTarget; readonly reconnected: StoredConnection | undefined },
+    Validation | SqlError
+  > =>
     Effect.gen(function* () {
       if (input.connectionId === undefined) {
         const config = input.config ?? {};
         yield* readConfig(contribution, config);
-        return { kind: "create", label: input.label, labels: input.labels ?? [], config } as const;
+        return {
+          target: { kind: "create", label: input.label, labels: input.labels ?? [], config },
+          reconnected: undefined,
+        } as const;
       }
       const existing = Option.getOrUndefined(yield* connections.one(input.connectionId));
       if (existing === undefined) {
@@ -737,7 +1082,10 @@ const make = Effect.gen(function* () {
           ),
         );
       }
-      return { kind: "reconnect", connectionId: input.connectionId } as const;
+      return {
+        target: { kind: "reconnect", connectionId: input.connectionId },
+        reconnected: existing,
+      } as const;
     });
 
   /**
@@ -755,6 +1103,18 @@ const make = Effect.gen(function* () {
    *
    * `actor` is passed in rather than read, because the redirect flow's
    * callback arrives without a credential.
+   *
+   * `oauthClientId` is the OAuth client the plugin created for these tokens,
+   * stored with them in the same transaction. Without one, the connection
+   * keeps no client id, so a reconnect that signs in with a shipped or
+   * configured client, or a device flow, clears the id of an earlier created
+   * client together with the tokens it belonged to.
+   *
+   * `credentialsGeneration` is the connection's generation when the
+   * reconnect started. A reconnect writes nothing when the generation has
+   * moved, so of two sign-ins started from the same credentials the first to
+   * finish wins, and a client created for the second is not stored over the
+   * first's tokens.
    */
   const writeConnectionFromTokens = ({
     setup,
@@ -762,6 +1122,9 @@ const make = Effect.gen(function* () {
     account,
     tokens,
     actor,
+    oauthClientId,
+    credentialsGeneration,
+    onCommitted,
   }: {
     readonly setup: StoredSetupTarget;
     readonly connectionType: RegisteredConnectionType;
@@ -769,6 +1132,14 @@ const make = Effect.gen(function* () {
     readonly account: ExternalAccount;
     readonly tokens: TokenSet;
     readonly actor: string;
+    readonly oauthClientId: string | undefined;
+    readonly credentialsGeneration: number | undefined;
+    /**
+     * Runs once the transaction that writes the connection has committed, and
+     * never when it rolls back. The caller learns from it that the write is
+     * durable even when an interrupt keeps the result from reaching it.
+     */
+    readonly onCommitted?: () => void;
   }): Effect.Effect<TokenFlowWriteResult, SqlError> =>
     withTransaction(
       sql,
@@ -786,6 +1157,7 @@ const make = Effect.gen(function* () {
             ...buildWarningField(account),
             labels: setup.labels,
             config: setup.config,
+            ...(oauthClientId === undefined ? {} : { oauthClientId }),
             at: now,
           });
           id = row.id;
@@ -797,6 +1169,12 @@ const make = Effect.gen(function* () {
           id = setup.connectionId;
           const existing = Option.getOrUndefined(yield* connections.one(id));
           if (existing === undefined) return { _tag: "connection-gone" } as const;
+          if (
+            credentialsGeneration !== undefined &&
+            existing.credentialsGeneration !== credentialsGeneration
+          ) {
+            return { _tag: "credentials-replaced" } as const;
+          }
           if (isOtherAccount(account, existing)) {
             return {
               _tag: "other-account",
@@ -811,11 +1189,13 @@ const make = Effect.gen(function* () {
               statusDetail: null,
               warning: readAccountWarning(account),
               replacesCredentials: true,
+              oauthClientId: oauthClientId ?? null,
             },
             now,
           );
         }
         yield* replaceSecrets(id, { [OAUTH_TOKENS]: serializeTokens(tokens) });
+        if (onCommitted !== undefined) yield* afterCommit(onCommitted);
         yield* audit.append({
           kind: setup.kind === "create" ? "connection.created" : "connection.credentialsSet",
           actor,
@@ -831,77 +1211,321 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Handles the OAuth callback, and returns `ok` once the connection is
-   * written. Every way the flow can end early is a failure carrying the outcome
-   * to show the user, so the code below reads as the successful path.
+   * Checks the values the user pasted for the client a type creates, and
+   * returns them, or `undefined` when there is nothing to create a client from.
+   *
+   * - A type that creates no client takes no values.
+   * - A new Connection of a type that creates a client must give a value for
+   *   each declared field, and no other. A value that is only whitespace is
+   *   empty.
+   * - A reconnect may give none, and then uses the Connection's own client. If
+   *   it gives values, they are checked like a new Connection's.
+   *
+   * Fails with `validation`, naming each field that is missing, unknown or
+   * empty, and never quoting a value.
    */
-  const finishOAuthCallback = (query: unknown): Effect.Effect<Outcome, Outcome> =>
-    Effect.gen(function* () {
-      const params = yield* Effect.catchTag(decodeCallback(query), "SchemaError", () =>
-        failWithOutcome("expired"),
-      );
-      if (params.state === undefined) return yield* failWithOutcome("expired");
-      // Consume the setup in its own transaction, before anything waits on the
-      // provider, so a state presented twice finds nothing the second time.
-      const pending = yield* Effect.orDie(
-        withTransaction(sql, setups.consume(params.state, yield* nowIso)),
-      );
-      if (Option.isNone(pending)) return yield* failWithOutcome("expired");
-      const setup = pending.value;
-      // The provider sent the user back with an error instead of a code, or
-      // with neither: either way there is no code to exchange.
-      if (params.error !== undefined || params.code === undefined) {
-        return yield* failWithOutcome("denied");
-      }
+  const checkClientValues = (
+    contribution: Contribution,
+    fields: ReadonlyArray<CredentialField> | undefined,
+    given: Record<string, string> | undefined,
+    isNew: boolean,
+  ): Effect.Effect<Record<string, string> | undefined, Validation> => {
+    if (fields === undefined) {
+      return given === undefined
+        ? Effect.succeed(undefined)
+        : Effect.fail(
+            createValidationError([
+              {
+                path: ["clientValues"],
+                message: `the type ${contribution.type} creates no OAuth client, so it takes no clientValues`,
+              },
+            ]),
+          );
+    }
+    const declared = fields.map((field) => field.name);
+    if (given === undefined) {
+      return isNew
+        ? Effect.fail(
+            createValidationError([
+              {
+                path: ["clientValues"],
+                message: `give a value for each of ${declared.join(", ")}: ${contribution.displayName} sets up an app of its own for each new Connection`,
+              },
+            ]),
+          )
+        : Effect.succeed(undefined);
+    }
+    const issues = [
+      ...fields.flatMap((field) => {
+        const value = Object.hasOwn(given, field.name) ? given[field.name] : undefined;
+        if (value === undefined) {
+          return [
+            { path: ["clientValues", field.name], message: `give a value for ${field.label}` },
+          ];
+        }
+        return value.trim() === ""
+          ? [{ path: ["clientValues", field.name], message: `${field.label} cannot be empty` }]
+          : [];
+      }),
+      // A key the type does not declare may be a token pasted in the wrong
+      // place, so it is never put in a path or a message.
+      ...(Object.keys(given).some((name) => !declared.includes(name))
+        ? [
+            {
+              path: ["clientValues"],
+              message: `the type ${contribution.type} takes only these fields: ${declared.join(", ")}`,
+            },
+          ]
+        : []),
+    ];
+    return issues.length === 0 ? Effect.succeed(given) : Effect.fail(createValidationError(issues));
+  };
 
-      const registered = Option.getOrUndefined(yield* types.named(setup.type));
-      const oauth = registered?.contribution.oauth;
-      const client =
-        registered === undefined || oauth === undefined
-          ? Option.none()
-          : yield* Effect.orDie(findOAuthClient(registered.pluginId, oauth));
-      // The build no longer declares the type, or the type no longer declares
-      // a redirect flow, or no client is left to exchange the code with: a
-      // type without a public client keeps its client in its plugin's
-      // settings, and those were cleared while the user was at the provider.
-      // In every case the code cannot be exchanged.
-      if (registered === undefined || oauth === undefined || Option.isNone(client)) {
-        return yield* failWithOutcome("exchange-failed");
-      }
-
-      const tokens = yield* exchangeCode({
-        tokenUrl: oauth.tokenUrl,
-        client: client.value,
-        code: params.code,
-        redirectUri: buildRedirectUri(setup.origin),
-        codeVerifier: setup.codeVerifier,
-      }).pipe(
-        Effect.provide(FetchHttpClient.layer),
-        Effect.catch(() => failWithOutcome("exchange-failed")),
+  /**
+   * Asks the type's plugin to create the OAuth client for a Connection, from
+   * the values the user pasted, and returns it. Runs outside any transaction,
+   * because it calls the provider.
+   *
+   * Fails with `invalid_state` carrying the plugin's own message when the
+   * plugin refuses, because the plugin says what to do (a configuration token
+   * that has expired, for one). Every value the user pasted is removed from
+   * that message first (the fields in `secretFields` at any length, the others
+   * from 8 characters), because a provider may echo what it was sent. A plugin
+   * that throws, or answers without a client id, fails with a fixed message
+   * instead, because the failure may quote what the user pasted.
+   */
+  const createClient = (
+    contribution: Contribution,
+    values: Record<string, string>,
+    secretFields: ReadonlySet<string>,
+  ): Effect.Effect<CreatedOAuthClient, InvalidState> => {
+    const create = contribution.createOAuthClient;
+    if (create === undefined) {
+      return Effect.die(
+        new Error(`the type ${contribution.type} creates clients but has no createOAuthClient`),
       );
-      const account = yield* registered.contribution
-        .validate({ accessToken: tokens.accessToken })
-        .pipe(
-          Effect.provide(FetchHttpClient.layer),
-          Effect.catchTag("ConnectionValidationFailed", () => failWithOutcome("rejected")),
+    }
+    return Effect.suspend(() => create(values)).pipe(
+      Effect.provide(FetchHttpClient.layer),
+      Effect.mapError((failure) =>
+        createInvalidStateError(
+          truncateMessage(redactPastedValues(failure.message, values, secretFields)),
+        ),
+      ),
+      Effect.catchDefect(() =>
+        Effect.fail(createInvalidStateError(buildCreatingClientFailed(contribution.displayName))),
+      ),
+      Effect.filterOrFail(
+        (client) => client.clientId !== "",
+        () => createInvalidStateError(buildCreatingClientFailed(contribution.displayName)),
+      ),
+    );
+  };
+
+  /**
+   * Finishes a redirect flow from what the browser came back with, and
+   * returns the written Connection. It is the one body behind both the
+   * controller's callback page and `connection.finishOAuth`. Every way the
+   * flow can end without a Connection fails with a `FinishFailure`.
+   *
+   * `claimant` says who finishes, and so which flows are theirs:
+   *
+   * - `controller`: the callback page. It has no credential, and finishes only
+   *   flows that return to the controller, never one that returns to the
+   *   user's machine.
+   * - `user-machine`: `connection.finishOAuth`. It finishes only a flow that
+   *   returns to the user's machine, and only for the caller that started it,
+   *   so a caller who learned a `state` cannot end someone else's sign-in.
+   *
+   * The caller has already checked that the answer is well formed, so a
+   * malformed answer never claims a flow. A flow that is not the claimant's
+   * stays open. `callback.address`, when the user pasted a whole address, must
+   * be the flow's own redirect address, which is checked before the claim too.
+   *
+   * The claim deletes the setup row in its own transaction, before anything
+   * waits on the provider, so a `state` presented twice finds nothing the
+   * second time. The code exchange and the type's `validate` call the
+   * provider, so they run outside any transaction. They use the flow's own
+   * redirect URI and client, exactly as stored.
+   *
+   * When the flow created an OAuth client and does not end in a Connection, the
+   * client is deleted at the provider.
+   */
+  const finishSetup = (
+    callback: {
+      readonly state: string;
+      readonly code: string | undefined;
+      readonly error: string | undefined;
+      readonly address: URL | undefined;
+    },
+    claimant:
+      | { readonly kind: "controller" }
+      | { readonly kind: "user-machine"; readonly actor: string },
+  ): Effect.Effect<Connection, FinishError> =>
+    // The claim, the take of the created client's cleanup and the installing
+    // of the cleanup run uninterruptibly, and only the work that waits on the
+    // provider is restored to the caller's interruptibility. An interrupt can
+    // then never land between the claim and the code that owns the cleanup.
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const claim = yield* Effect.orDie(
+          pending.claim(callback.state, (setup): FinishFailure | undefined => {
+            if (claimant.kind === "controller") {
+              return setup.redirectUri === undefined ? undefined : "no-live-attempt";
+            }
+            if (setup.redirectUri === undefined) return "no-live-attempt";
+            if ((setup.actor ?? USER_ACTOR) !== claimant.actor) return "no-live-attempt";
+            return callback.address === undefined ||
+              isRedirectAddress(callback.address, setup.redirectUri)
+              ? undefined
+              : "wrong-address";
+          }),
         );
+        if (claim._tag === "none" || claim._tag === "refused") {
+          return yield* Effect.fail({
+            failure: claim._tag === "none" ? "no-live-attempt" : claim.reason,
+            reusedApp: undefined,
+          } as const);
+        }
+        const setup = claim.setup;
+        // The claim deleted the row, so the cleanup of the client the plugin
+        // created for it is this finish's now.
+        const deleteClient = claim.cleanup;
+        const registered = Option.getOrUndefined(yield* types.named(setup.type));
+        const publicClient = registered?.contribution.oauth?.publicClient;
+        // A reconnect that signs in with the Connection's own app, which the
+        // user may have deleted at the provider.
+        const reusedApp: ReusedApp | undefined =
+          registered !== undefined &&
+          setup.kind === "reconnect" &&
+          deleteClient === undefined &&
+          setup.clientId !== undefined &&
+          publicClient !== undefined &&
+          "createdAtSetup" in publicClient
+            ? {
+                displayName: registered.contribution.displayName,
+                fields: publicClient.createdAtSetup.fields,
+              }
+            : undefined;
 
-      const written = yield* Effect.orDie(
-        writeConnectionFromTokens({
-          setup,
-          connectionType: registered,
-          account,
-          tokens,
-          // The user started this setup with an authenticated request. The
-          // browser comes back without a credential, but the actor is still
-          // the user.
-          actor: USER_ACTOR,
-        }),
-      );
-      if (written._tag === "connection-gone") return yield* failWithOutcome("expired");
-      if (written._tag === "other-account") return yield* failWithOutcome("other-account");
-      return "ok" as const;
-    });
+        // Set when the transaction that writes the Connection commits. The
+        // cleanup below reads it, because an interrupt can arrive after the
+        // commit, and a client that a stored Connection signs in with must
+        // never be deleted. A read of the database would not do: an open read
+        // snapshot elsewhere can still show the state before the commit.
+        let connectionCommitted = false;
+
+        const exchangeAndWrite = Effect.gen(function* () {
+          // The provider sent the user back with an error instead of a code:
+          // either way there is no code to exchange.
+          if (callback.error !== undefined || callback.code === undefined) {
+            return yield* Effect.fail("denied" as const);
+          }
+          const oauth = registered?.contribution.oauth;
+          const client =
+            registered === undefined || oauth === undefined
+              ? Option.none()
+              : yield* Effect.orDie(findOAuthClient(registered.pluginId, oauth, setup.clientId));
+          // The build no longer declares the type, or the type no longer declares
+          // a redirect flow, or no client is left to exchange the code with: a
+          // type without a public client keeps its client in its plugin's
+          // settings, and those were cleared while the user was at the provider.
+          // In every case the code cannot be exchanged.
+          if (registered === undefined || oauth === undefined || Option.isNone(client)) {
+            return yield* Effect.fail("exchange-failed" as const);
+          }
+
+          const tokens = yield* exchangeCode({
+            tokenUrl: oauth.tokenUrl,
+            client: client.value,
+            code: callback.code,
+            redirectUri: buildSetupRedirectUri(setup),
+            codeVerifier: setup.codeVerifier,
+            ...(oauth.resource === undefined ? {} : { resource: oauth.resource }),
+            ...(oauth.transientErrors === undefined
+              ? {}
+              : { transientErrors: oauth.transientErrors }),
+          }).pipe(
+            Effect.provide(FetchHttpClient.layer),
+            Effect.catch(() => Effect.fail("exchange-failed" as const)),
+          );
+          const account = yield* registered.contribution
+            .validate({ accessToken: tokens.accessToken })
+            .pipe(
+              Effect.provide(FetchHttpClient.layer),
+              // A check that fails on a passing network error is tried again, as a
+              // device flow's is, before the sign-in is given up. The plugin's own
+              // message goes on to the user: it says whether the account was wrong.
+              Effect.retry(ACCOUNT_CHECK_RETRY),
+              Effect.catchTag("ConnectionValidationFailed", (failure) =>
+                Effect.fail({
+                  accountCheckFailed: truncateMessage(
+                    removeTokensFromMessage(failure.message, tokens),
+                  ),
+                } satisfies AccountCheckFailed),
+              ),
+            );
+
+          const { result: written, observer: started } = yield* Effect.orDie(
+            writeAndStartObserver(
+              writeConnectionFromTokens({
+                setup,
+                connectionType: registered,
+                account,
+                tokens,
+                // The caller that started this setup was authenticated. The browser
+                // may come back without a credential, but the actor is still the one
+                // who started it. A flow from before the actor was recorded was the
+                // user's.
+                actor: setup.actor ?? USER_ACTOR,
+                oauthClientId: setup.clientId,
+                credentialsGeneration: setup.credentialsGeneration,
+                onCommitted: () => {
+                  connectionCommitted = true;
+                },
+              }),
+              (result) =>
+                Effect.map(CurrentActor, (current) =>
+                  result._tag === "written" && setup.kind === "create"
+                    ? {
+                        connection: result.connection,
+                        // The controller's callback has no credential, so nobody's
+                        // grants can be checked there: the observer is told the
+                        // actor is unknown. The starter's own finish passes its own.
+                        actor: claimant.kind === "controller" ? NO_ACTOR : current,
+                      }
+                    : undefined,
+                ),
+            ),
+          );
+          if (written._tag === "other-account") {
+            return yield* Effect.fail("other-account" as const);
+          }
+          if (written._tag !== "written") return yield* Effect.fail("connection-changed" as const);
+          yield* awaitObserver(started);
+          return written.connection;
+        });
+
+        // A client the plugin created for this sign-in is useless unless the
+        // Connection that stores it was written, so it is deleted at the
+        // provider unless the write committed. The decision reads the flag the
+        // commit sets and not the exit of this effect, because an interrupt can
+        // arrive after the write committed. A reconnect that reused the
+        // Connection's own client has nothing to delete.
+        return yield* restore(exchangeAndWrite).pipe(
+          Effect.mapError((failure): FinishError =>
+            typeof failure === "string"
+              ? { failure, reusedApp }
+              : { failure: "rejected", reusedApp, detail: failure.accountCheckFailed },
+          ),
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) || deleteClient === undefined || connectionCommitted
+              ? Effect.void
+              : deleteClient,
+          ),
+        );
+      }),
+    );
 
   return {
     /** Returns one page of connections, optionally filtered by type and by status. */
@@ -971,40 +1595,45 @@ const make = Effect.gen(function* () {
         const credentials = yield* checkCredentialFields(contribution, decoded.credentials);
         const account = yield* validateCredentials(contribution, credentials);
 
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            const row = yield* connections.insert({
-              pluginId,
-              type: decoded.type,
-              label:
-                decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
-              displayName: account.displayName,
-              accountId: account.accountId,
-              ...buildWarningField(account),
-              labels: decoded.labels ?? [],
-              config,
-              at,
-            });
-            yield* replaceSecrets(row.id, credentials);
-            yield* audit.append({
-              kind: "connection.created",
-              actor: yield* currentStamp,
-              // Credential names only, never values: the Intake views read the
-              // audit log, and it is kept for 90 days.
-              payload: {
-                connectionId: row.id,
+        const { result: created, observer: started } = yield* writeAndStartObserver(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const at = yield* nowIso;
+              const row = yield* connections.insert({
                 pluginId,
-                type: row.type,
-                credentials: Object.keys(credentials),
-              },
-              record: { topic: "connection", id: row.id },
-              at,
-            });
-            return yield* readConnectionRecord(row);
-          }),
+                type: decoded.type,
+                label:
+                  decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
+                displayName: account.displayName,
+                accountId: account.accountId,
+                ...buildWarningField(account),
+                labels: decoded.labels ?? [],
+                config,
+                at,
+              });
+              yield* replaceSecrets(row.id, credentials);
+              yield* audit.append({
+                kind: "connection.created",
+                actor: yield* currentStamp,
+                // Credential names only, never values: the Intake views read the
+                // audit log, and it is kept for 90 days.
+                payload: {
+                  connectionId: row.id,
+                  pluginId,
+                  type: row.type,
+                  credentials: Object.keys(credentials),
+                },
+                record: { topic: "connection", id: row.id },
+                at,
+              });
+              return yield* readConnectionRecord(row);
+            }),
+          ),
+          (connection) => Effect.map(CurrentActor, (actor) => ({ connection, actor })),
         );
+        yield* awaitObserver(started);
+        return created;
       }),
 
     /**
@@ -1121,6 +1750,7 @@ const make = Effect.gen(function* () {
                 statusDetail: null,
                 warning: readAccountWarning(account),
                 replacesCredentials: true,
+                oauthClientId: null,
               },
               at,
             );
@@ -1237,14 +1867,32 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Starts an OAuth flow: stores everything the callback will need, and
+     * Starts an OAuth flow: stores everything the finish will need, and
      * returns the authorization URL to send the browser to. No connection
-     * exists yet. A flow the user abandons leaves a setup row, which a later
-     * start deletes once it has expired.
+     * exists yet. A flow the user abandons leaves a setup row, which its timer
+     * deletes at its deadline when a client was created, and which the routine
+     * purge deletes long after it expired otherwise.
      *
-     * Fails with `invalid_state` when the type's plugin ships a public client
-     * that did not register the redirect URI built from `origin`, or when the
-     * plugin has no client of its own set up. Either way nothing is stored.
+     * The browser returns to the redirect URI built from `origin` (the
+     * controller's callback path), or to the `redirectUri` the caller gave,
+     * which the caller finishes with `finishOAuth`. A type whose plugin ships
+     * or creates a public client accepts only the redirect URIs that client
+     * registered (`isRegisteredRedirectUri`).
+     *
+     * For a type whose plugin creates a client for each Connection, the start
+     * creates it, from `clientValues` (all of them, for a new Connection; for a
+     * reconnect, optional: without them the Connection's own client is used).
+     * Everything that can be checked locally is checked first, and the plugin
+     * is called outside any transaction. The client is deleted at the provider
+     * if the sign-in ends without a Connection (see `pending-oauth-setups`).
+     * `clientValues` are handed to the plugin and nowhere else: not to the
+     * setup row, the audit log, a log line, an error or the answer.
+     *
+     * Fails with `validation` when the client values do not match what the
+     * type declares. Fails with `invalid_state` when the redirect URI is not one
+     * the client registered, when the plugin has no client of its own set up,
+     * when a reconnect has no client and no values to create one, or when the
+     * plugin could not create the client. In each case nothing is stored.
      */
     startOAuth: (
       input: ConnectionOAuthStartInput,
@@ -1263,77 +1911,204 @@ const make = Effect.gen(function* () {
             `step: ${describeSetupOperations(contribution, decoded.connectionId === undefined ? "create" : "reconnect")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
-        // A provider matches the redirect URI exactly, and a public client
-        // registered only a fixed few. Refusing here means the browser is
-        // never sent to a provider that would refuse it.
-        const redirectUri = buildRedirectUri(decoded.origin);
+        // The input decoded, so exactly one of the two is given.
+        const redirectUri =
+          decoded.redirectUri ??
+          (decoded.origin === undefined
+            ? yield* Effect.die(new Error("a start input has neither origin nor redirectUri"))
+            : buildRedirectUri(decoded.origin));
+        const returnsToUserMachine = decoded.redirectUri !== undefined;
+        // A provider matches the redirect URI, and a public client registered
+        // only a fixed few. Refusing here means the browser is never sent to a
+        // provider that would refuse it.
+        const publicClient = oauth.publicClient;
         if (
-          oauth.publicClient !== undefined &&
-          !oauth.publicClient.redirectUris.includes(redirectUri)
+          publicClient !== undefined &&
+          !publicClient.redirectUris.some((registered) =>
+            isRegisteredRedirectUri(registered, redirectUri),
+          )
         ) {
           return yield* Effect.fail(
             createInvalidStateError(
-              describeUnregisteredOrigin(
-                contribution,
-                oauth.publicClient.redirectUris,
-                decoded.origin,
-              ),
+              returnsToUserMachine
+                ? describeUnregisteredReturnAddress(
+                    contribution,
+                    publicClient.redirectUris,
+                    redirectUri,
+                  )
+                : describeUnregisteredOrigin(
+                    contribution,
+                    publicClient.redirectUris,
+                    decoded.origin ?? "",
+                  ),
             ),
           );
         }
-        const target = yield* buildSetupTarget(decoded, contribution);
-        const client = yield* findOAuthClient(pluginId, oauth);
-        if (Option.isNone(client)) {
+        if (publicClient === undefined && returnsToUserMachine) {
           return yield* Effect.fail(
             createInvalidStateError(
-              `the plugin ${pluginId} has no OAuth client credentials: set its clientId ` +
-                `config field and its clientSecret secret before connecting`,
+              describeUnregisteredReturnAddress(contribution, undefined, redirectUri),
             ),
           );
         }
-
-        const now = yield* nowIso;
-        const state = mintToken();
-        const codeVerifier = mintToken();
-        yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            yield* setups.deleteExpired(now);
-            yield* setups.insert({
-              state,
-              type: decoded.type,
-              ...target,
-              origin: decoded.origin,
-              codeVerifier,
-              expiresAt: new Date(Date.parse(now) + SETUP_LIFETIME_MS).toISOString(),
-              createdAt: now,
-            });
-          }),
+        const { target, reconnected } = yield* buildSetupTarget(decoded, contribution);
+        const clientFields =
+          publicClient !== undefined && "createdAtSetup" in publicClient
+            ? publicClient.createdAtSetup.fields
+            : undefined;
+        const clientValues = yield* checkClientValues(
+          contribution,
+          clientFields,
+          decoded.clientValues,
+          target.kind === "create",
         );
-        return {
-          authorizationUrl: buildAuthorizationUrl(oauth, {
-            clientId: client.value.clientId,
-            redirectUri,
+        // The client the flow signs in with is selected here, once: the client
+        // that already exists (the plugin's own, or the Connection's), or, from
+        // `clientValues`, one the plugin creates now. Everything that can be
+        // refused is refused before the plugin is called.
+        const knownClientId = clientFields === undefined ? undefined : reconnected?.oauthClientId;
+
+        // The Connection's credentials generation comes with the connection read
+        // above, before the plugin is called, so a sign-in that replaces them
+        // while the client is being created makes this one write nothing.
+        const credentialsGeneration = reconnected?.credentialsGeneration;
+        const state = mintToken();
+        // The sign-in's one deadline is sampled before the client is created and
+        // is stored with the row, which is what the timer that retires the
+        // sign-in waits for.
+        const now = yield* nowIso;
+        const expiresAt = new Date(Date.parse(now) + SETUP_LIFETIME_MS).toISOString();
+        const secretFields = new Set(
+          (clientFields ?? []).filter((field) => field.secret === true).map((field) => field.name),
+        );
+        const selectClient =
+          clientValues === undefined
+            ? Effect.flatMap(findOAuthClient(pluginId, oauth, knownClientId), (found) =>
+                Option.isNone(found)
+                  ? Effect.fail(
+                      createInvalidStateError(describeMissingClient(pluginId, clientFields)),
+                    )
+                  : Effect.succeed({ client: found.value, created: undefined }),
+              )
+            : // The plugin bounds its own call to the provider, and nothing here may
+              // cut it short: an interrupt that landed while the provider created the
+              // app would leave an app that nothing knows about. So the creation and
+              // the keeping of its cleanup are one uninterruptible step.
+              Effect.uninterruptible(
+                createClient(contribution, clientValues, secretFields).pipe(
+                  Effect.tap((made) => pending.keepCreatedClient(state, made.deleteClient)),
+                  Effect.map((made) => ({ client: { clientId: made.clientId }, created: made })),
+                ),
+              );
+
+        const selectAndStore = Effect.gen(function* () {
+          const { client, created } = yield* selectClient;
+          const clientId = created?.clientId ?? knownClientId;
+          const codeVerifier = mintToken();
+          const stamp = yield* currentStamp;
+          yield* pending.publish({
             state,
-            challenge: computeChallenge(codeVerifier),
-          }),
-        };
+            type: decoded.type,
+            ...target,
+            origin: returnsToUserMachine ? new URL(redirectUri).origin : (decoded.origin ?? ""),
+            redirectUri: returnsToUserMachine ? redirectUri : undefined,
+            clientId,
+            actor: stamp,
+            credentialsGeneration,
+            codeVerifier,
+            expiresAt,
+            createdAt: now,
+          });
+          return {
+            authorizationUrl: buildAuthorizationUrl(oauth, {
+              clientId: client.clientId,
+              redirectUri,
+              state,
+              challenge: computeChallenge(codeVerifier),
+            }),
+          };
+        });
+
+        // A client nothing can sign in with, because the start failed or was
+        // interrupted before the sign-in was stored, is deleted at once. The
+        // handler covers the creation too, so an interrupt that arrives just
+        // after the app was created still finds its cleanup.
+        return yield* selectAndStore.pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) || clientValues === undefined
+              ? Effect.void
+              : pending.abandon(state),
+          ),
+        );
       }),
 
     /**
-     * Finishes the OAuth flow the browser came back from, and returns the path
-     * to redirect the browser to. The path carries one of the six `Outcome`
-     * words, never the provider's own error text.
+     * Finishes the OAuth flow the browser came back from to the controller's
+     * callback path, and returns the path to redirect the browser to. The path
+     * carries one of the six `Outcome` words, never the provider's own error
+     * text. A flow that returns to the user's machine is not finished here: it
+     * ends with `finishOAuth`, by the caller that started it.
      *
-     * The code exchange and the type's `validate` call the provider, so they run
-     * outside any transaction. The setup row is deleted before either runs, so a
-     * state presented twice does nothing the second time.
+     * `rawQuery` is the query string of the request, read by the same parser as
+     * `finishOAuth` (`parseCallbackQuery`). A query that is not an answer to any
+     * flow claims nothing, so a stray or blank request cannot end a flow that is
+     * open: one with no `state` or a malformed one ends as `expired`, and one
+     * with a blank or both of `code` and `error` as `denied`. The code exchange
+     * and the type's `validate` call the provider, so they run outside any
+     * transaction.
      */
-    completeOAuth: (query: unknown): Effect.Effect<string> =>
-      Effect.map(
-        Effect.catch(finishOAuthCallback(query), (outcome: Outcome) => Effect.succeed(outcome)),
-        (outcome) => `/connections?oauth=${outcome}`,
-      ),
+    completeOAuth: (rawQuery: string): Effect.Effect<string> =>
+      Effect.gen(function* () {
+        const parsed = parseCallbackQuery(rawQuery);
+        const outcome: Outcome =
+          parsed._tag === "Refused"
+            ? parsed.cause === "no-outcome"
+              ? "denied"
+              : "expired"
+            : yield* finishSetup(parsed, { kind: "controller" }).pipe(
+                Effect.as("ok" as const),
+                Effect.catch((error) => Effect.succeed(decideCallbackOutcome(error.failure))),
+              );
+        return `/connections?oauth=${outcome}`;
+      }),
+
+    /**
+     * Finishes the OAuth flow that `startOAuth` started with a `redirectUri`,
+     * from what the browser was sent back with, and returns the Connection.
+     * Only the caller that started the flow can finish it, and only once.
+     *
+     * Fails with `validation` when the text is not a redirect answer, is the
+     * address of another flow, or names no flow this caller has open. Fails
+     * with `invalid_state` when the flow ends without a Connection: the user
+     * declined, the code could not be exchanged, the account was refused, it
+     * is another account than the Connection's own, or the Connection changed
+     * meanwhile. The messages never quote the text, because it holds a code.
+     * Nothing is written in any of those cases.
+     */
+    finishOAuth: (
+      input: ConnectionOAuthFinishInput,
+    ): Effect.Effect<
+      Connection,
+      Unauthenticated | Forbidden | Validation | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("connection.finishOAuth");
+        const decoded = yield* Effect.mapError(decodeFinish(input), createDecodeValidationError);
+        const parsed = parseCallbackQuery(decoded.callbackQuery);
+        if (parsed._tag === "Refused") {
+          return yield* Effect.fail(
+            createValidationError([{ path: ["callbackQuery"], message: parsed.reason }]),
+          );
+        }
+        return yield* finishSetup(parsed, {
+          kind: "user-machine",
+          actor: yield* currentStamp,
+        }).pipe(
+          Effect.mapError((error) =>
+            buildFinishRefusal(error.failure, error.reusedApp, error.detail),
+          ),
+        );
+      }),
 
     /**
      * Starts a device flow: asks the provider for a device code, stores it
@@ -1370,7 +2145,7 @@ const make = Effect.gen(function* () {
             `step: ${describeSetupOperations(contribution, decoded.connectionId === undefined ? "create" : "reconnect")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
-        const target = yield* buildSetupTarget(decoded, contribution);
+        const { target } = yield* buildSetupTarget(decoded, contribution);
         const code = yield* requestDeviceCode(device).pipe(
           Effect.provide(FetchHttpClient.layer),
           Effect.mapError((error) => createInvalidStateError(error.message)),
@@ -1507,21 +2282,39 @@ const make = Effect.gen(function* () {
             status: "failed",
             message:
               `the provider approved the sign-in, but checking the account failed: ` +
-              `${account.failure.message}. Start again to get a new code`,
+              `${endSentence(removeTokensFromMessage(account.failure.message, exchange.tokens))} ` +
+              "Start again to get a new code",
           } as const;
         }
-        const written = yield* writeConnectionFromTokens({
-          setup,
-          connectionType: registered,
-          account: account.success,
-          tokens: exchange.tokens,
-          actor: yield* currentStamp,
-        });
+        const { result: written, observer: started } = yield* writeAndStartObserver(
+          writeConnectionFromTokens({
+            setup,
+            connectionType: registered,
+            account: account.success,
+            tokens: exchange.tokens,
+            actor: yield* currentStamp,
+            oauthClientId: undefined,
+            credentialsGeneration: undefined,
+          }),
+          (result) =>
+            Effect.map(CurrentActor, (actor) =>
+              result._tag === "written" && setup.kind === "create"
+                ? { connection: result.connection, actor }
+                : undefined,
+            ),
+        );
         switch (written._tag) {
           case "connection-gone":
             return {
               status: "expired",
               message: "the connection this flow was reconnecting has been deleted",
+            } as const;
+          case "credentials-replaced":
+            // Only a redirect flow records a generation to compare, so this
+            // answer is for completeness.
+            return {
+              status: "expired",
+              message: "the connection's credentials were replaced while this flow was open",
             } as const;
           case "other-account":
             return {
@@ -1529,6 +2322,7 @@ const make = Effect.gen(function* () {
               message: describeOtherAccount(account.success, written.connectionDisplayName),
             } as const;
           case "written":
+            yield* awaitObserver(started);
             return { status: "done", connection: written.connection } as const;
         }
       }),
@@ -1613,4 +2407,5 @@ export const ConnectionServiceLayer: Layer.Layer<
   | ConnectionEntityFacts
   | ConnectionObserver
   | ActivePlugins
+  | PromotionState
 > = Layer.effect(ConnectionService)(make);

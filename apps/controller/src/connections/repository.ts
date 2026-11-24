@@ -68,6 +68,13 @@ export interface StoredConnection {
    * even within one millisecond.
    */
   readonly credentialsGeneration: number;
+  /**
+   * The id of the OAuth client the type's plugin created for this Connection
+   * when it was set up, which a refresh sends. `undefined` when the
+   * Connection signs in with a client its plugin ships or has configured, or
+   * with no OAuth client at all. It is not a secret: the client has none.
+   */
+  readonly oauthClientId: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -83,6 +90,8 @@ export interface NewConnection {
   readonly warning?: string;
   readonly labels: ReadonlyArray<string>;
   readonly config: Record<string, Schema.Json>;
+  /** The OAuth client the plugin created for this Connection, if it did. */
+  readonly oauthClientId?: string;
   readonly at: string;
 }
 
@@ -105,6 +114,12 @@ export interface ConnectionEdit {
    * statement as the other columns.
    */
   readonly replacesCredentials?: true;
+  /**
+   * The OAuth client the Connection's tokens belong to. `null` clears it, as
+   * when pasted credentials or a client the plugin ships replace the tokens
+   * of a client the plugin created.
+   */
+  readonly oauthClientId?: string | null;
 }
 
 /** A field a connection listing can be sorted by. */
@@ -138,13 +153,14 @@ interface ConnectionRow {
   readonly feed_intervals: string;
   readonly intake: string;
   readonly credentials_generation: number;
+  readonly oauth_client_id: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
 const COLUMNS =
   "id, plugin_id, type, label, display_name, account_id, status, status_detail, warning, labels, " +
-  "config, feed_intervals, intake, credentials_generation, created_at, updated_at";
+  "config, feed_intervals, intake, credentials_generation, oauth_client_id, created_at, updated_at";
 
 /** How a connection listing sorts by each of its sortable fields. */
 const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConnection>> = {
@@ -189,6 +205,7 @@ const toConnection = (row: ConnectionRow): Effect.Effect<StoredConnection> =>
       feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
       intake,
       credentialsGeneration: row.credentials_generation,
+      oauthClientId: row.oauth_client_id ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }),
@@ -250,12 +267,12 @@ const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO connections
             (id, plugin_id, type, label, display_name, account_id, status, status_detail, warning,
-             labels, config, created_at, updated_at)
+             labels, config, oauth_client_id, created_at, updated_at)
           VALUES
             (${id}, ${connection.pluginId}, ${connection.type}, ${connection.label},
              ${connection.displayName}, ${connection.accountId}, 'connected', ${null},
              ${connection.warning ?? null}, ${JSON.stringify(connection.labels)}, ${JSON.stringify(connection.config)},
-             ${connection.at}, ${connection.at})
+             ${connection.oauthClientId ?? null}, ${connection.at}, ${connection.at})
         `;
         return {
           id: uuidToString(id),
@@ -272,6 +289,7 @@ const make = Effect.gen(function* () {
           feedIntervals: {},
           intake: NO_INTAKE_OVERRIDES,
           credentialsGeneration: 0,
+          oauthClientId: connection.oauthClientId,
           createdAt: connection.at,
           updatedAt: connection.at,
         };
@@ -291,6 +309,7 @@ const make = Effect.gen(function* () {
       if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
       if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
       if (edit.warning !== undefined) sets.push(sql`warning = ${edit.warning}`);
+      if (edit.oauthClientId !== undefined) sets.push(sql`oauth_client_id = ${edit.oauthClientId}`);
       if (edit.replacesCredentials) {
         sets.push(sql`credentials_generation = credentials_generation + 1`);
       }

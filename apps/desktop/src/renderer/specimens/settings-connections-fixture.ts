@@ -243,3 +243,70 @@ export const CONNECTIONS_SETTINGS_RECORDS: ConnectionsSettingsRecords = {
   plugins: CONNECTIONS_PLUGINS,
   counts: EVENT_COUNTS,
 };
+
+/**
+ * The Slack plugin as it declares its Connection type: a checklist that says
+ * what Hercule does and where to get the configuration token, then a redirect
+ * flow with a client created at setup. The words are the plugin's own
+ * (plugins/slack/src/connection-type.ts). It is not in the list the
+ * Connections specimen draws by default, so that screen stays as the book
+ * has it; the Slack states of the specimen add it.
+ */
+export const SLACK_PLUGIN: PluginDetail = {
+  ...buildPlugin("slack", "Slack", {
+    paths: [
+      "M3.361333 10.11a1.685333 1.685333 0 0 1-1.68 1.682A1.685333 1.685333 0 0 1 0 10.11a1.684667 1.684667 0 0 1 1.681333-1.68h1.68v1.68zM4.208667 10.11a1.684667 1.684667 0 0 1 1.680667-1.68 1.684667 1.684667 0 0 1 1.680667 1.68v4.208667A1.685333 1.685333 0 0 1 5.889333 16a1.685333 1.685333 0 0 1-1.680667-1.681333v-4.208667zM5.889333 3.361333a1.685333 1.685333 0 0 1-1.680667-1.68A1.685333 1.685333 0 0 1 5.889333 0a1.685333 1.685333 0 0 1 1.680667 1.681333v1.68H5.889333zM5.889333 4.208667a1.685333 1.685333 0 0 1 1.680667 1.680667 1.685333 1.685333 0 0 1-1.680667 1.680667H1.681333A1.685333 1.685333 0 0 1 0 5.889333a1.685333 1.685333 0 0 1 1.681333-1.680667h4.208zM12.637333 5.889333a1.685333 1.685333 0 0 1 1.681333-1.680667A1.685333 1.685333 0 0 1 16 5.889333a1.685333 1.685333 0 0 1-1.681333 1.680667h-1.681333V5.889333zM11.792 5.889333a1.685333 1.685333 0 0 1-1.682 1.680667 1.684667 1.684667 0 0 1-1.68-1.680667V1.681333A1.684667 1.684667 0 0 1 10.11 0a1.685333 1.685333 0 0 1 1.682 1.681333v4.208zM10.11 12.637333a1.685333 1.685333 0 0 1 1.682 1.681333A1.685333 1.685333 0 0 1 10.11 16a1.684667 1.684667 0 0 1-1.68-1.681333v-1.681333h1.68zM10.11 11.792a1.684667 1.684667 0 0 1-1.68-1.682 1.684 1.684 0 0 1 1.68-1.68h4.208667A1.684667 1.684667 0 0 1 16 10.11a1.685333 1.685333 0 0 1-1.681333 1.682h-4.208667z",
+    ],
+    hue: 300,
+  }),
+  capabilities: ["connections"],
+  contributions: [
+    {
+      extensionPoint: "connection-type",
+      id: "slack/slack",
+      definition: {
+        type: "slack/slack",
+        displayName: "Slack",
+        setup: [
+          {
+            kind: "checklist",
+            markdown: [
+              "Hercule adds a small app named Hercule to your Slack workspace, so your agents can use Slack as you.",
+              "",
+              "1. Open Slack's app page, [api.slack.com/apps](https://api.slack.com/apps).",
+              "2. Under Your App Configuration Tokens, choose Generate Token, pick your workspace, and copy the Access Token.",
+              "3. Paste it here.",
+              "",
+              "If Slack says an admin must approve the app, ask them right away. If they approve it within 10 minutes, open Slack's page again from here and finish. A slower approval is not supported yet.",
+            ].join("\n"),
+          },
+          { kind: "oauth" },
+        ],
+        oauth: {
+          authorizationUrl: "https://slack.com/oauth/v2_user/authorize",
+          tokenUrl: "https://slack.com/api/oauth.v2.user.access",
+          scopes: ["channels:history"],
+          publicClient: {
+            createdAtSetup: {
+              fields: [
+                {
+                  name: "configurationToken",
+                  label: "Configuration token",
+                  secret: true,
+                  help: "Hercule uses it once to create the Slack app, and does not keep it.",
+                },
+              ],
+            },
+            redirectUris: ["http://127.0.0.1/oauth/callback", "http://127.0.0.1/callback"],
+          },
+        },
+      },
+    },
+  ],
+};
+
+/** A Slack Connection whose sign-in ran out, so Reconnect has the user sign in again. */
+export const SLACK_CONNECTION_NEEDING_SIGN_IN: Connection = {
+  ...buildConnection("c-slack", "slack/slack", "work", "Acme · rogier"),
+  status: "needs-reauth",
+};

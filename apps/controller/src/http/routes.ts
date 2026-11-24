@@ -93,6 +93,7 @@ import {
   RetirementLayer,
   RunExecutorLayer,
   RunServiceReferenceFill,
+  McpServerServiceReferenceFill,
   RunTargetsLayer,
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
@@ -277,6 +278,7 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
       )
       .handle("listChoices", ({ params }) => withApiErrors(connections.listChoices(params)))
       .handle("startOAuth", ({ payload }) => withApiErrors(connections.startOAuth(payload)))
+      .handle("finishOAuth", ({ payload }) => withApiErrors(connections.finishOAuth(payload)))
       .handle("startDeviceFlow", ({ payload }) =>
         withApiErrors(connections.startDeviceFlow(payload)),
       )
@@ -1086,6 +1088,20 @@ const SignalServiceDomainLayer = SignalServiceLayer.pipe(
 );
 
 /**
+ * The MCP Server service. Deleting a server removes it from the lists that
+ * hold it, through the controller daemon, which reaches the Projects and
+ * Sessions the domain cannot import. The checks are merged into the output
+ * because the controller daemon's scheduler requests them too, and a check
+ * must be one instance to run at most once per server. It is one layer
+ * because the operations and the Connection service's observer must share
+ * one instance.
+ */
+const McpServerDomainLayer = McpServerServiceLayer.pipe(
+  Layer.provideMerge(McpServerChecksLayer),
+  Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -1132,15 +1148,7 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
-  // Deleting a server removes it from the lists that hold it, through the
-  // controller daemon, which reaches the Projects and Sessions the domain
-  // cannot import. The checks are merged into the output because the
-  // controller daemon's scheduler requests them too, and a check must be one
-  // instance to run at most once per server.
-  McpServerServiceLayer.pipe(
-    Layer.provideMerge(McpServerChecksLayer),
-    Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
-  ),
+  McpServerDomainLayer,
   // The gateway's calls to outside MCP servers. They follow the committed
   // changes of servers and Connections to close the sessions of a server that
   // lost its destination.
@@ -1279,6 +1287,11 @@ const operationServices = Layer.mergeAll(
   // service, which is built here, after the session service. So the observer
   // holds a reference that this layer sets once the run service is built.
   RunServiceReferenceFill.pipe(Layer.provide(RunDomainLayer)),
+  // The Connection service's observer adds a plugin's MCP server for a new
+  // Connection through the MCP Server service, which is built here, after the
+  // Connection service. So the observer holds a reference that this layer
+  // sets once the MCP Server service is built.
+  McpServerServiceReferenceFill.pipe(Layer.provide(McpServerDomainLayer)),
   LiveTopicsLayer,
   WsTicketsLayer,
   AttachmentServiceLayer,

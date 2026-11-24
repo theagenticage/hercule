@@ -366,6 +366,8 @@ The per-message "couldn't answer" accounting (every message owed one answer or o
 
 ## 11. Channel plugins: Discord and Slack
 
+*(Amended 2026-11-24, [#1273](https://github.com/theagenticage/hercule/issues/1273).)* **The Slack channel is superseded.** The Slack plugin ships a Connection type with an MCP server instead ([./05-plugins.md](./05-plugins.md) section 12, [./08-events-and-connections.md](./08-events-and-connections.md#97-slack)), and no channel. Rogier closed the Slack channel plugin ticket ([#98](https://github.com/theagenticage/hercule/issues/98)) on 2026-11-24, to reopen it when channels are needed. Every Slack line in this spec (the container table of section 2, the Slack rows of the other tables, the Slack bullets here and in section 11.5) describes that channel and is not built. It stays as the design a later Slack channel would start from. Discord is unchanged.
+
 Channels are contributions into the `channel` extension point ([./05-plugins.md](./05-plugins.md)); Discord and Slack are the two v1 channel plugins, built in-process as plugins. The contract below is pinned by [Channel contribution interface and conversation ingress](https://github.com/theagenticage/hercule/issues/39); platform facts were verified against the Discord and Slack developer documentation on 2026-08-30 (`research/channel-platform-facts.md`, branch `research/channel-platform-facts`).
 
 ### 11.1 The channel contribution interface

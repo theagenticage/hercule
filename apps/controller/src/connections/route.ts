@@ -18,8 +18,12 @@ import { ConnectionService } from "./service";
 export const OAuthCallbackRouteLayer = HttpRouter.add("GET", CALLBACK_PATH, () =>
   Effect.gen(function* () {
     const connections = yield* ConnectionService;
-    const query = yield* HttpServerRequest.ParsedSearchParams;
-    return HttpServerResponse.redirect(yield* connections.completeOAuth(query));
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    // The raw query, so the service reads it with the parser `finishOAuth` uses.
+    // Everything after the first `?`: a later `?` belongs to a value.
+    const delimiter = request.url.indexOf("?");
+    const rawQuery = delimiter === -1 ? "" : request.url.slice(delimiter + 1);
+    return HttpServerResponse.redirect(yield* connections.completeOAuth(rawQuery));
     // The derived routes get their span from the router middleware, and this
     // route is not behind that middleware.
   }).pipe(Effect.withSpan("connection.completeOAuth")),

@@ -1,0 +1,414 @@
+/**
+ * Tests the controller daemon's `ConnectionObserver` over HTTP, against a real
+ * controller with two test plugins that each offer an MCP server and a
+ * Connection type (`acme/desk` and `bolt/desk`). Only Acme's server sets
+ * `addWhenConnected`:
+ *
+ * - creating an Acme Connection adds exactly one server for it, enabled and
+ *   attached to no list, stamped with the user who created the Connection;
+ * - a Bolt Connection, whose server does not set the flag, adds none;
+ * - a reconnect adds none, also after the user deleted the server;
+ * - a second Connection of another account gets a server of the same name,
+ *   and one of the same account gets no second server;
+ * - a session without `mcp.manage` creates the Connection and gets no server,
+ *   and a session with it gets the server, stamped with the session;
+ * - a redirect sign-in that the browser finishes at the controller's callback,
+ *   which carries no credential, adds no server, because nobody's grants can be
+ *   checked there; one that the session finishes with `connection.finishOAuth`
+ *   adds the server, stamped with the session.
+ */
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { McpServer } from "@hercule/contract";
+import {
+  HOST_API,
+  registerConnectionType,
+  registerMcpServer,
+  type Plugin,
+} from "@hercule/plugin-host";
+import { Effect, Logger, Schema } from "effect";
+import { buildAccount, buildJsonResponse } from "../../connections/testing";
+import { del, get, post } from "../../http/testing";
+import { buildDeskMcpServer, buildMcpServerPlugin } from "../../plugins/testing";
+import { WAIT_DEADLINE_MS, createProfile, spawnThreadUnder } from "../../sessions/testing";
+import { withFleet } from "../../workspaces/testing";
+import { withSetUpController, type SetUpController } from "../../workflows/testing";
+import { startFakeUpstream, type FakeUpstream } from "../../mcp-servers/testing";
+
+let upstream: FakeUpstream;
+let PLUGINS: ReadonlyArray<Plugin>;
+
+beforeAll(async () => {
+  upstream = await startFakeUpstream();
+  // A created server stays in status `checking`, and no test reaches the network.
+  upstream.hold();
+  PLUGINS = [
+    buildMcpServerPlugin("acme", {
+      server: { ...buildDeskMcpServer("acme", upstream), addWhenConnected: true },
+      accountIsToken: true,
+    }),
+    buildMcpServerPlugin("bolt", { server: buildDeskMcpServer("bolt", upstream) }),
+  ];
+});
+
+afterAll(async () => {
+  await upstream.stop();
+});
+
+/** Creates a Connection with `token` as the caller, and returns the response. */
+const requestConnection = (
+  base: string,
+  token: string,
+  type: string,
+  pastedToken: string,
+): Promise<Response> =>
+  post(
+    base,
+    "/api/v1/connections",
+    { type, label: pastedToken, credentials: { token: pastedToken } },
+    token,
+  );
+
+const createConnectionOrFail = async (
+  base: string,
+  token: string,
+  type: string,
+  pastedToken: string,
+): Promise<string> => {
+  const response = await requestConnection(base, token, type, pastedToken);
+  expect(response.status, await response.clone().text()).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+};
+
+const listServers = async (controller: SetUpController): Promise<ReadonlyArray<McpServer>> => {
+  const response = await get(controller.base, "/api/v1/mcp-servers", controller.token);
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { items: ReadonlyArray<McpServer> }).items;
+};
+
+describe("a Connection whose plugin's server sets addWhenConnected", () => {
+  it("adds exactly one server for it, stamped with the user", async () => {
+    await withSetUpController(async (controller) => {
+      const connectionId = await createConnectionOrFail(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "one",
+      );
+
+      const servers = await listServers(controller);
+
+      expect(servers).toHaveLength(1);
+      expect(servers[0]).toMatchObject({
+        name: "desk",
+        source: { kind: "plugin", contributionId: "acme/desk", connectionId },
+        enabled: true,
+        status: "checking",
+      });
+      const created = await controller.harness.audit("mcpServer.created");
+      expect(created.map((entry) => entry.actor)).toEqual(["user"]);
+    }, PLUGINS);
+  });
+
+  it("adds none for a Connection of a plugin whose server does not set it", async () => {
+    await withSetUpController(async (controller) => {
+      await createConnectionOrFail(controller.base, controller.token, "bolt/desk", "one");
+
+      expect(await listServers(controller)).toEqual([]);
+    }, PLUGINS);
+  });
+
+  it("adds none when the Connection is reconnected, even after the user deleted the server", async () => {
+    await withSetUpController(async (controller) => {
+      const connectionId = await createConnectionOrFail(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "one",
+      );
+      const [server] = await listServers(controller);
+      const deleted = await del(
+        controller.base,
+        `/api/v1/mcp-servers/${server!.id}`,
+        controller.token,
+      );
+      expect(deleted.status).toBe(200);
+
+      const reconnected = await post(
+        controller.base,
+        `/api/v1/connections/${connectionId}/credentials`,
+        { credentials: { token: "one" } },
+        controller.token,
+      );
+
+      expect(reconnected.status, await reconnected.clone().text()).toBe(200);
+      expect(await listServers(controller)).toEqual([]);
+    }, PLUGINS);
+  });
+
+  it("gives a Connection of another account a server of the same name, and none for the same account", async () => {
+    await withSetUpController(async (controller) => {
+      const first = await createConnectionOrFail(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "one",
+      );
+      const second = await createConnectionOrFail(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "two",
+      );
+      // The same account as `first`: the server it has already is the one.
+      const sameAccount = await requestConnection(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "one",
+      );
+      expect(sameAccount.status).toBe(201);
+
+      const servers = await listServers(controller);
+
+      expect(servers.map((server) => server.name)).toEqual(["desk", "desk"]);
+      expect(
+        servers
+          .map((server) => (server.source.kind === "plugin" ? server.source.connectionId : ""))
+          .toSorted(),
+      ).toEqual([first, second].toSorted());
+    }, PLUGINS);
+  });
+});
+
+/** Lists the Notifications that say an MCP server was not added for a new Connection. */
+const listNotAddedNotifications = async (
+  controller: SetUpController,
+): Promise<ReadonlyArray<{ readonly title: string; readonly body?: string }>> => {
+  const response = await get(controller.base, "/api/v1/notifications", controller.token);
+  expect(response.status).toBe(200);
+  const { items } = (await response.json()) as {
+    items: ReadonlyArray<{ title: string; body?: string; kind: string }>;
+  };
+  return items.filter(
+    (item) =>
+      item.kind === "core.connection-error" && item.title.includes("MCP server was not added"),
+  );
+};
+
+describe("deleting a Connection whose MCP server was added for it", () => {
+  it("is refused with the server's name and where to remove it", async () => {
+    await withSetUpController(async (controller) => {
+      const id = await createConnectionOrFail(
+        controller.base,
+        controller.token,
+        "acme/desk",
+        "one",
+      );
+      const [server] = await listServers(controller);
+
+      const response = await del(controller.base, `/api/v1/connections/${id}`, controller.token);
+
+      expect(response.status).toBe(409);
+      const { error } = (await response.json()) as { error: { code: string; message: string } };
+      expect(error.code).toBe("invalid_state");
+      expect(error.message).toContain(server?.name ?? "no server");
+      expect(error.message).toContain("Settings > MCP servers");
+    }, PLUGINS);
+  });
+});
+
+describe("a Connection of an account that already has the server", () => {
+  it("reuses the server it has, and says so in the log with no advice to add one by hand", async () => {
+    const lines: Array<string> = [];
+    const logger = Logger.make<unknown, void>(({ message }) => {
+      lines.push(JSON.stringify(message));
+    });
+    let servers: ReadonlyArray<McpServer> = [];
+    let notified: ReadonlyArray<unknown> = [];
+    await withSetUpController(
+      async (controller) => {
+        const first = await createConnectionOrFail(
+          controller.base,
+          controller.token,
+          "acme/desk",
+          "one",
+        );
+        const sameAccount = await requestConnection(
+          controller.base,
+          controller.token,
+          "acme/desk",
+          "one",
+        );
+        expect(sameAccount.status).toBe(201);
+        servers = await listServers(controller);
+        notified = await listNotAddedNotifications(controller);
+        // The server the first Connection added is the one the account has.
+        expect(
+          servers.map((server) =>
+            server.source.kind === "plugin" ? server.source.connectionId : "",
+          ),
+        ).toEqual([first]);
+      },
+      PLUGINS,
+      { logger },
+    );
+
+    expect(servers).toHaveLength(1);
+    // The account has its server, so the user has nothing to do and is told nothing.
+    expect(notified).toEqual([]);
+    const said = lines.filter((line) => line.includes("MCP server was not added"));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("already has one");
+    expect(said[0]).not.toContain("Settings > MCP servers");
+  });
+});
+
+describe("a Connection a session creates", () => {
+  it(
+    "gets a server only when the session may manage MCP servers, stamped with the session",
+    async () => {
+      await withFleet(
+        async (arranged) => {
+          const controller = {
+            harness: arranged.harness,
+            base: arranged.harness.base,
+            token: arranged.token,
+          };
+          const withoutManage = await spawnThreadUnder(
+            arranged,
+            await createProfile(arranged, "connector", ["connection.manage"]),
+          );
+          const withManage = await spawnThreadUnder(
+            arranged,
+            await createProfile(arranged, "connector-and-mcp", ["connection.manage", "mcp.manage"]),
+          );
+
+          await createConnectionOrFail(controller.base, withoutManage.token, "acme/desk", "one");
+          expect(await listServers(controller)).toEqual([]);
+          // The user is told, in a Notification, where to add the server.
+          const told = await listNotAddedNotifications(controller);
+          expect(told).toHaveLength(1);
+          expect(told[0]?.body).toContain("Settings > MCP servers");
+
+          await createConnectionOrFail(controller.base, withManage.token, "acme/desk", "two");
+          expect(await listServers(controller)).toHaveLength(1);
+          const created = await controller.harness.audit("mcpServer.created");
+          expect(created.map((entry) => entry.actor)).toEqual([`session:${withManage.session.id}`]);
+          // A server that was added needs no Notification.
+          expect(await listNotAddedNotifications(controller)).toHaveLength(1);
+        },
+        { plugins: PLUGINS },
+      );
+    },
+    WAIT_DEADLINE_MS * 3 + 10_000,
+  );
+});
+
+/**
+ * A plugin whose Connection type signs in through a redirect flow, as a
+ * public client that ships its own client id, and whose MCP server sets
+ * `addWhenConnected`. Its token endpoint is `tokenEndpoint`.
+ */
+const buildRedirectPlugin = (tokenEndpoint: string): Plugin => ({
+  manifest: {
+    id: "ridge",
+    displayName: "Ridge",
+    hostApi: HOST_API,
+    capabilities: ["connections", "mcp-servers"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    Effect.gen(function* () {
+      yield* registerConnectionType(host, {
+        type: "desk",
+        displayName: "Desk",
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          authorizationUrl: `${tokenEndpoint}/authorize`,
+          tokenUrl: `${tokenEndpoint}/token`,
+          scopes: [],
+          publicClient: {
+            clientId: "ridge-client",
+            redirectUris: [RIDGE_REDIRECT_URI, "http://127.0.0.1/callback"],
+          },
+        },
+        validate: ({ accessToken }) => Effect.succeed(buildAccount(accessToken ?? "")),
+      });
+      yield* registerMcpServer(host, {
+        ...buildDeskMcpServer("ridge", upstream),
+        addWhenConnected: true,
+      });
+    }),
+  activate: () => Effect.succeed(Effect.void),
+});
+
+/** The loopback address a public client may register as its redirect. */
+const RIDGE_ORIGIN = "http://127.0.0.1:4937";
+const RIDGE_REDIRECT_URI = `${RIDGE_ORIGIN}/oauth/callback`;
+
+describe("a Connection a redirect sign-in creates", () => {
+  it(
+    "adds no server at the controller's callback, which has no credential to check, and adds one as the session that finishes the sign-in itself",
+    async () => {
+      const provider = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch: () =>
+          buildJsonResponse({ access_token: "good-token", token_type: "bearer", expires_in: 3600 }),
+      });
+      try {
+        await withFleet(
+          async (arranged) => {
+            const { base, token } = { base: arranged.harness.base, token: arranged.token };
+            const controller = { harness: arranged.harness, base, token };
+            const withManage = await spawnThreadUnder(
+              arranged,
+              await createProfile(arranged, "connector-and-mcp", [
+                "connection.manage",
+                "mcp.manage",
+              ]),
+            );
+            const start = async (body: Record<string, unknown>): Promise<string> => {
+              const started = await post(
+                base,
+                "/api/v1/oauth/start",
+                { type: "ridge/desk", ...body },
+                withManage.token,
+              );
+              expect(started.status, await started.clone().text()).toBe(200);
+              const { authorizationUrl } = (await started.json()) as { authorizationUrl: string };
+              return new URL(authorizationUrl).searchParams.get("state") ?? "";
+            };
+
+            // The browser comes back with no credential at all.
+            const callbackState = await start({ origin: RIDGE_ORIGIN });
+            const callback = await fetch(
+              `${base}/oauth/callback?state=${callbackState}&code=the-code`,
+              { redirect: "manual" },
+            );
+            expect(callback.headers.get("location")).toBe("/connections?oauth=ok");
+            expect(await listServers(controller)).toEqual([]);
+
+            const finishState = await start({ redirectUri: "http://127.0.0.1:53682/callback" });
+            const finished = await post(
+              base,
+              "/api/v1/oauth/finish",
+              { callbackQuery: `code=the-code&state=${finishState}` },
+              withManage.token,
+            );
+            expect(finished.status, await finished.clone().text()).toBe(200);
+            expect(await listServers(controller)).toHaveLength(1);
+            const created = await controller.harness.audit("mcpServer.created");
+            expect(created.map((entry) => entry.actor)).toEqual([
+              `session:${withManage.session.id}`,
+            ]);
+          },
+          { plugins: [buildRedirectPlugin(`http://127.0.0.1:${String(provider.port)}`)] },
+        );
+      } finally {
+        await provider.stop(true);
+      }
+    },
+    WAIT_DEADLINE_MS * 3 + 10_000,
+  );
+});
