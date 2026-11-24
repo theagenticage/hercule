@@ -947,6 +947,42 @@ describe("the setup of a Connection whose client is created at setup", () => {
     );
   });
 
+  it("says why the browser did not open when Open again is pressed while the controller finishes", async () => {
+    let opens = 0;
+    let answerFinish: (answer: { body: unknown }) => void = () => undefined;
+    const { calls, signInReturn, view } = await openSlackSetup(
+      {
+        [`POST ${FINISH_OAUTH}`]: () =>
+          new Promise((resolve) => {
+            answerFinish = resolve;
+          }),
+      },
+      buildSignInReturn(),
+      () => {
+        opens += 1;
+        return Promise.resolve(
+          opens === 1
+            ? { _tag: "Opened" }
+            : { _tag: "NotOpened", reason: "The system could not open your default browser." },
+        );
+      },
+    );
+    await userEvent.type(view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    signInReturn.comeBack("code=c1&state=s1");
+    await waitFor(() => {
+      expect(readCalls(calls, "POST", FINISH_OAUTH)).toHaveLength(1);
+    });
+
+    await userEvent.click(view.getByRole("button", { name: "Open again" }));
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "The browser did not open the sign-in page: The system could not open your default browser.",
+    );
+    answerFinish({ body: SLACK_CONNECTED });
+    await waitForClosed();
+  });
+
   it("shows why the app could not be made, with the token gone and the field ready for a new one", async () => {
     const { view } = await openSlackSetup({
       [`POST ${START_OAUTH}`]: {
