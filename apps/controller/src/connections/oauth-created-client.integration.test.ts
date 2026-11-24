@@ -23,30 +23,35 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import type * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 import { ConnectionValidationFailed, type CreatedOAuthClient } from "@hercule/plugin-host";
 import type { ConnectionOAuthStartInput } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { holdWriter } from "../db/client";
-import { inTransaction } from "../db/testing";
+import { buildHomePaths, HerculeHome } from "../config";
+import { EntityObservationsLayer, IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
+import { holdWriter, withReadSnapshot } from "../db/client";
+import { inTransaction, TestDatabase } from "../db/testing";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
+import { NotifierLayer } from "../notifications";
+import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { PromotionState } from "../promotion";
-import { withReadSnapshot } from "../db/client";
-import { CREATED_CLIENT_GRACE_MS, SETUP_LIFETIME_MS } from "./oauth";
-import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
-import { ConnectionService } from "./service";
-import {
-  buildAccount,
-  buildConnectionServiceStack,
-  buildJsonResponse,
-  type ConnectionServiceStackOptions,
-} from "./testing";
+import { ServingPromotionStateLayer } from "../promotion/testing";
+import { masterKeyLayer, SecretLayer, Secrets, secretsLayer, type SecretOwner } from "../secrets";
+import { ConnectionEntityFacts } from "./entity-facts";
+import { ConnectionObserver } from "./observer";
+import { SETUP_LIFETIME_MS } from "./oauth";
+import { ConnectionReferences } from "./references";
+import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
+import { ConnectionService, ConnectionServiceLayer } from "./service";
+import { buildAccount, buildJsonResponse } from "./testing";
 
 /** What the user pastes for the client. Appears in no row, log line or error. */
 const SENTINEL = "xoxe-sentinel-config-token-0123456789";
@@ -269,6 +274,118 @@ const CONFIGURED_TYPE: RegisteredConnectionType = {
 };
 
 /**
+ * What a scenario changes in the service's stack to reach an interleaving that
+ * the public operations cannot reach.
+ */
+interface StackOptions {
+  /** The observer the service reports a created Connection to. By default one that does nothing. */
+  readonly observer?: ConnectionObserver["Service"];
+  /**
+   * Runs once, just before the first read of a Connection's token set by
+   * `Secrets.get`, which is where a refresh reads the tokens beside the row, so
+   * another operation can commit between the two reads. The effect is taken out
+   * of the cell before it runs.
+   */
+  readonly beforeTokenRead?: { current: Effect.Effect<void> | undefined };
+  /**
+   * Runs once, when a Connection's token set is written, which happens inside
+   * the transaction that writes the Connection, so a request can be interrupted
+   * while its commit is on the way. The effect is taken out of the cell before
+   * it runs.
+   */
+  readonly onTokenWrite?: { current: Effect.Effect<void> | undefined };
+  /**
+   * Makes the controller sealed, as it is after a promotion: work that waits for
+   * the gate is answered with the seal at once, and `whenServing` never
+   * returns. `answered.count` counts the work answered with the seal, so the
+   * test can see that the sealed branch ran.
+   */
+  readonly sealed?: { readonly answered: { count: number } };
+}
+
+/**
+ * Builds the connection service over the real repositories and a temporary
+ * database, from the layers the production stack is made of, with the changes
+ * of `options`.
+ */
+const buildStack = (home: string, options: StackOptions) => {
+  const hooks = { read: options.beforeTokenRead, write: options.onTokenWrite };
+  /** Takes the effect out of a cell, so a hook runs once. */
+  const takeHook = (cell: { current: Effect.Effect<void> | undefined } | undefined) => {
+    const hook = cell?.current;
+    if (cell !== undefined) cell.current = undefined;
+    return hook ?? Effect.void;
+  };
+  const realSecrets = secretsLayer.pipe(Layer.provide(masterKeyLayer("file")));
+  const secrets =
+    hooks.read === undefined && hooks.write === undefined
+      ? realSecrets
+      : Layer.effect(Secrets)(
+          Effect.map(Secrets, (real) => ({
+            ...real,
+            get: (owner: SecretOwner, name: string) =>
+              Effect.suspend(() =>
+                Effect.andThen(
+                  name === "oauth.tokens" ? takeHook(hooks.read) : Effect.void,
+                  real.get(owner, name),
+                ),
+              ),
+            set: (owner: SecretOwner, name: string, value: Redacted.Redacted<string>) =>
+              Effect.suspend(() =>
+                Effect.andThen(
+                  name === "oauth.tokens" ? takeHook(hooks.write) : Effect.void,
+                  real.set(owner, name, value),
+                ),
+              ),
+          })),
+        ).pipe(Layer.provide(realSecrets));
+  const sealed = options.sealed;
+  const promotion =
+    sealed === undefined
+      ? ServingPromotionStateLayer
+      : Layer.effect(PromotionState)(
+          Effect.map(PromotionState, (real): PromotionState["Service"] => ({
+            ...real,
+            whenServing: () => Effect.never,
+            whenServingOr: (_work, onSealed) =>
+              Effect.suspend(() => {
+                sealed.answered.count += 1;
+                return onSealed(undefined as never);
+              }),
+          })),
+        ).pipe(Layer.provide(ServingPromotionStateLayer));
+  return ConnectionServiceLayer.pipe(
+    Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
+    Layer.provide(
+      Layer.succeed(ConnectionEntityFacts)({ recordFactsOfDeletion: (_id, deletion) => deletion }),
+    ),
+    Layer.provide(
+      Layer.succeed(ConnectionObserver)(
+        options.observer ?? {
+          connectionCreated: () => Effect.void,
+          connectionDeleted: () => Effect.void,
+        },
+      ),
+    ),
+    Layer.provideMerge(
+      PluginHostLayer.pipe(
+        Layer.provide([IngestExecutorLayer, OpenSignalsLayer, EntityObservationsLayer]),
+      ),
+    ),
+    Layer.provideMerge(ConnectionTypesLayer),
+    Layer.provideMerge(PluginConfigsLayer),
+    Layer.provideMerge(SecretLayer),
+    Layer.provideMerge(secrets),
+    Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(AuditLogLayer),
+    Layer.provideMerge(PlatformEventsLayer),
+    Layer.provideMerge(promotion),
+    Layer.provideMerge(TestDatabase),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
+  );
+};
+
+/**
  * Runs a scenario over a fresh stack, as the user, on a test clock, with the
  * given types registered. `logs` collects every log line the controller
  * writes.
@@ -280,7 +397,7 @@ const run = <A, E>(
     E,
     ConnectionService | ConnectionTypes | PromotionState | SqlClient.SqlClient
   >,
-  options: { readonly logs?: Array<string>; readonly stack?: ConnectionServiceStackOptions } = {},
+  options: { readonly logs?: Array<string>; readonly stack?: StackOptions } = {},
 ): Promise<A> => {
   const logs = options.logs ?? [];
   const home = mkdtempSync(join(tmpdir(), "hercule-created-client-"));
@@ -291,7 +408,7 @@ const run = <A, E>(
       scenario,
     ).pipe(
       Effect.provideService(CurrentActor, USER),
-      Effect.provide(buildConnectionServiceStack(home, options.stack)),
+      Effect.provide(buildStack(home, options.stack ?? {})),
       Effect.provide(
         Logger.layer([
           Logger.make<unknown, void>(({ message }) => {
@@ -971,9 +1088,7 @@ describe("the client a sign-in created and nothing used", () => {
         yield* service.startOAuth(startInput());
         // The flow's lifetime is over, but a finish that claimed at its last
         // moment may still be exchanging the code: the grace period protects it.
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS - 1000),
-        );
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS - 1000));
         yield* settle;
         const early = [...log.deleted];
         yield* TestClock.adjust(Duration.millis(2000));
@@ -1210,8 +1325,11 @@ describe("who owns the cleanup of a created client", () => {
         yield* settle;
         const start = yield* Effect.forkChild(service.startOAuth(startInput()));
         yield* waitUntil(Effect.sync(() => log.created.length > 0));
-        yield* Fiber.interrupt(start);
+        // The interrupt ends the start, which then deletes its row and its client,
+        // and that needs the writer: so the writer is given back meanwhile.
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(start));
         yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(interrupting);
         yield* settle;
         return { setups: yield* sql`SELECT state FROM oauth_setups` };
       }),
@@ -1232,7 +1350,7 @@ describe("who owns the cleanup of a created client", () => {
         const promotion = yield* PromotionState;
         yield* service.startOAuth(startInput());
         yield* promotion.freeze("promotion-1", new Date(Date.now() + 60_000));
-        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS * 2));
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS * 2));
         yield* settle;
         expect(log.deleted).toEqual([]);
         yield* promotion.thaw("promotion-1");
@@ -1244,173 +1362,29 @@ describe("who owns the cleanup of a created client", () => {
   });
 });
 
-/**
- * Wraps a clock so that a test can hold one of its reads. Set `held.armed` to
- * N to hold the Nth read from then on: the read resolves `held.reached`, waits
- * for `held.go`, and then answers. Every other read answers at once.
- */
-const buildHoldableClock = (
-  real: Clock.Clock,
-): {
-  readonly clock: Clock.Clock;
-  readonly held: {
-    armed: number;
-    readonly reached: ReturnType<typeof Promise.withResolvers<void>>;
-    readonly go: ReturnType<typeof Promise.withResolvers<void>>;
-  };
-} => {
-  const held = {
-    armed: 0,
-    reached: Promise.withResolvers<void>(),
-    go: Promise.withResolvers<void>(),
-  };
-  const clock: Clock.Clock = {
-    currentTimeMillisUnsafe: () => real.currentTimeMillisUnsafe(),
-    currentTimeNanosUnsafe: () => real.currentTimeNanosUnsafe(),
-    monotonicTimeNanosUnsafe: () => real.monotonicTimeNanosUnsafe(),
-    currentTimeNanos: real.currentTimeNanos,
-    monotonicTimeNanos: real.monotonicTimeNanos,
-    sleep: (duration) => real.sleep(duration),
-    currentTimeMillis: Effect.suspend(() => {
-      if (held.armed === 0) return real.currentTimeMillis;
-      held.armed -= 1;
-      if (held.armed > 0) return real.currentTimeMillis;
-      held.reached.resolve();
-      return Effect.andThen(
-        Effect.promise(() => held.go.promise),
-        real.currentTimeMillis,
-      );
-    }),
-  };
-  return { clock, held };
-};
-
-describe("the expiry timer's last look before it deletes a created client", () => {
-  it("does not delete early when the clock rolled back while the timer waited for a frozen controller", async () => {
+describe("the routine purge of expired setups", () => {
+  it("leaves the row of a sign-in whose timer has not run yet, so the timer still deletes its client", async () => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
 
-    const { afterThaw } = await run(
+    await run(
       [type],
       Effect.gen(function* () {
         const service = yield* ConnectionService;
         const promotion = yield* PromotionState;
         yield* service.startOAuth(startInput());
+        // The first sign-in's timer is due and waits at the gate of a frozen controller.
         yield* promotion.freeze("promotion-1", new Date(Date.now() + 60_000));
-        // The timer is due, and waits at the gate.
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
         yield* settle;
-        // The clock is corrected backwards while it waits, to before the deadline.
-        yield* TestClock.setTime(1000);
+        // A new start runs the routine purge of expired rows, and must not take that row.
+        yield* service.startOAuth(startInput({ redirectUri: OTHER_REDIRECT_URI }));
         yield* promotion.thaw("promotion-1");
         yield* settle;
-        const afterThaw = [...log.deleted];
-        // Once the clock really reaches the due time, the client goes.
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
-        yield* settle;
-        return { afterThaw };
       }),
     );
 
-    expect(afterThaw).toEqual([]);
-    expect(log.deleted).toEqual(["made-1"]);
-  });
-
-  it("keeps the client for a finish that begins its claim after the timer is due and before it looks at the entry", async () => {
-    const token = startProvider();
-    const { type, log } = buildCreatedClientType(token.base);
-
-    const { early } = await run(
-      [type],
-      Effect.gen(function* () {
-        const service = yield* ConnectionService;
-        const sql = yield* SqlClient.SqlClient;
-        const release = yield* Deferred.make<void>();
-        const { clock, held } = buildHoldableClock(yield* Clock.Clock);
-        // The timer is forked from the start, so it reads this clock.
-        const started = yield* asActor(
-          SESSION,
-          service.startOAuth(startInput()).pipe(Effect.provideService(Clock.Clock, clock)),
-        );
-        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
-        yield* settle;
-        // The timer's next look at the clock, once it is due, is held.
-        held.armed = 1;
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
-        yield* Effect.promise(() => held.reached.promise);
-        // A finish begins its claim, which waits for the writer, while the timer is held.
-        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
-        yield* settle;
-        const finish = yield* Effect.forkChild(
-          Effect.flip(asActor(SESSION, service.finishOAuth({ callbackQuery }))),
-        );
-        yield* settle;
-        held.go.resolve();
-        yield* settle;
-        const early = [...log.deleted];
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(finish);
-        yield* settle;
-        return { early };
-      }),
-    );
-
-    // The timer looked at the entry after the claim began and left the client to
-    // it. The claim came after the deadline, so it ended without a Connection and
-    // deleted the client.
-    expect(early).toEqual([]);
-    expect(log.deleted).toEqual(["made-1"]);
-  });
-
-  it("keeps the client for a finish that begins its claim while another claim's end waits for the clock", async () => {
-    const token = startProvider();
-    const { type, log } = buildCreatedClientType(token.base);
-
-    const { early } = await run(
-      [type],
-      Effect.gen(function* () {
-        const service = yield* ConnectionService;
-        const sql = yield* SqlClient.SqlClient;
-        const release = yield* Deferred.make<void>();
-        const { clock, held } = buildHoldableClock(yield* Clock.Clock);
-        const started = yield* asActor(SESSION, service.startOAuth(startInput()));
-        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
-        // The deadline has passed, so a claim that ends without success deletes the client.
-        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
-        // The first claim reads the clock for its claim and then for its end;
-        // it is held at the second read, which is its end.
-        held.armed = 2;
-        const first = yield* Effect.forkChild(
-          Effect.flip(asActor(OTHER_SESSION, service.finishOAuth({ callbackQuery }))).pipe(
-            Effect.provideService(Clock.Clock, clock),
-          ),
-        );
-        yield* Effect.promise(() => held.reached.promise);
-        // Another finish begins its claim, which waits for the writer, in that gap.
-        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
-        yield* settle;
-        const second = yield* Effect.forkChild(
-          Effect.flip(asActor(SESSION, service.finishOAuth({ callbackQuery }))),
-        );
-        yield* settle;
-        held.go.resolve();
-        yield* Fiber.join(first);
-        yield* settle;
-        const early = [...log.deleted];
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(second);
-        yield* settle;
-        return { early };
-      }),
-    );
-
-    expect(early).toEqual([]);
+    // Only the first sign-in's client went. The second sign-in is still open.
     expect(log.deleted).toEqual(["made-1"]);
   });
 });
@@ -1430,9 +1404,7 @@ describe("an expired sign-in, while its client is being deleted at the provider"
         const started = yield* service.startOAuth(startInput());
         const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
         // The timer comes due and starts to delete the client, which is held.
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
         yield* settle;
         // The clock is set back to before the deadline while the delete is in flight.
         yield* TestClock.setTime(1000);
@@ -1727,7 +1699,7 @@ describe("the clean-up of a created client, when the finish is cut short or the 
     expect(log.deleted).toEqual([]);
   });
 
-  it("leaves the client to the finish when the expiry timer fires during a slow claim, and the finish deletes it once", async () => {
+  it("deletes the client once when a claim that waited for the writer comes after the deadline, and the timer is due", async () => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
 
@@ -1749,9 +1721,7 @@ describe("the clean-up of a created client, when the finish is cut short or the 
           ),
         );
         yield* settle;
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
         yield* settle;
         const early = [...log.deleted];
         yield* Deferred.succeed(release, undefined);
@@ -1783,9 +1753,7 @@ describe("the clean-up of a created client, when the finish is cut short or the 
           }),
         );
         expect(refused).toMatchObject({ error: { code: "validation" } });
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
         yield* settle;
       }),
     );
@@ -1825,45 +1793,6 @@ describe("the clean-up of a created client, when the finish is cut short or the 
     expect(log.deleted).toEqual([]);
   });
 
-  it("deletes the client once when two finishes of the same sign-in overlap and both come too late", async () => {
-    const token = startProvider();
-    const { type, log } = buildCreatedClientType(token.base);
-
-    const early = await run(
-      [type],
-      Effect.gen(function* () {
-        const service = yield* ConnectionService;
-        const sql = yield* SqlClient.SqlClient;
-        const release = yield* Deferred.make<void>();
-        const started = yield* asActor(SESSION, service.startOAuth(startInput()));
-        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
-        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
-        yield* settle;
-        const first = yield* Effect.forkChild(
-          Effect.flip(asActor(OTHER_SESSION, service.finishOAuth({ callbackQuery }))),
-        );
-        const second = yield* Effect.forkChild(
-          Effect.flip(asActor(SESSION, service.finishOAuth({ callbackQuery }))),
-        );
-        yield* settle;
-        // The timer fires while both claims wait, and leaves the client to them.
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
-        yield* settle;
-        const early = [...log.deleted];
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(first);
-        yield* Fiber.join(second);
-        yield* settle;
-        return early;
-      }),
-    );
-
-    expect(early).toEqual([]);
-    expect(log.deleted).toEqual(["made-1"]);
-  });
-
   it("never calls the provider for a client when the controller is sealed, and the sealed branch is the one that ran", async () => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
@@ -1874,9 +1803,7 @@ describe("the clean-up of a created client, when the finish is cut short or the 
       Effect.gen(function* () {
         const service = yield* ConnectionService;
         yield* service.startOAuth(startInput());
-        yield* TestClock.adjust(
-          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
-        );
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + 1000));
         yield* settle;
       }),
       { stack: { sealed: { answered } } },

@@ -109,7 +109,9 @@ const make = Effect.gen(function* () {
     /**
      * Claims the setup for this `state`, so a `state` can be used only once.
      *
-     * An expired row is deleted and found as `none`. A live row is passed to
+     * An expired row is found as `none` and left where it is: whoever deletes
+     * a row owns what belongs to it (see `./pending-oauth-setups`), and a
+     * claim that finds nothing live owns nothing. A live row is passed to
      * `check`, which returns the reason the caller may not have it, or
      * `undefined` to accept it. Only an accepted row is deleted: a caller that
      * does not own the flow must not be able to end it.
@@ -125,10 +127,7 @@ const make = Effect.gen(function* () {
         `;
         const row = rows[0];
         if (row === undefined) return { _tag: "none" } as const;
-        if (row.expires_at <= now) {
-          yield* sql`DELETE FROM oauth_setups WHERE state = ${state}`;
-          return { _tag: "none" } as const;
-        }
+        if (row.expires_at <= now) return { _tag: "none" } as const;
         const setup = parseSetupRow(row);
         const reason = check(setup);
         if (reason !== undefined) return { _tag: "refused", reason } as const;
@@ -137,20 +136,21 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes the setup for this `state`, whether or not it has expired.
-     * Succeeds when there is no such row. The controller ends a sign-in with
-     * it, so that a finish that comes later finds nothing, whatever the clock
-     * says then.
+     * Deletes the setup for this `state`, whether or not it has expired, and
+     * returns whether a row was there to delete. A flow that ends this way can
+     * no longer be finished, whatever the clock says afterwards.
      */
-    remove: (state: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`DELETE FROM oauth_setups WHERE state = ${state}`),
+    remove: (state: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly state: string;
+        }>`DELETE FROM oauth_setups WHERE state = ${state} RETURNING state`,
+        (rows) => rows.length > 0,
+      ),
 
-    /**
-     * Deletes the expired rows: flows the user never came back from. Called on
-     * each new start rather than on a timer.
-     */
-    deleteExpired: (now: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`DELETE FROM oauth_setups WHERE expires_at <= ${now}`),
+    /** Deletes the rows that expired at or before `cutoff`: flows nobody came back to. */
+    deleteExpiredBefore: (cutoff: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM oauth_setups WHERE expires_at <= ${cutoff}`),
   };
 });
 

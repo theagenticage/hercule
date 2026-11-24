@@ -79,16 +79,6 @@ export const OAUTH_TOKENS = "oauth.tokens";
 export const SETUP_LIFETIME_MS = 10 * 60 * 1000;
 
 /**
- * How long after a sign-in's lifetime the controller waits before it deletes
- * the OAuth client the sign-in created. A finish can claim the sign-in until
- * the last moment of its lifetime and then spends up to a minute on the code
- * exchange and the account check, and the timer must not delete the client
- * under it. The finish takes ownership of the cleanup in the same step as its
- * claim, so this grace only has to cover that one step.
- */
-export const CREATED_CLIENT_GRACE_MS = 2 * 60 * 1000;
-
-/**
  * How an OAuth flow ended, as the word the Connections screen receives in its
  * URL. The user only ever sees one of these six outcomes, never the
  * provider's own error message, which the controller does not put in a URL.

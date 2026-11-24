@@ -29,8 +29,6 @@
 import type * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as Clock from "effect/Clock";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -113,7 +111,6 @@ import {
   OAUTH_TOKENS,
   buildRedirectUri,
   CATCHER_PATH,
-  CREATED_CLIENT_GRACE_MS,
   requestDeviceCode,
   SETUP_LIFETIME_MS,
   SLOW_DOWN_STEP_SECONDS,
@@ -130,7 +127,8 @@ import {
   type StoredConnection,
 } from "./repository";
 import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
-import { oauthSetupRepository, type StoredSetup } from "./oauth-setups";
+import type { StoredSetup } from "./oauth-setups";
+import { pendingOAuthSetups } from "./pending-oauth-setups";
 import { PromotionState } from "../promotion";
 import type { SetupTarget, StoredSetupTarget } from "./setup-target";
 
@@ -514,13 +512,6 @@ const buildFinishRefusal = (
 const buildSetupRedirectUri = (setup: StoredSetup): string =>
   setup.redirectUri ?? buildRedirectUri(setup.origin);
 
-/**
- * How long to wait for a plugin to delete an OAuth client it created. The
- * sign-in that needed the client is over, so nothing should wait for long on
- * the provider.
- */
-const DELETE_CLIENT_TIMEOUT = Duration.seconds(10);
-
 /** What replaces a value the user pasted where a plugin's message quotes it. */
 const REMOVED = "[removed]";
 
@@ -662,7 +653,6 @@ const NO_ACTOR: Actor = { _tag: "none" };
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
-  const setups = yield* oauthSetupRepository;
   const deviceSetups = yield* deviceSetupRepository;
   const findOAuthClient = yield* oauthClients;
   const secrets = yield* Secrets;
@@ -673,201 +663,9 @@ const make = Effect.gen(function* () {
   const observer = yield* ConnectionObserver;
   const activePlugins = yield* ActivePlugins;
   const pluginIntake = yield* PluginIntake;
-  const promotion = yield* PromotionState;
 
+  const pending = yield* pendingOAuthSetups;
   const serviceScope = yield* Effect.scope;
-
-  /**
-   * One OAuth client a plugin created for a sign-in that is still open.
-   *
-   * - `deleteClient` deletes the client at the provider. It keeps what it needs
-   *   (the values the user pasted) in its closure, so nothing about them is
-   *   stored, logged or put in a key.
-   * - `deadlineMillis` is the sign-in's own expiry, the same value the setup row
-   *   stores, so the timer and the claim read one deadline.
-   * - `claims` counts the finishes that are claiming the setup row right now.
-   *   While it is above 0 the expiry timer leaves the entry alone.
-   */
-  interface CreatedClientEntry {
-    readonly deleteClient: CreatedOAuthClient["deleteClient"];
-    readonly deadlineMillis: number;
-    claims: number;
-  }
-
-  /**
-   * The OAuth clients the plugins created for sign-ins that are still open, by
-   * the `state` of the sign-in. Only a sign-in that created a client has an
-   * entry: a reconnect that reuses the Connection's own client has none,
-   * because deleting that client would break the Connection.
-   *
-   * Exactly one party owns an entry's cleanup at a time, and every change of
-   * owner is one synchronous step, so no two parties can both take it:
-   *
-   * - From the moment the plugin created the client, the start owns it. It
-   *   registers the entry in the same uninterruptible step as the creation, and
-   *   deletes the client itself when the start fails or is interrupted before
-   *   the sign-in is stored.
-   * - Once the sign-in is stored, the expiry timer owns it while no claim is in
-   *   flight. The timer wakes at the deadline plus a grace period, checks the
-   *   clock again, and takes the entry only if its `claims` is 0.
-   * - A finish counts itself in (`beginClaim`) before it claims the setup row
-   *   and out again (`endClaim`) however the claim ends, so overlapping finishes
-   *   cannot undo each other and the timer leaves the entry while any is in
-   *   flight. A claim that succeeds removes the entry, and the finish owns the
-   *   cleanup from then on. The last claim to end without success deletes the
-   *   client itself when the deadline has passed, because the timer may already
-   *   have come and left it.
-   *
-   * The map lives in memory, and a Hercule that restarts or is promoted loses
-   * it, so a sign-in that is open then leaves its client at the provider, an
-   * unused app the user can delete there. A sealed controller drops its entries
-   * without calling the provider, because the new controller owns the setup row
-   * and may be finishing the sign-in with that client.
-   */
-  const createdClients = new Map<string, CreatedClientEntry>();
-
-  /**
-   * Runs a plugin's `deleteClient`. It never fails and never waits long,
-   * because it runs after the user's sign-in has already ended.
-   */
-  const deleteCreatedClient = (
-    deleteClient: CreatedOAuthClient["deleteClient"],
-  ): Effect.Effect<void> =>
-    deleteClient.pipe(
-      Effect.provide(FetchHttpClient.layer),
-      Effect.timeout(DELETE_CLIENT_TIMEOUT),
-      Effect.ignoreCause,
-    );
-
-  /**
-   * Ends an expired sign-in for good and deletes its created client at the
-   * provider. The order is the point:
-   *
-   * 1. The setup row is deleted in a short write transaction of its own. From
-   *    then on no finish can claim the sign-in, whatever the clock says: a
-   *    clock that is set back must not bring an expired sign-in back to life
-   *    while its app is being deleted. A row that is already gone counts as
-   *    deleted. When the delete fails, nothing is deleted at the provider.
-   * 2. The entry is looked at again, in the same synchronous step that takes it.
-   *    A finish that began its claim in the meantime owns the client, or has
-   *    already taken it.
-   * 3. Only then is the client deleted at the provider.
-   */
-  const retireSignIn = (state: string, entry: CreatedClientEntry): Effect.Effect<void> =>
-    Effect.matchEffect(withTransaction(sql, setups.remove(state)), {
-      onFailure: () => Effect.void,
-      onSuccess: () =>
-        Effect.suspend(() => {
-          if (createdClients.get(state) !== entry || entry.claims > 0) return Effect.void;
-          createdClients.delete(state);
-          return deleteCreatedClient(entry.deleteClient);
-        }),
-    });
-
-  /**
-   * Registers the client a start created, and deletes it when the sign-in's
-   * deadline and the grace period end without a finish. The timer is one forked
-   * fiber that sleeps, so nothing polls. It lives in the service's scope and
-   * ends with it. Registering is not interruptible, so no interrupt can land
-   * between the plugin's answer and the entry.
-   *
-   * The timer takes the entry inside the promotion gate, and only while no
-   * claim is in flight. A frozen controller waits, and a sealed one drops the
-   * entry without calling the provider.
-   */
-  const keepCreatedClient = (
-    state: string,
-    deleteClient: CreatedOAuthClient["deleteClient"],
-    deadlineMillis: number,
-  ): Effect.Effect<void> =>
-    Effect.uninterruptible(
-      Effect.gen(function* () {
-        createdClients.set(state, { deleteClient, deadlineMillis, claims: 0 });
-        // Sleeps until the deadline plus the grace period by the clock, and asks
-        // the clock again on waking: a clock that moved while the fiber slept
-        // must not make the timer early. The whole decision is made again inside
-        // the promotion gate, after any wait there, in one synchronous step with
-        // the delete, so a clock that rolled back during a freeze, or a finish
-        // that began its claim meanwhile, is seen.
-        const expire: Effect.Effect<void> = Effect.flatMap(
-          promotion.whenServingOr(
-            Effect.flatMap(Clock.currentTimeMillis, (now) => {
-              const entry = createdClients.get(state);
-              if (entry === undefined) return Effect.succeed("done" as const);
-              if (now < entry.deadlineMillis + CREATED_CLIENT_GRACE_MS) {
-                return Effect.succeed("early" as const);
-              }
-              // A claim in flight owns the entry, and the last claim to end
-              // without success deletes the client.
-              if (entry.claims > 0) return Effect.succeed("done" as const);
-              return Effect.as(retireSignIn(state, entry), "done" as const);
-            }),
-            () =>
-              Effect.sync(() => {
-                createdClients.delete(state);
-                return "done" as const;
-              }),
-          ),
-          (outcome) => (outcome === "early" ? waitThenExpire : Effect.void),
-        );
-        const waitThenExpire: Effect.Effect<void> = Effect.flatMap(
-          Clock.currentTimeMillis,
-          (now) => {
-            const remaining = deadlineMillis + CREATED_CLIENT_GRACE_MS - now;
-            return Effect.andThen(
-              remaining <= 0 ? Effect.void : Effect.sleep(Duration.millis(remaining)),
-              expire,
-            );
-          },
-        );
-        yield* Effect.forkIn(waitThenExpire, serviceScope);
-      }),
-    );
-
-  /**
-   * Counts a finish in as claiming the sign-in's setup row, so the expiry timer
-   * leaves the entry, and returns whether there was an entry to count in at. The
-   * caller must call `endClaim` if it returned true, whatever happens.
-   */
-  const beginClaim = (state: string): boolean => {
-    const entry = createdClients.get(state);
-    if (entry === undefined) return false;
-    entry.claims += 1;
-    return true;
-  };
-
-  /**
-   * Counts a finish out of the claim it began, when the claim did not succeed
-   * (a success removes the entry instead). When it was the last claim in flight
-   * and the sign-in's deadline has passed, the client is deleted at once,
-   * because the timer may have come during the claims and left it.
-   */
-  const endClaim = (state: string): Effect.Effect<void> =>
-    Effect.suspend(() => {
-      const entry = createdClients.get(state);
-      if (entry === undefined) return Effect.void;
-      entry.claims = Math.max(0, entry.claims - 1);
-      // Every condition is checked again after the clock was read, in the step
-      // that deletes: another finish may have begun its claim while this one
-      // waited for the clock.
-      return Effect.flatMap(Clock.currentTimeMillis, (now) => {
-        if (now < entry.deadlineMillis) return Effect.void;
-        if (entry.claims > 0 || createdClients.get(state) !== entry) return Effect.void;
-        return retireSignIn(state, entry);
-      });
-    });
-
-  /**
-   * Removes the sign-in's created client from the map without deleting it, and
-   * returns the effect that deletes it, or `undefined` when the sign-in created
-   * no client. The caller owns the cleanup from then on, and the timer finds
-   * nothing to delete.
-   */
-  const takeCreatedClient = (state: string): CreatedOAuthClient["deleteClient"] | undefined => {
-    const entry = createdClients.get(state);
-    createdClients.delete(state);
-    return entry?.deleteClient;
-  };
 
   /**
    * Runs the `write` that creates a Connection and, in the same uninterruptible
@@ -1170,7 +968,9 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks the input that starts a token flow, and returns what the flow does
-   * once it has tokens.
+   * once it has tokens, with the connection a reconnect names as it was read
+   * (`undefined` for a new connection), so its id and credentials generation
+   * travel together.
    *
    * - A new connection takes its label, topics and config from the input. The
    *   topics default to none and the config to empty; a missing label is
@@ -1191,12 +991,18 @@ const make = Effect.gen(function* () {
       readonly connectionId?: string;
     },
     contribution: Contribution,
-  ): Effect.Effect<SetupTarget, Validation | SqlError> =>
+  ): Effect.Effect<
+    { readonly target: SetupTarget; readonly reconnected: StoredConnection | undefined },
+    Validation | SqlError
+  > =>
     Effect.gen(function* () {
       if (input.connectionId === undefined) {
         const config = input.config ?? {};
         yield* readConfig(contribution, config);
-        return { kind: "create", label: input.label, labels: input.labels ?? [], config } as const;
+        return {
+          target: { kind: "create", label: input.label, labels: input.labels ?? [], config },
+          reconnected: undefined,
+        } as const;
       }
       const existing = Option.getOrUndefined(yield* connections.one(input.connectionId));
       if (existing === undefined) {
@@ -1231,7 +1037,10 @@ const make = Effect.gen(function* () {
           ),
         );
       }
-      return { kind: "reconnect", connectionId: input.connectionId } as const;
+      return {
+        target: { kind: "reconnect", connectionId: input.connectionId },
+        reconnected: existing,
+      } as const;
     });
 
   /**
@@ -1512,44 +1321,29 @@ const make = Effect.gen(function* () {
     // then never land between the claim and the code that owns the cleanup.
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        // The finish is counted in as claiming the sign-in's created client, if
-        // it has one, before the claim starts, so the expiry timer cannot take
-        // it however long the claim waits for the writer.
-        const marked = beginClaim(callback.state);
         const claim = yield* Effect.orDie(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              return yield* setups.consume(
-                callback.state,
-                yield* nowIso,
-                (setup): FinishFailure | undefined => {
-                  if (claimant.kind === "controller") {
-                    return setup.redirectUri === undefined ? undefined : "no-live-attempt";
-                  }
-                  if (setup.redirectUri === undefined) return "no-live-attempt";
-                  if ((setup.actor ?? USER_ACTOR) !== claimant.actor) return "no-live-attempt";
-                  return callback.address === undefined ||
-                    isRedirectAddress(callback.address, setup.redirectUri)
-                    ? undefined
-                    : "wrong-address";
-                },
-              );
-            }),
-          ),
-        ).pipe(
-          // A claim that dies leaves the client to the timer again.
-          Effect.onError(() => (marked ? endClaim(callback.state) : Effect.void)),
+          pending.claim(callback.state, (setup): FinishFailure | undefined => {
+            if (claimant.kind === "controller") {
+              return setup.redirectUri === undefined ? undefined : "no-live-attempt";
+            }
+            if (setup.redirectUri === undefined) return "no-live-attempt";
+            if ((setup.actor ?? USER_ACTOR) !== claimant.actor) return "no-live-attempt";
+            return callback.address === undefined ||
+              isRedirectAddress(callback.address, setup.redirectUri)
+              ? undefined
+              : "wrong-address";
+          }),
         );
         if (claim._tag === "none" || claim._tag === "refused") {
-          if (marked) yield* endClaim(callback.state);
           return yield* Effect.fail({
             failure: claim._tag === "none" ? "no-live-attempt" : claim.reason,
             reusedApp: undefined,
           } as const);
         }
         const setup = claim.setup;
-        const deleteClient = takeCreatedClient(callback.state);
+        // The claim deleted the row, so the cleanup of the client the plugin
+        // created for it is this finish's now.
+        const deleteClient = claim.cleanup;
         const registered = Option.getOrUndefined(yield* types.named(setup.type));
         const publicClient = registered?.contribution.oauth?.publicClient;
         // A reconnect that signs in with the Connection's own app, which the
@@ -1659,7 +1453,7 @@ const make = Effect.gen(function* () {
           Effect.onExit((exit) =>
             Exit.isSuccess(exit) || deleteClient === undefined || connectionCommitted
               ? Effect.void
-              : deleteCreatedClient(deleteClient),
+              : deleteClient,
           ),
         );
       }),
@@ -2007,8 +1801,9 @@ const make = Effect.gen(function* () {
     /**
      * Starts an OAuth flow: stores everything the finish will need, and
      * returns the authorization URL to send the browser to. No connection
-     * exists yet. A flow the user abandons leaves a setup row, which a later
-     * start deletes once it has expired.
+     * exists yet. A flow the user abandons leaves a setup row, which its timer
+     * deletes at its deadline when a client was created, and which the routine
+     * purge deletes long after it expired otherwise.
      *
      * The browser returns to the redirect URI built from `origin` (the
      * controller's callback path), or to the `redirectUri` the caller gave,
@@ -2021,7 +1816,7 @@ const make = Effect.gen(function* () {
      * reconnect, optional: without them the Connection's own client is used).
      * Everything that can be checked locally is checked first, and the plugin
      * is called outside any transaction. The client is deleted at the provider
-     * if the sign-in ends without a Connection (see `createdClients`).
+     * if the sign-in ends without a Connection (see `pending-oauth-setups`).
      * `clientValues` are handed to the plugin and nowhere else: not to the
      * setup row, the audit log, a log line, an error or the answer.
      *
@@ -2088,11 +1883,7 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const target = yield* buildSetupTarget(decoded, contribution);
-        const reconnected =
-          target.kind === "reconnect"
-            ? Option.getOrUndefined(yield* connections.one(target.connectionId))
-            : undefined;
+        const { target, reconnected } = yield* buildSetupTarget(decoded, contribution);
         const clientFields =
           publicClient !== undefined && "createdAtSetup" in publicClient
             ? publicClient.createdAtSetup.fields
@@ -2103,78 +1894,63 @@ const make = Effect.gen(function* () {
           decoded.clientValues,
           target.kind === "create",
         );
-        // Without values to create a client from, the flow signs in with the
-        // client that already exists: the plugin's own, or the Connection's.
+        // The client the flow signs in with is selected here, once: the client
+        // that already exists (the plugin's own, or the Connection's), or, from
+        // `clientValues`, one the plugin creates now. Everything that can be
+        // refused is refused before the plugin is called.
         const knownClientId = clientFields === undefined ? undefined : reconnected?.oauthClientId;
-        if (clientValues === undefined) {
-          const known = yield* findOAuthClient(pluginId, oauth, knownClientId);
-          if (Option.isNone(known)) {
-            return yield* Effect.fail(
-              createInvalidStateError(describeMissingClient(pluginId, clientFields)),
-            );
-          }
-        }
 
-        // The Connection's credentials generation is read before the plugin is
-        // called, so a sign-in that replaces them while the client is being
-        // created makes this one write nothing.
+        // The Connection's credentials generation comes with the connection read
+        // above, before the plugin is called, so a sign-in that replaces them
+        // while the client is being created makes this one write nothing.
         const credentialsGeneration = reconnected?.credentialsGeneration;
         const state = mintToken();
-        // The sign-in's one deadline is sampled before the client is created
-        // and is used both for the stored row and for the cleanup timer, so
-        // the two cannot disagree about when the sign-in ends.
+        // The sign-in's one deadline is sampled before the client is created and
+        // is stored with the row, which is what the timer that retires the
+        // sign-in waits for.
         const now = yield* nowIso;
         const expiresAt = new Date(Date.parse(now) + SETUP_LIFETIME_MS).toISOString();
         const secretFields = new Set(
           (clientFields ?? []).filter((field) => field.secret === true).map((field) => field.name),
         );
-        // The client is registered for cleanup in the same uninterruptible
-        // step as its creation, so no interrupt can leave an app at the
-        // provider that nothing will delete.
-        const created =
-          clientValues === undefined
-            ? undefined
-            : yield* Effect.uninterruptibleMask((restore) =>
-                restore(createClient(contribution, clientValues, secretFields)).pipe(
-                  Effect.tap((client) =>
-                    keepCreatedClient(state, client.deleteClient, Date.parse(expiresAt)),
-                  ),
-                ),
-              );
+        const { client, created } = yield* clientValues === undefined
+          ? Effect.flatMap(findOAuthClient(pluginId, oauth, knownClientId), (found) =>
+              Option.isNone(found)
+                ? Effect.fail(
+                    createInvalidStateError(describeMissingClient(pluginId, clientFields)),
+                  )
+                : Effect.succeed({ client: found.value, created: undefined }),
+            )
+          : // The client is kept for cleanup in the same uninterruptible step as
+            // its creation, so no interrupt can leave an app at the provider that
+            // nothing will delete.
+            Effect.uninterruptibleMask((restore) =>
+              restore(createClient(contribution, clientValues, secretFields)).pipe(
+                Effect.tap((made) => pending.keepCreatedClient(state, made.deleteClient)),
+                Effect.map((made) => ({ client: { clientId: made.clientId }, created: made })),
+              ),
+            );
         const clientId = created?.clientId ?? knownClientId;
 
         const storeAndBuildUrl = Effect.gen(function* () {
-          const client = yield* findOAuthClient(pluginId, oauth, clientId);
-          if (Option.isNone(client)) {
-            // The plugin's own client was cleared during this call.
-            return yield* Effect.fail(
-              createInvalidStateError(describeMissingClient(pluginId, clientFields)),
-            );
-          }
           const codeVerifier = mintToken();
           const stamp = yield* currentStamp;
-          yield* withTransaction(
-            sql,
-            Effect.gen(function* () {
-              yield* setups.deleteExpired(now);
-              yield* setups.insert({
-                state,
-                type: decoded.type,
-                ...target,
-                origin: returnsToUserMachine ? new URL(redirectUri).origin : (decoded.origin ?? ""),
-                redirectUri: returnsToUserMachine ? redirectUri : undefined,
-                clientId,
-                actor: stamp,
-                credentialsGeneration,
-                codeVerifier,
-                expiresAt,
-                createdAt: now,
-              });
-            }),
-          );
+          yield* pending.publish({
+            state,
+            type: decoded.type,
+            ...target,
+            origin: returnsToUserMachine ? new URL(redirectUri).origin : (decoded.origin ?? ""),
+            redirectUri: returnsToUserMachine ? redirectUri : undefined,
+            clientId,
+            actor: stamp,
+            credentialsGeneration,
+            codeVerifier,
+            expiresAt,
+            createdAt: now,
+          });
           return {
             authorizationUrl: buildAuthorizationUrl(oauth, {
-              clientId: client.value.clientId,
+              clientId: client.clientId,
               redirectUri,
               state,
               challenge: computeChallenge(codeVerifier),
@@ -2185,11 +1961,9 @@ const make = Effect.gen(function* () {
         // A client nothing can sign in with, because the start failed or was
         // interrupted before the sign-in was stored, is deleted at once.
         return yield* storeAndBuildUrl.pipe(
-          Effect.onExit((exit) => {
-            if (Exit.isSuccess(exit)) return Effect.void;
-            const deleteClient = takeCreatedClient(state);
-            return deleteClient === undefined ? Effect.void : deleteCreatedClient(deleteClient);
-          }),
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) || created === undefined ? Effect.void : pending.abandon(state),
+          ),
         );
       }),
 
@@ -2292,7 +2066,7 @@ const make = Effect.gen(function* () {
             `step: ${describeSetupOperations(contribution, decoded.connectionId === undefined ? "create" : "reconnect")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
-        const target = yield* buildSetupTarget(decoded, contribution);
+        const { target } = yield* buildSetupTarget(decoded, contribution);
         const code = yield* requestDeviceCode(device).pipe(
           Effect.provide(FetchHttpClient.layer),
           Effect.mapError((error) => createInvalidStateError(error.message)),
