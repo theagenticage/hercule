@@ -931,6 +931,41 @@ describe("Connections > a redirect flow that returns to the user's machine", () 
     vi.unstubAllGlobals();
   });
 
+  it("keeps the pasted address in the field when the controller cannot be reached, and sends it again on Finish", async () => {
+    vi.stubGlobal("open", vi.fn());
+    let attempts = 0;
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("The network is down.");
+        return { body: { ...CHATSY, status: "connected" } };
+      },
+    });
+    const user = await startChatsy();
+    const address = await screen.findByLabelText<HTMLInputElement>("Address");
+    await user.type(address, buildReturnAddress(api, 1));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(
+      await screen.findByText(
+        "The controller could not be reached, so the sign-in is not finished. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(address.value).toBe(buildReturnAddress(api, 1));
+    expect(screen.queryByRole("button", { name: "Start again" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Address")).toBeNull();
+    });
+    const finishes = listWrites(api).filter((write) => write.path.endsWith("/finish"));
+    expect(finishes.map((write) => write.body)).toEqual([
+      { callbackQuery: buildReturnAddress(api, 1) },
+      { callbackQuery: buildReturnAddress(api, 1) },
+    ]);
+    vi.unstubAllGlobals();
+  });
+
   it("refuses the address of another sign-in, so the controller does not complete that one in its place", async () => {
     vi.stubGlobal("open", vi.fn());
     const { api } = await openChatsy([], {

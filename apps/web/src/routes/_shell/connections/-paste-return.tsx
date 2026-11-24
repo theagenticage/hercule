@@ -5,7 +5,7 @@ import {
   describeSignInFailure,
   isWebLink,
   queryKeys,
-  readErrorMessage,
+  readFinishFailure,
   readPastedReturn,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -88,6 +88,9 @@ export function PasteReturnSignIn({
     setProblem(null);
     setPasted("");
     setFinishing(true);
+    // Kept in this request only, and put back in the field when the controller
+    // could not be reached, so the user can press Finish again.
+    const address = pasted;
     client.connection.finishOAuth({ payload: { callbackQuery: reading.callbackQuery } }).then(
       () => {
         // The connection exists from this reply on, even when the panel is gone.
@@ -97,7 +100,13 @@ export function PasteReturnSignIn({
       (error: unknown) => {
         if (!shown.current) return;
         setFinishing(false);
-        setRefusal(readErrorMessage(error));
+        const failure = readFinishFailure(error);
+        if (failure.kind === "retry") {
+          setPasted(address);
+          setProblem(failure.message);
+        } else {
+          setRefusal(failure.message);
+        }
       },
     );
   };

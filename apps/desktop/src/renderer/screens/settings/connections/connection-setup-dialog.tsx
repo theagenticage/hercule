@@ -15,6 +15,7 @@ import {
   readClientValues,
   readConfigIssues,
   readErrorMessage,
+  readFinishFailure,
   readPastedReturn,
   startLocalReturnSignIn,
   type ConnectionType,
@@ -46,6 +47,8 @@ import {
  * - `return-wait`: the browser returns to this machine. `signIn` holds the
  *   provider's page and the listener. `pasted` and `pasteProblem` are the
  *   address the user pastes when nothing listens, and why the last was refused.
+ *   When the controller could not be reached while it finished the sign-in,
+ *   the phase comes back with `retry`, and the return in `pasted`.
  * - `finishing`: the controller is finishing the sign-in the browser returned
  *   to this machine. The provider's page can still be opened again, and a
  *   refusal to open it still shows.
@@ -68,6 +71,8 @@ type OAuthPhase =
       readonly linkError: string | null;
       readonly pasted: string;
       readonly pasteProblem: string | null;
+      /** True after the controller could not be reached: `pasted` is the return to send again. */
+      readonly retry: boolean;
     }
   | {
       readonly kind: "finishing";
@@ -239,7 +244,21 @@ export function ConnectionSetupDialog({
     try {
       await client.connection.finishOAuth({ payload: { callbackQuery } });
     } catch (error) {
-      refuseSignIn(attempt, readErrorMessage(error));
+      const failure = readFinishFailure(error);
+      if (failure.kind === "refused") {
+        refuseSignIn(attempt, failure.message);
+      } else if (!attempt.signal.aborted) {
+        // The return is one-shot, but the sign-in may still be open at the
+        // controller, so the return goes back into the field to send again.
+        setPhase({
+          kind: "return-wait",
+          signIn,
+          linkError: null,
+          pasted: callbackQuery,
+          pasteProblem: failure.message,
+          retry: true,
+        });
+      }
       return;
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
@@ -255,7 +274,14 @@ export function ConnectionSetupDialog({
     start: Parameters<typeof startLocalReturnSignIn>[1],
   ): Promise<void> => {
     const signIn = await startLocalReturnSignIn({ client, port }, start, attempt.signal);
-    setPhase({ kind: "return-wait", signIn, linkError: null, pasted: "", pasteProblem: null });
+    setPhase({
+      kind: "return-wait",
+      signIn,
+      linkError: null,
+      pasted: "",
+      pasteProblem: null,
+      retry: false,
+    });
     if (signIn.returnBy === "listener") {
       void signIn.awaitReturn().then((outcome) => {
         if (attempt.signal.aborted) return;
@@ -520,8 +546,8 @@ const decideOAuthState = (
         linkError: phase.linkError,
         finishing: false,
         paste:
-          phase.signIn.returnBy === "paste"
-            ? { text: phase.pasted, problem: phase.pasteProblem }
+          phase.signIn.returnBy === "paste" || phase.retry
+            ? { text: phase.pasted, problem: phase.pasteProblem, retry: phase.retry }
             : null,
       };
     case "finishing":
@@ -530,7 +556,7 @@ const decideOAuthState = (
         authorizationUrl: phase.signIn.authorizationUrl,
         linkError: phase.linkError,
         finishing: true,
-        paste: phase.signIn.returnBy === "paste" ? { text: "", problem: null } : null,
+        paste: phase.signIn.returnBy === "paste" ? { text: "", problem: null, retry: false } : null,
       };
     case "refused":
       return describeSignInFailure(phase.message);

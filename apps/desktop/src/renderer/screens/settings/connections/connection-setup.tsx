@@ -86,6 +86,8 @@ export type ConnectionSetupState =
       readonly paste: {
         readonly text: string;
         readonly problem: string | null;
+        /** The browser already came back: the field holds its return, to send again. */
+        readonly retry: boolean;
       } | null;
     }
   | { readonly kind: "unsupported"; readonly flow?: "pairing" };
@@ -334,7 +336,9 @@ export function ConnectionSetup({
                     ? "Finishing the sign-in…"
                     : state.paste === null
                       ? "Approve Hercule in your browser, then come back here."
-                      : "Approve Hercule in your browser."
+                      : state.paste.retry
+                        ? "The browser came back."
+                        : "Approve Hercule in your browser."
                 }
               />
               <LinkError text={state.linkError} />
@@ -342,6 +346,7 @@ export function ConnectionSetup({
                 <PasteAddress
                   text={state.paste.text}
                   problem={state.paste.problem}
+                  retry={state.paste.retry}
                   disabled={state.finishing}
                   actions={actions}
                 />
@@ -503,11 +508,14 @@ function SetupForm({
 function PasteAddress({
   text,
   problem,
+  retry,
   disabled,
   actions,
 }: {
   readonly text: string;
   readonly problem: string | null;
+  /** The field holds the browser's return, to send again, so the sentence on where to find it is left out. */
+  readonly retry: boolean;
   readonly disabled: boolean;
   readonly actions: ConnectionSetupActions;
 }): JSX.Element {
@@ -519,10 +527,12 @@ function PasteAddress({
         if (!disabled && text.trim() !== "") actions.onFinishPasted();
       }}
     >
-      <p>
-        After you approve, your browser shows a page that does not load. Copy its address and paste
-        it here.
-      </p>
+      {retry ? null : (
+        <p>
+          After you approve, your browser shows a page that does not load. Copy its address and
+          paste it here.
+        </p>
+      )}
       <FormField label="Address" error={problem}>
         <input
           autoFocus
