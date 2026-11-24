@@ -740,6 +740,31 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Ends an expired sign-in for good and deletes its created client at the
+   * provider. The order is the point:
+   *
+   * 1. The setup row is deleted in a short write transaction of its own. From
+   *    then on no finish can claim the sign-in, whatever the clock says: a
+   *    clock that is set back must not bring an expired sign-in back to life
+   *    while its app is being deleted. A row that is already gone counts as
+   *    deleted. When the delete fails, nothing is deleted at the provider.
+   * 2. The entry is looked at again, in the same synchronous step that takes it.
+   *    A finish that began its claim in the meantime owns the client, or has
+   *    already taken it.
+   * 3. Only then is the client deleted at the provider.
+   */
+  const retireSignIn = (state: string, entry: CreatedClientEntry): Effect.Effect<void> =>
+    Effect.matchEffect(withTransaction(sql, setups.remove(state)), {
+      onFailure: () => Effect.void,
+      onSuccess: () =>
+        Effect.suspend(() => {
+          if (createdClients.get(state) !== entry || entry.claims > 0) return Effect.void;
+          createdClients.delete(state);
+          return deleteCreatedClient(entry.deleteClient);
+        }),
+    });
+
+  /**
    * Registers the client a start created, and deletes it when the sign-in's
    * deadline and the grace period end without a finish. The timer is one forked
    * fiber that sleeps, so nothing polls. It lives in the service's scope and
@@ -775,8 +800,7 @@ const make = Effect.gen(function* () {
               // A claim in flight owns the entry, and the last claim to end
               // without success deletes the client.
               if (entry.claims > 0) return Effect.succeed("done" as const);
-              createdClients.delete(state);
-              return Effect.as(deleteCreatedClient(entry.deleteClient), "done" as const);
+              return Effect.as(retireSignIn(state, entry), "done" as const);
             }),
             () =>
               Effect.sync(() => {
@@ -829,8 +853,7 @@ const make = Effect.gen(function* () {
       return Effect.flatMap(Clock.currentTimeMillis, (now) => {
         if (now < entry.deadlineMillis) return Effect.void;
         if (entry.claims > 0 || createdClients.get(state) !== entry) return Effect.void;
-        createdClients.delete(state);
-        return deleteCreatedClient(entry.deleteClient);
+        return retireSignIn(state, entry);
       });
     });
 

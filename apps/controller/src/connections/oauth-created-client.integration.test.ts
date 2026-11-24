@@ -147,6 +147,12 @@ interface PluginLog {
   readonly created: Array<Record<string, string>>;
   /** The client ids whose `deleteClient` ran. */
   readonly deleted: Array<string>;
+  /**
+   * While it holds a promise, a client's `deleteClient` waits for it before it
+   * records the delete, so a test can act while the provider's delete is in
+   * flight.
+   */
+  readonly deleteGate: { current: Promise<void> | undefined };
 }
 
 /**
@@ -160,7 +166,7 @@ const buildCreatedClientType = (
   tokenBase: string,
   fieldName = "configToken",
 ): { readonly type: RegisteredConnectionType; readonly log: PluginLog } => {
-  const log: PluginLog = { created: [], deleted: [] };
+  const log: PluginLog = { created: [], deleted: [], deleteGate: { current: undefined } };
   const type: RegisteredConnectionType = {
     pluginId: "forge",
     contribution: {
@@ -209,9 +215,12 @@ const buildCreatedClientType = (
         const clientId = `made-${log.created.length}`;
         const client: CreatedOAuthClient = {
           clientId,
-          deleteClient: Effect.sync(() => {
-            log.deleted.push(clientId);
-          }),
+          deleteClient: Effect.andThen(
+            Effect.promise(() => log.deleteGate.current ?? Promise.resolve()),
+            Effect.sync(() => {
+              log.deleted.push(clientId);
+            }),
+          ),
         };
         return Effect.succeed(client);
       },
@@ -1402,6 +1411,43 @@ describe("the expiry timer's last look before it deletes a created client", () =
     );
 
     expect(early).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+describe("an expired sign-in, while its client is being deleted at the provider", () => {
+  it("cannot be finished, even if the clock is set back before its deadline, and no Connection is written", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const gate = Promise.withResolvers<void>();
+    log.deleteGate.current = gate.promise;
+
+    const { refused, connections, deletedWhileHeld } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const started = yield* service.startOAuth(startInput());
+        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
+        // The timer comes due and starts to delete the client, which is held.
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+        // The clock is set back to before the deadline while the delete is in flight.
+        yield* TestClock.setTime(1000);
+        const refused = yield* Effect.flip(service.finishOAuth({ callbackQuery }));
+        const connections = yield* sql`SELECT id FROM connections`;
+        const deletedWhileHeld = [...log.deleted];
+        gate.resolve();
+        yield* settle;
+        return { refused, connections, deletedWhileHeld };
+      }),
+    );
+
+    expect(refused).toMatchObject({ error: { code: "validation" } });
+    expect(connections).toEqual([]);
+    expect(deletedWhileHeld).toEqual([]);
     expect(log.deleted).toEqual(["made-1"]);
   });
 });

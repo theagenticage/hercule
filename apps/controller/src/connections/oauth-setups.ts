@@ -137,6 +137,15 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Deletes the setup for this `state`, whether or not it has expired.
+     * Succeeds when there is no such row. The controller ends a sign-in with
+     * it, so that a finish that comes later finds nothing, whatever the clock
+     * says then.
+     */
+    remove: (state: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM oauth_setups WHERE state = ${state}`),
+
+    /**
      * Deletes the expired rows: flows the user never came back from. Called on
      * each new start rather than on a timer.
      */
