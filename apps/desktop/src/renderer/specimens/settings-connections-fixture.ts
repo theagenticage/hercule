@@ -276,6 +276,8 @@ export const SLACK_PLUGIN: PluginDetail = {
               "1. Open Slack's app page, [api.slack.com/apps](https://api.slack.com/apps).",
               "2. Under Your App Configuration Tokens, choose Generate Token, pick your workspace, and copy the Access Token.",
               "3. Paste it here.",
+              "",
+              "If Slack says an admin must approve the app, ask them to approve it, then start again here.",
             ].join("\n"),
           },
           { kind: "oauth" },
