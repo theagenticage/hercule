@@ -73,6 +73,15 @@ export const decideOAuthReturnPath = (
 };
 
 /**
+ * Returns what the user typed into the field called `name`, or an empty string
+ * when nothing was typed. A field may carry any name, `constructor` and
+ * `__proto__` included, so the name is read only when it is `typed`'s own key:
+ * an inherited property is no input.
+ */
+export const readTypedValue = (typed: Readonly<Record<string, string>>, name: string): string =>
+  Object.hasOwn(typed, name) ? (typed[name] ?? "") : "";
+
+/**
  * Returns the values to send as `clientValues`: one for each field the type's
  * client setup declares, from what the user typed. Returns `undefined` when
  * the type creates no client at setup, or when a value is still blank,
@@ -83,13 +92,11 @@ export const readClientValues = (
   typed: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> | undefined => {
   if (type.clientSetupFields.length === 0) return undefined;
-  const values: Record<string, string> = {};
-  for (const { name } of type.clientSetupFields) {
-    const value = typed[name] ?? "";
-    if (value.trim() === "") return undefined;
-    values[name] = value;
-  }
-  return values;
+  // `Object.fromEntries` makes every name an ordinary key, as `__proto__` must be.
+  const entries = type.clientSetupFields.map(({ name }) => [name, readTypedValue(typed, name)]);
+  return entries.every(([, value]) => value?.trim() !== "")
+    ? (Object.fromEntries(entries) as Record<string, string>)
+    : undefined;
 };
 
 /** What the browser's return came to, as `LocalReturnSignIn.awaitReturn` reports it. */

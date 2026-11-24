@@ -783,6 +783,19 @@ describe("Connections > a redirect flow that returns to the user's machine", () 
       { kind: "oauth" },
     ],
   };
+  /** The same type again, whose field is named like a property every object inherits. */
+  const ODD_TYPE = {
+    ...CHATSY_TYPE,
+    type: "oddsy/odd",
+    displayName: "Oddsy",
+    oauth: {
+      ...CHATSY_TYPE.oauth,
+      publicClient: {
+        ...CHATSY_TYPE.oauth.publicClient,
+        createdAtSetup: { fields: [{ name: "__proto__", label: "Odd token" }] },
+      },
+    },
+  };
   const CHATSY: Connection = {
     ...SKY,
     id: "0199c0ff-dddd-7000-8000-000000000004",
@@ -825,7 +838,12 @@ describe("Connections > a redirect flow that returns to the user's machine", () 
   ) =>
     openApp(connections, {
       "GET /api/v1/plugins": {
-        body: [...CATALOG, buildPlugin("chatsy", CHATSY_TYPE), buildPlugin("pixelsy", PIXEL_TYPE)],
+        body: [
+          ...CATALOG,
+          buildPlugin("chatsy", CHATSY_TYPE),
+          buildPlugin("pixelsy", PIXEL_TYPE),
+          buildPlugin("oddsy", ODD_TYPE),
+        ],
       },
       "POST /api/v1/oauth/start": answerStarts(),
       ...extra,
@@ -1037,6 +1055,27 @@ describe("Connections > a redirect flow that returns to the user's machine", () 
 
     expect(open).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("Address")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("takes a field named like an inherited property as an ordinary field", async () => {
+    vi.stubGlobal("open", vi.fn());
+    const user = userEvent.setup();
+    const { api } = await openChatsy([]);
+
+    await user.click(within(await findTypeOffer("Oddsy")).getByRole("button", { name: "Connect" }));
+    const field = screen.getByLabelText<HTMLInputElement>("Odd token");
+    expect(field.value).toBe("");
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Continue in Oddsy" }).disabled,
+    ).toBe(true);
+    await user.type(field, TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Oddsy" }));
+
+    await screen.findByLabelText("Address");
+    const { clientValues } = readStart(api, 1) as { clientValues: object };
+    expect(Object.keys(clientValues)).toEqual(["__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(clientValues, "__proto__")?.value).toBe(TOKEN);
     vi.unstubAllGlobals();
   });
 

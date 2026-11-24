@@ -131,6 +131,13 @@ const PIXEL_CHECKLIST = [
 ].join("\n");
 
 const PLUGINS: readonly PluginDetail[] = [
+  // A field named like an inherited property is an ordinary field.
+  buildClientPlugin("oddsy", "odd", "Oddsy", {
+    createdAtSetup: {
+      fields: [{ name: "constructor", label: "Odd token", secret: true, help: "Used once." }],
+    },
+    redirectUris: ["http://127.0.0.1/callback"],
+  }),
   buildPlugin("pixel", "pixel", "Pixel", [
     { kind: "checklist", markdown: PIXEL_CHECKLIST },
     { kind: "oauth" },
@@ -1046,6 +1053,97 @@ describe("the setup of a Connection whose client is created at setup", () => {
       "https://api.example/apps",
     ]);
     expect(dialog.textContent).toContain("a script");
+  });
+
+  describe("when the browser's return is delivered after the dialog was closed but before it unmounts", () => {
+    /** Starts the sign-in, and returns once the dialog waits for the browser. */
+    const startAndWait = async () => {
+      const app = await openSlackSetup({
+        [`POST ${FINISH_OAUTH}`]: { body: SLACK_CONNECTED },
+      });
+      await userEvent.type(app.view.getByLabelText("Configuration token"), `${SLACK_TOKEN}{Enter}`);
+      await app.view.findByText("Approve Hercule in your browser, then come back here.");
+      return app;
+    };
+    /**
+     * Delivers the return right after `closeSynchronously`, while the dialog's
+     * `close` event is still on its way, as it is in a browser: the event is
+     * queued, so everything delivered before it must already find the
+     * sign-in ended. Then the event runs, and the dialog unmounts.
+     */
+    const deliverAfter = async (
+      app: Awaited<ReturnType<typeof startAndWait>>,
+      closeSynchronously: () => void,
+    ) => {
+      const close = vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function (
+        this: HTMLDialogElement,
+      ) {
+        this.removeAttribute("open");
+        setTimeout(() => {
+          this.dispatchEvent(new Event("close"));
+        }, 30);
+      });
+      closeSynchronously();
+      app.signInReturn.comeBack("code=c1&state=s1");
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      // The close event has not run yet, so the dialog is still mounted.
+      expect(app.dialog.isConnected).toBe(true);
+      expect(readCalls(app.calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+      expect(app.signInReturn.cancel).toHaveBeenCalledWith({ listenerId: "l-1" });
+      await waitForClosed();
+      expect(readCalls(app.calls, "POST", FINISH_OAUTH)).toHaveLength(0);
+      close.mockRestore();
+    };
+
+    it("finishes nothing after Cancel", async () => {
+      const app = await startAndWait();
+      await deliverAfter(app, () => {
+        fireEvent.click(app.view.getByRole("button", { name: "Cancel" }));
+      });
+    });
+
+    it("finishes nothing after Esc", async () => {
+      const app = await startAndWait();
+      await deliverAfter(app, () => {
+        fireEvent(app.dialog, new Event("cancel", { cancelable: true }));
+      });
+    });
+
+    it("finishes nothing after a click on the scrim", async () => {
+      const app = await startAndWait();
+      await deliverAfter(app, () => {
+        fireEvent.pointerDown(app.dialog);
+        fireEvent.click(app.dialog);
+      });
+    });
+  });
+
+  it("takes a field named like an inherited property as an ordinary field", async () => {
+    const { calls } = await openConnections(
+      { [`POST ${START_OAUTH}`]: { body: { authorizationUrl: SLACK_AUTHORIZATION_URL } } },
+      () => [],
+      { signInReturn: buildSignInReturn() },
+    );
+    const view = within(await openSetup("Oddsy"));
+    const button = view.getByRole<HTMLButtonElement>("button", { name: "Continue in Oddsy" });
+    expect(button.disabled).toBe(true);
+    expect(view.getByLabelText<HTMLInputElement>("Odd token").value).toBe("");
+
+    await userEvent.type(view.getByLabelText("Odd token"), `${SLACK_TOKEN}{Enter}`);
+
+    await view.findByText("Approve Hercule in your browser, then come back here.");
+    const [start] = readCalls(calls, "POST", START_OAUTH);
+    expect(Object.keys((start?.body as { clientValues: object }).clientValues)).toEqual([
+      "constructor",
+    ]);
+    expect(
+      Object.getOwnPropertyDescriptor(
+        (start?.body as { clientValues: object }).clientValues,
+        "constructor",
+      )?.value,
+    ).toBe(SLACK_TOKEN);
   });
 
   describe("when nothing can listen and the user pastes the address", () => {
