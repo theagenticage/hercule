@@ -503,7 +503,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     resolveExtPending(requestId, ({ deferred }) => Deferred.succeed(deferred, value));
 
   const failAllExtPending = (error: AcpError.AcpError) =>
-    Ref.getAndSet(extPending, new Map()).pipe(
+    Ref.getAndSet(extPending, new Map<string, AcpPendingRequest>()).pipe(
       Effect.flatMap((pending) =>
         Effect.forEach([...pending.values()], ({ deferred }) => Deferred.fail(deferred, error), {
           discard: true,
@@ -1038,7 +1038,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         Effect.orDie,
       );
     }),
-    end: Effect.fn("RpcServer.Protocol.end")(function (_clientId) {
+    end: Effect.fn("RpcServer.Protocol.end")(function () {
       return Ref.update(outgoingWriterState, (state) => ({ ...state, intentionalEnd: true })).pipe(
         Effect.andThen(Queue.end(outgoing)),
       );

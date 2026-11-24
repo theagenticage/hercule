@@ -411,12 +411,7 @@ function normalizeSessionUpdate(
           ...(content === undefined
             ? {}
             : {
-                content:
-                  content === null
-                    ? null
-                    : (content as ReadonlyArray<AcpSchemaV2.ContentBlock>).map(
-                        normalizeContentBlock,
-                      ),
+                content: content === null ? null : content.map(normalizeContentBlock),
               }),
         },
       } as AcpSchema.SessionNotification;
@@ -534,8 +529,9 @@ function normalizeV1SessionUpdate(
     (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") &&
     update.name === null
   ) {
-    const { name: _name, ...rest } = update;
-    return { ...notification, update: rest } as unknown as AcpSchema.SessionNotification;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- `name` is taken out only so that `rest` is the update without it.
+    const { name, ...rest } = update;
+    return { ...notification, update: rest };
   }
   if (notification.update.sessionUpdate !== "available_commands_update") {
     return notification as unknown as AcpSchema.SessionNotification;
@@ -630,7 +626,7 @@ function normalizeInitializeResponse(
       : {
           authMethods: response.authMethods
             .map((method) => {
-              const record = method as AcpSchemaV2.AuthMethod;
+              const record = method;
               const base = {
                 id: record.methodId,
                 name: record.name,
@@ -832,10 +828,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
         const completePrompt =
           state.sessionUpdate === "state_update" && state.state === "idle"
             ? Effect.suspend(() => {
-                const idle = state as Extract<
-                  AcpSchema.SessionUpdate,
-                  { readonly sessionUpdate: "state_update"; readonly state: "idle" }
-                >;
+                const idle = state;
                 const completion = promptCompletions.get(normalized.sessionId);
                 if (completion === undefined) return Effect.void;
                 promptCompletions.delete(normalized.sessionId);
@@ -1111,9 +1104,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
               // with the v1 agentInfo/agentCapabilities response shape.
               const isV2 = isV2InitializeResponse(response);
               negotiatedProtocolGeneration = isV2 ? 2 : 1;
-              const normalized = isV2
-                ? normalizeInitializeResponse(response)
-                : (response as AcpSchema.InitializeResponse);
+              const normalized = isV2 ? normalizeInitializeResponse(response) : response;
               sessionDeleteSupported =
                 normalized.agentCapabilities?.sessionCapabilities?.delete != null;
               return normalized;
@@ -1169,9 +1160,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
               ),
             ),
       listSessions: (payload) =>
-        callRpc(AGENT_METHODS.session_list, rpc[AGENT_METHODS.session_list](payload)).pipe(
-          Effect.map((response) => response as AcpSchema.ListSessionsResponse),
-        ),
+        callRpc(AGENT_METHODS.session_list, rpc[AGENT_METHODS.session_list](payload)),
       forkSession: (payload) =>
         negotiatedProtocolGeneration === 1
           ? callRpc(
@@ -1209,9 +1198,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
               ),
             ),
       closeSession: (payload) =>
-        callRpc(AGENT_METHODS.session_close, rpc[AGENT_METHODS.session_close](payload)).pipe(
-          Effect.map((response) => response as AcpSchema.CloseSessionResponse),
-        ),
+        callRpc(AGENT_METHODS.session_close, rpc[AGENT_METHODS.session_close](payload)),
       deleteSession: (payload) =>
         Effect.suspend(() =>
           sessionDeleteSupported
@@ -1252,9 +1239,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
         negotiatedProtocolGeneration === 1
           ? callRpc(
               AGENT_METHODS.session_set_config_option,
-              rpc[AGENT_METHODS.session_set_config_option](
-                payload as AcpSchemaV1.SetSessionConfigOptionRequest,
-              ),
+              rpc[AGENT_METHODS.session_set_config_option](payload),
             ).pipe(Effect.map((response) => response as AcpSchema.SetSessionConfigOptionResponse))
           : callRpc(
               AGENT_METHODS.session_set_config_option,

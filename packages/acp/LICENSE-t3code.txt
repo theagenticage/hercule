@@ -1,6 +1,5 @@
 The source files of this package are taken from T3 Code's `effect-acp`
-package. The hand-written files are copied unchanged apart from import paths;
-README.md lists each file and what was changed.
+package. README.md lists each file and what was changed in it.
 
 Source: https://github.com/pingdotgg/t3code
 Folder: packages/effect-acp

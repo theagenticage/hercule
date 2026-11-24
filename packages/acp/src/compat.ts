@@ -185,7 +185,7 @@ export interface LoadSessionResponse {
 }
 
 export type ResumeSessionResponse = LoadSessionResponse;
-export interface ForkSessionResponse extends NewSessionResponse {}
+export type ForkSessionResponse = NewSessionResponse;
 
 export type SessionConfigSelectOption = V2.SessionConfigSelectOption;
 export type SessionConfigSelectOptions =
@@ -406,7 +406,7 @@ export interface WriteTextFileRequest {
   readonly path: string;
   readonly content: string;
 }
-export interface WriteTextFileResponse {}
+export type WriteTextFileResponse = Record<string, never>;
 export interface CreateTerminalRequest {
   readonly sessionId: string;
   readonly command: string;
@@ -431,9 +431,9 @@ export interface TerminalOutputResponse {
 export type WaitForTerminalExitRequest = TerminalRequest;
 export type WaitForTerminalExitResponse = TerminalExitStatus;
 export type KillTerminalRequest = TerminalRequest;
-export interface KillTerminalResponse {}
+export type KillTerminalResponse = Record<string, never>;
 export type ReleaseTerminalRequest = TerminalRequest;
-export interface ReleaseTerminalResponse {}
+export type ReleaseTerminalResponse = Record<string, never>;
 
 // Older v1 agents still advertise and select models through this removed unstable API.
 const LegacyMeta = Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.Json)));

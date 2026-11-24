@@ -123,6 +123,7 @@ export const jsonRpcResponse = <A, I>(result: Schema.Codec<A, I>) =>
   });
 
 export const encodeJsonl = <A, I>(schema: Schema.Codec<A, I>, value: A) =>
+  // eslint-disable-next-line no-restricted-syntax -- The schema is the caller's, so it cannot be built once at module level. Only tests call this, once per line they write.
   Effect.map(Schema.encodeEffect(Schema.fromJsonString(schema))(value), (encoded) =>
     encoder.encode(`${encoded}\n`),
   );

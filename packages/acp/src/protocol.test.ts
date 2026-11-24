@@ -60,6 +60,7 @@ const JsonRpcErrorResponse = Schema.Struct({
   id: Schema.Number,
   error: Schema.Struct({ code: Schema.Number, message: Schema.String }),
 });
+const decodeJsonRpcErrorResponse = Schema.decodeEffect(Schema.fromJsonString(JsonRpcErrorResponse));
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const encoder = new TextEncoder();
 const MIB = 1024 * 1024;
@@ -472,7 +473,7 @@ it.layer(BunServices.layer)("effect-acp protocol", (it) => {
       expect(decodeFailed?.payload).toMatchObject({
         operation: "decode-notification-payload",
         method: "session/update",
-        issueSummary: expect.stringContaining("update.used missing"),
+        issueSummary: expect.stringContaining("update.used missing") as string,
       });
       assert.lengthOf(
         events.filter(({ stage }) => stage === "decode_failed"),
@@ -480,7 +481,7 @@ it.layer(BunServices.layer)("effect-acp protocol", (it) => {
       );
       assert.lengthOf(warnings, 1);
       expect(warnings[0]).toMatchObject({
-        issueSummary: expect.stringContaining("update.used missing"),
+        issueSummary: expect.stringContaining("update.used missing") as string,
       });
       assert.notInclude(encodeUnknownJsonString({ decodeFailed, warnings }), secret);
     }),
@@ -517,7 +518,7 @@ it.layer(BunServices.layer)("effect-acp protocol", (it) => {
         Deferred.await(termination).pipe(Effect.timeout("2 seconds")),
       );
       assert.instanceOf(error, AcpError.AcpTransportError);
-      assert.equal((error as AcpError.AcpTransportError).operation, "read-input-stream");
+      assert.equal(error.operation, "read-input-stream");
     }),
   );
 
@@ -891,10 +892,6 @@ it.layer(BunServices.layer)("effect-acp protocol", (it) => {
           headers: [],
         }),
       );
-      const decodeJsonRpcErrorResponse = Schema.decodeEffect(
-        Schema.fromJsonString(JsonRpcErrorResponse),
-      );
-
       const response = yield* decodeJsonRpcErrorResponse(yield* Queue.take(output));
       assert.equal(response.id, 9);
       assert.equal(response.error.code, -32603);
@@ -1334,7 +1331,7 @@ it.layer(BunServices.layer)("effect-acp protocol", (it) => {
       const message = yield* Deferred.await(firstMessage);
       const exitError = yield* Deferred.await(termination);
       assert.instanceOf(exitError, AcpError.AcpProcessExitedError);
-      assert.equal((exitError as AcpError.AcpProcessExitedError).code, 7);
+      assert.equal(exitError.code, 7);
       assert.equal((message as { readonly _tag?: string })._tag, "ClientProtocolError");
       const defect = (message as { readonly error: { readonly reason: unknown } }).error.reason as {
         readonly _tag: string;
@@ -1344,7 +1341,7 @@ it.layer(BunServices.layer)("effect-acp protocol", (it) => {
       assert.equal(defect._tag, "RpcClientDefect");
       assert.equal(defect.message, "ACP protocol terminated.");
       assert.instanceOf(defect.cause, AcpError.AcpProcessExitedError);
-      assert.equal((defect.cause as AcpError.AcpProcessExitedError).code, 7);
+      assert.equal(defect.cause.code, 7);
     }),
   );
 

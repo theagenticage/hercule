@@ -10,9 +10,9 @@ The code is copied from the `effect-acp` package of [T3 Code](https://github.com
 
 | File here | File in `packages/effect-acp` | Changes |
 |---|---|---|
-| `src/client.ts`, `src/protocol.ts`, `src/rpc.ts`, `src/errors.ts`, `src/compat.ts`, `src/schema.ts` | the same path | none |
-| `src/_internal/stdio.ts`, `src/_internal/shared.ts` | the same path | none |
-| `src/*.test.ts`, `src/_internal/stdio.test.ts` | the same path | the platform layer is `@effect/platform-bun` instead of `@effect/platform-node`, because the tests run on Bun; fixture paths |
+| `src/rpc.ts`, `src/errors.ts`, `src/schema.ts`, `src/_internal/stdio.ts` | the same path | none |
+| `src/client.ts`, `src/protocol.ts`, `src/compat.ts`, `src/_internal/shared.ts` | the same path | only what `pnpm lint` asked for, with no change in behaviour: type assertions that changed no type are removed, four empty interfaces are type aliases, one unused parameter is dropped |
+| `src/*.test.ts`, `src/_internal/stdio.test.ts` | the same path | the platform layer is `@effect/platform-bun` instead of `@effect/platform-node`, because the tests run on Bun; fixture paths; decoders moved to module level for `pnpm lint` |
 | `src/agent.testing.ts` | `src/agent.ts` | none |
 | `src/acp-mock-peer.testing.ts` | `test/fixtures/acp-mock-peer.ts` | the platform layer, and the import of the agent |
 | `src/antigravity-initialize.fixture.json` | `test/fixtures/antigravity-initialize.json` | none |

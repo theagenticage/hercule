@@ -33,6 +33,14 @@ import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 import antigravityInitialize from "./antigravity-initialize.fixture.json" with { type: "json" };
 
+/**
+ * Returns a function that parses one JSON line the client wrote and decodes it
+ * with `schema`. The function fails with a schema error when the line does not match.
+ */
+const decodeJsonLine = <A, I>(schema: Schema.Codec<A, I>) =>
+  // eslint-disable-next-line no-restricted-syntax -- A test decodes a line or two with each schema, so compiling the schema per call costs nothing here.
+  Schema.decodeEffect(Schema.fromJsonString(schema));
+
 const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeRequest);
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
 const InitializeRequestV1 = jsonRpcRequest("initialize", AcpSchemaV1.InitializeRequest);
@@ -59,7 +67,7 @@ const DieResponse = Schema.Struct({
     message: Schema.Literal("Internal error"),
   }),
 });
-const decodePromptRequestLine = Schema.decodeEffect(Schema.fromJsonString(PromptRequest));
+const decodePromptRequestLine = decodeJsonLine(PromptRequest);
 const XAiPromptCompleteNotification = jsonRpcNotification(
   "_x.ai/session/prompt_complete",
   Schema.Struct({
@@ -726,8 +734,8 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
       const firstOutbound = yield* Queue.take(output);
       const secondOutbound = yield* Queue.take(output);
 
-      const decodedInitialize = Schema.decodeEffect(Schema.fromJsonString(InitializeRequest));
-      const decodedExt = Schema.decodeEffect(Schema.fromJsonString(ExtRequest));
+      const decodedInitialize = decodeJsonLine(InitializeRequest);
+      const decodedExt = decodeJsonLine(ExtRequest);
       const firstIsInitialize = yield* decodedInitialize(firstOutbound).pipe(Effect.isSuccess);
 
       const initializeRequest = firstIsInitialize
@@ -774,8 +782,8 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
       const sessionFiber = yield* acp.agent
         .createSession({ cwd: "/tmp", mcpServers: [] })
         .pipe(Effect.forkScoped);
-      const sessionRequest = yield* Schema.decodeEffect(
-        Schema.fromJsonString(jsonRpcRequest("session/new", AcpSchema.NewSessionRequest)),
+      const sessionRequest = yield* decodeJsonLine(
+        jsonRpcRequest("session/new", AcpSchema.NewSessionRequest),
       )(yield* Queue.take(output));
       assert.equal(sessionRequest.id, 2 ** 30 + 1);
       yield* Queue.offer(
@@ -809,7 +817,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         })
         .pipe(Effect.forkScoped);
       const initializeRequest = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(InitializeRequestV1))),
+        Effect.flatMap(decodeJsonLine(InitializeRequestV1)),
       );
       assert.equal(initializeRequest.params.protocolVersion, 2);
       assert.equal(initializeRequest.params.clientCapabilities?._meta?.["terminal-auth"], true);
@@ -832,9 +840,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         Effect.gen(function* () {
           const fiber = yield* effect.pipe(Effect.forkScoped);
           const request = yield* Queue.take(output).pipe(
-            Effect.flatMap(
-              Schema.decodeEffect(Schema.fromJsonString(jsonRpcRequest(method, Schema.Unknown))),
-            ),
+            Effect.flatMap(decodeJsonLine(jsonRpcRequest(method, Schema.Unknown))),
           );
           yield* Queue.offer(
             input,
@@ -857,7 +863,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         .createSession({ cwd: process.cwd(), mcpServers })
         .pipe(Effect.forkScoped);
       const sessionRequest = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(NewSessionRequestV1))),
+        Effect.flatMap(decodeJsonLine(NewSessionRequestV1)),
       );
       assert.deepEqual(sessionRequest.params.mcpServers, mcpServers);
       yield* Queue.offer(
@@ -885,12 +891,10 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         .pipe(Effect.forkScoped);
       const selection = yield* Queue.take(output).pipe(
         Effect.flatMap(
-          Schema.decodeEffect(
-            Schema.fromJsonString(
-              jsonRpcRequest(
-                "session/set_model",
-                Schema.Struct({ sessionId: Schema.String, modelId: Schema.String }),
-              ),
+          decodeJsonLine(
+            jsonRpcRequest(
+              "session/set_model",
+              Schema.Struct({ sessionId: Schema.String, modelId: Schema.String }),
             ),
           ),
         ),
@@ -910,12 +914,10 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         .pipe(Effect.forkScoped);
       const modeSelection = yield* Queue.take(output).pipe(
         Effect.flatMap(
-          Schema.decodeEffect(
-            Schema.fromJsonString(
-              jsonRpcRequest(
-                "session/set_mode",
-                Schema.Struct({ sessionId: Schema.String, modeId: Schema.String }),
-              ),
+          decodeJsonLine(
+            jsonRpcRequest(
+              "session/set_mode",
+              Schema.Struct({ sessionId: Schema.String, modeId: Schema.String }),
             ),
           ),
         ),
@@ -950,7 +952,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         }),
       );
       const answer = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(jsonRpcResponse(Schema.Unknown)))),
+        Effect.flatMap(decodeJsonLine(jsonRpcResponse(Schema.Unknown))),
       );
       assert.deepEqual(answer.result, {
         action: { action: "accept", content: { branch: "main" } },
@@ -972,7 +974,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         }),
       );
       const devinAnswer = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(jsonRpcResponse(Schema.Unknown)))),
+        Effect.flatMap(decodeJsonLine(jsonRpcResponse(Schema.Unknown))),
       );
       assert.deepEqual(devinAnswer.result, {
         action: { action: "accept", content: { branch: "main" } },
@@ -998,7 +1000,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         })
         .pipe(Effect.forkScoped);
       const promptRequest = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(PromptRequestV1))),
+        Effect.flatMap(decodeJsonLine(PromptRequestV1)),
       );
       yield* Queue.offer(
         input,
@@ -1031,7 +1033,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         .prompt({ sessionId: "pi-session-1", prompt: [{ type: "text", text: "retry" }] })
         .pipe(Effect.forkScoped);
       const cancelledRequest = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(PromptRequestV1))),
+        Effect.flatMap(decodeJsonLine(PromptRequestV1)),
       );
       yield* Queue.offer(
         input,
@@ -1087,7 +1089,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
           })
           .pipe(Effect.forkScoped);
         const initializeRequest = yield* Queue.take(output).pipe(
-          Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(InitializeRequestV1))),
+          Effect.flatMap(decodeJsonLine(InitializeRequestV1)),
         );
         yield* Queue.offer(
           input,
@@ -1139,8 +1141,8 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
           return;
         }
         assert.exists(deleteCapability, "session/delete reached transport without its capability");
-        const deleteRequest = yield* Schema.decodeEffect(
-          Schema.fromJsonString(jsonRpcRequest("session/delete", AcpSchemaV1.DeleteSessionRequest)),
+        const deleteRequest = yield* decodeJsonLine(
+          jsonRpcRequest("session/delete", AcpSchemaV1.DeleteSessionRequest),
         )(outcome.line);
         assert.equal(deleteRequest.params.sessionId, "kiro-session-1");
         yield* Queue.offer(
@@ -1191,7 +1193,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         ),
       );
 
-      const decodeResponse = Schema.decodeEffect(Schema.fromJsonString(PermissionResponse));
+      const decodeResponse = decodeJsonLine(PermissionResponse);
       const responses = yield* Effect.all([
         Queue.take(output).pipe(Effect.flatMap(decodeResponse)),
         Queue.take(output).pipe(Effect.flatMap(decodeResponse)),
@@ -1239,7 +1241,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
       );
       const send = <E>(line: Effect.Effect<Uint8Array, E>) =>
         Effect.flatMap(line, (bytes) => Queue.offer(input, bytes));
-      const decodeDie = Schema.decodeEffect(Schema.fromJsonString(DieResponse));
+      const decodeDie = decodeJsonLine(DieResponse);
       const next = <A>(queue: Queue.Dequeue<A>) =>
         TestClock.withLive(Queue.take(queue).pipe(Effect.timeout("2 seconds")));
 
@@ -1271,9 +1273,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
           headers: [],
         }),
       );
-      const extDied = yield* next(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(ErrorResponse))),
-      );
+      const extDied = yield* next(output).pipe(Effect.flatMap(decodeJsonLine(ErrorResponse)));
       assert.equal(extDied.id, "ext-a");
 
       yield* send(
@@ -1305,9 +1305,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
           headers: [],
         }),
       );
-      const answered = yield* next(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(ExtResponse))),
-      );
+      const answered = yield* next(output).pipe(Effect.flatMap(decodeJsonLine(ExtResponse)));
       assert.deepEqual([answered.id, answered.result], ["ext-b", { ok: true }]);
 
       assert.deepEqual((yield* Queue.clear(errorLogs)).toSorted(), [
@@ -1364,7 +1362,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         }),
       );
       const response = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(ElicitationResponse))),
+        Effect.flatMap(decodeJsonLine(ElicitationResponse)),
       );
       assert.deepEqual(response.result, { action: "accept", content: { areas: ["ui"] } });
       const request = yield* Deferred.await(received);
@@ -1623,7 +1621,7 @@ it.layer(BunServices.layer)("effect-acp client", (it) => {
         .initialize({ protocolVersion: 1, clientCapabilities: { session: { notices: {} } } })
         .pipe(Effect.forkScoped);
       const initializeRequest = yield* Queue.take(output).pipe(
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(InitializeRequestV1))),
+        Effect.flatMap(decodeJsonLine(InitializeRequestV1)),
       );
       yield* Queue.offer(
         input,
@@ -1683,9 +1681,9 @@ const elicitationForm = {
     required: ["choice"],
   },
 };
-const decodeWireResponse = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
-const decodeWireError = Schema.decodeEffect(
-  Schema.fromJsonString(Schema.Struct({ error: Schema.Struct({ code: Schema.Finite }) })),
+const decodeWireResponse = decodeJsonLine(Schema.Unknown);
+const decodeWireError = decodeJsonLine(
+  Schema.Struct({ error: Schema.Struct({ code: Schema.Finite }) }),
 );
 
 it.effect.each(["accept", "decline", "cancel"] as const)(
