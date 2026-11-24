@@ -1,24 +1,35 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildRedirectUriToRegister,
+  decideOAuthReturnPath,
   describeConnectionTypeName,
+  describePasteRefusal,
+  describeSignInFailure,
   findOAuthConnection,
   isWebLink,
   listCredentialFields,
   listFlowSwitches,
   listSetupFlows,
   queryKeys,
+  readClientValues,
   readConfigIssues,
   readErrorMessage,
+  startLocalReturnSignIn,
   type ConnectionType,
+  type LocalReturnSignIn,
   type SetupFlow,
 } from "@hercule/client-core";
-import type { Connection } from "@hercule/contract";
+import { parseCallbackQuery, type Connection } from "@hercule/contract";
+import { buildBrowserSignInPort } from "../../../app/browser-sign-in-port";
 import { useDeviceSignIn, type DeviceSignInProgress } from "../../../app/device-sign-in";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
-import { ConnectionSetup, type ConnectionSetupState } from "./connection-setup";
+import {
+  ConnectionSetup,
+  type ClientSetupForm,
+  type ConnectionSetupState,
+} from "./connection-setup";
 
 /**
  * An OAuth sign-in that is finishing in the browser: the provider's page at
@@ -28,6 +39,20 @@ import { ConnectionSetup, type ConnectionSetupState } from "./connection-setup";
 interface BrowserSignIn {
   readonly authorizationUrl: string;
   readonly before: readonly Connection[];
+}
+
+/**
+ * An OAuth sign-in whose return is caught on this machine: `signIn` holds the
+ * listener and the provider's page. `endedMessage` is why the sign-in ended
+ * without a Connection, or null while it goes on. `pasted` is the address the
+ * user pastes when nothing listens, and `pasteProblem` why the last one was
+ * refused.
+ */
+interface LocalReturnProgress {
+  readonly signIn: LocalReturnSignIn;
+  readonly endedMessage: string | null;
+  readonly pasted: string;
+  readonly pasteProblem: string | null;
 }
 
 /**
@@ -43,7 +68,12 @@ interface BrowserSignIn {
  *   on screen, and stops on Cancel, on a switch of flow, and when it closes;
  * - OAuth: the provider's page opens in the default browser, and the dialog
  *   closes once the Connection the sign-in writes arrives on the
- *   `connection` live topic, which the shell holds.
+ *   `connection` live topic, which the shell holds;
+ * - OAuth with a return to this machine (see `decideOAuthReturnPath`, Slack):
+ *   the app listens for the browser's return and finishes the sign-in with
+ *   `connection.finishOAuth`, whose answer closes the dialog. A type that
+ *   creates its OAuth client at setup also asks for the values to create it
+ *   from. A reconnect asks for none, and offers to set the client up again.
  *
  * The dialog closes once the Connection is set up. `onClose` is called
  * whenever it closes, set up or not; the caller then unmounts it.
@@ -77,6 +107,10 @@ export function ConnectionSetupDialog({
   const [flow, setFlow] = useState<SetupFlow | undefined>(listSetupFlows(type)[0]);
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [browserSignIn, setBrowserSignIn] = useState<BrowserSignIn | null>(null);
+  const [localReturn, setLocalReturn] = useState<LocalReturnProgress | null>(null);
+  // A reconnect signs in with the client the Connection has. It asks for the
+  // values to make the client again only when the user chooses to.
+  const [clientSetupAsked, setClientSetupAsked] = useState(connection === undefined);
   // Why the sign-in page did not open, shown until the user moves on.
   const [linkError, setLinkError] = useState<string | null>(null);
 
@@ -113,10 +147,99 @@ export function ConnectionSetupDialog({
     providerName: type.displayName,
     onDone: close,
   });
+  const clientValues = readClientValues(type, values);
+  // The values go only with a start that asks for them, and a start for a
+  // client that is not made again must not send a value typed and hidden.
+  const clientValuesPayload =
+    clientSetupAsked && clientValues !== undefined ? { clientValues } : {};
+  const returnPath = decideOAuthReturnPath(type, "desktop");
   const startOAuth = useMutation({
     mutationFn: () =>
-      client.connection.startOAuth({ payload: { type: type.type, origin, ...reconnectPayload } }),
+      client.connection.startOAuth({
+        payload: { type: type.type, origin, ...reconnectPayload, ...clientValuesPayload },
+      }),
   });
+  const port = useMemo(() => buildBrowserSignInPort(bridge), [bridge]);
+  // The listener of a return to this machine ends with the dialog, also when
+  // the dialog is gone before the start answered.
+  const localReturnLifetime = useRef<{ disposed: boolean; signIn: LocalReturnSignIn | null }>({
+    disposed: false,
+    signIn: null,
+  });
+  useEffect(() => {
+    const lifetime = localReturnLifetime.current;
+    lifetime.disposed = false;
+    return () => {
+      lifetime.disposed = true;
+      lifetime.signIn?.close();
+    };
+  }, []);
+  const startLocalReturn = useMutation({
+    mutationFn: async () => {
+      const signIn = await startLocalReturnSignIn(
+        { client, port },
+        { type: type.type, ...reconnectPayload, ...clientValuesPayload },
+      );
+      localReturnLifetime.current.signIn = signIn;
+      if (localReturnLifetime.current.disposed) signIn.close();
+      return signIn;
+    },
+  });
+  // The answer of `connection.finishOAuth` closes the dialog, not a read of
+  // the list, which would also close it for another sign-in's Connection.
+  const finishOAuth = useMutation({
+    mutationFn: (callbackQuery: string) =>
+      client.connection.finishOAuth({ payload: { callbackQuery } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
+  });
+  /** Shows why `signIn` ended without a Connection, unless the user has started another sign-in since. */
+  const endLocalReturn = (signIn: LocalReturnSignIn, message: string): void => {
+    setLocalReturn((current) =>
+      current?.signIn === signIn ? { ...current, endedMessage: message } : current,
+    );
+  };
+  const finishLocalReturn = (signIn: LocalReturnSignIn, callbackQuery: string): void => {
+    finishOAuth.mutate(callbackQuery, {
+      onSuccess: close,
+      onError: (error) => {
+        endLocalReturn(signIn, readErrorMessage(error));
+      },
+    });
+  };
+  /** Starts an OAuth sign-in that returns to this machine, and opens the provider's page. */
+  const startLocalReturnSignInFlow = (): void => {
+    startLocalReturn.mutate(undefined, {
+      onSuccess: (signIn) => {
+        // What was pasted is a credential, so it goes as soon as it was sent.
+        setValues({});
+        setLocalReturn({ signIn, endedMessage: null, pasted: "", pasteProblem: null });
+        openLink(signIn.authorizationUrl);
+        if (signIn.returnBy !== "listener") return;
+        void signIn.awaitReturn().then((outcome) => {
+          if (outcome.kind === "received") finishLocalReturn(signIn, outcome.callbackQuery);
+          else endLocalReturn(signIn, outcome.message);
+        });
+      },
+    });
+  };
+  /** Closes the listener and shows the form again. */
+  const resetLocalReturn = (): void => {
+    localReturn?.signIn.close();
+    localReturnLifetime.current.signIn = null;
+    startLocalReturn.reset();
+    finishOAuth.reset();
+    setLocalReturn(null);
+  };
+  const finishPasted = (): void => {
+    if (localReturn === null) return;
+    const parsed = parseCallbackQuery(localReturn.pasted);
+    if (parsed._tag === "Refused") {
+      setLocalReturn({ ...localReturn, pasteProblem: describePasteRefusal(parsed.reason) });
+      return;
+    }
+    setLocalReturn({ ...localReturn, pasteProblem: null });
+    finishLocalReturn(localReturn.signIn, localReturn.pasted.trim());
+  };
   /**
    * Starts an OAuth sign-in and opens the provider's page. A switch of flow
    * resets the mutation, which drops an answer that arrives after it.
@@ -125,6 +248,10 @@ export function ConnectionSetupDialog({
     // Read before the sign-in starts, so a Connection it writes is never
     // taken for one that was there already.
     const before = connections;
+    if (returnPath === "local-listener") {
+      startLocalReturnSignInFlow();
+      return;
+    }
     startOAuth.mutate(undefined, {
       onSuccess: ({ authorizationUrl }) => {
         setBrowserSignIn({ authorizationUrl, before });
@@ -153,10 +280,21 @@ export function ConnectionSetupDialog({
     fieldErrors: issues.perField,
     error: issues.rest ? readErrorMessage(saveCredentials.error) : null,
   };
+  const oauthStart = returnPath === "local-listener" ? startLocalReturn : startOAuth;
+  const clientSetup: ClientSetupForm | undefined =
+    type.clientSetupFields.length === 0
+      ? undefined
+      : {
+          fields: type.clientSetupFields,
+          asked: clientSetupAsked,
+          complete: clientValues !== undefined,
+          reconnect: connection !== undefined,
+        };
   const oauthForm = {
-    busy: startOAuth.isPending,
+    busy: oauthStart.isPending,
     fieldErrors: {},
-    error: startOAuth.error === null ? null : readErrorMessage(startOAuth.error),
+    error: oauthStart.error === null ? null : readErrorMessage(oauthStart.error),
+    ...(clientSetup === undefined ? {} : { clientSetup }),
   };
 
   return (
@@ -174,6 +312,8 @@ export function ConnectionSetupDialog({
         oauthForm,
         deviceSignIn: deviceSignIn.progress,
         browserSignIn,
+        localReturn,
+        finishing: finishOAuth.isPending,
         linkError,
       })}
       values={values}
@@ -185,6 +325,9 @@ export function ConnectionSetupDialog({
           // The fields cannot change while a save is pending: resetting then
           // would drop the save's answer, and the dialog would stay open.
           if (saveCredentials.isError) saveCredentials.reset();
+          // The refusal of a start was about the old value, and the field keeps it to be fixed.
+          if (startLocalReturn.isError) startLocalReturn.reset();
+          if (startOAuth.isError) startOAuth.reset();
           setValues((current) => ({ ...current, [name]: value }));
         },
         onSubmit: () => {
@@ -200,6 +343,7 @@ export function ConnectionSetupDialog({
           // settled error is reset here.
           if (saveCredentials.isError) saveCredentials.reset();
           startOAuth.reset();
+          resetLocalReturn();
           deviceSignIn.cancel();
           setValues({});
           setLinkError(null);
@@ -211,9 +355,19 @@ export function ConnectionSetupDialog({
         },
         onStartAgain: () => {
           setLinkError(null);
-          deviceSignIn.start();
+          if (flow === "oauth") resetLocalReturn();
+          else deviceSignIn.start();
         },
         onOpen: openLink,
+        onAskClientSetup: () => {
+          setClientSetupAsked(true);
+        },
+        onPasteChange: (text) => {
+          setLocalReturn((current) =>
+            current === null ? null : { ...current, pasted: text, pasteProblem: null },
+          );
+        },
+        onFinishPasted: finishPasted,
       }}
       onClose={onClose}
     />
@@ -235,6 +389,8 @@ const decideSetupState = (
     readonly oauthForm: FormState;
     readonly deviceSignIn: DeviceSignInProgress;
     readonly browserSignIn: BrowserSignIn | null;
+    readonly localReturn: LocalReturnProgress | null;
+    readonly finishing: boolean;
     readonly linkError: string | null;
   },
 ): ConnectionSetupState => {
@@ -246,6 +402,18 @@ const decideSetupState = (
     case "credentials":
       return { kind: "form", flow, ...read.credentialsForm };
     case "oauth":
+      if (read.localReturn !== null) {
+        const { signIn, endedMessage, pasted, pasteProblem } = read.localReturn;
+        return endedMessage !== null
+          ? describeSignInFailure(endedMessage)
+          : {
+              kind: "returning",
+              authorizationUrl: signIn.authorizationUrl,
+              linkError: read.linkError,
+              finishing: read.finishing,
+              paste: signIn.returnBy === "paste" ? { text: pasted, problem: pasteProblem } : null,
+            };
+      }
       return read.browserSignIn === null
         ? { kind: "form", flow, ...read.oauthForm }
         : {

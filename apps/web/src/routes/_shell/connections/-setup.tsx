@@ -6,16 +6,21 @@ import {
   listCredentialFields,
   queryKeys,
   buildRedirectUriToRegister,
+  decideOAuthReturnPath,
   listSetupFlows,
   listFlowSwitches,
+  readClientValues,
+  startLocalReturnSignIn,
   type ConnectionType,
   type HerculeClient,
   type SetupFlow,
   readErrorMessage,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
+import { Markdown } from "../../../screens/markdown";
 import { SaveStatus } from "../../../screens/save-status";
 import { DeviceSignIn } from "./-device";
+import { PasteReturnSignIn } from "./-paste-return";
 
 /**
  * The form that sets up a connection: either a new one, or a fresh credential
@@ -24,6 +29,11 @@ import { DeviceSignIn } from "./-device";
  *
  * A type can offer several flows. The form starts with the first one the type
  * declares, and offers the others as quieter buttons under it.
+ *
+ * A type whose plugin creates its OAuth client at setup (Slack) also asks for
+ * the values to create it from, and returns to the user's machine, where the
+ * user pastes the address the browser ends on (see `decideOAuthReturnPath`).
+ * A reconnect asks for no values, and offers to set the client up again.
  *
  * Every flow asks only for the credential or the sign-in, never for a name or
  * a topic, so that connecting an account is as short as it can be. A new
@@ -49,16 +59,23 @@ export function ConnectionSetup({
   // Undefined when the type offers no flow this build can show.
   const [flow, setFlow] = useState<SetupFlow | undefined>(flows[0]);
   const [pasted, setPasted] = useState<Readonly<Record<string, string>>>({});
+  // A reconnect signs in with the client the connection has, and asks for the
+  // values to make the client again only when the user chooses to.
+  const [clientSetupAsked, setClientSetupAsked] = useState(connection === undefined);
+  const asksClientSetup = flow === "oauth" && type.clientSetupFields.length > 0 && clientSetupAsked;
+  const clientValues = readClientValues(type, pasted);
+  const startPayload = {
+    type: type.type,
+    ...(connection === undefined ? {} : { connectionId: connection.id }),
+    ...(asksClientSetup && clientValues !== undefined ? { clientValues } : {}),
+  };
+  const returnPath = decideOAuthReturnPath(type, "web");
 
   const submit = useMutation({
     mutationFn: async () => {
       if (flow === "oauth") {
         const { authorizationUrl } = await client.connection.startOAuth({
-          payload: {
-            type: type.type,
-            origin: window.location.origin,
-            ...(connection === undefined ? {} : { connectionId: connection.id }),
-          },
+          payload: { ...startPayload, origin: window.location.origin },
         });
         // The rest of the setup happens at the provider, which sends the
         // browser back to the callback route, so the browser leaves this page.
@@ -94,10 +111,22 @@ export function ConnectionSetup({
       }),
   });
 
+  // The browser returns to the user's machine, so the page stays open and
+  // shows where the user pastes the address the browser ends on.
+  const startPasted = useMutation({
+    mutationFn: () => startLocalReturnSignIn({ client, port: undefined }, startPayload),
+    onSuccess: ({ authorizationUrl }) => {
+      // What was pasted is a credential, so it goes as soon as it was sent.
+      setPasted({});
+      // A popup blocker may stop this, so the panel has a link as well.
+      window.open(authorizationUrl, "_blank", "noopener,noreferrer");
+    },
+  });
+
   // An error about one credential field is shown under that field; any other
   // error is shown at the bottom of the form.
   const issues = readConfigIssues(submit.error, fields, "credentials");
-  const failure = startDeviceFlow.error ?? (issues.rest ? submit.error : null);
+  const failure = startDeviceFlow.error ?? startPasted.error ?? (issues.rest ? submit.error : null);
 
   // The same column width as the rows and the offers, so the form does not
   // stretch across the whole content width when nothing else does.
@@ -150,11 +179,32 @@ export function ConnectionSetup({
     );
   }
 
+  if (flow === "oauth" && startPasted.data !== undefined) {
+    return (
+      <div className={`flex flex-col gap-3 ${column}`}>
+        <div className="-mb-2.5">
+          <LaneLabel>{heading}</LaneLabel>
+        </div>
+        <PasteReturnSignIn
+          client={client}
+          providerName={type.displayName}
+          authorizationUrl={startPasted.data.authorizationUrl}
+          onRestart={() => {
+            startPasted.reset();
+          }}
+          onCancel={onDone}
+          onDone={onDone}
+        />
+      </div>
+    );
+  }
+
   const idPrefix = connection?.id ?? type.type;
   const redirectUri = buildRedirectUriToRegister(type, window.location.origin);
   const send = (event: FormEvent): void => {
     event.preventDefault();
     if (flow === "device") startDeviceFlow.mutate();
+    else if (flow === "oauth" && returnPath === "pasted-address") startPasted.mutate();
     // React Query calls a callback passed to `mutate` only while this form is
     // on screen, so a reply that arrives after Cancel cannot close another panel.
     else submit.mutate(undefined, { onSuccess: onDone });
@@ -164,6 +214,7 @@ export function ConnectionSetup({
   const switchFlow = (next: SetupFlow): void => {
     submit.reset();
     startDeviceFlow.reset();
+    startPasted.reset();
     setFlow(next);
   };
 
@@ -174,19 +225,27 @@ export function ConnectionSetup({
       <div className="-mb-2.5">
         <LaneLabel>{heading}</LaneLabel>
       </div>
-      {flow === "oauth" ? (
+      {flow === "oauth" && !asksClientSetup ? (
         <p className="max-w-[52ch] text-row text-muted">
           {`You sign in to ${type.displayName} in your browser.`}
         </p>
       ) : null}
-      {type.setup.map((step, index) =>
-        step.kind === "checklist" ? (
-          // A checklist step holds the provider's own instructions, shown as written.
-          <p key={index} className="max-w-[52ch] text-row whitespace-pre-line text-muted">
-            {step.markdown}
-          </p>
-        ) : null,
-      )}
+      {asksClientSetup && connection !== undefined ? (
+        <p className="max-w-[52ch] text-row text-muted">
+          {`Use this when the app named Hercule was deleted in ${type.displayName}.`}
+        </p>
+      ) : null}
+      {/* A reconnect that signs in with the existing client needs no instructions for making one. */}
+      {type.clientSetupFields.length === 0 || asksClientSetup
+        ? type.setup.map((step, index) =>
+            step.kind === "checklist" ? (
+              // A checklist step holds the plugin's own instructions, written in Markdown.
+              <div key={index} className="max-w-[52ch] text-row text-muted">
+                <Markdown text={step.markdown} />
+              </div>
+            ) : null,
+          )
+        : null}
 
       {flow === "oauth" && redirectUri !== undefined ? (
         <p className="max-w-[52ch] text-row text-muted">
@@ -225,6 +284,36 @@ export function ConnectionSetup({
           ))
         : null}
 
+      {asksClientSetup
+        ? type.clientSetupFields.map((field) => (
+            <Field
+              key={field.name}
+              id={`${idPrefix}-${field.name}`}
+              label={field.label}
+              error={undefined}
+            >
+              {field.help === undefined ? null : (
+                <p className="text-fine text-faint">{field.help}</p>
+              )}
+              <Input
+                id={`${idPrefix}-${field.name}`}
+                // A pasted value is never read back, so it is never prefilled.
+                type="password"
+                autoComplete="off"
+                value={pasted[field.name] ?? ""}
+                readOnly={startPasted.isPending}
+                onChange={(event) => {
+                  // The refusal of a start was about the old value, which stays to be fixed.
+                  startPasted.reset();
+                  if (!submit.isIdle) submit.reset();
+                  const value = event.target.value;
+                  setPasted((current) => ({ ...current, [field.name]: value }));
+                }}
+              />
+            </Field>
+          ))
+        : null}
+
       <div className="flex items-center gap-2">
         {/* A quiet button's text is pulled back to line up with the fields above it. */}
         <Button type="button" className="-ml-2" onClick={onDone}>
@@ -233,11 +322,32 @@ export function ConnectionSetup({
         <Button
           type="submit"
           variant="form"
-          disabled={submit.isPending || startDeviceFlow.isPending}
+          disabled={
+            submit.isPending ||
+            startDeviceFlow.isPending ||
+            startPasted.isPending ||
+            (asksClientSetup && clientValues === undefined)
+          }
         >
-          {flow === "device" ? `Sign in with ${type.displayName}` : "Connect"}
+          {describeSubmit(type, flow, {
+            asksClientSetup,
+            reconnect: connection !== undefined,
+            busy: startPasted.isPending,
+          })}
         </Button>
       </div>
+
+      {type.clientSetupFields.length > 0 && !clientSetupAsked ? (
+        <Button
+          type="button"
+          className="-mt-1.5 -ml-2 self-start"
+          onClick={() => {
+            setClientSetupAsked(true);
+          }}
+        >
+          {`Set up the ${type.displayName} app again`}
+        </Button>
+      ) : null}
 
       {listFlowSwitches(type, flow).map((flowSwitch) => (
         <Button
@@ -262,3 +372,23 @@ export function ConnectionSetup({
     </form>
   );
 }
+
+/**
+ * Returns the label of the setup form's button. A type that creates its OAuth
+ * client at setup says what comes next, and what it is doing while it makes
+ * the client. Every other flow keeps its label: "Sign in with GitHub" for a
+ * device flow, "Connect" for the rest.
+ */
+const describeSubmit = (
+  type: ConnectionType,
+  flow: SetupFlow,
+  state: { readonly asksClientSetup: boolean; readonly reconnect: boolean; readonly busy: boolean },
+): string => {
+  if (state.asksClientSetup) {
+    return state.busy ? `Creating the ${type.displayName} app…` : `Continue in ${type.displayName}`;
+  }
+  if (flow === "oauth" && type.clientSetupFields.length > 0 && state.reconnect) {
+    return `Sign in to ${type.displayName} again`;
+  }
+  return flow === "device" ? `Sign in with ${type.displayName}` : "Connect";
+};

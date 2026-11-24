@@ -16,7 +16,8 @@ import "./glass-dialog.css";
 /**
  * Renders `children` in a modal dialog that opens as soon as it mounts.
  * `label` is the dialog's accessible name and `className` sets its size and
- * place.
+ * place. The dialog opens with the focus on the element marked
+ * `data-autofocus`, or else on the first focusable element.
  *
  * Esc, or a click on the scrim, closes the dialog, unless `locked` is set:
  * the caller sets it while something is running that closing would leave
@@ -55,7 +56,13 @@ export function GlassDialog({
   const pressedScrimRef = useRef(false);
 
   useEffect(() => {
-    dialogRef.current?.showModal();
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    // React's `autoFocus` runs before the dialog is open, where focus does
+    // nothing, and `showModal` then focuses the first focusable element, which
+    // may be a link in the dialog's text. An element marked `data-autofocus`
+    // takes the focus instead.
+    dialog?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
   }, [dialogRef]);
 
   return (

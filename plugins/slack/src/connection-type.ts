@@ -491,10 +491,23 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
     };
   });
 
+/**
+ * What the user reads before pasting the configuration token: what Hercule
+ * does in their workspace, and where to get the token. It is Markdown, so the
+ * address of Slack's app page is a link.
+ */
+const SETUP_INSTRUCTIONS = [
+  "Hercule adds a small app named Hercule to your Slack workspace, so your agents can use Slack as you.",
+  "",
+  "1. Open Slack's app page, [api.slack.com/apps](https://api.slack.com/apps).",
+  "2. Under Your App Configuration Tokens, choose Generate Token, pick your workspace, and copy the Access Token.",
+  "3. Paste it here.",
+].join("\n");
+
 export const connectionType: ConnectionTypeContribution = {
   type: "slack",
   displayName: "Slack",
-  setup: [{ kind: "oauth" }],
+  setup: [{ kind: "checklist", markdown: SETUP_INSTRUCTIONS }, { kind: "oauth" }],
   oauth: {
     authorizationUrl: "https://slack.com/oauth/v2_user/authorize",
     tokenUrl: "https://slack.com/api/oauth.v2.user.access",
@@ -508,7 +521,7 @@ export const connectionType: ConnectionTypeContribution = {
             name: CONFIGURATION_TOKEN_FIELD,
             label: "Configuration token",
             secret: true,
-            help: "Make one at api.slack.com/apps under Your App Configuration Tokens: choose Generate Token, pick the workspace and copy the Access Token. Hercule uses it once to create its Slack app and never stores it.",
+            help: "Hercule uses it once to create the Slack app, and does not keep it.",
           },
         ],
       },

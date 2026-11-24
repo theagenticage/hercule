@@ -22,6 +22,8 @@ const GITHUB: ConnectionType = {
   pluginName: "GitHub",
   setup: [{ kind: "device" }],
   hasPublicClient: false,
+  clientSetupFields: [],
+  registeredRedirectUris: [],
   feeds: [],
 };
 

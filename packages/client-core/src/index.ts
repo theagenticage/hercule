@@ -162,6 +162,16 @@ export {
   type DeviceFlowWatcher,
   type SignInEnding,
 } from "./connection-device-flow";
+export { describePasteRefusal } from "./browser-return-words";
+export {
+  decideOAuthReturnPath,
+  readClientValues,
+  startLocalReturnSignIn,
+  type LocalReturn,
+  type LocalReturnSignIn,
+  type OAuthReturnApp,
+  type OAuthReturnPath,
+} from "./connection-oauth-return";
 export {
   SUGGESTED_TOPICS,
   describeConnectionHealth,

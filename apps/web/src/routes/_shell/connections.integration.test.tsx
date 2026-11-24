@@ -729,6 +729,216 @@ describe("Connections > a redirect flow", () => {
   });
 });
 
+describe("Connections > a redirect flow that returns to the user's machine", () => {
+  const AUTHORIZATION_URL = "https://chatsy.test/authorize?state=s-1";
+  const TOKEN = "cfg-token-4411";
+
+  /** A type whose client is created at setup, and whose provider accepts a loopback return only. */
+  const CHATSY_TYPE = {
+    type: "chatsy/chat",
+    displayName: "Chatsy",
+    setup: [
+      {
+        kind: "checklist",
+        markdown:
+          "Chatsy adds a small app.\n\n1. Open [chatsy.test/apps](https://chatsy.test/apps).",
+      },
+      { kind: "oauth" },
+    ],
+    oauth: {
+      authorizationUrl: "https://chatsy.test/authorize",
+      tokenUrl: "https://chatsy.test/token",
+      scopes: [],
+      publicClient: {
+        createdAtSetup: {
+          fields: [
+            {
+              name: "configurationToken",
+              label: "Configuration token",
+              help: "Used once to create the app, and not kept.",
+            },
+          ],
+        },
+        redirectUris: ["http://127.0.0.1/oauth/callback", "http://127.0.0.1/callback"],
+      },
+    },
+  };
+  const CHATSY: Connection = {
+    ...SKY,
+    id: "0199c0ff-dddd-7000-8000-000000000004",
+    type: "chatsy/chat",
+    displayName: "acme · rogier",
+  };
+  const chatsyPlugin = buildPlugin("chatsy", CHATSY_TYPE);
+  /** The address the web app gives the controller: a port nothing listens on. */
+  const LOOPBACK_ADDRESS = /^http:\/\/127\.0\.0\.1:\d+\/callback$/;
+  const readRedirectUri = (body: unknown): string => (body as { redirectUri: string }).redirectUri;
+  const withoutRedirectUri = (body: unknown): unknown =>
+    Object.fromEntries(
+      Object.entries(body as Record<string, unknown>).filter(([key]) => key !== "redirectUri"),
+    );
+
+  const openChatsy = (
+    connections: readonly Connection[],
+    extra: Readonly<Record<string, Handler>> = {},
+  ) =>
+    openApp(connections, {
+      "GET /api/v1/plugins": { body: [...CATALOG, chatsyPlugin] },
+      "POST /api/v1/oauth/start": { body: { authorizationUrl: AUTHORIZATION_URL } },
+      ...extra,
+    });
+
+  it("asks for the token, starts with a loopback address, and shows where to paste the address the browser ends on", async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const { api } = await openChatsy([]);
+
+    await user.click(
+      within(await findTypeOffer("Chatsy")).getByRole("button", { name: "Connect" }),
+    );
+    expect(screen.getByRole<HTMLAnchorElement>("link", { name: "chatsy.test/apps" }).href).toBe(
+      "https://chatsy.test/apps",
+    );
+    expect(readPageText()).not.toContain("You sign in to Chatsy in your browser.");
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "Continue in Chatsy" });
+    expect(button.disabled).toBe(true);
+    const field = screen.getByLabelText<HTMLInputElement>("Configuration token");
+    expect(field.type).toBe("password");
+    await user.type(field, TOKEN);
+    await user.click(button);
+
+    await screen.findByText(/After you approve, your browser shows a page that does not load/);
+    const [write] = listWrites(api);
+    expect(write).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
+    expect(withoutRedirectUri(write?.body)).toEqual({
+      type: "chatsy/chat",
+      clientValues: { configurationToken: TOKEN },
+    });
+    expect(readRedirectUri(write?.body)).toMatch(LOOPBACK_ADDRESS);
+    expect(open).toHaveBeenCalledWith(AUTHORIZATION_URL, "_blank", "noopener,noreferrer");
+    expect(screen.getByRole<HTMLAnchorElement>("link", { name: "Open Chatsy" }).href).toBe(
+      AUTHORIZATION_URL,
+    );
+    // Chatsy has the token now, so the page no longer holds it.
+    expect(readPageText()).not.toContain(TOKEN);
+    vi.unstubAllGlobals();
+  });
+
+  it("finishes with the pasted address, and refuses text that is not an address before sending it", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("open", vi.fn());
+    const { api } = await openChatsy([], {
+      "POST /api/v1/oauth/finish": { body: { ...CHATSY, status: "connected" } },
+    });
+    await user.click(
+      within(await findTypeOffer("Chatsy")).getByRole("button", { name: "Connect" }),
+    );
+    await user.type(screen.getByLabelText("Configuration token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+    const address = await screen.findByLabelText("Address");
+
+    await user.type(address, "not an address");
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(await screen.findByText(/That is not what the browser ended on/)).toBeTruthy();
+    expect(listWrites(api)).toHaveLength(1);
+
+    await user.clear(address);
+    await user.type(address, "http://127.0.0.1:51234/callback?code=c-1&state=s-1");
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(2);
+    });
+    expect(listWrites(api)[1]).toMatchObject({ method: "POST", path: "/api/v1/oauth/finish" });
+    expect(listWrites(api)[1]?.body).toEqual({
+      callbackQuery: "http://127.0.0.1:51234/callback?code=c-1&state=s-1",
+    });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Address")).toBeNull();
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("shows why the controller refused the sign-in, and starts again at an empty token field", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("open", vi.fn());
+    await openChatsy([], {
+      "POST /api/v1/oauth/finish": {
+        status: 409,
+        body: buildErrorBody("invalid_state", "Chatsy refused the code."),
+      },
+    });
+    await user.click(
+      within(await findTypeOffer("Chatsy")).getByRole("button", { name: "Connect" }),
+    );
+    await user.type(screen.getByLabelText("Configuration token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+    await user.type(
+      await screen.findByLabelText("Address"),
+      "http://127.0.0.1:51234/callback?code=c-1&state=s-1",
+    );
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(await screen.findByText("Chatsy refused the code.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Start again" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Configuration token").value).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the provider's refusal of the token, and keeps the token to fix", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("open", vi.fn());
+    await openChatsy([], {
+      "POST /api/v1/oauth/start": {
+        status: 400,
+        body: buildErrorBody("validation", "This configuration token has expired."),
+      },
+    });
+    await user.click(
+      within(await findTypeOffer("Chatsy")).getByRole("button", { name: "Connect" }),
+    );
+    await user.type(screen.getByLabelText("Configuration token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+
+    expect(await screen.findByText("This configuration token has expired.")).toBeTruthy();
+    expect(screen.getByLabelText<HTMLInputElement>("Configuration token").value).toBe(TOKEN);
+    vi.unstubAllGlobals();
+  });
+
+  it("signs in again on a reconnect with no token, and asks for one after Set up the app again", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("open", vi.fn());
+    const { api } = await openChatsy([CHATSY]);
+
+    const row = await findConnectionRow(CHATSY);
+    await user.click(within(row).getByRole("button", { name: "Reconnect" }));
+    expect(screen.queryByLabelText("Configuration token")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Sign in to Chatsy again" }));
+    await screen.findByLabelText("Address");
+    expect(withoutRedirectUri(listWrites(api)[0]?.body)).toEqual({
+      type: "chatsy/chat",
+      connectionId: CHATSY.id,
+    });
+    expect(readRedirectUri(listWrites(api)[0]?.body)).toMatch(LOOPBACK_ADDRESS);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(
+      within(await findConnectionRow(CHATSY)).getByRole("button", { name: "Reconnect" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Set up the Chatsy app again" }));
+    expect(readPageText()).toContain("Use this when the app named Hercule was deleted in Chatsy.");
+    await user.type(screen.getByLabelText("Configuration token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Continue in Chatsy" }));
+    await screen.findByLabelText("Address");
+    expect(listWrites(api)[1]?.body).toMatchObject({
+      connectionId: CHATSY.id,
+      clientValues: { configurationToken: TOKEN },
+    });
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("Connections > reconnecting and removing", () => {
   const STALE: Connection = { ...PAPER, status: "needs-reauth", statusDetail: "token revoked" };
 

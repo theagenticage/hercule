@@ -7,6 +7,7 @@ import {
   formatUrlWithoutScheme,
   listCredentialFields,
   type ConnectionType,
+  type CredentialField,
   type FlowSwitch,
   type PluginIdentity,
   type SetupFlow,
@@ -18,9 +19,11 @@ import { ExternalIcon } from "../../../icons/external";
 import { KeyIcon } from "../../../icons/key";
 import { QuestionIcon } from "../../../icons/question";
 import { GlassDialog } from "../../glass-dialog";
+import { Markdown } from "../../session/markdown";
 import {
   CredentialFields,
   DeviceCodeSteps,
+  FormField,
   MarkedRow,
   MarkedRows,
   WaitLine,
@@ -41,6 +44,11 @@ import "./connection-setup.css";
  * - `ended`: the sign-in with a code ended without a Connection.
  * - `browser`: the provider's sign-in page is open in the browser at
  *   `authorizationUrl`, and the setup waits for the Connection.
+ * - `returning`: the same, for a redirect that returns to this machine: the
+ *   setup waits for the browser to come back (`finishing` once it did, and
+ *   the controller finishes the sign-in). `paste` is present when nothing can
+ *   catch the return, and holds the address the user pastes and why the last
+ *   one was refused.
  * - `unsupported`: the setup takes a pairing, which is not built, or a step
  *   this version does not know (`flow` absent).
  *
@@ -54,6 +62,8 @@ export type ConnectionSetupState =
       readonly busy: boolean;
       readonly fieldErrors: Readonly<Record<string, string>>;
       readonly error: string | null;
+      /** Present for a type whose OAuth client is created at setup. */
+      readonly clientSetup?: ClientSetupForm;
     }
   | {
       readonly kind: "code";
@@ -68,7 +78,34 @@ export type ConnectionSetupState =
       readonly authorizationUrl: string;
       readonly linkError: string | null;
     }
+  | {
+      readonly kind: "returning";
+      readonly authorizationUrl: string;
+      readonly linkError: string | null;
+      readonly finishing: boolean;
+      readonly paste: {
+        readonly text: string;
+        readonly problem: string | null;
+      } | null;
+    }
   | { readonly kind: "unsupported"; readonly flow?: "pairing" };
+
+/**
+ * The part of a sign-in form for a type whose plugin creates the OAuth client
+ * when the Connection is set up (Slack):
+ *
+ * - `fields`: what the user pastes once, shown when `asked`.
+ * - `asked`: false on a reconnect, which signs in with the client the
+ *   Connection has, until the user chooses to set the client up again.
+ * - `complete`: every field has a value, so the form can continue.
+ * - `reconnect`: the form is the Reconnect of an existing Connection.
+ */
+export interface ClientSetupForm {
+  readonly fields: ReadonlyArray<CredentialField>;
+  readonly asked: boolean;
+  readonly complete: boolean;
+  readonly reconnect: boolean;
+}
 
 /** What the setup's buttons and fields do. */
 export interface ConnectionSetupActions {
@@ -83,6 +120,11 @@ export interface ConnectionSetupActions {
   readonly onStartAgain: () => void;
   /** Opens `url` in the default browser. */
   readonly onOpen: (url: string) => void;
+  /** Asks for the client setup values on a reconnect, to make the client again. */
+  readonly onAskClientSetup: () => void;
+  readonly onPasteChange: (text: string) => void;
+  /** Finishes a sign-in with the address the user pasted. */
+  readonly onFinishPasted: () => void;
 }
 
 const ENDING_ICONS = {
@@ -149,6 +191,7 @@ export function ConnectionSetup({
             redirectUri={redirectUri}
             actions={actions}
             cancelButton={cancelButton}
+            askMark={renderMark(14)}
             switches={
               <FlowSwitches
                 switches={flowSwitches}
@@ -247,6 +290,50 @@ export function ConnectionSetup({
               <LinkError text={state.linkError} />
             </MarkedRow>
           </MarkedRows>
+        ) : state.kind === "returning" ? (
+          <MarkedRows>
+            <MarkedRow
+              mark={renderMark(18)}
+              name="Finish in your browser"
+              detail={formatUrlWithoutScheme(state.authorizationUrl)}
+              end={
+                <span className="setup-row-acts">
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    onClick={() => actions.onOpen(state.authorizationUrl)}
+                    // The button that started the sign-in is gone, and the focus with it.
+                    autoFocus={state.paste === null}
+                  >
+                    <ExternalIcon size={14} />
+                    Open again
+                  </button>
+                  <button type="button" className="btn btn--sm btn--quiet" onClick={close}>
+                    Cancel
+                  </button>
+                </span>
+              }
+            >
+              <WaitLine
+                text={
+                  state.finishing
+                    ? "Finishing the sign-in…"
+                    : state.paste === null
+                      ? "Approve Hercule in your browser, then come back here."
+                      : "Approve Hercule in your browser."
+                }
+              />
+              <LinkError text={state.linkError} />
+              {state.paste === null ? null : (
+                <PasteAddress
+                  text={state.paste.text}
+                  problem={state.paste.problem}
+                  disabled={state.finishing}
+                  actions={actions}
+                />
+              )}
+            </MarkedRow>
+          </MarkedRows>
         ) : (
           <>
             <p className="setup-lead">
@@ -282,6 +369,7 @@ function SetupForm({
   redirectUri,
   actions,
   cancelButton,
+  askMark,
   switches,
 }: {
   readonly type: ConnectionType;
@@ -290,6 +378,8 @@ function SetupForm({
   readonly redirectUri: string | undefined;
   readonly actions: ConnectionSetupActions;
   readonly cancelButton: JSX.Element;
+  /** The type's mark, drawn beside the link that asks for the client setup again. */
+  readonly askMark: JSX.Element;
   readonly switches: ReactNode;
 }): JSX.Element {
   const submit = (event: FormEvent): void => {
@@ -297,26 +387,40 @@ function SetupForm({
     if (!state.busy) actions.onSubmit();
   };
   const credentials = state.flow === "credentials";
+  const { clientSetup } = state;
+  const asksClientSetup = state.flow === "oauth" && clientSetup?.asked === true;
+  const providerName = type.displayName;
   const submitLabel = credentials
     ? state.busy
       ? "Connecting…"
       : "Connect"
-    : `Sign in with ${type.displayName}`;
+    : asksClientSetup
+      ? state.busy
+        ? `Creating the ${providerName} app…`
+        : `Continue in ${providerName}`
+      : clientSetup?.reconnect === true
+        ? `Sign in to ${providerName} again`
+        : `Sign in with ${providerName}`;
   return (
     <form onSubmit={submit}>
       {state.flow === "device" ? (
-        <p className="setup-lead">{`You get a code to enter on ${type.displayName}.`}</p>
-      ) : state.flow === "oauth" ? (
-        <p className="setup-lead">{`You sign in to ${type.displayName} in your browser.`}</p>
+        <p className="setup-lead">{`You get a code to enter on ${providerName}.`}</p>
+      ) : state.flow === "oauth" && !asksClientSetup ? (
+        <p className="setup-lead">{`You sign in to ${providerName} in your browser.`}</p>
       ) : null}
-      {type.setup.map((step, index) =>
-        // A checklist step holds the provider's own instructions, shown as written.
-        step.kind === "checklist" ? (
-          <p key={index} className="setup-lead">
-            {step.markdown}
-          </p>
-        ) : null,
-      )}
+      {asksClientSetup && clientSetup.reconnect ? (
+        <p className="setup-lead">{`Use this when the app named Hercule was deleted in ${providerName}.`}</p>
+      ) : null}
+      {/* A reconnect that signs in with the existing client needs no instructions for making one. */}
+      {clientSetup === undefined || clientSetup.asked
+        ? type.setup.map((step, index) =>
+            step.kind === "checklist" ? (
+              <div key={index} className="msg-body setup-checklist">
+                <Markdown text={step.markdown} relativeLinksAsText />
+              </div>
+            ) : null,
+          )
+        : null}
       {state.flow === "credentials" ? (
         <CredentialFields
           fields={listCredentialFields(type)}
@@ -325,9 +429,17 @@ function SetupForm({
           readOnly={state.busy}
           onChange={(name, value) => actions.onFieldChange(name, value)}
         />
+      ) : asksClientSetup ? (
+        <CredentialFields
+          fields={clientSetup.fields}
+          values={values}
+          errors={state.fieldErrors}
+          readOnly={state.busy}
+          onChange={(name, value) => actions.onFieldChange(name, value)}
+        />
       ) : state.flow === "oauth" && redirectUri !== undefined ? (
         <>
-          <p className="setup-lead">Register this redirect URI with {type.displayName}:</p>
+          <p className="setup-lead">Register this redirect URI with {providerName}:</p>
           <p className="setup-uri mono">{redirectUri}</p>
         </>
       ) : null}
@@ -343,15 +455,79 @@ function SetupForm({
           className="btn btn--accent"
           aria-busy={state.busy ? true : undefined}
           aria-disabled={state.busy ? true : undefined}
+          disabled={asksClientSetup && !clientSetup.complete}
           // With no field to type in, the first button would be Cancel, and
           // Enter would close the dialog instead of signing in.
-          autoFocus={!credentials}
+          autoFocus={!credentials && !asksClientSetup}
+          data-autofocus={!credentials && !asksClientSetup ? "" : undefined}
         >
           {state.busy ? <span className="spin" /> : null}
           {submitLabel}
         </button>
       </div>
       {switches}
+      {clientSetup !== undefined && !clientSetup.asked ? (
+        <div className="setup-switches">
+          <p className="st-note">
+            {askMark}
+            <span>
+              <button type="button" className="link" onClick={actions.onAskClientSetup}>
+                {`Set up the ${providerName} app again`}
+              </button>
+            </span>
+          </p>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+/**
+ * Renders the field where the user pastes the address the browser ended on,
+ * when nothing on this machine catches the return, with `problem`, why the
+ * last address was refused, under it. `disabled` while the controller
+ * finishes the sign-in.
+ */
+function PasteAddress({
+  text,
+  problem,
+  disabled,
+  actions,
+}: {
+  readonly text: string;
+  readonly problem: string | null;
+  readonly disabled: boolean;
+  readonly actions: ConnectionSetupActions;
+}): JSX.Element {
+  return (
+    <form
+      className="setup-paste"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!disabled && text.trim() !== "") actions.onFinishPasted();
+      }}
+    >
+      <p>
+        After you approve, your browser shows a page that does not load. Copy its address and paste
+        it here.
+      </p>
+      <FormField label="Address" error={problem}>
+        <input
+          autoFocus
+          className="mono"
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="http://127.0.0.1:…/callback?code=…"
+          value={text}
+          readOnly={disabled}
+          onChange={(event) => actions.onPasteChange(event.target.value)}
+        />
+      </FormField>
+      <div className="setup-acts">
+        <button type="submit" className="btn btn--accent" disabled={disabled || text.trim() === ""}>
+          Finish
+        </button>
+      </div>
     </form>
   );
 }

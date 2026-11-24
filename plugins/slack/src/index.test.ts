@@ -46,7 +46,7 @@ describe("what the slack plugin registers", () => {
     expect(types[0]).toMatchObject({
       type: "slack",
       displayName: "Slack",
-      setup: [{ kind: "oauth" }],
+      setup: [expect.objectContaining({ kind: "checklist" }), { kind: "oauth" }],
       oauth: {
         authorizationUrl: "https://slack.com/oauth/v2_user/authorize",
         tokenUrl: "https://slack.com/api/oauth.v2.user.access",

@@ -629,6 +629,53 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
       { selector: ".conn-tools.is-fail .dot", kind: "mark" },
     ],
   },
+  // The setup of a Slack Connection: the token field before and after something is pasted, Slack's refusal,
+  // the wait for the browser (and the paste when nothing listens), and the Reconnect with and without the field.
+  {
+    name: "settings-connections-slack-setup",
+    path: "settings-connections.html?state=slack-setup",
+    contentSelector: "dialog.setup-dialog .setup-checklist",
+    nonTextParts: [{ selector: 'dialog.setup-dialog input[type="password"]', kind: "boundary" }],
+  },
+  {
+    name: "settings-connections-slack-pasted",
+    path: "settings-connections.html?state=slack-pasted",
+    contentSelector: "dialog.setup-dialog .setup-checklist",
+    nonTextParts: [{ selector: 'dialog.setup-dialog input[type="password"]', kind: "boundary" }],
+  },
+  {
+    name: "settings-connections-slack-refused",
+    path: "settings-connections.html?state=slack-refused",
+    contentSelector: 'dialog.setup-dialog [role="alert"]',
+    nonTextParts: [{ selector: 'dialog.setup-dialog input[type="password"]', kind: "boundary" }],
+  },
+  {
+    name: "settings-connections-slack-waiting",
+    path: "settings-connections.html?state=slack-waiting",
+    contentSelector: "dialog.setup-dialog .hx-row",
+    nonTextParts: [{ selector: "dialog.setup-dialog .hx-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-connections-slack-paste",
+    path: "settings-connections.html?state=slack-paste",
+    contentSelector: "dialog.setup-dialog .setup-paste",
+    nonTextParts: [
+      { selector: "dialog.setup-dialog .hx-mark svg", kind: "mark" },
+      { selector: "dialog.setup-dialog .setup-paste input", kind: "boundary" },
+    ],
+  },
+  {
+    name: "settings-connections-slack-reconnect",
+    path: "settings-connections.html?state=slack-reconnect",
+    contentSelector: "dialog.setup-dialog .setup-switches",
+    nonTextParts: [{ selector: "dialog.setup-dialog .setup-switches svg", kind: "mark" }],
+  },
+  {
+    name: "settings-connections-slack-reconnect-app",
+    path: "settings-connections.html?state=slack-reconnect-app",
+    contentSelector: "dialog.setup-dialog .setup-checklist",
+    nonTextParts: [{ selector: 'dialog.setup-dialog input[type="password"]', kind: "boundary" }],
+  },
   // The composer's `+` menu with the thread's MCP servers, on a started thread and on a Draft Thread, and the thread's
   // lines about a server left out at the start and a refused call.
   {

@@ -383,6 +383,7 @@ export function CredentialFields({
             spellCheck={false}
             autoComplete="off"
             autoFocus={index === 0}
+            data-autofocus={index === 0 ? "" : undefined}
             readOnly={readOnly}
           />
         </FormField>
