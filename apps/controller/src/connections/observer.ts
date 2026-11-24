@@ -10,7 +10,8 @@ export interface CreatedConnection {
   /**
    * Who created the Connection. A change made on its behalf must pass the
    * same grant checks this actor would. It is the `none` actor when the
-   * controller no longer knows who started the sign-in, which holds no grant.
+   * Connection was created at the controller's own callback, which has no
+   * credential, and then no change is made on its behalf.
    */
   readonly actor: Actor;
 }

@@ -40,7 +40,7 @@ import {
   type ConnectionTypeContribution,
   type FeedDeclaration,
 } from "@hercule/plugin-host";
-import { announce, nowIso, withTransaction } from "../db";
+import { announce, nowIso, withReadSnapshot, withTransaction } from "../db";
 import { Notifier } from "../notifications";
 import {
   isStale,
@@ -431,10 +431,11 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Reads a connection's row and its token set in one transaction, so both
+   * Reads a connection's row and its token set from one read snapshot, so both
    * are the same version of the credentials: a reconnect writes the tokens,
    * the client id and the credentials generation in one transaction, and this
-   * read sees all of them or none. Returns `None` when the connection is gone.
+   * read sees all of them or none. A snapshot is a read, so it does not take
+   * the writer's gate. Returns `None` when the connection is gone.
    * The token set is `None` when the connection holds none.
    */
   const readRowAndTokens = (
@@ -446,7 +447,7 @@ const make = Effect.gen(function* () {
     }>
   > =>
     Effect.orDie(
-      withTransaction(
+      withReadSnapshot(
         sql,
         Effect.gen(function* () {
           const row = yield* connections.one(connectionId);
@@ -490,11 +491,12 @@ const make = Effect.gen(function* () {
   const refreshTokens = <CannotRefresh, GuardFailure>(
     initial: StoredConnection,
     type: ConnectionType,
+    requireUsable: boolean,
     rejectedIdentity: string | undefined,
     cannotRefresh: (row: StoredConnection, held: string) => Effect.Effect<never, CannotRefresh>,
     guard: RefreshGuard<GuardFailure>,
   ): Effect.Effect<
-    TokenSet,
+    { readonly tokens: TokenSet; readonly row: StoredConnection },
     ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh | GuardFailure
   > =>
     Effect.gen(function* () {
@@ -514,6 +516,9 @@ const make = Effect.gen(function* () {
         );
       }
       const { row } = read.value;
+      // The usability check is about this row, the one the tokens and the
+      // client come from, and not an earlier read of the connection.
+      if (requireUsable) yield* checkUsable(row);
       const held = Redacted.value(stored.value);
       const tokens = yield* parseStoredTokens(row, held);
       const millis = yield* Clock.currentTimeMillis;
@@ -521,7 +526,7 @@ const make = Effect.gen(function* () {
         rejectedIdentity === undefined
           ? isStale(tokens, millis)
           : computeCredentialsIdentity({ accessToken: tokens.accessToken }) === rejectedIdentity;
-      if (!needsRefresh) return tokens;
+      if (!needsRefresh) return { tokens, row };
 
       const endpoint = yield* findRefreshEndpoint(row, type);
       const { refreshToken } = tokens;
@@ -534,7 +539,7 @@ const make = Effect.gen(function* () {
       // The request and the write that stores its answer are uninterruptible
       // together, as `renewTokenSet` explains. Marking the connection when the
       // provider refuses is part of the same unit.
-      return yield* Effect.uninterruptible(
+      const renewed = yield* Effect.uninterruptible(
         renewTokenSet({
           refreshToken,
           endpoint: endpoint.value,
@@ -560,6 +565,7 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
+      return { tokens: renewed, row };
     });
 
   /**
@@ -568,23 +574,14 @@ const make = Effect.gen(function* () {
    * that says why not: `missing` for no such connection or an unregistered
    * type, `switched-off` for a `disabled` one, and `needs-sign-in` for one
    * that is `needs-reauth`. Reads only, so it never refreshes.
+   *
+   * `checkUsable` makes the decision about a row the caller already holds, and
+   * `readConnectionForUse` reads the row first.
    */
-  const readConnectionForUse = (
-    connectionId: string,
-  ): Effect.Effect<
-    { readonly row: StoredConnection; readonly type: RegisteredConnectionType },
-    ConnectionCredentialsUnavailable
-  > =>
+  const checkUsable = (
+    row: StoredConnection,
+  ): Effect.Effect<RegisteredConnectionType, ConnectionCredentialsUnavailable> =>
     Effect.gen(function* () {
-      const row = Option.getOrUndefined(yield* Effect.orDie(connections.one(connectionId)));
-      if (row === undefined) {
-        return yield* Effect.fail(
-          new ConnectionCredentialsUnavailable({
-            reason: "missing",
-            message: `there is no connection ${connectionId}`,
-          }),
-        );
-      }
       const type = yield* findRegisteredType(row);
       if (type === undefined) {
         return yield* Effect.fail(
@@ -610,7 +607,26 @@ const make = Effect.gen(function* () {
           }),
         );
       }
-      return { row, type };
+      return type;
+    });
+
+  const readConnectionForUse = (
+    connectionId: string,
+  ): Effect.Effect<
+    { readonly row: StoredConnection; readonly type: RegisteredConnectionType },
+    ConnectionCredentialsUnavailable
+  > =>
+    Effect.gen(function* () {
+      const row = Option.getOrUndefined(yield* Effect.orDie(connections.one(connectionId)));
+      if (row === undefined) {
+        return yield* Effect.fail(
+          new ConnectionCredentialsUnavailable({
+            reason: "missing",
+            message: `there is no connection ${connectionId}`,
+          }),
+        );
+      }
+      return { row, type: yield* checkUsable(row) };
     });
 
   /**
@@ -652,16 +668,20 @@ const make = Effect.gen(function* () {
     promotion.whenServing(
       refreshPermits.withPermit(
         connectionId,
+        // The row read here only tells the connection's type, which a
+        // reconnect never changes, and fails early. `refreshTokens` reads the
+        // row again together with the tokens, and its row is the one returned.
         Effect.flatMap(readConnectionForUse(connectionId), (current) =>
           Effect.map(
             refreshTokens(
               current.row,
               current.type.contribution,
+              true,
               rejectedIdentity,
               cannotRefresh,
               guard,
             ),
-            (tokens) => ({ tokens, row: current.row, type: current.type }),
+            (refreshed) => ({ tokens: refreshed.tokens, row: refreshed.row, type: current.type }),
           ),
         ),
       ),
@@ -754,10 +774,10 @@ const make = Effect.gen(function* () {
       const refreshedTokens = yield* promotion.whenServing(
         refreshPermits.withPermit(
           row.id,
-          refreshTokens(row, type, undefined, markStaleTokenNeedsReauth, Effect.void),
+          refreshTokens(row, type, false, undefined, markStaleTokenNeedsReauth, Effect.void),
         ),
       );
-      return { tokens: refreshedTokens, read: undefined };
+      return { tokens: refreshedTokens.tokens, read: undefined };
     });
 
   /**

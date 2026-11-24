@@ -23,19 +23,28 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 import { ConnectionValidationFailed, type CreatedOAuthClient } from "@hercule/plugin-host";
 import type { ConnectionOAuthStartInput } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
+import { holdWriter } from "../db/client";
 import { inTransaction } from "../db/testing";
-import { SETUP_LIFETIME_MS } from "./oauth";
+import { PromotionState } from "../promotion";
+import { CREATED_CLIENT_GRACE_MS, SETUP_LIFETIME_MS } from "./oauth";
 import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
 import { ConnectionService } from "./service";
-import { buildAccount, buildConnectionServiceStack, buildJsonResponse } from "./testing";
+import {
+  buildAccount,
+  buildConnectionServiceStack,
+  buildJsonResponse,
+  type ConnectionServiceStackOptions,
+} from "./testing";
 
 /** What the user pastes for the client. Appears in no row, log line or error. */
 const SENTINEL = "xoxe-sentinel-config-token-0123456789";
@@ -80,7 +89,7 @@ afterEach(() => {
 interface Provider {
   readonly base: string;
   readonly requests: Array<Record<string, string>>;
-  readonly answers: Record<string, () => Response>;
+  readonly answers: Record<string, () => Response | Promise<Response>>;
   readonly stop: () => Promise<void>;
 }
 
@@ -147,6 +156,7 @@ interface PluginLog {
  */
 const buildCreatedClientType = (
   tokenBase: string,
+  fieldName = "configToken",
 ): { readonly type: RegisteredConnectionType; readonly log: PluginLog } => {
   const log: PluginLog = { created: [], deleted: [] };
   const type: RegisteredConnectionType = {
@@ -164,7 +174,7 @@ const buildCreatedClientType = (
         scopes: ["read"],
         publicClient: {
           createdAtSetup: {
-            fields: [{ name: "configToken", label: "Configuration token", secret: true }],
+            fields: [{ name: fieldName, label: "Configuration token", secret: true }],
           },
           redirectUris: ["http://127.0.0.1/callback", "http://127.0.0.1/oauth/callback"],
         },
@@ -178,11 +188,20 @@ const buildCreatedClientType = (
             );
       },
       createOAuthClient: (values) => {
-        if (values["configToken"] === EXPIRED) {
+        const pasted = Object.hasOwn(values, fieldName) ? (values[fieldName] ?? "") : "";
+        if (pasted === EXPIRED) {
           return Effect.fail(new ConnectionValidationFailed({ message: EXPIRED_MESSAGE }));
         }
-        if (values["configToken"]?.startsWith("throws")) {
-          return Effect.die(new Error(`could not use ${values["configToken"]}`));
+        if (pasted.startsWith("throws")) {
+          return Effect.die(new Error(`could not use ${pasted}`));
+        }
+        // A provider that reflects what it was sent in its refusal.
+        if (pasted.startsWith("echo-")) {
+          return Effect.fail(
+            new ConnectionValidationFailed({
+              message: `the provider refused the token ${pasted}: it is invalid`,
+            }),
+          );
         }
         log.created.push(values);
         const clientId = `made-${log.created.length}`;
@@ -245,9 +264,14 @@ const CONFIGURED_TYPE: RegisteredConnectionType = {
  */
 const run = <A, E>(
   types: ReadonlyArray<RegisteredConnectionType>,
-  scenario: Effect.Effect<A, E, ConnectionService | ConnectionTypes | SqlClient.SqlClient>,
-  logs: Array<string> = [],
+  scenario: Effect.Effect<
+    A,
+    E,
+    ConnectionService | ConnectionTypes | PromotionState | SqlClient.SqlClient
+  >,
+  options: { readonly logs?: Array<string>; readonly stack?: ConnectionServiceStackOptions } = {},
 ): Promise<A> => {
+  const logs = options.logs ?? [];
   const home = mkdtempSync(join(tmpdir(), "hercule-created-client-"));
   homes.push(home);
   return Effect.runPromise(
@@ -256,7 +280,7 @@ const run = <A, E>(
       scenario,
     ).pipe(
       Effect.provideService(CurrentActor, USER),
-      Effect.provide(buildConnectionServiceStack(home)),
+      Effect.provide(buildConnectionServiceStack(home, options.stack)),
       Effect.provide(
         Logger.layer([
           Logger.make<unknown, void>(({ message }) => {
@@ -712,7 +736,7 @@ describe("who can finish a flow, and which operation finishes which flow", () =>
         const refused = yield* Effect.flip(
           service.finishOAuth({ callbackQuery: `code=the-code&state=${state}` }),
         );
-        const path = yield* service.completeOAuth({ code: "the-code", state });
+        const path = yield* service.completeOAuth(`code=the-code&state=${state}`);
         const { items } = yield* service.query({});
         return { refused, path, count: items.length };
       }),
@@ -736,7 +760,7 @@ describe("who can finish a flow, and which operation finishes which flow", () =>
         const service = yield* ConnectionService;
         const started = yield* service.startOAuth(startInput());
         const state = readState(started.authorizationUrl);
-        const path = yield* service.completeOAuth({ code: "the-code", state });
+        const path = yield* service.completeOAuth(`code=the-code&state=${state}`);
         const connection = yield* service.finishOAuth({
           callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
         });
@@ -769,6 +793,11 @@ describe("who can finish a flow, and which operation finishes which flow", () =>
 });
 
 describe("the values the user pastes for the client", () => {
+  /** The refusal of a key the type does not declare. It never quotes the key. */
+  const UNKNOWN_FIELD_ISSUE = {
+    path: ["clientValues"],
+    message: "the type forge/forge takes only these fields: configToken",
+  };
   const fieldIssue = (field: string, message: string) => ({
     path: ["clientValues", field],
     message,
@@ -789,10 +818,7 @@ describe("the values the user pastes for the client", () => {
     [
       "a missing field",
       { clientValues: { other: "x" } },
-      [
-        fieldIssue("configToken", "give a value for Configuration token"),
-        fieldIssue("other", "the type forge/forge has no such field: it takes configToken"),
-      ],
+      [fieldIssue("configToken", "give a value for Configuration token"), UNKNOWN_FIELD_ISSUE],
     ],
     [
       "an empty field",
@@ -802,7 +828,12 @@ describe("the values the user pastes for the client", () => {
     [
       "an unknown field",
       { clientValues: { configToken: SENTINEL, extra: SENTINEL } },
-      [fieldIssue("extra", "the type forge/forge has no such field: it takes configToken")],
+      [UNKNOWN_FIELD_ISSUE],
+    ],
+    [
+      "a token pasted where a field name belongs, in a key longer than any field name",
+      { clientValues: { configToken: "fine-value", [`${"k".repeat(300)}${SENTINEL}`]: "x" } },
+      [UNKNOWN_FIELD_ISSUE],
     ],
   ])("refuses %s, names the field, and creates nothing", async (_, overrides, issues) => {
     const token = startProvider();
@@ -909,7 +940,7 @@ describe("the values the user pastes for the client", () => {
         );
         return JSON.stringify(seen) + (yield* dumpDatabase);
       }),
-      logs,
+      { logs },
     );
 
     expect(everything).not.toContain(SENTINEL);
@@ -927,7 +958,11 @@ describe("the client a sign-in created and nothing used", () => {
       Effect.gen(function* () {
         const service = yield* ConnectionService;
         yield* service.startOAuth(startInput());
-        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS - 1000));
+        // The flow's lifetime is over, but a finish that claimed at its last
+        // moment may still be exchanging the code: the grace period protects it.
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS - 1000),
+        );
         yield* settle;
         const early = [...log.deleted];
         yield* TestClock.adjust(Duration.millis(2000));
@@ -1034,5 +1069,385 @@ describe("the redirect URI of a flow that returns to the user's machine", () => 
     );
 
     expect(failure).toMatchObject({ error: { code: "invalid_state" } });
+  });
+});
+
+/** Polls, in real time, until the effect answers true, for at most two seconds. */
+const waitUntil = (condition: Effect.Effect<boolean, unknown, SqlClient.SqlClient>) =>
+  Effect.gen(function* () {
+    const deadline = Date.now() + 2000;
+    while (!(yield* condition)) {
+      if (Date.now() > deadline) throw new Error("the condition never held");
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+    }
+  });
+
+describe("deciding whether to delete the client of a sign-in that did not end cleanly", () => {
+  it("keeps the client of a Connection whose write committed, when the finish is interrupted afterwards", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    // The finish reports the new Connection to the observer after the write
+    // committed, so an observer that never answers holds the finish there.
+    const observer = {
+      connectionCreated: () => Effect.never,
+      connectionDeleted: () => Effect.void,
+    };
+
+    const stored = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(startInput());
+        const finish = yield* Effect.forkChild(
+          service.finishOAuth({
+            callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+          }),
+        );
+        yield* waitUntil(Effect.map(readStoredClientIds, (ids) => ids.length > 0));
+        yield* Fiber.interrupt(finish);
+        yield* settle;
+        return yield* readStoredClientIds;
+      }),
+      { stack: { observer } },
+    );
+
+    expect(stored).toEqual(["made-1"]);
+    expect(log.deleted).toEqual([]);
+  });
+
+  it("deletes the client when the finish is interrupted before the write", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const held = Promise.withResolvers<Response>();
+    token.answers["authorization_code"] = () => held.promise;
+
+    const stored = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(startInput());
+        const finish = yield* Effect.forkChild(
+          service.finishOAuth({
+            callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+          }),
+        );
+        yield* waitUntil(Effect.sync(() => token.requests.length > 0));
+        yield* Fiber.interrupt(finish);
+        yield* settle;
+        return yield* readStoredClientIds;
+      }),
+    );
+    held.resolve(buildJsonResponse({ error: "invalid_grant" }, 400));
+
+    expect(stored).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+describe("who owns the cleanup of a created client", () => {
+  it("is the finish's, once it claimed the sign-in just before its lifetime ended, even when the lifetime is over while the code is exchanged", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const held = Promise.withResolvers<Response>();
+    token.answers["authorization_code"] = () => held.promise;
+
+    const connection = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(startInput());
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS - 1000));
+        const finish = yield* Effect.forkChild(
+          service.finishOAuth({
+            callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+          }),
+        );
+        yield* waitUntil(Effect.sync(() => token.requests.length > 0));
+        // The sign-in's lifetime is over while the code is still being exchanged
+        // (a request waits at most 30 seconds). The timer must not delete the
+        // client under the finish.
+        yield* TestClock.adjust(Duration.seconds(20));
+        yield* settle;
+        expect(log.deleted).toEqual([]);
+        held.resolve(
+          buildJsonResponse({
+            access_token: "good-first@account-1",
+            refresh_token: "refresh-1",
+            expires_in: 3600,
+          }),
+        );
+        return yield* Fiber.join(finish);
+      }),
+    );
+
+    expect(connection).toMatchObject({ status: "connected" });
+    expect(log.deleted).toEqual([]);
+  });
+
+  it("is still the start's when the start is interrupted after the client was created: the client is deleted and no flow is stored", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { setups } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const release = yield* Deferred.make<void>();
+        // The writer is busy, so the start waits for it after it created the client.
+        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
+        yield* settle;
+        const start = yield* Effect.forkChild(service.startOAuth(startInput()));
+        yield* waitUntil(Effect.sync(() => log.created.length > 0));
+        yield* Fiber.interrupt(start);
+        yield* Deferred.succeed(release, undefined);
+        yield* settle;
+        return { setups: yield* sql`SELECT state FROM oauth_setups` };
+      }),
+    );
+
+    expect(setups).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("is left alone by a controller that is frozen for a promotion, until it serves again", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const promotion = yield* PromotionState;
+        yield* service.startOAuth(startInput());
+        yield* promotion.freeze("promotion-1", new Date(Date.now() + 60_000));
+        yield* TestClock.adjust(Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS * 2));
+        yield* settle;
+        expect(log.deleted).toEqual([]);
+        yield* promotion.thaw("promotion-1");
+        yield* settle;
+      }),
+    );
+
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+describe("a plugin's refusal when it creates the client", () => {
+  it("shows the plugin's words with every pasted value removed from them", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+    const pasted = "echo-0123456789-secret";
+
+    const failure = await run(
+      [type],
+      Effect.flatMap(ConnectionService, (service) =>
+        Effect.flip(service.startOAuth(startInput({ clientValues: { configToken: pasted } }))),
+      ),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "invalid_state" } });
+    expect(readMessage(failure)).toBe("the provider refused the token [removed]: it is invalid");
+  });
+
+  it("reads a field the type names like an inherited property as missing, not as the inherited function", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base, "toString");
+
+    const failure = await run(
+      [type],
+      Effect.flatMap(ConnectionService, (service) =>
+        Effect.flip(service.startOAuth(startInput({ clientValues: { other: "x" } }))),
+      ),
+    );
+
+    expect(failure).toMatchObject({
+      error: {
+        code: "validation",
+        details: {
+          issues: [{ path: ["clientValues", "toString"] }, { path: ["clientValues"] }],
+        },
+      },
+    });
+  });
+});
+
+describe("the controller's callback for a flow that returns to the controller", () => {
+  const ORIGIN = "http://127.0.0.1:4937";
+
+  it.each([
+    ["a blank code", (state: string) => `state=${state}&code=`, "denied"],
+    ["a blank error", (state: string) => `state=${state}&error=`, "denied"],
+    ["both a code and an error", (state: string) => `state=${state}&code=c&error=e`, "denied"],
+    ["a parameter twice", (state: string) => `state=${state}&code=a&code=b`, "expired"],
+    ["no state", () => "code=the-code", "expired"],
+  ])("claims nothing for %s, so the real return still works", async (_, query, outcome) => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+
+    const { blank, real, exchanges } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(
+          startInput({ redirectUri: undefined, origin: ORIGIN }),
+        );
+        const state = readState(started.authorizationUrl);
+        const blank = yield* service.completeOAuth(query(state));
+        const real = yield* service.completeOAuth(`state=${state}&code=the-code`);
+        return { blank, real, exchanges: token.requests.length };
+      }),
+    );
+
+    expect(blank).toBe(`/connections?oauth=${outcome}`);
+    expect(real).toBe("/connections?oauth=ok");
+    expect(exchanges).toBe(1);
+  });
+
+  it("still ends the flow when the provider denies it with an error and a state", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const { denied, again } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const started = yield* service.startOAuth(
+          startInput({ redirectUri: undefined, origin: ORIGIN }),
+        );
+        const state = readState(started.authorizationUrl);
+        const denied = yield* service.completeOAuth(`error=access_denied&state=${state}`);
+        const again = yield* service.completeOAuth(`state=${state}&code=the-code`);
+        return { denied, again };
+      }),
+    );
+
+    expect(denied).toBe("/connections?oauth=denied");
+    expect(again).toBe("/connections?oauth=expired");
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+});
+
+describe("a refresh reads the Connection's row and tokens as one version", () => {
+  it("never sends a refresh token with the client id of another version, when a reconnect commits between the two reads", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+    const accessToken = "good-first@account-1";
+    let issued = 0;
+    token.answers["authorization_code"] = () => {
+      issued += 1;
+      return buildJsonResponse({
+        access_token: accessToken,
+        refresh_token: `refresh-${String(issued)}`,
+        expires_in: 0,
+      });
+    };
+    const hook: { current: Effect.Effect<void> | undefined } = { current: undefined };
+
+    await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const types = yield* ConnectionTypes;
+        const started = yield* service.startOAuth(startInput());
+        const connection = yield* service.finishOAuth({
+          callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
+        });
+        const again = yield* service.startOAuth(
+          startInput({
+            connectionId: connection.id,
+            clientValues: { configToken: "second-token" },
+          }),
+        );
+        // The reconnect commits after the refresh read the row and before it reads the tokens.
+        hook.current = Effect.asVoid(
+          Effect.orDie(
+            service.finishOAuth({
+              callbackQuery: buildReturn(REDIRECT_URI, again.authorizationUrl),
+            }),
+          ),
+        );
+        yield* Effect.ignore(types.runtimeFor("forge").credentials(connection.id));
+      }),
+      { stack: { beforeTokenRead: hook } },
+    );
+
+    const refreshes = token.requests
+      .filter((request) => request["grant_type"] === "refresh_token")
+      .map((request) => `${request["refresh_token"]}/${request["client_id"]}`);
+    // Refresh token 1 belongs to client made-1 and refresh token 2 to made-2.
+    expect(refreshes.length).toBeGreaterThan(0);
+    for (const pair of refreshes) expect(["refresh-1/made-1", "refresh-2/made-2"]).toContain(pair);
+  });
+});
+
+describe("the refusal when the app of a reconnect may be gone", () => {
+  /** Connects, then reconnects with the Connection's own app while the provider refuses the code. */
+  const reconnectRefused = (answer: string, values?: Record<string, string>) => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+    return run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const first = yield* service.startOAuth(startInput());
+        const connection = yield* service.finishOAuth({
+          callbackQuery: buildReturn(REDIRECT_URI, first.authorizationUrl),
+        });
+        token.answers["authorization_code"] = () =>
+          buildJsonResponse({ error: "invalid_client" }, 401);
+        const again = yield* service.startOAuth({
+          type: "forge/forge",
+          redirectUri: REDIRECT_URI,
+          connectionId: connection.id,
+          ...(values === undefined ? {} : { clientValues: values }),
+        });
+        return yield* Effect.flip(
+          service.finishOAuth({
+            callbackQuery: `${answer}&state=${readState(again.authorizationUrl)}`,
+          }),
+        );
+      }),
+    );
+  };
+
+  it.each([
+    ["the provider refuses the code", "code=the-code"],
+    ["the user is sent back with an error", "error=access_denied"],
+  ])("says to set the app up again, with the CLI way, when %s", async (_, answer) => {
+    const failure = await reconnectRefused(answer);
+
+    expect(readMessage(failure)).toContain("set it up again");
+    expect(readMessage(failure)).toContain("configuration token");
+    expect(readMessage(failure)).toContain("--client-values-stdin");
+  });
+
+  it("does not suggest it when the app was created for this very sign-in", async () => {
+    const failure = await reconnectRefused("code=the-code", { configToken: "new-token" });
+
+    expect(readMessage(failure)).not.toContain("set it up again");
+  });
+});
+
+describe("the refusal of an origin the app does not accept", () => {
+  it("sends the user to the desktop app or the paste flow, and lists no address without a port", async () => {
+    const token = startProvider();
+    const { type } = buildCreatedClientType(token.base);
+
+    const failure = await run(
+      [type],
+      Effect.flatMap(ConnectionService, (service) =>
+        Effect.flip(
+          service.startOAuth(
+            startInput({ redirectUri: undefined, origin: "http://hercule.example:4937" }),
+          ),
+        ),
+      ),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "invalid_state" } });
+    expect(readMessage(failure)).toContain("desktop app");
+    expect(readMessage(failure)).toContain("paste");
+    expect(readMessage(failure)).toContain("with its own port");
   });
 });

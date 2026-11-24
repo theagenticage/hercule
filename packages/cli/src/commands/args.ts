@@ -125,7 +125,14 @@ export const coerceFieldValue = (field: Field, text: string, help: string): unkn
       try {
         return JSON.parse(text);
       } catch {
-        throw new UsageError(`${formatFieldName(field)}: ${text} is not valid JSON`, help);
+        // A secret field holds a token or a code, and a message that quotes it
+        // lands in the terminal and the shell's scrollback.
+        throw new UsageError(
+          field.secret
+            ? `${formatFieldName(field)}: expected a JSON object on stdin`
+            : `${formatFieldName(field)}: ${text} is not valid JSON`,
+          help,
+        );
       }
     case "namedValues": {
       const equals = text.indexOf("=");

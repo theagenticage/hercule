@@ -66,27 +66,34 @@ const addServer = (
   contribution: RegisteredMcpServer,
   created: CreatedConnection,
 ): Effect.Effect<void> =>
-  servers
-    .create({
-      source: {
-        kind: "plugin",
-        contributionId: contribution.id,
-        connectionId: created.connectionId,
-      },
-    })
-    .pipe(
-      Effect.provideService(CurrentActor, created.actor),
-      Effect.asVoid,
-      Effect.catch((error) =>
-        error instanceof Forbidden
-          ? Effect.logWarning(
-              `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because whoever created the Connection may not manage MCP servers (${error.message}). The Connection is created. Add the server in Settings > MCP servers.`,
-            )
-          : Effect.logError(
-              `The ${contribution.displayName} MCP server could not be added for the new Connection ${created.connectionId}: ${error.message}. The Connection is created. Add the server in Settings > MCP servers.`,
-            ),
-      ),
-    );
+  created.actor._tag === "none"
+    ? // The browser came back to the controller's callback with no credential,
+      // and the controller keeps no grants of whoever started the sign-in, so
+      // nothing can say that this server may be added.
+      Effect.logWarning(
+        `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because the sign-in came back to the controller with no credential, so nobody's right to manage MCP servers could be checked. The Connection is created. Add the server in Settings > MCP servers.`,
+      )
+    : servers
+        .create({
+          source: {
+            kind: "plugin",
+            contributionId: contribution.id,
+            connectionId: created.connectionId,
+          },
+        })
+        .pipe(
+          Effect.provideService(CurrentActor, created.actor),
+          Effect.asVoid,
+          Effect.catch((error) =>
+            error instanceof Forbidden
+              ? Effect.logWarning(
+                  `The ${contribution.displayName} MCP server was not added for the new Connection ${created.connectionId}, because whoever created the Connection may not manage MCP servers (${error.message}). The Connection is created. Add the server in Settings > MCP servers.`,
+                )
+              : Effect.logError(
+                  `The ${contribution.displayName} MCP server could not be added for the new Connection ${created.connectionId}: ${error.message}. The Connection is created. Add the server in Settings > MCP servers.`,
+                ),
+          ),
+        );
 
 /**
  * Provides the connections domain's `ConnectionObserver`:

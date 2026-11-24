@@ -12,8 +12,10 @@
  *   and one of the same account gets no second server;
  * - a session without `mcp.manage` creates the Connection and gets no server,
  *   and a session with it gets the server, stamped with the session;
- * - the same holds when the session starts a redirect sign-in and the browser
- *   finishes it at the controller's callback, which carries no credential.
+ * - a redirect sign-in that the browser finishes at the controller's callback,
+ *   which carries no credential, adds no server, because nobody's grants can be
+ *   checked there; one that the session finishes with `connection.finishOAuth`
+ *   adds the server, stamped with the session.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { McpServer } from "@hercule/contract";
@@ -236,7 +238,10 @@ const buildRedirectPlugin = (tokenEndpoint: string): Plugin => ({
           authorizationUrl: `${tokenEndpoint}/authorize`,
           tokenUrl: `${tokenEndpoint}/token`,
           scopes: [],
-          publicClient: { clientId: "ridge-client", redirectUris: [RIDGE_REDIRECT_URI] },
+          publicClient: {
+            clientId: "ridge-client",
+            redirectUris: [RIDGE_REDIRECT_URI, "http://127.0.0.1/callback"],
+          },
         },
         validate: ({ accessToken }) => Effect.succeed(buildAccount(accessToken ?? "")),
       });
@@ -252,9 +257,9 @@ const buildRedirectPlugin = (tokenEndpoint: string): Plugin => ({
 const RIDGE_ORIGIN = "http://127.0.0.1:4937";
 const RIDGE_REDIRECT_URI = `${RIDGE_ORIGIN}/oauth/callback`;
 
-describe("a Connection a redirect sign-in creates at the controller's callback", () => {
+describe("a Connection a redirect sign-in creates", () => {
   it(
-    "adds the server as the session that started the sign-in, and none when that session may not manage MCP servers",
+    "adds no server at the controller's callback, which has no credential to check, and adds one as the session that finishes the sign-in itself",
     async () => {
       const provider = Bun.serve({
         port: 0,
@@ -267,10 +272,6 @@ describe("a Connection a redirect sign-in creates at the controller's callback",
           async (arranged) => {
             const { base, token } = { base: arranged.harness.base, token: arranged.token };
             const controller = { harness: arranged.harness, base, token };
-            const withoutManage = await spawnThreadUnder(
-              arranged,
-              await createProfile(arranged, "connector", ["connection.manage"]),
-            );
             const withManage = await spawnThreadUnder(
               arranged,
               await createProfile(arranged, "connector-and-mcp", [
@@ -278,27 +279,35 @@ describe("a Connection a redirect sign-in creates at the controller's callback",
                 "mcp.manage",
               ]),
             );
-            const signIn = async (sessionToken: string): Promise<void> => {
+            const start = async (body: Record<string, unknown>): Promise<string> => {
               const started = await post(
                 base,
                 "/api/v1/oauth/start",
-                { type: "ridge/desk", origin: RIDGE_ORIGIN },
-                sessionToken,
+                { type: "ridge/desk", ...body },
+                withManage.token,
               );
               expect(started.status, await started.clone().text()).toBe(200);
               const { authorizationUrl } = (await started.json()) as { authorizationUrl: string };
-              const state = new URL(authorizationUrl).searchParams.get("state") ?? "";
-              // The browser comes back with no credential at all.
-              const callback = await fetch(`${base}/oauth/callback?state=${state}&code=the-code`, {
-                redirect: "manual",
-              });
-              expect(callback.headers.get("location")).toBe("/connections?oauth=ok");
+              return new URL(authorizationUrl).searchParams.get("state") ?? "";
             };
 
-            await signIn(withoutManage.token);
+            // The browser comes back with no credential at all.
+            const callbackState = await start({ origin: RIDGE_ORIGIN });
+            const callback = await fetch(
+              `${base}/oauth/callback?state=${callbackState}&code=the-code`,
+              { redirect: "manual" },
+            );
+            expect(callback.headers.get("location")).toBe("/connections?oauth=ok");
             expect(await listServers(controller)).toEqual([]);
 
-            await signIn(withManage.token);
+            const finishState = await start({ redirectUri: "http://127.0.0.1:53682/callback" });
+            const finished = await post(
+              base,
+              "/api/v1/oauth/finish",
+              { callbackQuery: `code=the-code&state=${finishState}` },
+              withManage.token,
+            );
+            expect(finished.status, await finished.clone().text()).toBe(200);
             expect(await listServers(controller)).toHaveLength(1);
             const created = await controller.harness.audit("mcpServer.created");
             expect(created.map((entry) => entry.actor)).toEqual([

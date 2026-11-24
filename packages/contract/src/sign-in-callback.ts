@@ -48,6 +48,14 @@ export interface ParsedCallback {
 export interface RefusedCallback {
   readonly _tag: "Refused";
   readonly reason: string;
+  /**
+   * What is wrong, for a caller that must answer in words of its own:
+   *
+   * - `no-state`: the text is a well-formed query with no `state`;
+   * - `no-outcome`: it holds both a `code` and an `error`, or neither;
+   * - `malformed`: it is not an address, or a parameter appears twice.
+   */
+  readonly cause: "no-state" | "no-outcome" | "malformed";
 }
 
 /**
@@ -74,6 +82,7 @@ export const parseCallbackQuery = (text: string): ParsedCallback | RefusedCallba
       return {
         _tag: "Refused",
         reason: "this is not an address: paste the address the browser ended on",
+        cause: "malformed",
       };
     }
     query = address.search;
@@ -82,7 +91,11 @@ export const parseCallbackQuery = (text: string): ParsedCallback | RefusedCallba
   }
   const params = new URLSearchParams(query);
   if (new Set(params.keys()).size !== [...params.keys()].length) {
-    return { _tag: "Refused", reason: "a parameter appears twice, so the answer has two readings" };
+    return {
+      _tag: "Refused",
+      reason: "a parameter appears twice, so the answer has two readings",
+      cause: "malformed",
+    };
   }
   const read = (name: string): string | undefined => {
     const value = params.get(name);
@@ -93,12 +106,17 @@ export const parseCallbackQuery = (text: string): ParsedCallback | RefusedCallba
     return {
       _tag: "Refused",
       reason: "there is no state: paste the whole address the browser ended on, or its query",
+      cause: "no-state",
     };
   }
   const code = read("code");
   const error = read("error");
   if ((code === undefined) === (error === undefined)) {
-    return { _tag: "Refused", reason: "the answer holds both a code and an error, or neither" };
+    return {
+      _tag: "Refused",
+      reason: "the answer holds both a code and an error, or neither",
+      cause: "no-outcome",
+    };
   }
   return { _tag: "Callback", address, state, code, error, iss: params.get("iss") ?? undefined };
 };

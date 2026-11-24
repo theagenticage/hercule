@@ -354,6 +354,14 @@ describe("a token endpoint's answer", () => {
     },
   );
 
+  it("stays unreachable for a rate limit whose body looks like an OAuth error, as Slack's does", async () => {
+    const failure = await failWith(
+      () => new Response(JSON.stringify({ ok: false, error: "ratelimited" }), { status: 429 }),
+    );
+
+    expect(failure._tag).toBe("ProviderUnreachable");
+  });
+
   it("stays unreachable for a rate limit whose body cannot be read", async () => {
     const failure = await failWith(
       () => new Response("x".repeat(MAX_ANSWER_BYTES + 1), { status: 429 }),

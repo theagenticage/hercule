@@ -226,6 +226,17 @@ const make = Effect.gen(function* () {
     one,
 
     /**
+     * Checks whether a Connection stores this OAuth client id. A sign-in that
+     * created the client asks it after the sign-in ended, to learn whether the
+     * write that stores the id committed.
+     */
+    holdsOAuthClient: (clientId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`SELECT 1 AS held FROM connections WHERE oauth_client_id = ${clientId} LIMIT 1`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
      * Returns each Connection that exists, by its id, using one query. An id
      * with no Connection is missing from the map.
      */

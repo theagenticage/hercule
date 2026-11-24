@@ -361,6 +361,15 @@ export const postForm = (
       if (response.status >= 500) {
         return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
       }
+      // HTTP 429 is a rate limit whatever the body says, so it is decided before
+      // the body is read. Slack's rate limit body is `{"ok": false, "error":
+      // "ratelimited"}`, which would otherwise read as the provider refusing the
+      // grant, and a body that cannot be read must not change the answer.
+      if (response.status === 429) {
+        return yield* failProviderUnreachable(
+          `the ${endpointName} returned HTTP ${status}: it is rate limiting requests`,
+        );
+      }
       // A body that cannot be read is no body for a client error: the status
       // alone says the provider refused. Only an answer of 200 needs its body.
       const text = yield* readBoundedText(response, endpointName).pipe(
@@ -379,14 +388,6 @@ export const postForm = (
             `the ${endpointName} returned a response that is not JSON`,
           );
         }
-      }
-      // HTTP 429 is a rate limit whatever the body says. Slack's rate limit
-      // body is `{"ok": false, "error": "ratelimited"}`, which would otherwise
-      // read as the provider refusing the grant.
-      if (response.status === 429) {
-        return yield* failProviderUnreachable(
-          `the ${endpointName} returned HTTP ${status}: it is rate limiting requests`,
-        );
       }
       const refusal = decodeErrorResponse(body);
       if (Option.isSome(refusal)) {

@@ -1473,6 +1473,74 @@ describe("a connection type's token flows", () => {
       "the field name oauth.tokens is reserved",
     ],
     [
+      "a client created at setup with more fields than a setup takes",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: {
+            ...CREATED_CLIENT,
+            createdAtSetup: {
+              fields: Array.from({ length: 17 }, (_, index) => ({
+                name: `field${String(index)}`,
+                label: "Field",
+              })),
+            },
+          },
+        },
+        createOAuthClient,
+      },
+      "has 17 fields, and a setup takes at most 16",
+    ],
+    [
+      "a client created at setup with a field name longer than a name may be",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: {
+            ...CREATED_CLIENT,
+            createdAtSetup: { fields: [{ name: "n".repeat(200), label: "Field" }] },
+          },
+        },
+        createOAuthClient,
+      },
+      "a field name of oauth.publicClient.createdAtSetup is 200 characters",
+    ],
+    [
+      "a public client that declares both a clientId and a client created at setup",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: { ...OAUTH, publicClient: { ...CREATED_CLIENT, clientId: "shipped" } },
+        createOAuthClient,
+      },
+      "declares both a clientId and createdAtSetup",
+    ],
+    [
+      "a catcher redirect URI on https",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["https://127.0.0.1/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI https://127.0.0.1/callback is not",
+    ],
+    [
+      "a catcher redirect URI on the IPv6 loopback address",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { ...CREATED_CLIENT, redirectUris: ["http://[::1]/callback"] },
+        },
+        createOAuthClient,
+      },
+      "the public client's redirect URI http://[::1]/callback is not",
+    ],
+    [
       "a client created at setup with no redirect URIs",
       {
         setup: [{ kind: "oauth" }],

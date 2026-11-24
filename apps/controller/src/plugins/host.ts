@@ -28,6 +28,7 @@ import {
   PluginError,
   PluginManifest,
   listChoiceFields,
+  MAX_CONTRIBUTION_NAME_LENGTH,
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
@@ -41,6 +42,7 @@ import {
 } from "@hercule/plugin-host";
 import {
   createDecodeValidationError,
+  MAX_CLIENT_VALUES,
   summarizeCause,
   truncateMessage,
   type IntakeOverrides,
@@ -60,6 +62,7 @@ import { Secrets, type SecretOwner } from "../secrets";
 import {
   ActivePlugins,
   ConnectionTypes,
+  CATCHER_PATH,
   OAUTH_TOKENS,
   REDIRECT_URI_PATHS,
   PluginConfigs,
@@ -303,6 +306,9 @@ const checkCredentialFieldNames = (type: ConnectionType): string | undefined => 
     : undefined;
 };
 
+/** The hosts the desktop app's own return catcher answers for. */
+const CATCHER_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1"];
+
 /** The hostnames a public client's redirect URIs may use: the loopback names of this machine. */
 const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[::1]"];
 
@@ -327,7 +333,9 @@ const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[:
  *   http.
  * - Each redirect URI must have no query and no fragment, and its path must
  *   be one of the two the core can receive a return on: the controller's
- *   callback path, or the path of the desktop app's own catcher.
+ *   callback path, or the path of the desktop app's own catcher. A URI on the
+ *   catcher's path must be plain http on `127.0.0.1` or `localhost`, because
+ *   that is all the catcher listens on.
  */
 const checkPublicClient = (type: ConnectionType, createsClients: boolean): string | undefined => {
   const client = type.oauth?.publicClient;
@@ -349,6 +357,15 @@ const checkPublicClient = (type: ConnectionType, createsClients: boolean): strin
     if (names.length === 0) {
       return "oauth.publicClient.createdAtSetup has no fields: declare what the user pastes, or ship a clientId";
     }
+    // The start operation takes at most this many values, so a type with more
+    // fields could never be set up.
+    if (names.length > MAX_CLIENT_VALUES) {
+      return `oauth.publicClient.createdAtSetup has ${String(names.length)} fields, and a setup takes at most ${String(MAX_CLIENT_VALUES)}`;
+    }
+    const tooLong = names.find((name) => name.length > MAX_CONTRIBUTION_NAME_LENGTH);
+    if (tooLong !== undefined) {
+      return `a field name of oauth.publicClient.createdAtSetup is ${String(tooLong.length)} characters, and the most allowed is ${String(MAX_CONTRIBUTION_NAME_LENGTH)}`;
+    }
     const duplicate = names.find((name, index) => names.indexOf(name) !== index);
     if (duplicate !== undefined) {
       return `oauth.publicClient.createdAtSetup names the field ${duplicate} twice`;
@@ -367,6 +384,11 @@ const checkPublicClient = (type: ConnectionType, createsClients: boolean): strin
       url.search !== "" ||
       url.hash !== "" ||
       !REDIRECT_URI_PATHS.includes(url.pathname) ||
+      // The desktop app's catcher listens on plain http at the loopback
+      // address, so a `/callback` URI on any other scheme or host could never
+      // be the address a sign-in returns to.
+      (url.pathname === CATCHER_PATH &&
+        (url.protocol !== "http:" || !CATCHER_HOSTNAMES.includes(url.hostname))) ||
       uri !== `${url.origin}${url.pathname}`
     );
   });
@@ -449,6 +471,22 @@ const buildRegistrationHost = (
               // Everything except `validate`, `listChoices` and `createOAuthClient`, which no JSON
               // column can hold, so they are kept in memory instead.
               const { validate, listChoices, createOAuthClient, ...serializable } = contribution;
+              // The decode below keeps only one variant of a public client, so
+              // a declaration with both is checked before it.
+              const declaredClient = (
+                serializable.oauth as { readonly publicClient?: object } | undefined
+              )?.publicClient;
+              if (
+                declaredClient !== undefined &&
+                "clientId" in declaredClient &&
+                "createdAtSetup" in declaredClient
+              ) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${manifest.id}/${serializable.type}: oauth.publicClient declares both a clientId and createdAtSetup: declare one`,
+                  }),
+                );
+              }
               const decoded = yield* decodeConnectionType(serializable).pipe(
                 Effect.mapError(toPluginError),
               );

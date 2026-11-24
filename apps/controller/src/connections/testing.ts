@@ -22,7 +22,7 @@ import { get } from "../http/testing";
 import { NotifierLayer } from "../notifications";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { ServingPromotionStateLayer } from "../promotion/testing";
-import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
+import { masterKeyLayer, SecretLayer, Secrets, secretsLayer, type SecretOwner } from "../secrets";
 import { ConnectionEntityFacts } from "./entity-facts";
 import { ConnectionObserver } from "./observer";
 import { ConnectionReferences } from "./references";
@@ -184,23 +184,57 @@ export const createDeviceProvider = (): DeviceProvider => {
   };
 };
 
+/** What a test may change in the stack `buildConnectionServiceStack` builds. */
+export interface ConnectionServiceStackOptions {
+  /** The observer the service reports a created or deleted Connection to. By default one that does nothing. */
+  readonly observer?: ConnectionObserver["Service"];
+  /**
+   * Runs once, just before the first read of a Connection's token set by
+   * `Secrets.get`, which is where a refresh reads the tokens beside the row. A
+   * test uses it to let another operation commit between the two reads. The
+   * effect is taken out of the cell before it runs, so it runs once.
+   */
+  readonly beforeTokenRead?: { current: Effect.Effect<void> | undefined };
+}
+
 /**
  * Builds the real connection service over the real repositories, a temporary
  * database file and a key file in `home`. The caller removes `home`. This
  * builds no other domain, so no record names a Connection and a delete
  * records no Task fact.
  */
-export const buildConnectionServiceStack = (home: string) =>
-  ConnectionServiceLayer.pipe(
+export const buildConnectionServiceStack = (
+  home: string,
+  options: ConnectionServiceStackOptions = {},
+) => {
+  const realSecrets = secretsLayer.pipe(Layer.provide(masterKeyLayer("file")));
+  const hook = options.beforeTokenRead;
+  const secrets =
+    hook === undefined
+      ? realSecrets
+      : Layer.effect(Secrets)(
+          Effect.map(Secrets, (real) => ({
+            ...real,
+            get: (owner: SecretOwner, name: string) =>
+              Effect.suspend(() => {
+                const pending = name === "oauth.tokens" ? hook.current : undefined;
+                hook.current = pending === undefined ? hook.current : undefined;
+                return Effect.andThen(pending ?? Effect.void, real.get(owner, name));
+              }),
+          })),
+        ).pipe(Layer.provide(realSecrets));
+  return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
     Layer.provide(
       Layer.succeed(ConnectionEntityFacts)({ recordFactsOfDeletion: (_id, deletion) => deletion }),
     ),
     Layer.provide(
-      Layer.succeed(ConnectionObserver)({
-        connectionCreated: () => Effect.void,
-        connectionDeleted: () => Effect.void,
-      }),
+      Layer.succeed(ConnectionObserver)(
+        options.observer ?? {
+          connectionCreated: () => Effect.void,
+          connectionDeleted: () => Effect.void,
+        },
+      ),
     ),
     Layer.provideMerge(
       PluginHostLayer.pipe(
@@ -210,7 +244,7 @@ export const buildConnectionServiceStack = (home: string) =>
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(secrets),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
     // The ingest records Task facts, which are Platform Events.
@@ -219,3 +253,4 @@ export const buildConnectionServiceStack = (home: string) =>
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
+};

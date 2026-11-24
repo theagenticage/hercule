@@ -195,9 +195,10 @@ export const ConnectionCredentialsInput = Schema.Struct({ credentials: Credentia
 export type ConnectionCredentialsInput = Schema.Schema.Type<typeof ConnectionCredentialsInput>;
 
 /**
- * The most values a setup may paste for the OAuth client its type creates,
- * and the longest each may be. A type declares a handful of fields, each a
- * token or a name.
+ * The most values a setup may paste for the OAuth client its type creates, and
+ * the longest each may be. A type declares a handful of fields, each a token
+ * or a name, and a plugin that declares more fields than this is refused at
+ * registration.
  */
 export const MAX_CLIENT_VALUES = 16;
 export const MAX_CLIENT_VALUE_LENGTH = 4096;
@@ -206,11 +207,16 @@ export const MAX_CLIENT_VALUE_LENGTH = 4096;
  * The values the user pastes once, to let the type's plugin create an OAuth
  * client for this Connection (a Slack configuration token, for one), keyed by
  * the field names the type declared. The controller never stores them.
+ *
+ * A key is not bounded here, because a key the type did not declare is
+ * refused by the controller without quoting it (a token pasted as a key must
+ * not reach an error), and a record whose key schema fails would drop the key
+ * silently or quote it. The number of keys and the length of each value are
+ * bounded.
  */
-const ClientValues = Schema.Record(
-  bounded(1, MAX_CONTRIBUTION_NAME_LENGTH),
-  bounded(0, MAX_CLIENT_VALUE_LENGTH),
-).check(Schema.isMaxProperties(MAX_CLIENT_VALUES));
+const ClientValues = Schema.Record(Schema.String, bounded(0, MAX_CLIENT_VALUE_LENGTH)).check(
+  Schema.isMaxProperties(MAX_CLIENT_VALUES),
+);
 
 /**
  * The payload for starting a redirect flow. The provider sends the browser

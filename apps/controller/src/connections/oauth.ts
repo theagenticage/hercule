@@ -60,11 +60,14 @@ import { PluginConfigs } from "./plugin-configs";
 /** Where the provider sends the browser back to. Appended to the browser's origin. */
 export const CALLBACK_PATH = "/oauth/callback";
 
+/** The path the desktop app's own return catcher listens on. */
+export const CATCHER_PATH = "/callback";
+
 /**
  * The paths a public client may register a redirect URI on: the controller's
  * callback path, and the path the desktop app's own catcher listens on.
  */
-export const REDIRECT_URI_PATHS: ReadonlyArray<string> = [CALLBACK_PATH, "/callback"];
+export const REDIRECT_URI_PATHS: ReadonlyArray<string> = [CALLBACK_PATH, CATCHER_PATH];
 
 /** The name of the only secret an OAuth connection owns: its whole token set, as JSON. */
 export const OAUTH_TOKENS = "oauth.tokens";
@@ -74,6 +77,16 @@ export const OAUTH_TOKENS = "oauth.tokens";
  * screen, and short enough that abandoned flows are soon deleted.
  */
 export const SETUP_LIFETIME_MS = 10 * 60 * 1000;
+
+/**
+ * How long after a sign-in's lifetime the controller waits before it deletes
+ * the OAuth client the sign-in created. A finish can claim the sign-in until
+ * the last moment of its lifetime and then spends up to a minute on the code
+ * exchange and the account check, and the timer must not delete the client
+ * under it. The finish takes ownership of the cleanup in the same step as its
+ * claim, so this grace only has to cover that one step.
+ */
+export const CREATED_CLIENT_GRACE_MS = 2 * 60 * 1000;
 
 /**
  * How an OAuth flow ended, as the word the Connections screen receives in its
@@ -91,15 +104,6 @@ export type Outcome =
   | "exchange-failed"
   | "rejected"
   | "other-account";
-
-/** The query string the browser brings to the callback. */
-const CallbackQuery = Schema.Struct({
-  state: Schema.optionalKey(Schema.String),
-  code: Schema.optionalKey(Schema.String),
-  error: Schema.optionalKey(Schema.String),
-});
-
-export const decodeCallback = Schema.decodeUnknownEffect(CallbackQuery);
 
 /** Builds the authorization URL, with the parameters RFC 6749 and RFC 7636 define. */
 export const buildAuthorizationUrl = (
