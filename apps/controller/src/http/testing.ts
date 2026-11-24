@@ -18,6 +18,7 @@ import type * as Exit from "effect/Exit";
 import type * as Fiber from "effect/Fiber";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Redacted from "effect/Redacted";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -611,6 +612,12 @@ export interface ServerOptions {
    */
   readonly expressionBudget?: Duration.Duration;
   /**
+   * A logger that receives every log line the controller writes, in place of
+   * the default one. A test that checks what the controller tells the operator
+   * collects the lines with it.
+   */
+  readonly logger?: Logger.Logger<unknown, void>;
+  /**
    * The plugin registry. The real one is compiled in, so a test passes its
    * own. A harness plugin is added when none of these offers harnesses.
    */
@@ -795,6 +802,10 @@ export const withServer = (
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
       provideTimings(options),
+      (effect) =>
+        options.logger === undefined
+          ? effect
+          : Effect.provide(effect, Logger.layer([options.logger])),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));
 };

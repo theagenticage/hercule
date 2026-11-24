@@ -685,14 +685,13 @@ const make = Effect.gen(function* () {
    *   stored, logged or put in a key.
    * - `deadlineMillis` is the sign-in's own expiry, the same value the setup row
    *   stores, so the timer and the claim read one deadline.
-   * - `state` says who may take the entry: `waiting` for the expiry timer, and
-   *   `claiming` while a finish is claiming the setup row, when the timer must
-   *   leave it alone.
+   * - `claims` counts the finishes that are claiming the setup row right now.
+   *   While it is above 0 the expiry timer leaves the entry alone.
    */
   interface CreatedClientEntry {
     readonly deleteClient: CreatedOAuthClient["deleteClient"];
     readonly deadlineMillis: number;
-    state: "waiting" | "claiming";
+    claims: number;
   }
 
   /**
@@ -708,15 +707,16 @@ const make = Effect.gen(function* () {
    *   registers the entry in the same uninterruptible step as the creation, and
    *   deletes the client itself when the start fails or is interrupted before
    *   the sign-in is stored.
-   * - Once the sign-in is stored, the expiry timer owns it while the entry is
-   *   `waiting`. The timer fires at the deadline plus a grace period and takes
-   *   the entry only if it is still `waiting`.
-   * - A finish marks the entry `claiming` before it claims the setup row, so a
-   *   timer that fires during a slow claim leaves it. A claim that succeeds
-   *   removes the entry, and the finish owns the cleanup from then on. A claim
-   *   that fails marks the entry `waiting` again, or, when the deadline has
-   *   passed, deletes the client itself, because the timer may already have
-   *   come and gone.
+   * - Once the sign-in is stored, the expiry timer owns it while no claim is in
+   *   flight. The timer wakes at the deadline plus a grace period, checks the
+   *   clock again, and takes the entry only if its `claims` is 0.
+   * - A finish counts itself in (`beginClaim`) before it claims the setup row
+   *   and out again (`endClaim`) however the claim ends, so overlapping finishes
+   *   cannot undo each other and the timer leaves the entry while any is in
+   *   flight. A claim that succeeds removes the entry, and the finish owns the
+   *   cleanup from then on. The last claim to end without success deletes the
+   *   client itself when the deadline has passed, because the timer may already
+   *   have come and left it.
    *
    * The map lives in memory, and a Hercule that restarts or is promoted loses
    * it, so a sign-in that is open then leaves its client at the provider, an
@@ -746,8 +746,8 @@ const make = Effect.gen(function* () {
    * ends with it. Registering is not interruptible, so no interrupt can land
    * between the plugin's answer and the entry.
    *
-   * The timer takes the entry inside the promotion gate, and only while the
-   * entry is `waiting`. A frozen controller waits, and a sealed one drops the
+   * The timer takes the entry inside the promotion gate, and only while no
+   * claim is in flight. A frozen controller waits, and a sealed one drops the
    * entry without calling the provider.
    */
   const keepCreatedClient = (
@@ -757,16 +757,23 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void> =>
     Effect.uninterruptible(
       Effect.gen(function* () {
-        createdClients.set(state, { deleteClient, deadlineMillis, state: "waiting" });
-        const now = yield* Clock.currentTimeMillis;
-        const wait = Math.max(0, deadlineMillis + CREATED_CLIENT_GRACE_MS - now);
+        createdClients.set(state, { deleteClient, deadlineMillis, claims: 0 });
+        // Sleeps until the deadline plus the grace period by the clock, and
+        // asks the clock again on waking: a clock that moved while the fiber
+        // slept must not make the timer early.
+        const waitUntilDue: Effect.Effect<void> = Effect.flatMap(Clock.currentTimeMillis, (now) => {
+          const remaining = deadlineMillis + CREATED_CLIENT_GRACE_MS - now;
+          return remaining <= 0
+            ? Effect.void
+            : Effect.andThen(Effect.sleep(Duration.millis(remaining)), waitUntilDue);
+        });
         yield* Effect.forkIn(
-          Effect.sleep(Duration.millis(wait)).pipe(
+          waitUntilDue.pipe(
             Effect.andThen(
               promotion.whenServingOr(
                 Effect.suspend(() => {
                   const entry = createdClients.get(state);
-                  if (entry?.state !== "waiting") return Effect.void;
+                  if (entry === undefined || entry.claims > 0) return Effect.void;
                   createdClients.delete(state);
                   return deleteCreatedClient(entry.deleteClient);
                 }),
@@ -783,31 +790,31 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Marks the sign-in's entry `claiming`, so the expiry timer leaves it, and
-   * returns whether it did. It does nothing for a sign-in with no entry, or one
-   * another finish is claiming.
+   * Counts a finish in as claiming the sign-in's setup row, so the expiry timer
+   * leaves the entry, and returns whether there was an entry to count in at. The
+   * caller must call `endClaim` if it returned true, whatever happens.
    */
-  const markClaiming = (state: string): boolean => {
+  const beginClaim = (state: string): boolean => {
     const entry = createdClients.get(state);
-    if (entry?.state !== "waiting") return false;
-    entry.state = "claiming";
+    if (entry === undefined) return false;
+    entry.claims += 1;
     return true;
   };
 
   /**
-   * Ends a claim that failed: the entry is `waiting` again for the timer, or,
-   * when the sign-in's deadline has passed, the client is deleted at once,
-   * because the timer may have fired during the claim and left it.
+   * Counts a finish out of the claim it began, when the claim did not succeed
+   * (a success removes the entry instead). When it was the last claim in flight
+   * and the sign-in's deadline has passed, the client is deleted at once,
+   * because the timer may have come during the claims and left it.
    */
-  const releaseClaiming = (state: string): Effect.Effect<void> =>
+  const endClaim = (state: string): Effect.Effect<void> =>
     Effect.suspend(() => {
       const entry = createdClients.get(state);
       if (entry === undefined) return Effect.void;
+      entry.claims = Math.max(0, entry.claims - 1);
+      if (entry.claims > 0) return Effect.void;
       return Effect.flatMap(Clock.currentTimeMillis, (now) => {
-        if (now < entry.deadlineMillis) {
-          entry.state = "waiting";
-          return Effect.void;
-        }
+        if (now < entry.deadlineMillis || createdClients.get(state) !== entry) return Effect.void;
         createdClients.delete(state);
         return deleteCreatedClient(entry.deleteClient);
       });
@@ -826,23 +833,51 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Tells `ConnectionObserver` that a Connection was created. Call it after the
-   * create committed. The observer never fails. It runs in a fiber of the
-   * service's own scope, so a caller that is cancelled after the commit cannot
-   * drop the work the observer does for the Connection, such as adding its MCP
-   * server, which nothing would do again. The caller still waits for it, until
-   * the caller is cancelled.
+   * Runs the `write` that creates a Connection and, in the same uninterruptible
+   * step, starts the work `ConnectionObserver` does for it, so no interrupt can
+   * land between the durable commit and that start. Without this, a client that
+   * hangs up just as the commit finishes would leave a Connection that nothing
+   * ever tells the observer about, and a reconnect never repairs that.
+   *
+   * `describeCreated` says, from the write's result, which Connection was
+   * created and who created it, or `undefined` when the write created none.
+   * The observer's work runs in a fiber of the service's own scope and never
+   * fails. Returns the write's result and that fiber. The caller waits for it
+   * with `awaitObserver`, and a cancelled caller stops waiting without stopping
+   * the work.
    */
-  const reportCreated = (connection: Connection, actor: Actor): Effect.Effect<void> =>
-    Effect.uninterruptibleMask((restore) =>
-      Effect.flatMap(
-        Effect.forkIn(
-          observer.connectionCreated({ connectionId: connection.id, type: connection.type, actor }),
-          serviceScope,
-        ),
-        (fiber) => restore(Fiber.join(fiber)),
-      ),
+  const writeAndStartObserver = <A, E, R>(
+    write: Effect.Effect<A, E, R>,
+    describeCreated: (
+      result: A,
+    ) => Effect.Effect<{ readonly connection: Connection; readonly actor: Actor } | undefined>,
+  ): Effect.Effect<
+    { readonly result: A; readonly observer: Fiber.Fiber<void> | undefined },
+    E,
+    R
+  > =>
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const result = yield* write;
+        const created = yield* describeCreated(result);
+        const started =
+          created === undefined
+            ? undefined
+            : yield* Effect.forkIn(
+                observer.connectionCreated({
+                  connectionId: created.connection.id,
+                  type: created.connection.type,
+                  actor: created.actor,
+                }),
+                serviceScope,
+              );
+        return { result, observer: started };
+      }),
     );
+
+  /** Waits for the observer's work that `writeAndStartObserver` started, if any. */
+  const awaitObserver = (started: Fiber.Fiber<void> | undefined): Effect.Effect<void> =>
+    started === undefined ? Effect.void : Fiber.join(started);
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
@@ -1440,10 +1475,10 @@ const make = Effect.gen(function* () {
     // then never land between the claim and the code that owns the cleanup.
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        // The sign-in's created client, if it has one, is marked as being
-        // claimed before the claim starts, so the expiry timer cannot take it
-        // however long the claim waits for the writer.
-        const marked = markClaiming(callback.state);
+        // The finish is counted in as claiming the sign-in's created client, if
+        // it has one, before the claim starts, so the expiry timer cannot take
+        // it however long the claim waits for the writer.
+        const marked = beginClaim(callback.state);
         const claim = yield* Effect.orDie(
           withTransaction(
             sql,
@@ -1467,10 +1502,10 @@ const make = Effect.gen(function* () {
           ),
         ).pipe(
           // A claim that dies leaves the client to the timer again.
-          Effect.onError(() => (marked ? releaseClaiming(callback.state) : Effect.void)),
+          Effect.onError(() => (marked ? endClaim(callback.state) : Effect.void)),
         );
         if (claim._tag === "none" || claim._tag === "refused") {
-          if (marked) yield* releaseClaiming(callback.state);
+          if (marked) yield* endClaim(callback.state);
           return yield* Effect.fail({
             failure: claim._tag === "none" ? "no-live-attempt" : claim.reason,
             reusedApp: undefined,
@@ -1535,35 +1570,43 @@ const make = Effect.gen(function* () {
               Effect.catchTag("ConnectionValidationFailed", () => Effect.fail("rejected" as const)),
             );
 
-          const written = yield* Effect.orDie(
-            writeConnectionFromTokens({
-              setup,
-              connectionType: registered,
-              account,
-              tokens,
-              // The caller that started this setup was authenticated. The browser
-              // may come back without a credential, but the actor is still the one
-              // who started it. A flow from before the actor was recorded was the
-              // user's.
-              actor: setup.actor ?? USER_ACTOR,
-              oauthClientId: setup.clientId,
-              credentialsGeneration: setup.credentialsGeneration,
-              onCommitted: () => {
-                connectionCommitted = true;
-              },
-            }),
+          const { result: written, observer: started } = yield* Effect.orDie(
+            writeAndStartObserver(
+              writeConnectionFromTokens({
+                setup,
+                connectionType: registered,
+                account,
+                tokens,
+                // The caller that started this setup was authenticated. The browser
+                // may come back without a credential, but the actor is still the one
+                // who started it. A flow from before the actor was recorded was the
+                // user's.
+                actor: setup.actor ?? USER_ACTOR,
+                oauthClientId: setup.clientId,
+                credentialsGeneration: setup.credentialsGeneration,
+                onCommitted: () => {
+                  connectionCommitted = true;
+                },
+              }),
+              (result) =>
+                Effect.map(CurrentActor, (current) =>
+                  result._tag === "written" && setup.kind === "create"
+                    ? {
+                        connection: result.connection,
+                        // The controller's callback has no credential, so nobody's
+                        // grants can be checked there: the observer is told the
+                        // actor is unknown. The starter's own finish passes its own.
+                        actor: claimant.kind === "controller" ? NO_ACTOR : current,
+                      }
+                    : undefined,
+                ),
+            ),
           );
           if (written._tag === "other-account") {
             return yield* Effect.fail("other-account" as const);
           }
           if (written._tag !== "written") return yield* Effect.fail("connection-changed" as const);
-          if (setup.kind === "create") {
-            // The controller's callback has no credential, so nobody's grants
-            // can be checked there: the observer is told the actor is unknown.
-            // The starter's own finish passes its own actor.
-            const creator = claimant.kind === "controller" ? NO_ACTOR : yield* CurrentActor;
-            yield* reportCreated(written.connection, creator);
-          }
+          yield* awaitObserver(started);
           return written.connection;
         });
 
@@ -1652,41 +1695,44 @@ const make = Effect.gen(function* () {
         const credentials = yield* checkCredentialFields(contribution, decoded.credentials);
         const account = yield* validateCredentials(contribution, credentials);
 
-        const created = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            const row = yield* connections.insert({
-              pluginId,
-              type: decoded.type,
-              label:
-                decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
-              displayName: account.displayName,
-              accountId: account.accountId,
-              ...buildWarningField(account),
-              labels: decoded.labels ?? [],
-              config,
-              at,
-            });
-            yield* replaceSecrets(row.id, credentials);
-            yield* audit.append({
-              kind: "connection.created",
-              actor: yield* currentStamp,
-              // Credential names only, never values: the Intake views read the
-              // audit log, and it is kept for 90 days.
-              payload: {
-                connectionId: row.id,
+        const { result: created, observer: started } = yield* writeAndStartObserver(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const at = yield* nowIso;
+              const row = yield* connections.insert({
                 pluginId,
-                type: row.type,
-                credentials: Object.keys(credentials),
-              },
-              record: { topic: "connection", id: row.id },
-              at,
-            });
-            return yield* readConnectionRecord(row);
-          }),
+                type: decoded.type,
+                label:
+                  decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
+                displayName: account.displayName,
+                accountId: account.accountId,
+                ...buildWarningField(account),
+                labels: decoded.labels ?? [],
+                config,
+                at,
+              });
+              yield* replaceSecrets(row.id, credentials);
+              yield* audit.append({
+                kind: "connection.created",
+                actor: yield* currentStamp,
+                // Credential names only, never values: the Intake views read the
+                // audit log, and it is kept for 90 days.
+                payload: {
+                  connectionId: row.id,
+                  pluginId,
+                  type: row.type,
+                  credentials: Object.keys(credentials),
+                },
+                record: { topic: "connection", id: row.id },
+                at,
+              });
+              return yield* readConnectionRecord(row);
+            }),
+          ),
+          (connection) => Effect.map(CurrentActor, (actor) => ({ connection, actor })),
         );
-        yield* reportCreated(created, yield* CurrentActor);
+        yield* awaitObserver(started);
         return created;
       }),
 
@@ -2348,15 +2394,23 @@ const make = Effect.gen(function* () {
               `${account.failure.message}. Start again to get a new code`,
           } as const;
         }
-        const written = yield* writeConnectionFromTokens({
-          setup,
-          connectionType: registered,
-          account: account.success,
-          tokens: exchange.tokens,
-          actor: yield* currentStamp,
-          oauthClientId: undefined,
-          credentialsGeneration: undefined,
-        });
+        const { result: written, observer: started } = yield* writeAndStartObserver(
+          writeConnectionFromTokens({
+            setup,
+            connectionType: registered,
+            account: account.success,
+            tokens: exchange.tokens,
+            actor: yield* currentStamp,
+            oauthClientId: undefined,
+            credentialsGeneration: undefined,
+          }),
+          (result) =>
+            Effect.map(CurrentActor, (actor) =>
+              result._tag === "written" && setup.kind === "create"
+                ? { connection: result.connection, actor }
+                : undefined,
+            ),
+        );
         switch (written._tag) {
           case "connection-gone":
             return {
@@ -2376,9 +2430,7 @@ const make = Effect.gen(function* () {
               message: describeOtherAccount(account.success, written.connectionDisplayName),
             } as const;
           case "written":
-            if (setup.kind === "create") {
-              yield* reportCreated(written.connection, yield* CurrentActor);
-            }
+            yield* awaitObserver(started);
             return { status: "done", connection: written.connection } as const;
         }
       }),

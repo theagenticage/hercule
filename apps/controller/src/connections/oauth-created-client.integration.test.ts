@@ -146,8 +146,6 @@ interface PluginLog {
   readonly created: Array<Record<string, string>>;
   /** The client ids whose `deleteClient` ran. */
   readonly deleted: Array<string>;
-  /** A weak reference to what each created client's `deleteClient` holds, to see when nothing retains it. */
-  readonly held: Array<WeakRef<object>>;
 }
 
 /**
@@ -161,7 +159,7 @@ const buildCreatedClientType = (
   tokenBase: string,
   fieldName = "configToken",
 ): { readonly type: RegisteredConnectionType; readonly log: PluginLog } => {
-  const log: PluginLog = { created: [], deleted: [], held: [] };
+  const log: PluginLog = { created: [], deleted: [] };
   const type: RegisteredConnectionType = {
     pluginId: "forge",
     contribution: {
@@ -208,12 +206,10 @@ const buildCreatedClientType = (
         }
         log.created.push(values);
         const clientId = `made-${log.created.length}`;
-        const holder = { clientId };
-        log.held.push(new WeakRef(holder));
         const client: CreatedOAuthClient = {
           clientId,
           deleteClient: Effect.sync(() => {
-            log.deleted.push(holder.clientId);
+            log.deleted.push(clientId);
           }),
         };
         return Effect.succeed(client);
@@ -1480,9 +1476,20 @@ describe("the clean-up of a created client, when the finish is cut short or the 
         const sql = yield* SqlClient.SqlClient;
         const releaseSnapshot = yield* Deferred.make<void>();
         const started = yield* service.startOAuth(startInput());
-        // A reader whose view is older than the commit that is about to happen.
-        yield* Effect.forkChild(withReadSnapshot(sql, Deferred.await(releaseSnapshot)));
-        yield* settle;
+        // A reader whose view is older than the commit that is about to happen:
+        // it has read once, which fixes the state it sees, and then it waits.
+        const snapshotRead = Promise.withResolvers<void>();
+        yield* Effect.forkChild(
+          withReadSnapshot(
+            sql,
+            Effect.gen(function* () {
+              yield* sql`SELECT count(*) AS connections FROM connections`;
+              snapshotRead.resolve();
+              yield* Deferred.await(releaseSnapshot);
+            }),
+          ),
+        );
+        yield* Effect.promise(() => snapshotRead.promise);
         const finish = yield* Effect.forkChild(
           service.finishOAuth({
             callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
@@ -1568,11 +1575,83 @@ describe("the clean-up of a created client, when the finish is cut short or the 
     expect(log.deleted).toEqual(["made-1"]);
   });
 
-  it("drops the client without deleting it, and keeps nothing of it, when the controller is sealed", async () => {
+  it("keeps the client for the valid finish when another finish of the same sign-in is refused at the same time", async () => {
     const token = startProvider();
     const { type, log } = buildCreatedClientType(token.base);
 
-    const held = await run(
+    const { refused, connection } = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const release = yield* Deferred.make<void>();
+        const started = yield* asActor(SESSION, service.startOAuth(startInput()));
+        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
+        // Both claims are in flight at once, waiting for the writer.
+        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
+        yield* settle;
+        const wrong = yield* Effect.forkChild(
+          Effect.flip(asActor(OTHER_SESSION, service.finishOAuth({ callbackQuery }))),
+        );
+        const right = yield* Effect.forkChild(
+          asActor(SESSION, service.finishOAuth({ callbackQuery })),
+        );
+        yield* settle;
+        yield* Deferred.succeed(release, undefined);
+        return { refused: yield* Fiber.join(wrong), connection: yield* Fiber.join(right) };
+      }),
+    );
+
+    expect(refused).toMatchObject({ error: { code: "validation" } });
+    expect(connection).toMatchObject({ status: "connected" });
+    expect(log.deleted).toEqual([]);
+  });
+
+  it("deletes the client once when two finishes of the same sign-in overlap and both come too late", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+
+    const early = await run(
+      [type],
+      Effect.gen(function* () {
+        const service = yield* ConnectionService;
+        const sql = yield* SqlClient.SqlClient;
+        const release = yield* Deferred.make<void>();
+        const started = yield* asActor(SESSION, service.startOAuth(startInput()));
+        const callbackQuery = buildReturn(REDIRECT_URI, started.authorizationUrl);
+        yield* Effect.forkChild(holdWriter(sql, Deferred.await(release)));
+        yield* settle;
+        const first = yield* Effect.forkChild(
+          Effect.flip(asActor(OTHER_SESSION, service.finishOAuth({ callbackQuery }))),
+        );
+        const second = yield* Effect.forkChild(
+          Effect.flip(asActor(SESSION, service.finishOAuth({ callbackQuery }))),
+        );
+        yield* settle;
+        // The timer fires while both claims wait, and leaves the client to them.
+        yield* TestClock.adjust(
+          Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
+        );
+        yield* settle;
+        const early = [...log.deleted];
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+        yield* settle;
+        return early;
+      }),
+    );
+
+    expect(early).toEqual([]);
+    expect(log.deleted).toEqual(["made-1"]);
+  });
+
+  it("never calls the provider for a client when the controller is sealed, and the sealed branch is the one that ran", async () => {
+    const token = startProvider();
+    const { type, log } = buildCreatedClientType(token.base);
+    const answered = { count: 0 };
+
+    await run(
       [type],
       Effect.gen(function* () {
         const service = yield* ConnectionService;
@@ -1581,55 +1660,57 @@ describe("the clean-up of a created client, when the finish is cut short or the 
           Duration.millis(SETUP_LIFETIME_MS + CREATED_CLIENT_GRACE_MS + 1000),
         );
         yield* settle;
-        // Looked at while the service still lives, so only its own map can hold it.
-        Bun.gc(true);
-        return log.held[0]?.deref();
       }),
-      { stack: { sealed: true } },
+      { stack: { sealed: { answered } } },
     );
 
+    // The timer reached the gate, was answered with the seal, and deleted nothing.
+    expect(answered.count).toBe(1);
     expect(log.deleted).toEqual([]);
-    // Nothing keeps what the client's cleanup held, such as the configuration token.
-    expect(held).toBeUndefined();
   });
 });
 
 describe("what the observer is told about a created Connection", () => {
-  it("still gets it when the request is cancelled after the commit", async () => {
+  it("is told once, although the request is interrupted just as the commit finishes", async () => {
     const token = startProvider();
     const { type } = buildCreatedClientType(token.base);
-    const gate = Promise.withResolvers<void>();
-    const reached = Promise.withResolvers<void>();
-    const done: Array<string> = [];
+    const told: Array<string> = [];
     const observer = {
       connectionCreated: (created: { readonly connectionId: string }) =>
-        Effect.gen(function* () {
-          reached.resolve();
-          yield* Effect.promise(() => gate.promise);
-          done.push(created.connectionId);
+        Effect.sync(() => {
+          told.push(created.connectionId);
         }),
       connectionDeleted: () => Effect.void,
     };
+    const holder: { fiber?: Fiber.Fiber<unknown, unknown> } = {};
+    // The interrupt is sent from inside the transaction that writes the
+    // Connection, so it is delivered as soon as the transaction's
+    // uninterruptible step ends, before anything after the commit can run.
+    const onTokenWrite = {
+      current: Effect.sync(() => {
+        if (holder.fiber !== undefined) Effect.runFork(Fiber.interrupt(holder.fiber));
+      }) as Effect.Effect<void> | undefined,
+    };
 
-    await run(
+    const stored = await run(
       [type],
       Effect.gen(function* () {
         const service = yield* ConnectionService;
         const started = yield* service.startOAuth(startInput());
-        const finish = yield* Effect.forkChild(
+        holder.fiber = yield* Effect.forkChild(
           service.finishOAuth({
             callbackQuery: buildReturn(REDIRECT_URI, started.authorizationUrl),
           }),
         );
-        yield* Effect.promise(() => reached.promise);
-        yield* Fiber.interrupt(finish);
-        gate.resolve();
+        yield* Fiber.await(holder.fiber);
         yield* settle;
+        return yield* readStoredClientIds;
       }),
-      { stack: { observer } },
+      { stack: { observer, onTokenWrite } },
     );
 
-    expect(done).toHaveLength(1);
+    expect(stored).toEqual(["made-1"]);
+    expect(told).toHaveLength(1);
   });
 });
 

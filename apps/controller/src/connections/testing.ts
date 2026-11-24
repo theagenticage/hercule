@@ -5,6 +5,7 @@
  * with a device flow.
  */
 import { expect } from "vitest";
+import type * as Redacted from "effect/Redacted";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -197,11 +198,20 @@ export interface ConnectionServiceStackOptions {
    */
   readonly beforeTokenRead?: { current: Effect.Effect<void> | undefined };
   /**
+   * Runs once, when a Connection's token set is written, which happens inside
+   * the transaction that writes the Connection. A test uses it to interrupt the
+   * request while the commit is on its way: the interrupt is delivered when the
+   * transaction's uninterruptible step ends. The effect is taken out of the cell
+   * before it runs, so it runs once.
+   */
+  readonly onTokenWrite?: { current: Effect.Effect<void> | undefined };
+  /**
    * Makes the controller sealed, as it is after a promotion: work that waits
    * for the gate is answered with the seal at once, and `whenServing` never
-   * returns.
+   * returns. `answered.count` counts the pieces of work that were answered
+   * with the seal, so a test can see that the sealed branch ran.
    */
-  readonly sealed?: true;
+  readonly sealed?: { readonly answered: { count: number } };
 }
 
 /**
@@ -215,29 +225,50 @@ export const buildConnectionServiceStack = (
   options: ConnectionServiceStackOptions = {},
 ) => {
   const realSecrets = secretsLayer.pipe(Layer.provide(masterKeyLayer("file")));
-  const hook = options.beforeTokenRead;
+  const readHook = options.beforeTokenRead;
+  const writeHook = options.onTokenWrite;
+  /** Takes the effect out of the cell, so a hook runs once. */
+  const takeHook = (cell: { current: Effect.Effect<void> | undefined } | undefined) => {
+    const pending = cell?.current;
+    if (cell !== undefined) cell.current = undefined;
+    return pending ?? Effect.void;
+  };
   const secrets =
-    hook === undefined
+    readHook === undefined && writeHook === undefined
       ? realSecrets
       : Layer.effect(Secrets)(
           Effect.map(Secrets, (real) => ({
             ...real,
             get: (owner: SecretOwner, name: string) =>
-              Effect.suspend(() => {
-                const pending = name === "oauth.tokens" ? hook.current : undefined;
-                hook.current = pending === undefined ? hook.current : undefined;
-                return Effect.andThen(pending ?? Effect.void, real.get(owner, name));
-              }),
+              Effect.suspend(() =>
+                Effect.andThen(
+                  name === "oauth.tokens" ? takeHook(readHook) : Effect.void,
+                  real.get(owner, name),
+                ),
+              ),
+            set: (owner: SecretOwner, name: string, value: Redacted.Redacted<string>) =>
+              Effect.suspend(() =>
+                Effect.andThen(
+                  name === "oauth.tokens" ? takeHook(writeHook) : Effect.void,
+                  real.set(owner, name, value),
+                ),
+              ),
           })),
         ).pipe(Layer.provide(realSecrets));
+  const sealed = options.sealed;
+  const answered = sealed?.answered ?? { count: 0 };
   const promotion =
-    options.sealed === undefined
+    sealed === undefined
       ? ServingPromotionStateLayer
       : Layer.effect(PromotionState)(
           Effect.map(PromotionState, (real): PromotionState["Service"] => ({
             ...real,
             whenServing: () => Effect.never,
-            whenServingOr: (_work, onSealed) => onSealed(undefined as never),
+            whenServingOr: (_work, onSealed) =>
+              Effect.suspend(() => {
+                answered.count += 1;
+                return onSealed(undefined as never);
+              }),
           })),
         ).pipe(Layer.provide(ServingPromotionStateLayer));
   return ConnectionServiceLayer.pipe(
