@@ -4,13 +4,21 @@
  * desktop app and the web app both run the redirect flow, and they must agree
  * on which return a type uses, so the decision is made here.
  */
-import type { ConnectionOAuthStart } from "@hercule/contract";
+import {
+  parseCallbackQuery,
+  readAuthorizationState,
+  type ConnectionOAuthStart,
+} from "@hercule/contract";
 import type { HerculeClient } from "./client";
 import type { ConnectionType } from "./connection-types";
 import { readErrorMessage } from "./errors";
 import { buildPastedRedirectUri } from "./mcp-server-sign-in";
 import type { BrowserSignInPort } from "./mcp-servers/browser-sign-in";
-import { BROWSER_WAIT_STOPPED, BROWSER_WAIT_TIMED_OUT } from "./browser-return-words";
+import {
+  BROWSER_WAIT_STOPPED,
+  BROWSER_WAIT_TIMED_OUT,
+  describePasteRefusal,
+} from "./browser-return-words";
 
 /**
  * The redirect URI a client that catches the return itself names, without its
@@ -93,23 +101,28 @@ export type LocalReturn =
 
 /**
  * A redirect flow whose return is caught on the user's machine, started and
- * waiting for the browser. The app opens `authorizationUrl`, then either waits
- * with `awaitReturn` (`returnBy` is `listener`) or asks the user to paste the
- * address the browser ended on (`returnBy` is `paste`), and then calls
- * `connection.finishOAuth`.
+ * waiting for the browser. The app arms the wait with `awaitReturn` (when
+ * `returnBy` is `listener`), then opens the provider's page with `openPage`,
+ * or asks the user to paste the address the browser ended on (`returnBy` is
+ * `paste`), and then calls `connection.finishOAuth`.
  */
 export interface LocalReturnSignIn {
   /** The provider's page, which the app opens in the user's browser. */
   readonly authorizationUrl: string;
   readonly returnBy: "listener" | "paste";
   /**
-   * Waits for the browser to come back to the listener. Resolves with what
-   * came of the wait, and `stopped` when `close` ended it. Only a sign-in
-   * with a `listener` waits: for a `paste` it resolves `stopped` at once.
+   * Registers the wait for the browser's return at the listener and returns
+   * what came of it. Call it before `openPage`: the listener refuses a return
+   * until the wait is registered, so a fast return would be lost. It resolves
+   * `stopped` when the start's signal aborted, and at once for a `paste`.
    */
   readonly awaitReturn: () => Promise<LocalReturn>;
-  /** Ends the listener. It may be called more than once, and does nothing after the first. */
-  readonly close: () => void;
+  /**
+   * Opens `authorizationUrl` in the user's browser through the port. Rejects
+   * with the port's own sentence when the browser cannot be opened. Does
+   * nothing when the app has no port.
+   */
+  readonly openPage: () => Promise<void>;
 }
 
 /**
@@ -121,8 +134,10 @@ export interface LocalReturnSignIn {
  *
  * `start` is the start's payload without its redirect: the type, the
  * Connection being reconnected, and the values for the type's client setup.
- * Fails with the controller's error when it refuses the start, after closing
- * the listener it opened.
+ * `signal` is the attempt's lifetime: the listener closes as soon as it
+ * aborts, also while the controller has not answered the start yet. Fails
+ * with the controller's error when it refuses the start, and with the
+ * signal's reason when it aborted first, closing the listener either way.
  */
 export const startLocalReturnSignIn = async (
   host: { readonly client: HerculeClient; readonly port: BrowserSignInPort | undefined },
@@ -131,27 +146,37 @@ export const startLocalReturnSignIn = async (
     readonly connectionId?: string;
     readonly clientValues?: Readonly<Record<string, string>>;
   },
+  signal: AbortSignal,
 ): Promise<LocalReturnSignIn> => {
   const { client, port } = host;
+  signal.throwIfAborted();
   const listening = port === undefined ? undefined : await port.listen();
   const listener = listening?.kind === "listening" ? listening : undefined;
-  const redirectUri = listener?.redirectUri ?? buildPastedRedirectUri();
-  let started: ConnectionOAuthStart;
-  try {
-    started = await client.connection.startOAuth({ payload: { ...start, redirectUri } });
-  } catch (error) {
-    if (listener !== undefined) void port?.cancel(listener.listenerId).catch(() => {});
-    throw error;
-  }
   let closed = false;
-  const close = (): void => {
+  const closeListener = (): void => {
     if (closed) return;
     closed = true;
     if (listener !== undefined) void port?.cancel(listener.listenerId).catch(() => {});
   };
+  // The listener belongs to the attempt from here on, so it closes when the
+  // attempt ends, whether or not the controller has answered the start.
+  signal.addEventListener("abort", closeListener, { once: true });
+  if (signal.aborted) closeListener();
+  let started: ConnectionOAuthStart;
+  try {
+    signal.throwIfAborted();
+    const redirectUri = listener?.redirectUri ?? buildPastedRedirectUri();
+    started = await client.connection.startOAuth({ payload: { ...start, redirectUri } });
+    signal.throwIfAborted();
+  } catch (error) {
+    closeListener();
+    throw error;
+  }
   const stopped = (message: string): LocalReturn => ({ kind: "stopped", message });
   const awaitReturn = async (): Promise<LocalReturn> => {
-    if (port === undefined || listener === undefined) return stopped(BROWSER_WAIT_STOPPED);
+    if (port === undefined || listener === undefined || signal.aborted) {
+      return stopped(BROWSER_WAIT_STOPPED);
+    }
     try {
       const outcome = await port.wait(listener.listenerId, started.authorizationUrl);
       switch (outcome.kind) {
@@ -170,6 +195,33 @@ export const startLocalReturnSignIn = async (
     authorizationUrl: started.authorizationUrl,
     returnBy: listener === undefined ? "paste" : "listener",
     awaitReturn,
-    close,
+    openPage: () => port?.open(started.authorizationUrl) ?? Promise.resolve(),
   };
+};
+
+/** The reading of an address the user pasted: what to send, or why not. */
+export type PastedReturn =
+  | { readonly kind: "callback"; readonly callbackQuery: string }
+  | { readonly kind: "refused"; readonly message: string };
+
+/**
+ * Reads the address the user pasted for the sign-in that opened at
+ * `authorizationUrl`. The address is refused, with a message the user can act
+ * on, when it is not a redirect answer, or when its `state` differs from the
+ * state of this sign-in: it was copied from another sign-in, which the
+ * controller would complete in place of this one.
+ */
+export const readPastedReturn = (authorizationUrl: string, pasted: string): PastedReturn => {
+  const parsed = parseCallbackQuery(pasted);
+  if (parsed._tag === "Refused") {
+    return { kind: "refused", message: describePasteRefusal(parsed.reason) };
+  }
+  if (parsed.state !== readAuthorizationState(authorizationUrl)) {
+    return {
+      kind: "refused",
+      message:
+        "This address is from another sign-in: paste the address the browser ended on for this one.",
+    };
+  }
+  return { kind: "callback", callbackQuery: pasted.trim() };
 };

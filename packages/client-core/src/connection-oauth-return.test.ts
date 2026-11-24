@@ -4,6 +4,7 @@ import { createClient } from "./client";
 import {
   decideOAuthReturnPath,
   readClientValues,
+  readPastedReturn,
   startLocalReturnSignIn,
 } from "./connection-oauth-return";
 import type { ConnectionType } from "./connection-types";
@@ -109,20 +110,22 @@ describe("startLocalReturnSignIn", () => {
     const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
     return { host: { client, port }, calls: api.calls };
   };
+  const live = new AbortController().signal;
 
   it("sends the listener's address as the redirect, with the client values, and waits for the return", async () => {
     const port = buildPort({ kind: "received", callbackQuery: "code=c&state=s1" });
     const { host, calls } = buildHost(port);
 
-    const signIn = await startLocalReturnSignIn(host, {
-      type: "slack/slack",
-      clientValues: { configurationToken: "xoxe.xoxp-1" },
-    });
+    const signIn = await startLocalReturnSignIn(
+      host,
+      { type: "slack/slack", clientValues: { configurationToken: "not-a-real-token" } },
+      live,
+    );
 
     expect(calls.map((call) => call.body)).toEqual([
       {
         type: "slack/slack",
-        clientValues: { configurationToken: "xoxe.xoxp-1" },
+        clientValues: { configurationToken: "not-a-real-token" },
         redirectUri: "http://127.0.0.1:51234/callback",
       },
     ]);
@@ -135,12 +138,27 @@ describe("startLocalReturnSignIn", () => {
     expect(port.wait).toHaveBeenCalledWith("l-1", AUTHORIZATION_URL);
   });
 
+  it("opens the provider's page through the port, which reports a refusal", async () => {
+    const port = buildPort({ kind: "cancelled" });
+    const signIn = await startLocalReturnSignIn(
+      buildHost(port).host,
+      { type: "slack/slack" },
+      live,
+    );
+    await signIn.openPage();
+    expect(port.open).toHaveBeenCalledWith(AUTHORIZATION_URL);
+
+    port.open.mockRejectedValueOnce(new Error("No browser is set."));
+    await expect(signIn.openPage()).rejects.toThrow("No browser is set.");
+  });
+
   it("sends a reconnect's Connection, and no client values when it has none", async () => {
     const { host, calls } = buildHost(buildPort({ kind: "cancelled" }));
-    await startLocalReturnSignIn(host, {
-      type: "slack/slack",
-      connectionId: "01a06d02-7700-7000-8000-000000000002",
-    });
+    await startLocalReturnSignIn(
+      host,
+      { type: "slack/slack", connectionId: "01a06d02-7700-7000-8000-000000000002" },
+      live,
+    );
     expect(calls[0]?.body).toEqual({
       type: "slack/slack",
       connectionId: "01a06d02-7700-7000-8000-000000000002",
@@ -154,7 +172,7 @@ describe("startLocalReturnSignIn", () => {
     );
     for (const port of [cannotListen, undefined]) {
       const { host, calls } = buildHost(port);
-      const signIn = await startLocalReturnSignIn(host, { type: "slack/slack" });
+      const signIn = await startLocalReturnSignIn(host, { type: "slack/slack" }, live);
       expect(signIn.returnBy).toBe("paste");
       expect((calls[0]?.body as { redirectUri: string }).redirectUri).toMatch(
         /^http:\/\/127\.0\.0\.1:\d+\/callback$/,
@@ -170,6 +188,7 @@ describe("startLocalReturnSignIn", () => {
     const timedOut = await startLocalReturnSignIn(
       buildHost(buildPort({ kind: "timed-out" })).host,
       { type: "slack/slack" },
+      live,
     );
     expect(await timedOut.awaitReturn()).toEqual({
       kind: "stopped",
@@ -178,6 +197,7 @@ describe("startLocalReturnSignIn", () => {
     const broken = await startLocalReturnSignIn(
       buildHost(buildPort(new Error("The window went away."))).host,
       { type: "slack/slack" },
+      live,
     );
     expect(await broken.awaitReturn()).toEqual({
       kind: "stopped",
@@ -185,13 +205,69 @@ describe("startLocalReturnSignIn", () => {
     });
   });
 
-  it("closes the listener once, however often close is called", async () => {
+  it("closes the listener once when the attempt aborts, and waits no more", async () => {
     const port = buildPort({ kind: "cancelled" });
-    const signIn = await startLocalReturnSignIn(buildHost(port).host, { type: "slack/slack" });
-    signIn.close();
-    signIn.close();
+    const attempt = new AbortController();
+    const signIn = await startLocalReturnSignIn(
+      buildHost(port).host,
+      { type: "slack/slack" },
+      attempt.signal,
+    );
+    attempt.abort();
+    attempt.abort();
     expect(port.cancel).toHaveBeenCalledTimes(1);
     expect(port.cancel).toHaveBeenCalledWith("l-1");
+    expect((await signIn.awaitReturn()).kind).toBe("stopped");
+    expect(port.wait).not.toHaveBeenCalled();
+  });
+
+  it("closes the listener when the attempt aborts before the controller answers the start", async () => {
+    const port = buildPort({ kind: "cancelled" });
+    const attempt = new AbortController();
+    let answerStart: (answer: Answer) => void = () => undefined;
+    const api = createApiStub({
+      "POST /api/v1/oauth/start": () =>
+        new Promise<Answer>((resolve) => {
+          answerStart = resolve;
+        }),
+    });
+    const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
+    const started = startLocalReturnSignIn(
+      { client, port },
+      { type: "slack/slack" },
+      attempt.signal,
+    );
+    await vi.waitFor(() => {
+      expect(api.calls).toHaveLength(1);
+    });
+
+    attempt.abort();
+    expect(port.cancel).toHaveBeenCalledWith("l-1");
+    answerStart({ body: { authorizationUrl: AUTHORIZATION_URL } });
+
+    await expect(started).rejects.toThrow();
+    expect(port.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the listener when the attempt aborts while the port starts listening", async () => {
+    const attempt = new AbortController();
+    let listened: (outcome: Awaited<ReturnType<BrowserSignInPort["listen"]>>) => void = () =>
+      undefined;
+    const port = buildPort(
+      { kind: "cancelled" },
+      () =>
+        new Promise((resolve) => {
+          listened = resolve;
+        }),
+    );
+    const { host, calls } = buildHost(port);
+    const started = startLocalReturnSignIn(host, { type: "slack/slack" }, attempt.signal);
+    attempt.abort();
+    listened(LISTENING);
+
+    await expect(started).rejects.toThrow();
+    expect(port.cancel).toHaveBeenCalledWith("l-1");
+    expect(calls).toHaveLength(0);
   });
 
   it("closes the listener and fails with the controller's message when the start is refused", async () => {
@@ -200,9 +276,43 @@ describe("startLocalReturnSignIn", () => {
       status: 400,
       body: buildErrorBody("validation", "This configuration token has expired. Make a new one."),
     });
-    await expect(startLocalReturnSignIn(host, { type: "slack/slack" })).rejects.toThrow(
+    await expect(startLocalReturnSignIn(host, { type: "slack/slack" }, live)).rejects.toThrow(
       "This configuration token has expired. Make a new one.",
     );
     expect(port.cancel).toHaveBeenCalledWith("l-1");
+  });
+});
+
+describe("readPastedReturn", () => {
+  const OWN_URL = "https://slack.example/authorize?client_id=c&state=own-state";
+
+  it("returns the address, trimmed, for the sign-in it was started for", () => {
+    const address = "http://127.0.0.1:51234/callback?code=c-1&state=own-state";
+    expect(readPastedReturn(OWN_URL, `  ${address}\n`)).toEqual({
+      kind: "callback",
+      callbackQuery: address,
+    });
+    expect(readPastedReturn(OWN_URL, "?code=c-1&state=own-state")).toEqual({
+      kind: "callback",
+      callbackQuery: "?code=c-1&state=own-state",
+    });
+  });
+
+  it("refuses an address from another sign-in, which the controller would complete in place of this one", () => {
+    expect(
+      readPastedReturn(OWN_URL, "http://127.0.0.1:51234/callback?code=c-1&state=other-state"),
+    ).toEqual({
+      kind: "refused",
+      message:
+        "This address is from another sign-in: paste the address the browser ended on for this one.",
+    });
+  });
+
+  it("refuses text that is not a redirect answer, in the parser's words", () => {
+    const reading = readPastedReturn(OWN_URL, "not an address");
+    expect(reading.kind).toBe("refused");
+    expect((reading as { message: string }).message).toContain(
+      "That is not what the browser ended on",
+    );
   });
 });

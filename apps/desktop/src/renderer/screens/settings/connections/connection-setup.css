@@ -42,6 +42,8 @@
 }
 .setup-error {
   margin: 12px 0 0;
+  /* A provider's refusal is a few sentences, and its last line is never one word. */
+  text-wrap: pretty;
 }
 .setup-acts {
   display: flex;
@@ -81,16 +83,38 @@
 .setup-link-error {
   margin: 8px 0 0;
 }
-/* The type's own instructions, written in Markdown: a sentence and numbered
-   steps, in the muted text of `.setup-lead`. A link is the ink colour, so it
-   stands out from the muted words around it. */
+/* The type's own instructions: a sentence and numbered steps, in the muted text of `.setup-lead`.
+   Paragraphs and lists have the spacing of a message's markdown, and a link is the ink colour,
+   underlined, so it stands out from the muted words around it. */
 .setup-checklist {
   margin: 0 0 12px;
   color: var(--muted);
   line-height: 1.5;
 }
+.setup-checklist :is(p, ul, ol) {
+  margin: 0 0 10px;
+}
+.setup-checklist > :last-child {
+  margin-bottom: 0;
+}
+.setup-checklist :is(ul, ol) {
+  padding-left: 22px;
+}
+.setup-checklist li > :is(ul, ol) {
+  margin-bottom: 0;
+}
 .setup-checklist a {
   color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.setup-checklist code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: var(--t-13);
 }
 /* Where the user pastes the address the browser ended on, in the waiting
    card: the sentence, the field, and the button that finishes. */

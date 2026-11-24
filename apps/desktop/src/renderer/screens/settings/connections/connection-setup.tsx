@@ -19,7 +19,6 @@ import { ExternalIcon } from "../../../icons/external";
 import { KeyIcon } from "../../../icons/key";
 import { QuestionIcon } from "../../../icons/question";
 import { GlassDialog } from "../../glass-dialog";
-import { Markdown } from "../../session/markdown";
 import {
   CredentialFields,
   DeviceCodeSteps,
@@ -29,6 +28,7 @@ import {
   WaitLine,
   Warning,
 } from "../../step";
+import { ChecklistText } from "./checklist-text";
 import { ConnectionTypeMark } from "./connection-type-mark";
 import "./connection-setup.css";
 
@@ -314,7 +314,10 @@ export function ConnectionSetup({
                 </span>
               }
             >
+              {/* Only the finish is a request that ends by itself. Until then the user is
+                  approving in the browser or pasting, and the words are enough. */}
               <WaitLine
+                spinning={state.finishing}
                 text={
                   state.finishing
                     ? "Finishing the sign-in…"
@@ -415,9 +418,7 @@ function SetupForm({
       {clientSetup === undefined || clientSetup.asked
         ? type.setup.map((step, index) =>
             step.kind === "checklist" ? (
-              <div key={index} className="msg-body setup-checklist">
-                <Markdown text={step.markdown} relativeLinksAsText />
-              </div>
+              <ChecklistText key={index} markdown={step.markdown} />
             ) : null,
           )
         : null}

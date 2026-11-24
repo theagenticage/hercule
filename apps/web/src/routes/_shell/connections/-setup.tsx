@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type JSX } from "react";
+import { useEffect, useRef, useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input, LaneLabel } from "@hercule/ui";
 import {
@@ -7,18 +7,20 @@ import {
   queryKeys,
   buildRedirectUriToRegister,
   decideOAuthReturnPath,
+  isWebLink,
   listSetupFlows,
   listFlowSwitches,
   readClientValues,
   startLocalReturnSignIn,
   type ConnectionType,
   type HerculeClient,
+  type LocalReturnSignIn,
   type SetupFlow,
   readErrorMessage,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
-import { Markdown } from "../../../screens/markdown";
 import { SaveStatus } from "../../../screens/save-status";
+import { Checklist } from "./-checklist";
 import { DeviceSignIn } from "./-device";
 import { PasteReturnSignIn } from "./-paste-return";
 
@@ -64,24 +66,27 @@ export function ConnectionSetup({
   const [clientSetupAsked, setClientSetupAsked] = useState(connection === undefined);
   const asksClientSetup = flow === "oauth" && type.clientSetupFields.length > 0 && clientSetupAsked;
   const clientValues = readClientValues(type, pasted);
-  const startPayload = {
-    type: type.type,
-    ...(connection === undefined ? {} : { connectionId: connection.id }),
-    ...(asksClientSetup && clientValues !== undefined ? { clientValues } : {}),
-  };
   const returnPath = decideOAuthReturnPath(type, "web");
+  // The redirect flow is no mutation: its start holds the values pasted for
+  // the type's client, which would stay in the mutation cache otherwise.
+  const [oauthStart, setOauthStart] = useState<{ busy: boolean; error: string | null }>({
+    busy: false,
+    error: null,
+  });
+  // The sign-in that returns to the user's machine, once its start was answered.
+  const [pasteSignIn, setPasteSignIn] = useState<LocalReturnSignIn | null>(null);
+  // The attempt of the sign-in that is starting or running. It aborts when the
+  // form goes, so an answer that comes later opens nothing.
+  const attemptRef = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      attemptRef.current?.abort();
+    },
+    [],
+  );
 
   const submit = useMutation({
     mutationFn: async () => {
-      if (flow === "oauth") {
-        const { authorizationUrl } = await client.connection.startOAuth({
-          payload: { ...startPayload, origin: window.location.origin },
-        });
-        // The rest of the setup happens at the provider, which sends the
-        // browser back to the callback route, so the browser leaves this page.
-        window.location.assign(authorizationUrl);
-        return;
-      }
       if (connection !== undefined) {
         await client.connection.setCredentials({
           params: { id: connection.id },
@@ -111,22 +116,73 @@ export function ConnectionSetup({
       }),
   });
 
-  // The browser returns to the user's machine, so the page stays open and
-  // shows where the user pastes the address the browser ends on.
-  const startPasted = useMutation({
-    mutationFn: () => startLocalReturnSignIn({ client, port: undefined }, startPayload),
-    onSuccess: ({ authorizationUrl }) => {
-      // What was pasted is a credential, so it goes as soon as it was sent.
-      setPasted({});
-      // A popup blocker may stop this, so the panel has a link as well.
-      window.open(authorizationUrl, "_blank", "noopener,noreferrer");
-    },
-  });
+  /** Ends the sign-in that starts or runs, and shows the form again. */
+  const abandonSignIn = (): void => {
+    attemptRef.current?.abort();
+    attemptRef.current = null;
+    setPasteSignIn(null);
+    setOauthStart({ busy: false, error: null });
+  };
+  /**
+   * Starts the redirect flow. The values pasted for the type's client leave
+   * the form as the request starts. Either the provider's page opens in a new
+   * tab beside a panel that takes the address the browser ends on, or the
+   * browser goes to the provider and the controller finishes the sign-in. An
+   * answer that comes after the form went, or the user started again, opens
+   * nothing.
+   */
+  const startOAuthSignIn = async (): Promise<void> => {
+    abandonSignIn();
+    const attempt = new AbortController();
+    attemptRef.current = attempt;
+    const sent = asksClientSetup ? clientValues : undefined;
+    setPasted({});
+    setOauthStart({ busy: true, error: null });
+    const start = {
+      type: type.type,
+      ...(connection === undefined ? {} : { connectionId: connection.id }),
+      ...(sent === undefined ? {} : { clientValues: sent }),
+    };
+    try {
+      if (returnPath === "pasted-address") {
+        const signIn = await startLocalReturnSignIn(
+          { client, port: undefined },
+          start,
+          attempt.signal,
+        );
+        setOauthStart({ busy: false, error: null });
+        setPasteSignIn(signIn);
+        // A popup blocker may stop this, so the panel has a link as well.
+        if (isWebLink(signIn.authorizationUrl)) {
+          window.open(signIn.authorizationUrl, "_blank", "noopener,noreferrer");
+        }
+        return;
+      }
+      const { authorizationUrl } = await client.connection.startOAuth({
+        payload: { ...start, origin: window.location.origin },
+      });
+      if (attempt.signal.aborted) return;
+      if (!isWebLink(authorizationUrl)) {
+        setOauthStart({
+          busy: false,
+          error: `The sign-in page is not a web address, so it was not opened: ${authorizationUrl}`,
+        });
+        return;
+      }
+      // The rest of the setup happens at the provider, which sends the
+      // browser back to the callback route, so the browser leaves this page.
+      window.location.assign(authorizationUrl);
+    } catch (error) {
+      if (!attempt.signal.aborted) setOauthStart({ busy: false, error: readErrorMessage(error) });
+    }
+  };
 
   // An error about one credential field is shown under that field; any other
   // error is shown at the bottom of the form.
   const issues = readConfigIssues(submit.error, fields, "credentials");
-  const failure = startDeviceFlow.error ?? startPasted.error ?? (issues.rest ? submit.error : null);
+  const failureCause = startDeviceFlow.error ?? (issues.rest ? submit.error : null);
+  const failure =
+    oauthStart.error ?? (failureCause === null ? null : readErrorMessage(failureCause));
 
   // The same column width as the rows and the offers, so the form does not
   // stretch across the whole content width when nothing else does.
@@ -179,7 +235,7 @@ export function ConnectionSetup({
     );
   }
 
-  if (flow === "oauth" && startPasted.data !== undefined) {
+  if (flow === "oauth" && pasteSignIn !== null) {
     return (
       <div className={`flex flex-col gap-3 ${column}`}>
         <div className="-mb-2.5">
@@ -188,10 +244,8 @@ export function ConnectionSetup({
         <PasteReturnSignIn
           client={client}
           providerName={type.displayName}
-          authorizationUrl={startPasted.data.authorizationUrl}
-          onRestart={() => {
-            startPasted.reset();
-          }}
+          authorizationUrl={pasteSignIn.authorizationUrl}
+          onRestart={abandonSignIn}
           onCancel={onDone}
           onDone={onDone}
         />
@@ -204,7 +258,7 @@ export function ConnectionSetup({
   const send = (event: FormEvent): void => {
     event.preventDefault();
     if (flow === "device") startDeviceFlow.mutate();
-    else if (flow === "oauth" && returnPath === "pasted-address") startPasted.mutate();
+    else if (flow === "oauth") void startOAuthSignIn();
     // React Query calls a callback passed to `mutate` only while this form is
     // on screen, so a reply that arrives after Cancel cannot close another panel.
     else submit.mutate(undefined, { onSuccess: onDone });
@@ -214,7 +268,7 @@ export function ConnectionSetup({
   const switchFlow = (next: SetupFlow): void => {
     submit.reset();
     startDeviceFlow.reset();
-    startPasted.reset();
+    abandonSignIn();
     setFlow(next);
   };
 
@@ -240,9 +294,7 @@ export function ConnectionSetup({
         ? type.setup.map((step, index) =>
             step.kind === "checklist" ? (
               // A checklist step holds the plugin's own instructions, written in Markdown.
-              <div key={index} className="max-w-[52ch] text-row text-muted">
-                <Markdown text={step.markdown} />
-              </div>
+              <Checklist key={index} markdown={step.markdown} />
             ) : null,
           )
         : null}
@@ -297,15 +349,15 @@ export function ConnectionSetup({
               )}
               <Input
                 id={`${idPrefix}-${field.name}`}
+                // The form changed under the user's hands, as when the app is set up again, so the field takes the focus.
+                autoFocus
                 // A pasted value is never read back, so it is never prefilled.
                 type="password"
                 autoComplete="off"
                 value={pasted[field.name] ?? ""}
-                readOnly={startPasted.isPending}
                 onChange={(event) => {
-                  // The refusal of a start was about the old value, which stays to be fixed.
-                  startPasted.reset();
-                  if (!submit.isIdle) submit.reset();
+                  // The refusal of a start was about the value that has left the form.
+                  if (oauthStart.error !== null) setOauthStart({ busy: false, error: null });
                   const value = event.target.value;
                   setPasted((current) => ({ ...current, [field.name]: value }));
                 }}
@@ -325,14 +377,14 @@ export function ConnectionSetup({
           disabled={
             submit.isPending ||
             startDeviceFlow.isPending ||
-            startPasted.isPending ||
+            oauthStart.busy ||
             (asksClientSetup && clientValues === undefined)
           }
         >
           {describeSubmit(type, flow, {
             asksClientSetup,
             reconnect: connection !== undefined,
-            busy: startPasted.isPending,
+            busy: oauthStart.busy,
           })}
         </Button>
       </div>
@@ -367,7 +419,7 @@ export function ConnectionSetup({
           that 52ch is the same width as the setup text above, which a long
           refusal would otherwise run past. */}
       <div className="max-w-[52ch] text-row">
-        <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+        <SaveStatus saved={false} failure={failure} />
       </div>
     </form>
   );

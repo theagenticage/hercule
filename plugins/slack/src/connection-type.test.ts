@@ -194,8 +194,11 @@ describe("creating the Slack app of a Connection", () => {
       await runAgainst(createClient({ configurationToken: CONFIGURATION_TOKEN }), stub),
     );
 
-    expect(message).toContain("Make a new one.");
-    expect(message).toContain("api.slack.com/apps");
+    expect(message).toContain(
+      "Generate a new one at api.slack.com/apps and copy its Access Token.",
+    );
+    // The form shows the steps above the field, so the message does not repeat them.
+    expect(message).not.toContain("Your App Configuration Tokens");
   });
 
   it("names a refused manifest as a bug in Hercule, and repeats nothing Slack wrote", async () => {

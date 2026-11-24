@@ -12,8 +12,8 @@
  * - `slack-setup`: the dialog Add a Connection > Slack opens, before anything
  *   is pasted, so its button cannot be pressed;
  * - `slack-pasted`: the same with a configuration token pasted;
- * - `slack-refused`: the same after Slack refused the token, with the token
- *   still in the field;
+ * - `slack-refused`: the same after Slack refused the token, with the field
+ *   empty again;
  * - `slack-waiting`: the dialog after "Continue in Slack", while the browser is
  *   open on Slack's page;
  * - `slack-paste`: the same when nothing on this machine can listen, so the
@@ -56,7 +56,7 @@ const slackScene = (): Pick<McpScene, "handlers" | "signInReturn"> => ({
             status: 400,
             body: buildErrorBody(
               "validation",
-              "This configuration token has expired: Slack configuration tokens last 12 hours. Make a new one. Go to api.slack.com/apps, open Your App Configuration Tokens, choose Generate Token, pick the workspace, and copy the Access Token.",
+              "This configuration token has expired: Slack configuration tokens last 12 hours. Generate a new one at api.slack.com/apps and copy its Access Token.",
             ),
           }
         : { body: { authorizationUrl: SLACK_AUTHORIZATION_URL } },

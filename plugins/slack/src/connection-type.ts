@@ -115,9 +115,11 @@ const SLACK_REDIRECT_URIS = [
 /** The name of the one value the user pastes: the app configuration token. */
 const CONFIGURATION_TOKEN_FIELD = "configurationToken";
 
-/** Where the user makes a configuration token, in the words of Slack's own page. */
-const HOW_TO_MAKE_TOKEN =
-  "Go to api.slack.com/apps, open Your App Configuration Tokens, choose Generate Token, pick the workspace, and copy the Access Token.";
+/**
+ * What to do when a configuration token cannot be used. The form already shows
+ * the steps to make one, so a message says only where and what to copy.
+ */
+const GENERATE_NEW_TOKEN = "Generate a new one at api.slack.com/apps and copy its Access Token.";
 
 /**
  * Builds the manifest of the Slack app Hercule creates, as the JSON text
@@ -321,13 +323,13 @@ const describeCreateAppError = (code: string | undefined): string => {
   switch (code) {
     case "invalid_auth":
     case "not_authed":
-      return `Slack does not accept this as an app configuration token. Make a new one. ${HOW_TO_MAKE_TOKEN}`;
+      return `Slack does not accept this as an app configuration token. ${GENERATE_NEW_TOKEN}`;
     case "token_expired":
-      return `This configuration token has expired: Slack configuration tokens last 12 hours. Make a new one. ${HOW_TO_MAKE_TOKEN}`;
+      return `This configuration token has expired: Slack configuration tokens last 12 hours. ${GENERATE_NEW_TOKEN}`;
     case "token_revoked":
-      return `This configuration token was revoked. Make a new one. ${HOW_TO_MAKE_TOKEN}`;
+      return `This configuration token was revoked. ${GENERATE_NEW_TOKEN}`;
     case "not_allowed_token_type":
-      return `Slack does not allow this kind of token to create an app. Make an app configuration token. ${HOW_TO_MAKE_TOKEN}`;
+      return `Slack does not allow this kind of token to create an app. Make an app configuration token. ${GENERATE_NEW_TOKEN}`;
     case "invalid_manifest":
       return `Slack refused the app that Hercule asked it to create. This is a bug in Hercule: report it.`;
     case "ratelimited":
@@ -352,7 +354,7 @@ const checkConfigurationToken = (
 ): Effect.Effect<string, ConnectionValidationFailed> => {
   const token = value?.trim() ?? "";
   if (token === "") {
-    return failValidation(`The configuration token is missing. ${HOW_TO_MAKE_TOKEN}`);
+    return failValidation(`The configuration token is missing. Paste the Access Token you copied.`);
   }
   if (token.startsWith("xoxe-")) {
     return failValidation(
@@ -361,7 +363,7 @@ const checkConfigurationToken = (
   }
   if (/^(xoxb|xoxp|xapp)-/.test(token)) {
     return failValidation(
-      `This is a bot, user or app-level token, not an app configuration token. ${HOW_TO_MAKE_TOKEN}`,
+      `This is a bot, user or app-level token, not an app configuration token. ${GENERATE_NEW_TOKEN}`,
     );
   }
   return Effect.succeed(token);
