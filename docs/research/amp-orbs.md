@@ -152,7 +152,7 @@ Amp's CLI runs on a Hercule runner, in a Hercule workspace, like Claude Code doe
   - Skills and instructions are Amp's own (`.agents/`, Amp plugins), not the Skill Library.
 - **What Hercule adds.**
   - A provider plugin `amp` with one key Account Kind (an `sgamp_` token as `AMP_API_KEY`). It works on every runner, like any key account.
-  - A harness plugin `amp` and a runner adapter: start `amp --stream-json --stream-json-input`, map the stream to the normalized events, store `T-…` as the native session id, resume with `amp threads continue`.
+  - A harness plugin `amp` and a runner adapter: start `amp -x --stream-json --stream-json-input`, map the stream to the normalized events, store `T-…` as the native session id, resume with `amp threads continue`.
 - **What breaks or is unknown.**
   - Approvals: unknown how a program answers one ([1.4](#14-how-a-program-drives-amp)). Until tested, only `full-access` can be promised, and the Access Mode fallback only moves to less permissive modes, so a thread asking for `approval-required` would have to be refused with a message, not downgraded.
   - Resume is unusually easy: the transcript is at Amp, so a session is not tied to its runner's disk for its history. Its workspace still is.
@@ -187,7 +187,7 @@ Hercule does for itself what `amp orb provider` does for Amp: it asks the sandbo
 The Amp harness of option A, with one difference: the work runs in an orb, not on the Hercule runner. The runner only starts the CLI and reads the stream.
 
 - **What the user sees.** A Hercule thread. Model menu: Amp. Where it runs: "Orb · <provider name>", not one of the Fleet's machines. The transcript fills as in any thread. There is no Hercule workspace: no branch picker, no diff from Hercule. The result arrives as a branch or a pull request on GitHub.
-- **Hercule-native.** The thread, its Task and stage, the transcript, Token Usage, queued follow-ups, the pull request showing up on the Task through the GitHub Connection.
+- **Hercule-native.** The thread, its Task and stage, the transcript, Token Usage, queued follow-ups, and the pull request as an External Entity through the GitHub Connection.
 - **Not Hercule-native.**
   - Everything listed under A.
   - The workspace is Amp's. Hercule cannot show its files or its diff, run a Workspace Action in it, or watch edits for Edit Overlap.
@@ -195,6 +195,7 @@ The Amp harness of option A, with one difference: the work runs in an orb, not o
   - The `hercule` CLI is not in the orb, so the agent cannot use Discussions, the Wiki, or spawn sessions, unless the image carries the binary and the session's token reaches the orb. Each needs its own answer.
   - MCP servers must be set on the Amp project; the gateway is not reachable by a local flag.
   - Git runs as the Amp member, with Amp's GitHub integration, not Hercule's Connection.
+  - The pull request is not linked to the Task by itself. Hercule finds a Thread's pull request by joining the pull request's head branch with the branch of the Thread's checkout (spec 20 §14.4), and here Hercule has no checkout. The user links it by hand, or the adapter has to report the orb's branch some other way.
 - **What Hercule adds.**
   - The provider plugin and harness plugin of A.
   - In the adapter, a second way to run: one `amp -ox … --stream-json` process per turn, and `amp threads continue T-… -ox` for each later turn. The session has no workspace (`workspaceId: null`), which exists today.
@@ -233,7 +234,7 @@ The Amp harness of option A, with one difference: the work runs in an orb, not o
 5. Stream lines arrive at the CLI on Rogier's runner. The adapter maps them: `system/init` gives `T-abc`, stored as the native session id; `assistant` lines become messages and tool items; `result` ends the turn with its token count. The process exits. The thread shows idle.
 6. Six minutes later Amp pauses the orb: files go to the bucket, processes stop. Hercule shows nothing new, because nothing changed for the thread.
 7. Next morning Rogier types "Open a pull request with the fix." The adapter runs `amp threads continue T-abc -ox "Open a pull request…" --stream-json`. Amp sends `spawn` with the same orb id, the files come back, `.agents/resume` runs, the agent pushes a branch and reports the URL.
-8. Hercule's GitHub Connection for work sees the pull request and puts it on the thread's Task.
+8. Hercule's GitHub Connection sees the pull request as an External Entity. Rogier links it to the thread's Task by hand, because Hercule has no checkout whose branch it could match (spec 20 §14.4).
 9. Rogier's laptop is replaced a week later. The thread still continues from any runner, because its history is at Amp and its files are in the cluster. Nothing of it lived on the laptop.
 
 ## 4. The isolation side angle
