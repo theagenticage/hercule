@@ -6,7 +6,6 @@ The ACP (Agent Client Protocol) client: it talks to a harness that speaks ACP ov
   - `connection.ts` opens the connection. It calls T3's typed client (`AcpClient.make`, `client.agent.*` and the handlers) and turns what the client returns into our own types. T3's generated schemas decode everything the harness sends, and decode strictly: a value they do not know is not passed on silently.
   - `types.ts` holds our own plain types and the interface of a connection. `connection.ts` assigns T3's values to them, so when a sync removes or retypes a required field, `pnpm typecheck` fails there. A field that is absent means "not known", never "none".
   - `error.ts` holds the errors.
-  - `stdio.ts` turns the harness's pipes into the stdio T3 reads and writes.
   - `index.ts` is the package's interface.
   - `testing.ts` and `recordings/` are the fake harness (`@hercule/acp/testing`): its answers come from a recording or from a test's own script. `*.testing.ts` files hold helpers of this package's own tests.
 - `vendor/effect-acp/` is `packages/effect-acp` of [T3 Code](https://github.com/pingdotgg/t3code), copied unchanged. MIT licence, Copyright (c) 2026 T3 Tools Inc. (see `vendor/effect-acp/LICENSE`). Commit: `3a63e0ca37a50d31f78b0188960557ff69964e76`.
@@ -38,20 +37,20 @@ Only `src/connection.ts` imports the copy, tests and `import type` included, and
 
 ## When the harness sends a value T3 does not know
 
-T3's schemas refuse a value they do not know, such as a new tool kind in an approval request or a new config option type. Every such refusal is loud. You see it as:
+T3's schemas refuse a value they do not know, such as a new tool kind in an approval request or a new config option type. Every such refusal is loud:
 
-- an `AcpError` with reason `unreadable`, or
-- a report through `onUnhandledMessage`,
+- A call fails with an `AcpError` with reason `unreadable`. It names the ACP message, the field and the value. A prompt that ends with a stop reason T3 does not know names the field only.
+- A dropped update, or a request of the harness that T3 answered with an error, is reported through `onUnhandledMessage`, with T3's own text about the field and the untouched message in `raw`.
 
-and the message names the ACP message, the field T3 expected and the value. It happens after the pinned `agy` version was raised, or when a harness adds a feature.
+A value T3 leaves out of a reply without refusing it, such as malformed `usage` or `modes`, is absent for the caller. It happens after the pinned `agy` version was raised, or when a harness adds a feature.
 
 First remedy: sync with T3 Code (below). T3 usually has the new value by then.
 
 ## If syncing is not enough
 
-Rogier decided on 2026-11-25 to start with T3's typed client: less to maintain is worth more than tolerance for unknown values. What this gains: a new tolerance in T3's schemas reaches us with a sync and no work of ours, and every malformed reply is loud instead of being half read.
+Rogier decided on 2026-11-25 to start with T3's typed client: less to maintain is worth more than tolerance for unknown values. What this gains: a new tolerance in T3's schemas reaches us with a sync and no work of ours.
 
-Move away from it when the loud failures keep coming: a harness release that we must support breaks a call with `unreadable` again and again, and T3 does not have the fix after a sync. Then our own decoding can be added as a change of `connection.ts` only:
+Move away from it when the loud failures keep coming: a harness release that we must support breaks a call with `unreadable` again and again, and T3 does not have the fix after a sync. Our own decoding would also make every malformed reply loud. It is a change of `connection.ts` only:
 
 - Call `client.raw.request` and `client.raw.notify` instead of `client.agent.*`.
 - Answer the harness's requests and read `session/update` in our own line reader, before T3 sees the lines.
