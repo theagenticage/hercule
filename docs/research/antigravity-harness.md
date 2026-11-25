@@ -20,7 +20,7 @@ Everything marked **verified** was seen on the real binary. Everything marked **
 | 2026-11-25 | The adapter may read the `id_token_email` field of `agy`'s token file to report who is signed in. |
 | 2026-11-25 | Steering: declare `unsupported` for now (tentative). Native steering is a follow-up. |
 | 2026-11-25 | The build runs on the runner `beelink`. |
-| open | Deny on Antigravity: offer only `allow` and `cancel`, or also `deny` (section 6.3). Recommended: `allow` and `cancel` only. |
+| 2026-11-25 | Deny on Antigravity stays offered, because leaving it out costs client work. Whether it can be made to mean "refuse and go on" is tested in #1282 (section 6.3). |
 
 ## 2. The binary
 
@@ -216,7 +216,10 @@ What `agy` sends that we have no place for:
 
 - The options are always `allow_once` and `reject_once`. There is no "always allow".
 - **Deny ends the turn (verified, `deny2`).** The tool call fails, and the prompt returns `end_turn` 2 ms later with no further model call. The prompt said "if refused, reply REFUSED"; in 30 seconds nothing came. Answering with outcome `cancelled` does exactly the same, and also returns `end_turn`, not `cancelled`.
-- Spec 06 section 6.5 says `deny` is "refuse with a reason the model sees" and the turn goes on. `agy` cannot do that. So on Antigravity `deny` and `cancel` would be the same button. Recommendation, for Rogier: offer `allow` and `cancel` only, as pi leaves out `allow_always`.
+- Spec 06 section 6.5 says `deny` is "refuse with a reason the model sees" and the turn goes on. `agy` cannot do that by itself.
+- **Rogier's direction (2026-11-25):** keep offering `deny`. Leaving it out costs work in the clients (the Android lock screen and the desktop mini dock assume it), and he would rather have two decisions that do the same than pay for that. His idea for making `deny` mean what it means elsewhere: when the prompt ends after a deny, the adapter keeps the turn open and sends a follow-up `session/prompt` that tells the model which call the user denied. Record this on the real binary before relying on it (#1282). If it does not hold, `deny` behaves as `cancel` and the spec says so.
+- **What T3 does (read 2026-11-25).** It offers Allow once, Allow for this thread, Deny and Cancel, built from the options `agy` offers. After a deny it does nothing: no follow-up prompt, and no sign in its code or tests that it knows the turn ends. It passes no reason to the model. `packages/provider-acp/src/server/adapter.ts` lines 1644 to 1655 and 7549 to 7564.
+- **`allow_always` can be offered.** T3's fixtures hold Antigravity requests with three options (`remember-this-command`, `run-this-time`, `stop-this-command`) and a warning in `_meta` (`agy.security.warning`). Our 12 recorded requests never had one. So build `decisions` from the options each request offers, never from a fixed list.
 
 ### 6.4 Questions
 
@@ -257,6 +260,9 @@ Chunks carry only their text. There is no message id. Per model call the order i
 ### 6.8 Subagents, plans and compaction
 
 - **Subagents.** `invoke_subagent` completes in about a second with no content. No child id, no child events. The result reaches the parent invisibly. Our section 13 model gets one `subagent` item with a description and a type, and nothing else.
+- **How T3 shows a subagent's work (read 2026-11-25): it reads `agy`'s private files.** Nothing comes over ACP. Under `<gemini-dir>/<app-data-dir>/` on agy 1.5: `brain/<parent session>/.system_generated/subagents/<childId>.json` lists the children; `brain/<childId>/.system_generated/messages/*.json` is the child's inbox, whose launch message holds `sourceMetadata.tool.toolCall.id`, equal to the parent's ACP `toolCallId`; `brain/<childId>/.system_generated/logs/transcript.jsonl` is the child's activity, one step per line (`step_index`, `type`, `status`, `content`, `error`, `tool_calls[{name, args}]`). T3 reads these on demand, when the user opens a "Subagent work" dialog, not live. It gets the child's id, role, prompt, tool names with arguments, step text and status. It does not get the model, token usage, structured tool results or a live stream. `apps/server/src/provider/acp/AntigravityChildWork.ts` (822 lines, of which the 1.4 path over SQLite and protobuf is most).
+- **It is fragile by T3's own record.** agy 1.5 changed the format and the view returned nothing until T3 PR 39004. A child that goes idle without a message still shows as running (T3 PR 42498, open).
+- **A subagent's permission requests never reach the client** (T3 issue 39029, open, measured on agy 1.5.12). A child that needs approval for `write_file` or `run_command` waits 60 seconds and times out. Only mode `auto` and `--dangerously-skip-permissions` avoid it. So in approval-required and auto-accept-edits a subagent that needs an approval fails. Record this (#1282) and tell the user when it happens.
 - **Plans and todo lists.** Files under `<app-data-dir>/brain/<sessionId>/`. Each write asked permission in `default` and `plan` mode, because the path is outside the workspace. Plan mode has no "approve the plan" request; the turn just ends.
 - **Compaction.** `/compact` as a prompt compacts silently. Automatic compaction is invisible, and no switch to turn it off was found (`AGY_CLI_AUTO_COMPACT_OVERRIDE` is in the binary, untested).
 
