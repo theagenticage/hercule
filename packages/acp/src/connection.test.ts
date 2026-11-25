@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
+import * as References from "effect/References";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import type { AcpError } from "./error";
@@ -286,14 +287,14 @@ const UNREADABLE_REPLIES: ReadonlyArray<{
     method: "session/new",
     reply: { sessionId: SESSION, configOptions: [SLIDER] },
     call: (connection) => connection.newSession({ cwd: "/work", mcpServers: [] }),
-    detail: `configOptions[0] is ${JSON.stringify(SLIDER)}`,
+    detail: `configOptions[0] (type "slider") is ${JSON.stringify(SLIDER)}`,
   },
   {
     method: "session/resume",
     reply: { configOptions: [SLIDER] },
     call: (connection) =>
       connection.resumeSession({ nativeSessionId: SESSION, cwd: "/work", mcpServers: [] }),
-    detail: `configOptions[0] is ${JSON.stringify(SLIDER)}`,
+    detail: `configOptions[0] (type "slider") is ${JSON.stringify(SLIDER)}`,
   },
   {
     method: "session/set_config_option",
@@ -325,9 +326,13 @@ it.effect.each(UNREADABLE_REPLIES)(
 );
 
 it.effect.each([
-  { name: "has no stop reason", reply: {} },
-  { name: "has a stop reason the vendored client does not know", reply: { stopReason: "quota" } },
-])("fails a prompt whose reply $name, and names no value", ({ reply }) =>
+  { name: "has no stop reason", reply: {}, detail: "stopReason is missing" },
+  {
+    name: "has a stop reason the vendored client does not know",
+    reply: { stopReason: "quota" },
+    detail: 'stopReason is "quota"',
+  },
+])("fails a prompt whose reply $name, naming the field and the value", ({ reply, detail }) =>
   Effect.gen(function* () {
     const connection = yield* createTestHarness({
       scripts: { "session/prompt": answerWith(reply) },
@@ -336,12 +341,55 @@ it.effect.each([
     const error = yield* Effect.flip(connection.prompt(SESSION, TEXT));
 
     expect(error).toMatchObject({ reason: "unreadable" });
-    expect(error.message).toBe(
-      describeUnreadableReply(
-        "session/prompt",
-        "stopReason is missing, or is not one this version knows",
-      ),
+    expect(error.message).toBe(describeUnreadableReply("session/prompt", detail));
+  }),
+);
+
+it.effect("names, in each of many overlapping calls, the value that call was answered with", () =>
+  Effect.gen(function* () {
+    // All requests are written before the first reply comes, and the replies come in one burst.
+    const count = 96;
+    const asked: Array<{ readonly id: string | number; readonly cwd: string }> = [];
+    const harness = createTestHarness({
+      scripts: {
+        "session/new": ({ id, params }) => {
+          asked.push({ id, cwd: (params as { cwd: string }).cwd });
+          return asked.length < count
+            ? []
+            : asked.map((request) => buildResult(request.id, { sessionId: Number(request.cwd) }));
+        },
+      },
+    });
+    const connection = yield* harness.open;
+
+    const errors = yield* Effect.forEach(
+      Array.from({ length: count }, (_, n) => n),
+      (n) => Effect.flip(connection.newSession({ cwd: String(n), mcpServers: [] })),
+      { concurrency: "unbounded" },
     );
+
+    expect(errors.map(({ message }) => message)).toEqual(
+      errors.map((_, n) => describeUnreadableReply("session/new", `sessionId is ${n}`)),
+    );
+  }).pipe(
+    // The vendored client gives other fibers a turn after this many steps, so
+    // decoding the replies is interleaved.
+    Effect.provideService(References.MaxOpsBeforeYield, 16),
+  ),
+);
+
+it.effect("names the type of a refused object, and quotes up to 500 characters of it", () =>
+  Effect.gen(function* () {
+    const option = { id: "x", name: "n".repeat(300), type: "slider", currentValue: 3 };
+    const connection = yield* createTestHarness({
+      scripts: { "session/new": answerWith({ sessionId: SESSION, configOptions: [option] }) },
+    }).open;
+
+    const error = yield* Effect.flip(connection.newSession({ cwd: "/work", mcpServers: [] }));
+
+    expect(error.message).toContain('configOptions[0] (type "slider") is {"id":"x"');
+    // The end of the value is past the 200 characters an earlier version quoted.
+    expect(error.message).toContain('"currentValue":3}');
   }),
 );
 
@@ -879,7 +927,7 @@ const openSessionWithToken = (harness: TestHarness) =>
   });
 
 /** Harness text that holds the token and is longer than any message may quote. */
-const LONG_ECHO = `${BEARER_TOKEN} ${"z".repeat(300)}`;
+const LONG_ECHO = `${BEARER_TOKEN} ${"z".repeat(600)}`;
 
 /**
  * Each place where text of the harness is put into a sentence for a person,
@@ -968,7 +1016,7 @@ it.effect.each(PLACES_OF_HARNESS_TEXT)(
       expect(read).toHaveLength(1);
       expect(read[0]).not.toContain("sk-live");
       expect(read[0]).toContain("[hidden]");
-      expect(read[0]).not.toContain("z".repeat(201));
+      expect(read[0]).not.toContain("z".repeat(501));
       expect(read[0]).toContain("...");
     }),
 );
@@ -1008,7 +1056,7 @@ it.effect(
 
 it.effect("hides a secret before it cuts the text, and keeps harnessMessage whole", () =>
   Effect.gen(function* () {
-    const text = `${"y".repeat(195)}${BEARER_TOKEN}${"z".repeat(300)}`;
+    const text = `${"y".repeat(495)}${BEARER_TOKEN}${"z".repeat(600)}`;
     const harness = createTestHarness({
       scripts: { "session/set_mode": ({ id }) => [buildFailure(id, -32603, text)] },
     });
@@ -1017,9 +1065,9 @@ it.effect("hides a secret before it cuts the text, and keeps harnessMessage whol
     const error = yield* Effect.flip(connection.setMode(SESSION, "auto"));
 
     expect(error.message).toBe(
-      `The harness refused session/set_mode: ${"y".repeat(195)}[hidd... (code -32603).`,
+      `The harness refused session/set_mode: ${"y".repeat(495)}[hidd... (code -32603).`,
     );
-    expect(error.harnessMessage).toBe(`${"y".repeat(195)}[hidden]${"z".repeat(300)}`);
+    expect(error.harnessMessage).toBe(`${"y".repeat(495)}[hidden]${"z".repeat(600)}`);
   }),
 );
 

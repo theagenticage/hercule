@@ -23,6 +23,7 @@
  *   harness, which the handler reads when it starts.
  */
 import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -65,19 +66,33 @@ const EXIT_GRACE = Duration.millis(250);
 
 const SYNC_ADVICE = "Sync packages/acp/vendor with T3 Code (packages/acp/README.md).";
 
-/** The longest harness text that `quoteHarnessText` leaves whole. */
-const QUOTE_LENGTH = 200;
+/**
+ * The longest harness text that `quoteHarnessText` leaves whole. A refused
+ * config option is about 400 characters with its choices cut short, and the
+ * field that tells it apart from the others comes late.
+ */
+const QUOTE_LENGTH = 500;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /**
+ * The reply to the call that is being made. The vendored client logs each
+ * request in the fiber of its caller, so the logger finds this object there
+ * and files it under the request's id. The reply fills it in when it arrives.
+ */
+const CurrentCall = Context.Reference<{ reply: unknown } | undefined>("acp/CurrentCall", {
+  defaultValue: () => undefined,
+});
+
+/**
  * A message that the vendored client logs, in the part this file reads: a
- * request or notification has a `payload` (its `params`), and an answer
- * (`Exit`) has the `requestId` it belongs to.
+ * request or notification has a `payload` (its `params`), a request of ours
+ * has an `id`, and an answer (`Exit`) has the `requestId` it belongs to.
  */
 const LoggedMessage = Schema.Struct({
   _tag: Schema.String,
+  id: Schema.optionalKey(Schema.Union([Schema.String, Schema.Number])),
   requestId: Schema.optionalKey(Schema.Union([Schema.String, Schema.Number])),
   payload: Schema.optionalKey(Schema.Unknown),
   exit: Schema.optionalKey(
@@ -244,9 +259,8 @@ export const openAcpConnection = (options: {
     // the line being handled, because the client handles one line at a time.
     let lastLine = "";
     let incoming: ReadonlyArray<LoggedMessage> = [];
-    // The `result` of the latest reply. It names the value of a reply that was
-    // refused, so it is right only while no two calls wait for a reply at once.
-    let latestReply: unknown;
+    // The calls of ours that wait for their reply, by the id of their request.
+    const waitingCalls = new Map<string, { reply: unknown }>();
     // Requests of the harness that are not answered yet, by the id the client's handlers get.
     const openRequests = new Map<string, { readonly method: string; readonly params: unknown }>();
     const secrets = new Set<string>();
@@ -278,21 +292,31 @@ export const openAcpConnection = (options: {
       `The harness sent the ${kind} ${quoteHarnessText(method)}, which this version does not use.`;
 
     /**
-     * Returns a sentence that names the field of the latest reply that the
-     * vendored client refused, and its value. When the issues name more than
-     * one field, it takes the first one the reply has a value for: the client
-     * also lists what ACP version 2 would have needed.
+     * Returns `path in reply is <value>`, or `is missing`. For an object that
+     * has a `type`, it names the type first, because the cut may come before it.
      */
-    const describeUnreadableReply = (method: string, issue: SchemaIssue.Issue): string => {
+    const describeField = (reply: unknown, path: ReadonlyArray<PropertyKey>): string => {
+      const value = readAtPath(reply, path);
+      const field = path.length === 0 ? "the reply" : formatPath(path);
+      if (value === undefined) return `${field} is missing`;
+      const type = readAtPath(value, ["type"]);
+      return `${field}${typeof type === "string" ? ` (type ${JSON.stringify(type)})` : ""} is ${JSON.stringify(value)}`;
+    };
+
+    /**
+     * Returns a sentence that names the field of `reply`, the reply to the
+     * call, that the vendored client refused, and its value. When the issues
+     * name more than one field, it takes the first one the reply has a value
+     * for: the client also lists what ACP version 2 would have needed.
+     */
+    const describeUnreadableReply = (
+      method: string,
+      issue: SchemaIssue.Issue,
+      reply: unknown,
+    ): string => {
       const paths = listIssuePaths(issue);
-      const path = paths.find((each) => readAtPath(latestReply, each) !== undefined) ?? paths[0];
-      const value = readAtPath(latestReply, path ?? []);
-      const field = path === undefined || path.length === 0 ? "the reply" : formatPath(path);
-      return describeUnreadable(
-        "answered",
-        method,
-        `${field} ${value === undefined ? "is missing" : `is ${JSON.stringify(value)}`}`,
-      );
+      const path = paths.find((each) => readAtPath(reply, each) !== undefined) ?? paths[0] ?? [];
+      return describeUnreadable("answered", method, describeField(reply, path));
     };
 
     /** Returns the `refused` error for a harness that answered `method` with an error of `code` and `text`. */
@@ -419,8 +443,12 @@ export const openAcpConnection = (options: {
           } else if (event.stage === "decoded") {
             const messages = readIncomingMessages(event.payload);
             incoming = Option.getOrElse(messages, () => []);
-            for (const { exit } of incoming) {
-              if (exit?._tag === "Success") latestReply = exit.value;
+            for (const { requestId, exit } of incoming) {
+              if (requestId === undefined || exit === undefined) continue;
+              const key = acpRequestIdentity(requestId);
+              const call = waitingCalls.get(key);
+              if (call !== undefined && exit._tag === "Success") call.reply = exit.value;
+              waitingCalls.delete(key);
             }
           } else {
             return reportDroppedNotification(event.payload);
@@ -429,7 +457,16 @@ export const openAcpConnection = (options: {
         }
         const outgoing =
           event.stage === "decoded" ? readOutgoingMessage(event.payload) : Option.none();
-        return Option.isSome(outgoing) ? reportAnswerWithError(outgoing.value) : Effect.void;
+        if (Option.isNone(outgoing)) return Effect.void;
+        const { _tag, id } = outgoing.value;
+        // A notification of ours (`session/cancel`) has an empty id and no reply.
+        if (_tag !== "Request" || id === undefined || id === "") {
+          return reportAnswerWithError(outgoing.value);
+        }
+        return Effect.gen(function* () {
+          const call = yield* CurrentCall;
+          if (call !== undefined) waitingCalls.set(acpRequestIdentity(id), call);
+        });
       },
       onIncomingRequest: (requestId, method, params) =>
         Effect.sync(() => {
@@ -562,13 +599,22 @@ export const openAcpConnection = (options: {
     const callHarness = <A>(
       method: string,
       exchange: Effect.Effect<A, VendorErrors.AcpError>,
-      { withoutDeadline = false }: { readonly withoutDeadline?: boolean } = {},
+      {
+        withoutDeadline = false,
+        checkReply = () => undefined,
+      }: {
+        readonly withoutDeadline?: boolean;
+        /** Returns the error to fail with when the decoded reply is no good, given the reply as it was sent. */
+        readonly checkReply?: (decoded: A, reply: unknown) => AcpError | undefined;
+      } = {},
     ): Effect.Effect<A, AcpError> =>
       Effect.suspend(() => {
         if (Deferred.isDoneUnsafe(closed)) {
           return failClosed(method, "The connection to the harness is over.");
         }
+        const call = { reply: undefined as unknown };
         return exchange.pipe(
+          Effect.provideService(CurrentCall, call),
           Effect.catch((error) =>
             error._tag === "AcpRequestError"
               ? Effect.fail(buildRefusal(method, error.code, error.errorMessage))
@@ -580,7 +626,7 @@ export const openAcpConnection = (options: {
               ? Effect.fail(
                   new AcpError({
                     reason: "unreadable",
-                    message: describeUnreadableReply(method, defect.issue),
+                    message: describeUnreadableReply(method, defect.issue, call.reply),
                   }),
                 )
               : Effect.die(defect),
@@ -605,6 +651,17 @@ export const openAcpConnection = (options: {
                     }),
                   ),
               }),
+          Effect.flatMap((decoded) => {
+            const error = checkReply(decoded, call.reply);
+            return error === undefined ? Effect.succeed(decoded) : Effect.fail(error);
+          }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              for (const [key, waiting] of waitingCalls) {
+                if (waiting === call) waitingCalls.delete(key);
+              }
+            }),
+          ),
         );
       });
 
@@ -675,34 +732,31 @@ export const openAcpConnection = (options: {
         callHarness(
           "session/prompt",
           client.agent.prompt({ sessionId: nativeSessionId, prompt: content }),
-          { withoutDeadline: true },
-        ).pipe(
-          Effect.flatMap((reply) => {
-            if (reply.error != null) {
-              return Effect.fail(
-                buildRefusal("session/prompt", reply.error.code, reply.error.message),
-              );
-            }
-            // The vendored client leaves out a stop reason it does not know. Two
-            // prompts may be open at once, so no value is named: there is no
-            // telling which reply it was.
-            const stopReason: string | undefined = reply.stopReason;
-            return stopReason === undefined
-              ? Effect.fail(
-                  new AcpError({
+          {
+            withoutDeadline: true,
+            checkReply: (decoded, reply) => {
+              if (decoded.error != null) {
+                return buildRefusal("session/prompt", decoded.error.code, decoded.error.message);
+              }
+              // The vendored client leaves out a stop reason it does not know.
+              const stopReason: string | undefined = decoded.stopReason;
+              return stopReason === undefined
+                ? new AcpError({
                     reason: "unreadable",
                     message: describeUnreadable(
                       "answered",
                       "session/prompt",
-                      "stopReason is missing, or is not one this version knows",
+                      describeField(reply, ["stopReason"]),
                     ),
-                  }),
-                )
-              : Effect.succeed({
-                  stopReason,
-                  ...(reply.usage == null ? {} : { usage: reply.usage }),
-                });
-          }),
+                  })
+                : undefined;
+            },
+          },
+        ).pipe(
+          Effect.map((reply) => ({
+            stopReason: reply.stopReason,
+            ...(reply.usage == null ? {} : { usage: reply.usage }),
+          })),
         ),
       cancel: (nativeSessionId) =>
         callHarness("session/cancel", client.agent.cancel({ sessionId: nativeSessionId })),

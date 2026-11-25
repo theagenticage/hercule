@@ -39,7 +39,7 @@ Only `src/connection.ts` imports the copy, tests and `import type` included, and
 
 T3's schemas refuse a value they do not know, such as a new tool kind in an approval request or a new config option type. Every such refusal is loud:
 
-- A call fails with an `AcpError` with reason `unreadable`. It names the ACP message, the field and the value. A prompt that ends with a stop reason T3 does not know names the field only.
+- A call fails with an `AcpError` with reason `unreadable`. It names the ACP message, the field and the value, which is the value of that call's own reply, also when calls overlap. For an object with a `type`, it names the type first, and it quotes up to 500 characters. A prompt that ends with a stop reason T3 does not know names `stopReason` and the value.
 - A dropped update, or a request of the harness that T3 answered with an error, is reported through `onUnhandledMessage`, with T3's own text about the field and the untouched message in `raw`.
 
 A value T3 leaves out of a reply without refusing it, such as malformed `usage` or `modes`, is absent for the caller. It happens after the pinned `agy` version was raised, or when a harness adds a feature.
