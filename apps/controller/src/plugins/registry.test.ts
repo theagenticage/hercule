@@ -203,6 +203,37 @@ const SHIPPED = [
       ],
     },
   },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    definition: {
+      id: "antigravity/antigravity",
+      displayName: "Antigravity",
+      binaryName: "agy",
+      releaseSource: { kind: "github-releases", repository: "google-antigravity/antigravity-cli" },
+      declared: {
+        steering: "unsupported",
+        fork: "unsupported",
+        modelSwitch: "in-session",
+        accessModes: {
+          "approval-required": "native",
+          "auto-accept-edits": "native",
+          auto: "native",
+          "full-access": "native",
+        },
+        mcpPassthrough: "unsupported",
+        disallowedTools: "unsupported",
+        structuredOutput: "unsupported",
+      },
+      runs: [
+        {
+          providerId: "google/google",
+          kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
+          models: "all",
+        },
+      ],
+    },
+  },
 ];
 
 /** The providers a release ships, written out in full for the same reason. */
@@ -284,6 +315,28 @@ const SHIPPED_PROVIDERS = [
       catalogSource: { kind: "harness-probe", harnessId: "codex/codex" },
       defaultSelection: "current-models",
       suggestedTextGenerationModel: "gpt-6-luna",
+    },
+  },
+  {
+    id: "google",
+    displayName: "Google",
+    definition: {
+      id: "google/google",
+      displayName: "Google",
+      kinds: [
+        {
+          id: "subscription-per-machine",
+          title: "Google subscription, signed in on each machine",
+          description:
+            "Uses your Google plan through Antigravity. You sign in to Antigravity once on each machine that runs it.",
+          setup: [{ kind: "harness-login", method: "sign-in" }],
+          harnesses: ["antigravity/antigravity"],
+        },
+      ],
+      defaultHarnessId: "antigravity/antigravity",
+      catalogSource: { kind: "harness-probe", harnessId: "antigravity/antigravity" },
+      defaultSelection: "current-models",
+      defaultSelectionMaker: "Google",
     },
   },
   {
@@ -458,13 +511,15 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three harness plugins, the six provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the four harness plugins, the seven provider plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
       "pi",
+      "antigravity",
       "anthropic",
       "openai",
+      "google",
       "zai",
       "openrouter",
       "opencode",

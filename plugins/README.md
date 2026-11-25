@@ -19,8 +19,10 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-claude-code` | the `claude-code/claude-code` harness |
 | `@hercule/plugin-codex` | the `codex/codex` harness |
 | `@hercule/plugin-pi` | the `pi/pi` harness |
+| `@hercule/plugin-antigravity` | the `antigravity/antigravity` harness |
 | `@hercule/plugin-anthropic` | the `anthropic/anthropic` provider |
 | `@hercule/plugin-openai` | the `openai/openai` provider |
+| `@hercule/plugin-google` | the `google/google` provider, with a subscription signed in on each machine; its Default Selection holds Google's own models only |
 | `@hercule/plugin-zai` | the `zai/zai` provider |
 | `@hercule/plugin-openrouter` | the `openrouter/openrouter` provider, with an API key, whose models the controller reads from OpenRouter's API |
 | `@hercule/plugin-opencode` | the `opencode/opencode` provider, with a Go key and a Zen key |

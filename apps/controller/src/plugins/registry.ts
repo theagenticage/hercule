@@ -7,9 +7,11 @@
  */
 import type { Plugin } from "@hercule/plugin-host";
 import { anthropic } from "@hercule/plugin-anthropic";
+import { antigravity } from "@hercule/plugin-antigravity";
 import { claudeCode } from "@hercule/plugin-claude-code";
 import { codex } from "@hercule/plugin-codex";
 import { github } from "@hercule/plugin-github";
+import { google } from "@hercule/plugin-google";
 import { linear } from "@hercule/plugin-linear";
 import { minimax } from "@hercule/plugin-minimax";
 import { opencode } from "@hercule/plugin-opencode";
@@ -23,8 +25,10 @@ export const registry: ReadonlyArray<Plugin> = [
   claudeCode,
   codex,
   pi,
+  antigravity,
   anthropic,
   openai,
+  google,
   zai,
   openrouter,
   opencode,

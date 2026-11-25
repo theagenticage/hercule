@@ -1,9 +1,9 @@
 /**
- * Harnesses: the agent programs sessions run in, such as Claude Code, Codex
- * and pi. A harness is a plugin contribution, so its description comes from the
- * registering plugin; only what each runner reports about it (is it installed,
- * which version) varies at read time. The accounts that sign in to a harness's
- * models are Provider Accounts, in `provider-account.ts`.
+ * Harnesses: the agent programs sessions run in, such as Claude Code, Codex,
+ * pi and Antigravity. A harness is a plugin contribution, so its description
+ * comes from the registering plugin; only what each runner reports about it
+ * (is it installed, which version) varies at read time. The accounts that sign
+ * in to a harness's models are Provider Accounts, in `provider-account.ts`.
  */
 import { Schema } from "effect";
 import { DeclaredCapabilities, HarnessProviderSupport } from "@hercule/plugin-host";

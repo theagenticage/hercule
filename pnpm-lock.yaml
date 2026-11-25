@@ -93,6 +93,9 @@ importers:
       '@hercule/plugin-anthropic':
         specifier: workspace:*
         version: link:../../plugins/anthropic
+      '@hercule/plugin-antigravity':
+        specifier: workspace:*
+        version: link:../../plugins/antigravity
       '@hercule/plugin-claude-code':
         specifier: workspace:*
         version: link:../../plugins/claude-code
@@ -102,6 +105,9 @@ importers:
       '@hercule/plugin-github':
         specifier: workspace:*
         version: link:../../plugins/github
+      '@hercule/plugin-google':
+        specifier: workspace:*
+        version: link:../../plugins/google
       '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
@@ -536,6 +542,15 @@ importers:
         specifier: 4.0.7
         version: 4.0.7
 
+  plugins/antigravity:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
+
   plugins/claude-code:
     dependencies:
       '@hercule/plugin-host':
@@ -566,6 +581,15 @@ importers:
       '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+
+  plugins/google:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
 
   plugins/linear:
     dependencies:
