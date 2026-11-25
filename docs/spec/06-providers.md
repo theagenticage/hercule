@@ -560,7 +560,7 @@ On a native-steering harness, one operation that stores and claims the row does 
 
 ## 6. Normalized event taxonomy
 
-Normalization happens at the runner, closest to the vendor protocol. Every event carries the base fields; every event may carry `raw` (the untouched vendor payload tagged with its source, e.g. `claude.sdk.message`, `codex.app-server.notification`, `pi.session.event`). *(Amended 2026-11-06, [#1038](https://github.com/theagenticage/hercule/issues/1038).)* The controller stores `raw` with the event, but the transcript reads leave it out unless asked for it ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) `transcript.read`). Enums are open for consumers: unknown kinds render generically, never crash.
+Normalization happens at the runner, closest to the vendor protocol. Every event carries the base fields; every event may carry `raw` (the untouched vendor payload tagged with its source, e.g. `claude.sdk.message`, `codex.app-server.notification`, `pi.session.event`). *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Antigravity's is `antigravity.acp.message`: the message `agy` sent, never a request the adapter sent. *(Amended 2026-11-06, [#1038](https://github.com/theagenticage/hercule/issues/1038).)* The controller stores `raw` with the event, but the transcript reads leave it out unless asked for it ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) `transcript.read`). Enums are open for consumers: unknown kinds render generically, never crash.
 
 ```ts
 interface HarnessEventBase {
@@ -614,6 +614,7 @@ A turn is the user-visible episode: from user input until the agent goes idle. I
 | Claude Code | adapter-minted | adapter emits at `sendInput` | the one `result` message per turn (authoritative); `session_state_changed { idle }` is secondary confirmation only |
 | Codex | native `turn/started` id | `turn/started` | `turn/completed { status }` |
 | pi | adapter-minted | `agent_start` | **`agent_settled`** (not `agent_end`: `agent_end` fires once per low-level run and carries `willRetry`; auto-retry, overflow-compaction re-prompts and queued follow-ups continue the episode past it). pi's `turn_start/turn_end` is one LLM round-trip and maps to item grouping. ~~Intermediate `agent_end { willRetry: true }` becomes at most a `runtime.warning`.~~ *(Amended 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895).)* An intermediate `agent_end { willRetry: true }` shows nothing. The retry is shown by `auto_retry_start`, which is a `runtime.warning` (section 6.7), so one retry shows one warning. |
+| Antigravity *(added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278))* | adapter-minted | adapter emits at `sendInput` | the reply to that turn's last `session/prompt` (sections 6.5 and 10.5) |
 
 State mapping: `interrupted` <- Codex `interrupted`, Claude abort terminal reasons, pi `aborted`; `failed` <- Claude `error_*` result subtypes, Codex `failed`, pi `stopReason: "error"`. **Synthetic turns** are opened for unsolicited output outside any user turn ~~(Claude task notifications trailing a result)~~ *(Claude's answer to a background task that finished after the turn that started it: the model's `assistant` messages and their `result` form the synthetic turn. The task lifecycle messages themselves (`task_started`, `task_progress`, `task_updated`, `task_notification`) are not output and are trimmed (section 6.7); kept, each one read as an empty turn. Amended 2026-09-27, [#92](https://github.com/theagenticage/hercule/issues/92).)* *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* `task_started` and `task_notification` for a subagent (`task_type: local_agent`) are kept again: they open and close that subagent's own turn, and never open a synthetic turn of the main agent (section 13.6).
 
@@ -632,6 +633,16 @@ State mapping: `interrupted` <- Codex `interrupted`, Claude abort terminal reaso
 - **A notice or warning never opens a turn** (the 2026-10-28 amendment above). Codex's `warning`, `guardianWarning` and `model/rerouted` name the running turn, and only while it runs. `configWarning` and `deprecationNotice` concern the whole session and name no turn.
 
 *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); [ADR 0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md).)* **A subagent has turns of its own,** carrying its `subagentId`. A Codex child's turns are its thread's native turns. Claude and pi have none, so the adapter mints them: a turn opens when a subagent starts or is continued, and closes when that agent finishes (section 13.6). A subagent's turn may run while the main agent is idle, and two agents' turns may run at once. The session's status follows its own agent's turns only.
+
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity's turns.** ACP has no turn, so a turn is one `session/prompt` and its reply, or two: after a denied call the adapter sends a follow-up prompt in the same turn (section 6.5). The turn ends with the reply to its last prompt. Section 10.5 has the whole lifecycle: when the next prompt may be sent, how an interrupt works, and what happens to items still open. The turn's state and its late updates follow these rules:
+
+- The `stopReason` of the turn's last prompt gives its state. The reply to a prompt that is followed by a follow-up ends nothing.
+- `stopReason: "end_turn"` is `completed`, unless the user interrupted the turn. The turn is interrupted when the adapter sent `session/cancel` or answered a Request with `cancel`. Why: `agy` 1.5.15 replies `end_turn`, not `cancelled`, to a prompt whose Request was answered with the outcome `cancelled`, so the reply alone would hide the interrupt.
+- `stopReason: "cancelled"` is `interrupted`.
+- An error reply to the prompt, or a stop reason this build has no meaning for, is `failed`, with a `runtime.error` (that names the stop reason, when it is unknown).
+- A `tool_call_update` can arrive after the prompt's reply (seen after a `session/cancel`). It completes its item in the item's own turn (section 6.3).
+- **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): how a failed turn looks. Another client reports that an upstream error can arrive as an ordinary message followed by `end_turn`. A turn that failed is never reported `completed` without the user being told.
+- **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): output with no prompt open. Another client reports that `agy` can send output when no prompt is running, for example when a background command finishes. It gets a synthetic turn by the rules above. What closes that turn is part of the check.
 
 ### 6.3 Items
 
@@ -725,6 +736,32 @@ Item ids are native where they exist (Codex item id; Claude `tool_use` id / `mes
 
 The reference replaces the image in `raw` too, so no copy of the bytes reaches the stream. Only the Claude Code adapter does this today (section 10.1). Codex `imageView` names a file but carries no bytes; reading and uploading that file is a follow-up. **Known gap (pi):** pi's `tool_execution_end` is copied whole into `raw`, so the base64 of an image a pi tool returns still reaches the stream there; `detail` and `content.delta` carry only text. Replacing it is a follow-up.
 
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity's items.** A tool's item id is its `toolCallId`. The id of a message is minted by the adapter. A tool is mapped by its name, never by `kind` alone, because `kind: "other"` covers MCP tools, `ask_question` and `invoke_subagent` alike.
+
+| Kind | What `agy` sends | Notes |
+|---|---|---|
+| `user_message` | nothing | built from the input at `sendInput`; `agy` does not echo the prompt |
+| `assistant_message`, `reasoning` | `agent_message_chunk`, `agent_thought_chunk` | a chunk holds text and no id. An item starts at its first chunk and completes at the next update of another kind and at the prompt's reply. A `usage_update` closes the open message before it is dropped, so two messages with no tool between them stay two items |
+| `command_execution` | `run_command`, kind `execute` | the command is `rawInput.CommandLine`, the item's title is `rawInput.toolSummary`. Nothing streams: the whole output comes with the completion, behind a header the adapter removes, and the exit code is `rawOutput.exit_code` (section 10.5) |
+| `file_change` | `edit_file`, `write_file`, kind `edit` | the path is `rawInput.Path`, never `locations`, which flips between `/tmp/...` and `/private/tmp/...` within one call. `editedFiles` holds the same path |
+| `file_read` | `read_file`, kind `read` | `detail.path` is `rawInput.Path`. The content that was read is never sent |
+| `web_search` | `search_web`, kind `search` | `detail.query` is `rawInput.query`. The results are never sent |
+| `tool_call`, kind `mcp` | `mcp_tools_<server>__<tool>`, kind `other` | the adapter removes the prefix `mcp_tools_` and splits the rest at its first `__`: `mcp_tools_sentry__whoami` is the server `sentry` and the tool `whoami`, as in the gateway rule above. No result is sent |
+| `tool_call`, kind `native` | any other tool, `ask_question` included | |
+| `subagent` | `invoke_subagent` | `detail.subagentIds` is `[]`, because `agy` gives the subagent no id and sends none of its events. The call's `Prompt`, `Role` and `TypeName` stay in `raw` |
+| `todo_list`, `plan` | no ACP `plan` update | built from the agent's own file writes, below |
+| `context_compaction` | nothing | none is built: `agy` reports no compaction (section 9.2) |
+| `error` | nothing seen | none is built yet (section 6.2) |
+
+- **Status.** An update's status `completed` completes the item, and `failed` fails it, or declines it (`declined`) when the adapter answered its Request with `deny` or `cancel`, because `agy` reports `failed` for all three. A `pending` status while a Request is open is not an end: the item stays started, and the Request overlays it.
+- **One item per `toolCallId`.** `agy` resends the whole tool call with every update and does not patch it. A resent update never starts the item a second time and never reopens one that has ended. `item.updated` is used for the `todo_list` only.
+- **`todo_list` and `plan` are rebuilt from files, on a best effort.** `agy` sends no ACP `plan` update. The model keeps its list in the file `task.md` and its plan in `implementation_plan.md`, which it writes with `write_file` and `edit_file` in the folder `brain/<native session id>/` of the Harness Home's `antigravity-acp` folder. Only a completed write to exactly that folder, for this session's own native id, counts.
+  - A step of `task.md` is `- [ ]` (`pending`), `- [/]` (`in_progress`) or `- [x]` (`completed`). The `todo_list` rules of this section apply to the list.
+  - The adapter keeps the file's text. `write_file` sets it from `Content`, and `edit_file` replaces `Target` with `Replacement`. An edit it cannot apply, and an edit to a file it has not seen, show nothing.
+  - A completed write of `implementation_plan.md` shows a `plan` item whose `detail.content` is the file's text.
+  - The write also stays a `file_change` item. In approval-required `agy` asks for permission to write these files, because they lie outside the workspace, and the Request needs an item to belong to.
+- **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): how `agy` shows a file search, a directory listing, a URL fetch and a delete. The recordings show it searching files with `grep` through `run_command`. A tool this table does not know is a `tool_call` of kind `native`.
+
 ### 6.4 Streaming
 
 `content.delta { itemId, streamKind: "assistant_text" | "reasoning_text" | "command_output", delta }`
@@ -734,6 +771,7 @@ The reference replaces the image in `raw` too, so no copy of the bytes reaches t
 - **Reasoning-summary precedence rule**: where a vendor streams raw and summarized reasoning as separate channels (Codex `item/reasoning/textDelta` and `summaryTextDelta`), the adapter picks one channel per reasoning item, raw preferred, and emits it as `reasoning_text`; the unpicked channel stays raw-only. No fourth stream kind (`reasoning_summary_text` remains an additive option later).
 - *(Amended 2026-10-26, [#770](https://github.com/theagenticage/hercule/issues/770).)* **A completed assistant message that streamed no text still shows its text.** Codex writes some messages in one piece (an async question, section 6.5), so their text arrives only inside `item/completed`, and a client builds a message's text from deltas. When an `agentMessage` completes with text and no non-empty `assistant_text` delta came for that item, the Codex adapter emits the text as one `content.delta` before `item.completed`. A message that streamed is never emitted again, and a repeated `item/completed` for an item adds nothing.
 - The store coalesces deltas in memory and flushes at message/turn boundaries; nothing is persisted per token ([./04-state-store.md](./04-state-store.md)). Watched sessions receive an ephemeral token-delta passthrough ([./14-web-app.md](./14-web-app.md)).
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Antigravity streams no `command_output`: the output arrives whole when the command completes, as on Claude.
 
 ### 6.5 Requests (approvals and questions)
 
@@ -779,6 +817,32 @@ The reference replaces the image in `raw` too, so no copy of the bytes reaches t
 
 A request stays open until ~~`respondToRequest`~~ `respondToApprovalRequest` or `respondToQuestion` *(amended 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))*; the controller surfaces it as a Notification and in the session view ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85): an approval surfaces as a `core.approval` decision, and a `question` surfaces in the session view only, ~~because an answer cannot yet carry answers to questions~~ *(amended 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))* because none of a notification's bound answers fits a set of answers; [#317](https://github.com/theagenticage/hercule/issues/317) decides how a question is announced ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.6).)* `interrupt` on a session with an open request resolves it as `cancel` (spec's consolidated semantics; follows from the park-and-resume abort caveat in section 8.2). *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* With several agents asking, a stop resolves as `cancel` the Requests of every agent it stops, and no others (section 13.4).
 
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity's Requests.** `agy` sends two kinds of request, and the adapter answers every one of them (section 8.2).
+
+- **Approvals.** A `session/request_permission` is an approval. Its `decisions` are built from the options that request offers, never from a fixed list:
+  - `allow_once` gives `allow`, and `reject_once` gives `deny`.
+  - `cancel` is always offered. It is answered with the outcome `cancelled`.
+  - `allow_always` is not offered yet. **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): that `agy` keeps such an answer no longer than its process and writes it to no file, as for-session persistence requires (above). All 12 recorded requests offered only `allow_once` and `reject_once`; another client's fixtures hold requests with a third option.
+  - Any other option kind is left out. A request with no `allow_once` offers no `allow`.
+  - The adapter picks an option by its `kind`, never by its `optionId` or its label.
+  - **The Request's kind follows the tool call's `kind`:** `execute` is `command_approval`, `edit` is `file_change_approval`, `read` is `file_read_approval`, and any other kind is `tool_approval`. `agy` has not asked about a read so far: reads run unasked.
+  - **Nothing confirms a resolution.** The adapter emits `request.resolved` when it sends its reply.
+- **`deny` continues the turn with a follow-up prompt.** `agy` ends a prompt right after a rejected call and makes no model call (seen on 1.5.15: the prompt returned `end_turn` within milliseconds, and nothing came in the next 30 seconds). So the adapter does this:
+  - It answers with the `reject_once` option, and the item is `declined`.
+  - When the prompt's reply arrives, it does not end the turn. It sends one `session/prompt` in the same turn that names the call the user denied, or every call when several were denied, and tells the model to go on without it.
+  - The follow-up is the adapter's, not the user's, so it makes no `user_message`.
+  - The turn ends with the reply to the follow-up. The turn's usage is the sum of its prompts.
+  - There is no follow-up when the turn was interrupted, or when any Request was answered `cancel`.
+  - **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): that the model goes on after the follow-up and that the conversation stays sound. If it does not hold, `deny` behaves as `cancel` on Antigravity, the turn ends `interrupted`, and the clients' line for Deny, that the agent is told and continues, is wrong there.
+- **`cancel` declines the item and interrupts the turn** (section 6.2). `agy` replies `end_turn` to a prompt whose Request was answered this way, not `cancelled`.
+- **Questions.** `agy` asks a question with `elicitation/create` when the client advertises `elicitation: { form: {} }`. Without it, `agy` writes the question as text, leaves its `ask_question` tool call open and ends the turn (seen on 1.5.15). The Request is a `question`:
+  - Each property `qN` of the form's schema is one question. `question` is the property's `title`. `header` is "Question", or "Question 1" to "Question n" when there are several, as for a Codex async question (above). The options are the titles in `oneOf`, and the adapter keeps each option's `const` for the reply. `multiSelect` is false: no other shape is recorded.
+  - A property `qN_other` is not a question. It is the optional free-text answer to question N.
+  - The reply is `{ "action": "accept", "content": { "qN": <const> } }`. A typed answer goes in `qN_other` alone. Why: a reply that held both `q1: "1"` and `q1_other: "Green"` was read as both, and the agent said "You chose Red, Green".
+  - A form the adapter cannot read is answered `{ "action": "cancel" }`, with a `runtime.warning`. It is never left unanswered, because the prompt waits for the answer.
+- **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): `session/cancel` while a Request is open, two Requests open at once, and an answer that arrives while an interrupt is on its way. Section 10.5 has the interrupt rule.
+- **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): a typed answer with no `qN` beside it, several questions in one form, multi-select, declining a question, and questions in full-access.
+
 ### 6.6 Usage and ops
 
 - `session.usage.updated { ... }` - a cumulative token snapshot for the session, taken from Claude `context_usage`, Codex `thread/tokenUsage/updated` and pi `message_end.usage`. Cadence differs per harness; the snapshot shape absorbs that. The field set is below.
@@ -797,6 +861,14 @@ A request stays open until ~~`respondToRequest`~~ `respondToApprovalRequest` or 
 `costUsd` follows the same rules where the harness reports a cost.
 
 *(Amended 2026-10-06, [#437](https://github.com/theagenticage/hercule/issues/437).)* Token Usage can be incomplete when a required historical baseline cannot be restored or discovery drops events. `session.usage.updated` has two exclusive forms: the existing exact `{ usage: Usage }`, or `{ usageReport: { status: "incomplete", counts: Usage } }` with no `usage`. The controller derives each record's `usageReport: { status: "complete" | "incomplete", counts }` from these process reports. Counts remain monotonic known subtotals; once an interval is missing, the lifetime report stays incomplete across resumes. The legacy record field `usage` is present only for a complete report. Screens show incomplete counts with an incomplete label and never reuse an earlier exact count. Missing reports remain absent, distinct from a reported zero.
+
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity's usage.**
+
+- `agy` reports usage on the reply to each `session/prompt`, a cancelled prompt included. The adapter adds the replies up per process, as the rule above asks, and emits `session.usage.updated` after each reply.
+- `inputTokens` leaves out cache reads, so it fits the four parts above as it is. `outputTokens` already includes the thought tokens, so the adapter never adds `thoughtTokens` again. The reply's `totalTokens` is the sum of the four parts: 21453 + 935 + 40912 + 0 = 63300 in one recorded reply.
+- `agy` reports no cost, so `costUsd` is absent.
+- The adapter reports the incomplete form once a subagent has run in the process, or output has come with no prompt open, because neither is in any reply. **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): that a subagent's tokens are in no reply.
+- After every model call `agy` also sends `usage_update { used, size }`, how full the context window is (`size` was 1,048,576 in the recordings). The v1 snapshot has no field for it, so the adapter drops it. A follow-up adds the field that the assistant rotation threshold needs (above).
 
 ### 6.7 Trimmed on purpose
 
@@ -934,6 +1006,22 @@ Every other pi event is dropped on purpose:
 | `summarization_retry_scheduled`, `summarization_retry_attempt_start`, `summarization_retry_finished` | retries inside the summary call of a compaction or a branch summary; the compaction item shows how it ended |
 | `bash_execution_update` | it streams a `bash` RPC command, which the adapter never sends |
 
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Every Antigravity message gets a decision.** The runner holds one table with an entry for every `sessionUpdate` value and every request that `agy` 1.5.15 sends. Like pi's, it is typed over a literal list of the names, because Hercule depends on no type package of `agy`. Adding a name to the list fails typecheck until the name is decided, but the compiler cannot see a newer `agy`. A `sessionUpdate` or a request that is not in the table becomes an `unknown` item labelled `antigravity: <sessionUpdate>` or `antigravity: <method>` (section 6.3). A known message whose fields cannot be read becomes the same item. A known message with extra fields is read as usual, and the extra fields stay in `raw`.
+
+| Message | Decision |
+|---|---|
+| `agent_message_chunk`, `agent_thought_chunk` | `assistant_message` and `reasoning` items and their `content.delta` (sections 6.3 and 6.4) |
+| `tool_call`, `tool_call_update` | items, by the tool's name (section 6.3) |
+| `usage_update` | dropped, after it closes the open message: the context window has no field yet (section 6.6) |
+| `available_commands_update` | dropped: Hercule offers none of `agy`'s slash commands |
+| `session_info_update` | dropped: Hercule names its own Threads |
+| `current_mode_update`, `config_option_update` | not drawn: the adapter reads them to check the mode and the model (section 8.1) |
+| `user_message_chunk` | dropped: the input is already reported as a `user_message`. No recording shows one. **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): what a resume replays |
+| `plan` and any other value | an `unknown` item labelled `antigravity: <sessionUpdate>`. No recording shows `agy` sending `plan` |
+| request `session/request_permission` | an approval Request (section 6.5) |
+| request `elicitation/create` | a `question` Request (section 6.5) |
+| any other request | answered at once with the JSON-RPC error "method not found", and an `unknown` item labelled `antigravity: <method>`. The client advertises no `fs` and no `terminal`, so `agy` has no reason to send one, and an unanswered request would leave a prompt waiting |
+
 ## 7. Structured output
 
 An agent step may declare an output schema; the graph routes on the schema-conforming result ([./07-workflows.md](./07-workflows.md), ADR 0008). The runner obtains it by the harness's native-enough mechanism; a closing prompt with parse-and-retry is never used.
@@ -943,6 +1031,9 @@ An agent step may declare an output schema; the graph routes on the schema-confo
 | Claude Code | `outputFormat: { type: "json_schema", schema }` on `query()`; SDK validates and re-prompts | `structured_output` on the final `result` message | `subtype: "error_max_structured_output_retries"`, or `success` with no `structured_output` (treated as failure per SDK docs) |
 | Codex | `outputSchema` on `turn/start` (stable, not experimental-gated); enforced server-side as strict constrained decoding | text of the turn's final `agentMessage` item | turn `failed`, or turn completed with a final item that is not an `agentMessage` (missing output; ~~the adapter may retry with a fresh `turn/start`, default once~~) |
 | pi | `submit_result` tool registered by the Hercule extension file (section 10.3): Typebox parameters = output schema, ~~`terminate: true`~~, `constrainedSampling: { type: "json_schema", strict: "prefer" }`; pi validates args and feeds violations back to the model | the tool's captured args (~~carried on `tool_execution_end`~~; a trailing assistant message is ignored) | agent settled without calling the tool: adapter re-prompts ("You must call submit_result with ...") a bounded number of times (default 2 retries, the research's example figure), then schema-failure |
+| Antigravity *(added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278))* | none: unsupported in a session | none | none |
+
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Antigravity declares `structuredOutput: "unsupported"`, because `agy`'s ACP takes no output schema, so a session with an `outputSchema` is refused (section 2); its print mode has `--json-schema`, but that serves Text Generation only (section 14.4).
 
 *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* Four corrections: three to the pi row, from building it against pi 0.85.1, and one to the Codex row. **Where the args come from:** a call's arguments are carried on `tool_execution_start` and on nothing else, so the adapter captures them there and reads them when the matching `tool_execution_end` arrives; the end frame alone would answer the turn with nothing. **Where `terminate` lives:** it is a field of the tool's execute result, returned by the call, not a field of the registration - the same in section 10.3's extension-file paragraph. **Two bounds on the failure signal, one per harness**, both named in `apps/runner/src/harnesses/pi/adapter.ts` - `MAX_REPROMPTS` for the re-prompts and `MAX_REFUSED_ANSWERS` for the refused answers. pi stops asking after three answers pi's own argument validation refused: a model argues with the validator indefinitely on a schema no value can satisfy, so the settle the re-prompt bound waits for never comes; the adapter ends pi's run and reports the last answer's schema-failure on a `completed` turn. On Codex the API refuses an unsatisfiable schema before any sampling happens - `invalid_json_schema` on `response_format 'codex_output_schema'` - and the adapter reports that as a schema-failure carrying the API's own sentence, on a `failed` turn. **No retry on Codex:** the Codex row's struck clause promised a fresh `turn/start` after a turn that ended without a value, and the adapter as shipped never retries - a turn that answered nothing is reported as a schema-failure at once, because the one failure seen live is the API refusing the schema, which a second identical `turn/start` would only be refused for again.
 
@@ -965,12 +1056,27 @@ The runner re-validates `value` against the declared schema before routing, on e
 
 ### 8.1 Mapping table (normative)
 
-| Hercule mode | Claude Code | Codex | pi |
-|---|---|---|---|
-| approval-required | SDK default mode + `canUseTool` parks -> `request.opened`, resumes on decision | `approvalPolicy: "untrusted"` + `sandbox: "read-only"`; approvals arrive as server-to-client requests | `tool_call` handler parks -> `request.opened`, resumes on decision (native park-and-resume) *(Amended 2026-10-10, [#516](https://github.com/theagenticage/hercule/issues/516): pi's read-only tools `read`, `grep`, `find` and `ls` run unasked in this mode.)* |
-| auto-accept-edits | `permissionMode: "acceptEdits"` | `approvalPolicy: "on-request"` + `sandbox: "workspace-write"` | handler allows edit/write tools, parks the rest *(Amended 2026-10-10, [#516](https://github.com/theagenticage/hercule/issues/516): pi's read-only tools `read`, `grep`, `find` and `ls` run unasked in this mode.)* |
-| auto | `permissionMode: "auto"` (native) | `approvalsReviewer: "auto_review"` (native) | unsupported (falls back, section 8.4) |
-| full-access | `permissionMode: "bypassPermissions"` + `allowDangerouslySkipPermissions: true` *(Amended 2026-10-26, [#770](https://github.com/theagenticage/hercule/issues/770): `canUseTool` is passed here too, see below.)* | `approvalPolicy: "never"` + `sandbox: "danger-full-access"` | handler allows all |
+| Hercule mode | Claude Code | Codex | pi | Antigravity *(added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278))* |
+|---|---|---|---|---|
+| approval-required | SDK default mode + `canUseTool` parks -> `request.opened`, resumes on decision | `approvalPolicy: "untrusted"` + `sandbox: "read-only"`; approvals arrive as server-to-client requests | `tool_call` handler parks -> `request.opened`, resumes on decision (native park-and-resume) *(Amended 2026-10-10, [#516](https://github.com/theagenticage/hercule/issues/516): pi's read-only tools `read`, `grep`, `find` and `ls` run unasked in this mode.)* | mode `default` |
+| auto-accept-edits | `permissionMode: "acceptEdits"` | `approvalPolicy: "on-request"` + `sandbox: "workspace-write"` | handler allows edit/write tools, parks the rest *(Amended 2026-10-10, [#516](https://github.com/theagenticage/hercule/issues/516): pi's read-only tools `read`, `grep`, `find` and `ls` run unasked in this mode.)* | mode `accept-edits` |
+| auto | `permissionMode: "auto"` (native) | `approvalsReviewer: "auto_review"` (native) | unsupported (falls back, section 8.4) | mode `auto` |
+| full-access | `permissionMode: "bypassPermissions"` + `allowDangerouslySkipPermissions: true` *(Amended 2026-10-26, [#770](https://github.com/theagenticage/hercule/issues/770): `canUseTool` is passed here too, see below.)* | `approvalPolicy: "never"` + `sandbox: "danger-full-access"` | handler allows all | `--dangerously-skip-permissions` at spawn |
+
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity.** Notes on the column, and the rules for its mode:
+
+- **Parking.** Antigravity is an RPC-approval harness like Codex: a parked approval is a held reply to `session/request_permission`.
+- **What asks.** Reads run unasked. Edits and commands ask in `default`. MCP calls ask in `default`, `accept-edits` and `auto`, also for a tool marked read-only, and ask nothing in full-access. In `auto`, a command with `BypassSandbox: true` ran with no question.
+- **`plan` is never used.** Plan mode has no request to approve a plan: the turn just ends.
+- **Deny.** A denied call ends the prompt, and the adapter goes on with a follow-up prompt in the same turn (section 6.5).
+- **Plan files ask.** The files `agy` writes for its own plan (section 6.3) lie outside the workspace, so in approval-required each such write asks. Nothing is allowed on the user's behalf.
+- **The adapter sets the mode after `session/new` or `session/resume`, before the first prompt, and only when the reply's `modes.currentModeId` differs.** The reply to `session/set_mode` is an empty object and proves nothing. The proof of a mode is `modes.currentModeId` in the reply to `session/new` or `session/resume`, and then `current_mode_update`. That update came before the reply to `set_mode` in one recording and after it in another, so the adapter waits for it for at most 5 seconds.
+- **The order of the modes is `default`, `accept-edits`, `auto`.** `plan` and any other value are not in it.
+- **A start with no report, or with a mode that is unknown or more permissive than the one set, fails** with `AdapterFailed`, and no prompt is sent.
+- **A start with a less permissive mode succeeds,** with a `runtime.warning` that names both modes: `agy` then asks more than the user chose, never less.
+- **During the session,** a more permissive mode that the adapter did not set is a `runtime.error`: "Antigravity changed its own permission mode from <a> to <b>, so Hercule stopped it." The adapter stops the process. The session exits with reason `crash`, and the next input resumes it with the right mode. Any other change the adapter did not make is a `runtime.warning`, and the adapter sets its mode again before the next prompt.
+- **Full-access is a spawn flag with no report,** so the adapter sets no mode and checks none there.
+- **Verify at build time** ([#1282](https://github.com/theagenticage/hercule/issues/1282)): whether `auto` can stay in `default`, as another client reports, and whether `agy` changes its mode on its own.
 
 Claude and pi are park-and-resume harnesses: the approval seam is an awaited callback (`canUseTool`; pi's `tool_call` extension handler, awaited with no timeout, verified in source at v0.84.x) that the adapter does not return from until ~~`respondToRequest`~~ `respondToApprovalRequest`, or `respondToQuestion` for a question, *(amended 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))* arrives; `undefined` / allow lets the call execute as-is, deny returns a reason the model sees. Codex is the RPC-approval harness: `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/fileRead/requestApproval`, `item/tool/requestUserInput`, `mcpServer/elicitation/request` and `item/permissions/requestApproval` are server-to-client JSON-RPC requests the adapter MUST answer or the turn hangs; each maps to a `request.opened` and is answered from the decision (`accept` / `acceptForSession` / `decline` / `cancel`).
 
@@ -1001,6 +1107,7 @@ From `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), 
 - *(Added 2026-10-10, [#516](https://github.com/theagenticage/hercule/issues/516).)* **The approval card describes the call pi will run.** pi validates and converts a call's arguments after `tool_execution_start` and before the `tool_call` hook, so the arguments on `tool_execution_start` can differ from what runs: a `write` whose `path` the model sent as the number `42` writes the file `42`. The hook's dialog message is the JSON `{ toolCallId, toolName, command?, path? }`, where `command` and `path` come from the hook's validated `event.input` and are present only when they are strings. The adapter finds the call's item by `toolCallId` and builds the card's command or paths from the message, never from `tool_execution_start`. The rest of the input stays out of the message, because a `write`'s content can be megabytes and the message is one RPC frame.
 - While parked no LLM connection is held open; the turn stays active; `tool_execution_start` has already fired, so the UI overlays "awaiting approval" on the started item.
 - On Claude, `canUseTool` is reached only when the pipeline falls through to a prompt; auto-approved tools never hit it. That is the intended behaviour for the mapped modes. *(Amended 2026-10-26, [#770](https://github.com/theagenticage/hercule/issues/770).)* In `full-access` the callback is passed, and only a question and a call that always needs approval fall through to it (section 8.1); the question is the reason it is there. A `PreToolUse` hook is the seam if every call must be observed. In `approval-required`, which actions are asked about is the harness's own judgement: Claude Code decides read-only shell itself, so only mutating commands park - `ls -la` ran without the callback being called at all, while `touch proof.txt` parked *(observed 2026-09-14, [#70](https://github.com/theagenticage/hercule/issues/70), CLI 2.1.270)*.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity answers every request it sends.** It is an RPC-approval harness like Codex. A `session/request_permission` or an `elicitation/create` that is not answered leaves the prompt waiting for it, and any other request gets a "method not found" reply (section 6.7).
 
 ### 8.3 Codex sandbox caveats
 
