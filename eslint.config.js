@@ -130,7 +130,8 @@ const buildImportCalls = (source, message) => [
  * Each library that draws or edits a workflow sits behind a facade, so that
  * it can be replaced there without a change anywhere else. A fence rejects an
  * import of the library's packages everywhere but in its facade, in a static
- * import and in a dynamic `import()` alike.
+ * import and in a dynamic `import()` alike. The fence of the copy of T3 Code's
+ * ACP client, further down, is held the same way.
  */
 const fenceLibrary = (scopes, message) => ({
   pattern: { group: scopes.map((scope) => `${scope}/*`), message },
@@ -150,9 +151,63 @@ const dagreFence = fenceLibrary(
   ["@dagrejs"],
   `The layout engine is imported only in ${graphLayout}, so that it can be replaced there alone. Use computeGraphLayout from @hercule/client-core/graph-layout.`,
 );
-const editorLibraryFences = [codeMirrorFence, reactFlowFence, dagreFence];
-const editorLibraryPatterns = editorLibraryFences.map((fence) => fence.pattern);
-const editorLibraryCalls = editorLibraryFences.flatMap((fence) => fence.calls);
+/**
+ * The ACP client of `packages/acp` is a copy of T3 Code's, replaced as a whole
+ * on every sync, so its API can change under us. Only `src/connection.ts`
+ * imports the copy and turns what it returns into the package's own types.
+ * Everyone else, tests of the package included, imports `@hercule/acp`, and
+ * `@hercule/acp/testing` for the fake harness. The fence matches the text of
+ * the specifier, so a relative path, an absolute path and a path through
+ * `node_modules` are all refused, and so is an import of a type. It also
+ * refuses every other subpath of `@hercule/acp`, which would reach the copy
+ * through the package.
+ */
+const acpFenceMessage =
+  "The copy of T3 Code's ACP client is imported only in packages/acp/src/connection.ts, so that a sync with T3 Code can break that one file and nothing else learns the library's types. Import from @hercule/acp, and from @hercule/acp/testing for the fake harness; export from the package's index.ts what you need.";
+const acpFenceSpecifiers = "vendor/effect-acp|^@hercule/acp/(?!testing$)";
+const acpFenceSource = `/${acpFenceSpecifiers.replaceAll("/", "\\x2F")}/`;
+const acpFence = {
+  pattern: { regex: acpFenceSpecifiers, message: acpFenceMessage },
+  calls: [
+    ...buildImportCalls(acpFenceSource, acpFenceMessage),
+    {
+      selector: `CallExpression[callee.name='require'][arguments.0.value=${acpFenceSource}]`,
+      message: acpFenceMessage,
+    },
+    {
+      selector: `TSImportType[source.value=${acpFenceSource}]`,
+      message: acpFenceMessage,
+    },
+  ],
+};
+
+const libraryFences = [codeMirrorFence, reactFlowFence, dagreFence, acpFence];
+const libraryPatterns = libraryFences.map((fence) => fence.pattern);
+const libraryCalls = libraryFences.flatMap((fence) => fence.calls);
+
+/**
+ * The rules of a facade: every ban of the base block, which a block's options
+ * replace, except the fence of the library that this facade is the one file
+ * to import.
+ */
+const buildFacadeRules = (facadeFence) => {
+  const fences = libraryFences.filter((fence) => fence !== facadeFence);
+  return {
+    "no-restricted-imports": [
+      "error",
+      {
+        paths: [...bannedEverywhere, ...bannedChildProcess],
+        patterns: fences.map((fence) => fence.pattern),
+      },
+    ],
+    "no-restricted-syntax": [
+      "error",
+      ...bannedChildProcessCalls,
+      ...inlineSchemaCalls,
+      ...fences.flatMap((fence) => fence.calls),
+    ],
+  };
+};
 
 /** The workflow editor is one module: the rest of the app reaches it through its index only. */
 const workflowEditorFenceMessage =
@@ -190,7 +245,7 @@ const browserImports = ({ allowed, more = [] } = {}) => [
       routeLocalPattern,
       workflowEditorFencePattern,
       yamlPattern,
-      ...editorLibraryFences.filter((fence) => fence !== allowed).map((fence) => fence.pattern),
+      ...libraryFences.filter((fence) => fence !== allowed).map((fence) => fence.pattern),
       ...more,
     ],
   },
@@ -206,7 +261,7 @@ const browserSyntax = ({ allowed, more = [] } = {}) => [
   ...inlineSchemaCalls,
   ...workflowEditorFenceCalls,
   ...yamlCalls,
-  ...editorLibraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
+  ...libraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
   ...more,
 ];
 
@@ -325,13 +380,13 @@ export default tseslint.config(
     rules: {
       "no-restricted-imports": [
         "error",
-        { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: editorLibraryPatterns },
+        { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: libraryPatterns },
       ],
       "no-restricted-syntax": [
         "error",
         ...bannedChildProcessCalls,
         ...inlineSchemaCalls,
-        ...editorLibraryCalls,
+        ...libraryCalls,
       ],
       // `import { type X } from "./x"` keeps an import of `./x` after the types
       // are removed, because the repository compiles with verbatimModuleSyntax.
@@ -452,28 +507,15 @@ export default tseslint.config(
     },
   },
   {
-    // The layout engine's facade. It keeps every ban of the base block above,
-    // because a rule's options here replace the ones there.
+    // The layout engine's facade. It keeps every ban of the base block, because
+    // a rule's options here replace the ones there.
     files: [graphLayout],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [...bannedEverywhere, ...bannedChildProcess],
-          patterns: editorLibraryFences
-            .filter((fence) => fence !== dagreFence)
-            .map((fence) => fence.pattern),
-        },
-      ],
-      "no-restricted-syntax": [
-        "error",
-        ...bannedChildProcessCalls,
-        ...inlineSchemaCalls,
-        ...editorLibraryFences
-          .filter((fence) => fence !== dagreFence)
-          .flatMap((fence) => fence.calls),
-      ],
-    },
+    rules: buildFacadeRules(dagreFence),
+  },
+  {
+    // The one file that imports the copy of T3 Code's ACP client.
+    files: ["packages/acp/src/connection.ts"],
+    rules: buildFacadeRules(acpFence),
   },
   {
     // The desktop app's Node code: main, and the build tooling around it.
@@ -495,7 +537,7 @@ export default tseslint.config(
         "error",
         ...bannedChildProcessCalls,
         ...inlineSchemaCalls,
-        ...editorLibraryCalls,
+        ...libraryCalls,
         viteGlobSyntax,
       ],
     },
@@ -548,11 +590,8 @@ export default tseslint.config(
       "e2e/https-stand-in.ts",
     ],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedEverywhere, patterns: editorLibraryPatterns },
-      ],
-      "no-restricted-syntax": ["error", ...inlineSchemaCalls, ...editorLibraryCalls],
+      "no-restricted-imports": ["error", { paths: bannedEverywhere, patterns: libraryPatterns }],
+      "no-restricted-syntax": ["error", ...inlineSchemaCalls, ...libraryCalls],
     },
   },
   {
@@ -562,10 +601,7 @@ export default tseslint.config(
     // installed Hercule binary, the user's login shell, and git.
     files: ["apps/desktop/src/main/run-program.ts"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedEverywhere, patterns: editorLibraryPatterns },
-      ],
+      "no-restricted-imports": ["error", { paths: bannedEverywhere, patterns: libraryPatterns }],
     },
   },
   {

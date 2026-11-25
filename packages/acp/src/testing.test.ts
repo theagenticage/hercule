@@ -7,6 +7,7 @@
 import { readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  answerWith,
   readRecording,
   RECORDING_NAMES,
   startFakeHarness,
@@ -180,11 +181,11 @@ describe("a turn", () => {
   });
 });
 
-describe("a request the recording does not answer", () => {
-  it("is answered from replies when it has one, and with -32601 naming the method when it has none", async () => {
+describe("a request outside the gates of the recording", () => {
+  it("is answered by a script when there is one, and with -32601 naming the method when there is none", async () => {
     const { harness, sent, write, settle } = connect({
       recording: [request(1, "initialize"), reply("in", 1, { protocolVersion: 1 })],
-      replies: { "session/set_mode": {} },
+      scripts: { "session/set_mode": answerWith({}) },
     });
 
     write({ id: 10, method: "session/set_mode" });
@@ -202,6 +203,66 @@ describe("a request the recording does not answer", () => {
       "session/close",
       "some/notification",
     ]);
+  });
+});
+
+describe("a script", () => {
+  it("wins over the setup part of the recording, and gets the id and params of the request", async () => {
+    const calls: Array<unknown> = [];
+    const { sent, write, settle } = connect({
+      recording: readRecording("steer2"),
+      scripts: {
+        initialize: (call) => {
+          calls.push(call);
+          return [{ jsonrpc: "2.0", id: call.id, result: { scripted: true } }];
+        },
+      },
+    });
+
+    write({ id: 7, method: "initialize", params: { a: 1 } });
+    await settle();
+
+    expect(calls).toEqual([{ id: 7, params: { a: 1 } }]);
+    expect(sent.map((message) => message.result)).toEqual([{ scripted: true }]);
+  });
+
+  it("can end or break the output, and break writes, after the lines it returns", async () => {
+    const lines = async (harness: ReturnType<typeof startFakeHarness>) => {
+      const read: Array<string> = [];
+      try {
+        for await (const line of harness.stdout) read.push(line);
+      } catch (error) {
+        read.push(`failed: ${String(error)}`);
+      }
+      return read;
+    };
+    const ending = startFakeHarness({
+      scripts: {
+        a: (call, harness) => {
+          harness.end();
+          return [{ jsonrpc: "2.0", id: call.id, result: 1 }, "raw text"];
+        },
+      },
+    });
+    ending.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "a" })}\n`);
+    expect(await lines(ending)).toEqual(['{"jsonrpc":"2.0","id":1,"result":1}', "raw text"]);
+
+    const failing = startFakeHarness({
+      scripts: {
+        a: (call, harness) => {
+          harness.failOutput(new Error("the pipe broke"));
+          return [{ jsonrpc: "2.0", id: call.id, result: 1 }];
+        },
+      },
+    });
+    failing.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "a" })}\n`);
+    expect(await lines(failing)).toEqual([
+      '{"jsonrpc":"2.0","id":1,"result":1}',
+      "failed: Error: the pipe broke",
+    ]);
+
+    failing.failWrites(new Error("EPIPE"));
+    expect(() => failing.write("x\n")).toThrow("EPIPE");
   });
 });
 

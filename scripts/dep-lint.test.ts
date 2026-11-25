@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -556,103 +556,5 @@ describe("the runner's user material", () => {
     expect(refusal, `dep-lint accepted ${file} importing user-material/`).toBeDefined();
     expect(refusal!.stderr).toContain(`    ${reported}\n`);
     expect(refusal!.stderr).toContain("ADR 0032");
-  });
-});
-
-/**
- * Only `packages/acp/src/connection.ts` imports `packages/acp/vendor/`, the
- * copy of T3 Code's ACP client. Each case writes a small repository into a
- * copy's root: the connection imports the copy, the copy's files import each
- * other, and a file that names the folder only in a comment imports nothing.
- */
-describe("the copy of T3 Code's ACP client", () => {
-  const CLEAN_ACP = {
-    "packages/acp/vendor/effect-acp/src/client.ts":
-      'import { Frame } from "./protocol.ts";\nexport const make = Frame;\n',
-    "packages/acp/vendor/effect-acp/src/protocol.ts": "export const Frame = 1;\n",
-    "packages/acp/src/connection.ts":
-      'import { make } from "../vendor/effect-acp/src/client.ts";\nexport const open = make;\n',
-    "apps/runner/src/index.ts":
-      "// The vendor folder of @hercule/acp is not imported here.\nexport const run = 1;\n",
-  };
-
-  /** Writes `files` into a copy's root, and returns the copy's path. */
-  const createAcpRoot = async (files: Readonly<Record<string, string>>): Promise<string> => {
-    const script = await createScriptRoot(`${SDK}@0.3.263`);
-    for (const [name, body] of Object.entries(files)) {
-      const file = join(dirname(script), "..", name);
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, body);
-    }
-    return script;
-  };
-
-  it("passes when only the connection imports it", async () => {
-    const { stdout } = await runDepLint("runner", "clean.ts", await createAcpRoot(CLEAN_ACP));
-
-    expect(stdout).toContain("only packages/acp/src/connection.ts imports packages/acp/vendor/");
-  });
-
-  // Each case is the file that imports the copy, its body and the line dep-lint
-  // reports it with. Both take the root of the copy of the repository, for an
-  // import by absolute path.
-  it.each([
-    [
-      "a runner file imports it at runtime",
-      "apps/runner/src/index.ts",
-      () =>
-        'import { make } from "../../../packages/acp/vendor/effect-acp/src/client.ts";\nexport const run = make;\n',
-      () =>
-        'apps/runner/src/index.ts imports "../../../packages/acp/vendor/effect-acp/src/client.ts"',
-    ],
-    [
-      "a file of the package imports a type from it",
-      "packages/acp/src/messages.ts",
-      () =>
-        'import type { Frame } from "../vendor/effect-acp/src/protocol.ts";\nexport type Message = typeof Frame;\n',
-      () => 'packages/acp/src/messages.ts imports "../vendor/effect-acp/src/protocol.ts"',
-    ],
-    [
-      "a test imports it",
-      "packages/acp/src/connection.test.ts",
-      () =>
-        'import { make } from "../vendor/effect-acp/src/client.ts";\nexport const run = make;\n',
-      () => 'packages/acp/src/connection.test.ts imports "../vendor/effect-acp/src/client.ts"',
-    ],
-    [
-      "a JavaScript module re-exports it",
-      "packages/acp/src/messages.mjs",
-      () => 'export * from "../vendor/effect-acp/src/protocol.ts";\n',
-      () => 'packages/acp/src/messages.mjs imports "../vendor/effect-acp/src/protocol.ts"',
-    ],
-    [
-      "a CommonJS file requires it",
-      "apps/runner/src/legacy.cjs",
-      () => 'module.exports = require("../../../packages/acp/vendor/effect-acp/src/client.ts");\n',
-      () =>
-        'apps/runner/src/legacy.cjs imports "../../../packages/acp/vendor/effect-acp/src/client.ts"',
-    ],
-    [
-      "a file imports it by an absolute path",
-      "apps/runner/src/absolute.ts",
-      (root: string) =>
-        `import { make } from "${root}/packages/acp/vendor/effect-acp/src/client.ts";\nexport const run = make;\n`,
-      (root: string) =>
-        `apps/runner/src/absolute.ts imports "${root}/packages/acp/vendor/effect-acp/src/client.ts"`,
-    ],
-  ])("fails when %s", async (_, file, body, reported) => {
-    const script = await createAcpRoot(CLEAN_ACP);
-    // Bun reports the real path of the copy, so an absolute import must use it too.
-    const copyRoot = await realpath(resolve(dirname(script), ".."));
-    await writeFile(join(copyRoot, file), body(copyRoot));
-
-    const refusal = await runDepLint("runner", "clean.ts", script).then(
-      () => undefined,
-      (thrown: { readonly stderr: string }) => thrown,
-    );
-
-    expect(refusal, `dep-lint accepted ${file} importing the vendored client`).toBeDefined();
-    expect(refusal!.stderr).toContain(`    ${reported(copyRoot)}\n`);
-    expect(refusal!.stderr).toContain("Import from @hercule/acp instead");
   });
 });

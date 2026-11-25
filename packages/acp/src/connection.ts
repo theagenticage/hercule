@@ -9,26 +9,36 @@
  * vendored client, so a change there reaches the rest of the code only
  * through here.
  *
- * A value that the vendored client's schemas do not know, or that ACP version
- * 1 does not allow, is never dropped silently: the message is reported to
- * `onUnhandledMessage` or fails the call, and names the field and the value.
+ * The vendored client decodes strictly. A value it cannot read is never
+ * dropped silently: it fails the call or is reported to `onUnhandledMessage`,
+ * with the field that was the problem and advice to sync the copy. What the
+ * client does not decode is read from its own hooks, because our stdin gives
+ * it one line at a time:
+ *
+ * - The `logger` shows each message before it is handled, so the handler that
+ *   runs next finds the untouched `params` (`raw`), and a refused reply finds
+ *   the value that was refused. It also shows a dropped update and each
+ *   answer to a request of the harness.
+ * - `onIncomingRequest` hands over the untouched `params` of a request of the
+ *   harness, which the handler reads when it starts.
  */
 import * as Cause from "effect/Cause";
-import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import type * as Scope from "effect/Scope";
+import * as Sink from "effect/Sink";
+import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
-import * as SchemaV1 from "../vendor/effect-acp/src/_generated/schema-v1.gen";
 import * as VendorClient from "../vendor/effect-acp/src/client";
-import * as Compat from "../vendor/effect-acp/src/compat";
+import type * as Compat from "../vendor/effect-acp/src/compat";
 import * as VendorErrors from "../vendor/effect-acp/src/errors";
 import { acpRequestIdentity } from "../vendor/effect-acp/src/protocol";
 import { AcpError } from "./error";
-import { createHarnessStdio } from "./stdio";
 import type {
   AcpConnection,
   AcpHandlers,
@@ -38,8 +48,6 @@ import type {
   SessionSettings,
   SessionUpdate,
 } from "./types";
-import { describeRefusal, describeUnreadable, type Sender } from "./unreadable";
-import { createWireMemory, type CallTicket, type RefusedRequest, type WireMemory } from "./wire";
 
 /**
  * How long a call waits for its reply, `session/prompt` excepted: a turn may
@@ -49,118 +57,53 @@ import { createWireMemory, type CallTicket, type RefusedRequest, type WireMemory
 const CALL_DEADLINE = Duration.seconds(30);
 
 /**
- * The ACP version 1 schema of every message the connection reads, by ACP
- * method, and who starts that message. The vendored client's schemas are
- * unions with version 2, which accept and empty a value that version 1
- * refuses. These schemas name the field that was the problem.
+ * How long the connection waits for the end of `stdout` after the process has
+ * exited. A descendant of the process may hold the pipe open, but a last reply
+ * that is still in the pipe is read well within this time.
  */
-const METHOD_SCHEMAS: ReadonlyMap<
-  string,
-  { readonly sender: Sender; readonly schema: Schema.Decoder<unknown> }
-> = new Map([
-  ["initialize", { sender: "answered", schema: SchemaV1.InitializeResponse }],
-  ["authenticate", { sender: "answered", schema: SchemaV1.AuthenticateResponse }],
-  [
-    "session/new",
-    {
-      sender: "answered",
-      schema: Schema.Struct({
-        ...SchemaV1.NewSessionResponse.fields,
-        models: Schema.optionalKey(Schema.NullOr(Compat.SessionModelState)),
-      }),
-    },
-  ],
-  [
-    "session/resume",
-    {
-      sender: "answered",
-      schema: Schema.Struct({
-        ...SchemaV1.ResumeSessionResponse.fields,
-        models: Schema.optionalKey(Schema.NullOr(Compat.SessionModelState)),
-      }),
-    },
-  ],
-  ["session/close", { sender: "answered", schema: SchemaV1.CloseSessionResponse }],
-  ["session/set_mode", { sender: "answered", schema: SchemaV1.SetSessionModeResponse }],
-  [
-    "session/set_config_option",
-    { sender: "answered", schema: SchemaV1.SetSessionConfigOptionResponse },
-  ],
-  ["session/prompt", { sender: "answered", schema: SchemaV1.PromptResponse }],
-  ["session/update", { sender: "sent", schema: SchemaV1.SessionNotification }],
-  ["session/request_permission", { sender: "sent", schema: SchemaV1.RequestPermissionRequest }],
-  ["elicitation/create", { sender: "sent", schema: SchemaV1.CreateElicitationRequest }],
-]);
+const EXIT_GRACE = Duration.millis(250);
+
+const SYNC_ADVICE = "Sync packages/acp/vendor with T3 Code (packages/acp/README.md).";
+
+/** The longest harness text that `quoteHarnessText` leaves whole. */
+const QUOTE_LENGTH = 200;
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 /**
- * Returns a sentence that names the field and the value of `payload` that ACP
- * version 1 does not allow in a message of `method`. Returns `undefined` when
- * `payload` is allowed, or when `sender` did not start messages of `method`
- * here: a harness may send a request named like one of our calls.
+ * A message that the vendored client logs, in the part this file reads: a
+ * request or notification has a `payload` (its `params`), and an answer
+ * (`Exit`) has the `requestId` it belongs to.
  */
-const describeMethodRefusal = (
-  options: {
-    readonly method: string;
-    readonly sender: Sender;
-    readonly payload: unknown;
-  },
-  wire: WireMemory,
-): string | undefined => {
-  const entry = METHOD_SCHEMAS.get(options.method);
-  return entry?.sender === options.sender
-    ? describeRefusal({ ...options, schema: entry.schema, quote: wire.quoteHarnessText })
-    : undefined;
-};
+const LoggedMessage = Schema.Struct({
+  _tag: Schema.String,
+  requestId: Schema.optionalKey(Schema.Union([Schema.String, Schema.Number])),
+  payload: Schema.optionalKey(Schema.Unknown),
+  exit: Schema.optionalKey(
+    Schema.Struct({
+      _tag: Schema.String,
+      value: Schema.optionalKey(Schema.Unknown),
+      cause: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            error: Schema.optionalKey(
+              Schema.Struct({
+                code: Schema.optionalKey(Schema.Number),
+                message: Schema.optionalKey(Schema.String),
+              }),
+            ),
+            defect: Schema.optionalKey(Schema.Unknown),
+          }),
+        ),
+      ),
+    }),
+  ),
+});
+type LoggedMessage = typeof LoggedMessage.Type;
 
-/**
- * Returns `describeMethodRefusal`'s sentence, or, when it names no field, a
- * sentence that shows `detail`, the vendored client's own account.
- */
-const describeUnreadableMessage = (
-  options: {
-    readonly method: string;
-    readonly sender: Sender;
-    readonly payload: unknown;
-    readonly detail: string;
-  },
-  wire: WireMemory,
-): string =>
-  describeMethodRefusal(options, wire) ??
-  describeUnreadable({ ...options, quote: wire.quoteHarnessText });
-
-/** Describes why the vendored client ended its connection, for the `message` of an `AcpError`. */
-const describeTermination = (error: VendorErrors.AcpError, wire: WireMemory): string =>
-  error._tag === "AcpProtocolParseError" && error.operation === "decode-wire-message"
-    ? `The harness wrote a line that is not a JSON-RPC message, or ended in the middle of one, so nothing it sends can be trusted any more. The line starts with: ${wire.quoteHarnessText(wire.getLastLineRead().line)}`
-    : error._tag === "AcpInputStreamEndedError"
-      ? "The harness closed its output."
-      : wire.quoteHarnessText(error.message);
-
-/** Describes a request of the harness that the vendored client answered with an error. */
-const describeRefusedRequest = ({ request, error }: RefusedRequest, wire: WireMemory): string => {
-  const detail =
-    typeof error === "object" && error !== null && "message" in error
-      ? String(error.message).replace(/\.$/, "")
-      : "no reason was given";
-  return (
-    describeMethodRefusal(
-      { method: request.method, sender: "sent", payload: request.params },
-      wire,
-    ) ??
-    `The harness sent the request ${wire.quoteHarnessText(request.method)}, which this version could not answer: ${wire.quoteHarnessText(detail)}.`
-  );
-};
-
-/**
- * Returns a sentence when `reply` to `initialize` is an ACP version 2 reply,
- * and `undefined` otherwise. The vendored client takes a reply with an `info`
- * field for version 2, and so do we: a version 1 reply that only says its
- * protocol version is 2, as Antigravity's does, is a version 1 reply.
- */
-const describeVersionTwoReply = (reply: unknown): string | undefined =>
-  typeof reply === "object" && reply !== null && "info" in reply
-    ? 'The harness speaks ACP version 2, which this version does not: its reply to initialize has an "info" field, which only version 2 has.'
-    : undefined;
+const readIncomingMessages = Schema.decodeUnknownOption(Schema.Array(LoggedMessage));
+const readOutgoingMessage = Schema.decodeUnknownOption(LoggedMessage);
 
 /** What the vendored client logs when it drops a notification it cannot decode. */
 const readDroppedNotification = Schema.decodeUnknownOption(
@@ -171,26 +114,25 @@ const readDroppedNotification = Schema.decodeUnknownOption(
   }),
 );
 
+/** The error code of "method not found" in JSON-RPC. */
+const METHOD_NOT_FOUND = -32601;
+
 /** Returns the data of the handshake that an adapter needs, from the reply to `initialize`. */
 const readHarnessDescription = (reply: Compat.InitializeResponse): HarnessDescription => {
   const capabilities = reply.agentCapabilities;
   return {
-    ...(reply.agentInfo?.name === undefined ? {} : { name: reply.agentInfo.name }),
     ...(reply.agentInfo?.version === undefined ? {} : { version: reply.agentInfo.version }),
     acceptsImages: capabilities?.promptCapabilities?.image === true,
     acceptsHttpMcpServers: capabilities?.mcpCapabilities?.http === true,
-    canResumeSession: capabilities?.sessionCapabilities?.resume != null,
-    canCloseSession: capabilities?.sessionCapabilities?.close != null,
     ...(capabilities?._meta == null ? {} : { meta: capabilities._meta }),
   };
 };
 
-/** Returns the modes, models, config options and `_meta` of the reply to `session/new` or `session/resume`. */
+/** Returns the modes, models and config options of the reply to `session/new` or `session/resume`. */
 const readSessionSettings = (reply: Compat.LoadSessionResponse): SessionSettings => ({
   ...(reply.modes == null ? {} : { modes: reply.modes }),
   ...(reply.models == null ? {} : { models: reply.models }),
   configOptions: reply.configOptions ?? [],
-  ...(reply._meta == null ? {} : { meta: reply._meta }),
 });
 
 /**
@@ -205,7 +147,6 @@ const readSessionUpdate = (update: Compat.SessionUpdate): SessionUpdate => {
     case "agent_thought_chunk":
     case "tool_call":
     case "tool_call_update":
-    case "usage_update":
     case "current_mode_update":
     case "config_option_update":
       return update;
@@ -216,43 +157,15 @@ const readSessionUpdate = (update: Compat.SessionUpdate): SessionUpdate => {
   }
 };
 
-const TOOL_CALL_ID = Schema.Struct({ update: Schema.Struct({ toolCallId: Schema.String }) });
-const MODE_ID = Schema.Struct({ update: Schema.Struct({ currentModeId: Schema.String }) });
-
-/**
- * For the `session/update` kinds that carry an identifier, a schema that
- * requires it to be a string. The vendored client's catch-all for unknown
- * update kinds lets a tool call without a string id, and a mode change without
- * a string mode id, through.
- */
-const IDENTIFIER_SCHEMAS = new Map<string, Schema.Decoder<unknown>>([
-  ["tool_call", TOOL_CALL_ID],
-  ["tool_call_update", TOOL_CALL_ID],
-  ["current_mode_update", MODE_ID],
-]);
-
-/**
- * The ticket of the call that is being written. The vendored client's logger
- * runs in the fiber of the call, before the frame is queued, so it can tell
- * the wire memory which id the call got.
- */
-const CurrentCallTicket = Context.Reference<CallTicket | undefined>("acp/CurrentCallTicket", {
-  defaultValue: () => undefined,
-});
-
-/** What the vendored client logs for a request of ours, before it queues the frame. A notification has no id. */
-const readOutgoingRequest = Schema.decodeUnknownOption(
-  Schema.Struct({
-    _tag: Schema.Literal("Request"),
-    id: Schema.Union([Schema.String, Schema.Number]),
-  }),
-);
-
 /** Checks that `request` is in the form mode, the only mode this client advertises. */
 const isFormElicitation = (
   request: Compat.CreateElicitationRequest,
 ): request is Extract<Compat.CreateElicitationRequest, { readonly mode: "form" }> =>
   request.mode === "form";
+
+/** Checks that `params`, as the harness sent them, name a tool call (ACP version 1). */
+const hasToolCall = (params: unknown): boolean =>
+  typeof params === "object" && params !== null && "toolCall" in params;
 
 /** Returns the MCP servers and `_meta` of a session request in the format of `session/new`. */
 const buildSessionParams = (request: NewSessionRequest) => ({
@@ -267,48 +180,302 @@ const buildSessionParams = (request: NewSessionRequest) => ({
 });
 
 /**
- * Gives the vendored client the handlers that pass what the harness sends to
- * `handlers`, in our types. The vendored client interrupts a handler that is
- * still waiting when the connection ends, whether the harness went away or
- * the scope closed.
+ * Returns the secrets in the headers of the MCP servers of `request`: each
+ * header value, and the credential after the scheme (`abc` of `Bearer abc`),
+ * because a harness may echo the credential alone.
  */
-const registerHandlers = (
-  client: VendorClient.AcpClient["Service"],
-  handlers: AcpHandlers,
-  wire: WireMemory,
-  reportUnhandled: (reason: string, payload: unknown) => Effect.Effect<void>,
-): Effect.Effect<void> =>
+const readHeaderSecrets = (request: NewSessionRequest): ReadonlyArray<string> =>
+  request.mcpServers.flatMap(({ headers }) =>
+    headers.flatMap(({ value }) => {
+      if (value === "") return [];
+      const credential = /^\S+\s+(\S.*)$/.exec(value)?.[1];
+      return credential === undefined ? [value] : [value, credential];
+    }),
+  );
+
+/** Writes a path as people write it: `toolCall.kind`, or `configOptions[3]`. */
+const formatPath = (path: ReadonlyArray<PropertyKey>): string =>
+  path
+    .map((key, index) =>
+      typeof key === "number" ? `[${key}]` : `${index === 0 ? "" : "."}${String(key)}`,
+    )
+    .join("");
+
+/** Returns the value at `path` in `payload`, or `undefined` when the path leads nowhere. */
+const readAtPath = (payload: unknown, path: ReadonlyArray<PropertyKey>): unknown =>
+  path.reduce<unknown>(
+    (value, key) =>
+      typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined,
+    payload,
+  );
+
+const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+
+/**
+ * Returns the path of each issue of a failed decoding of a reply, without the
+ * first segment: the vendored client decodes the reply inside an envelope
+ * whose only field is `value`.
+ */
+const listIssuePaths = (issue: SchemaIssue.Issue): ReadonlyArray<ReadonlyArray<PropertyKey>> =>
+  formatIssues(issue).issues.map(({ path = [] }) =>
+    path.slice(1).map((segment) => (typeof segment === "object" ? segment.key : segment)),
+  );
+
+/**
+ * Opens a connection to the harness behind `options.pipes` and performs the
+ * `initialize` handshake. Fails with an `AcpError` when the handshake fails;
+ * the connection is over then, and the caller closes the scope.
+ *
+ * The connection lives as long as the scope. It does not own the process. It
+ * ends by itself when `stdout` ends, or a short while after the process has
+ * exited, and then `awaitClosed` returns. The caller closes the scope after
+ * `awaitClosed`, not at the exit, so that a reply written just before the exit
+ * is still read.
+ */
+export const openAcpConnection = (options: {
+  readonly pipes: AcpPipes;
+  readonly clientVersion: string;
+  readonly handlers: AcpHandlers;
+}): Effect.Effect<AcpConnection, AcpError, Scope.Scope> =>
   Effect.gen(function* () {
+    const { pipes, handlers } = options;
+
+    // What the log events of the vendored client told us. Each is valid for
+    // the line being handled, because the client handles one line at a time.
+    let lastLine = "";
+    let incoming: ReadonlyArray<LoggedMessage> = [];
+    // The `result` of the latest reply. It names the value of a reply that was
+    // refused, so it is right only while no two calls wait for a reply at once.
+    let latestReply: unknown;
+    // Requests of the harness that are not answered yet, by the id the client's handlers get.
+    const openRequests = new Map<string, { readonly method: string; readonly params: unknown }>();
+    const secrets = new Set<string>();
+
+    // ---- Text for people ----
+
+    const hideSecrets = (text: string): string =>
+      [...secrets].reduce((hidden, secret) => hidden.replaceAll(secret, "[hidden]"), text);
+
+    /**
+     * Returns `text` of the harness as it may appear in a sentence for a
+     * person: the secrets hidden first, so that a cut never leaves half of one,
+     * then cut to `QUOTE_LENGTH` characters with `...` when something was cut.
+     */
+    const quoteHarnessText = (text: string): string => {
+      const hidden = hideSecrets(text);
+      return hidden.length > QUOTE_LENGTH ? `${hidden.slice(0, QUOTE_LENGTH)}...` : hidden;
+    };
+
+    /** Returns a sentence that says what `sender` did with `method`, with `detail` as the reason this version could not read it. */
+    const describeUnreadable = (
+      sender: "sent" | "answered",
+      method: string,
+      detail: string,
+    ): string =>
+      `The harness ${sender} ${quoteHarnessText(method)} with a value this version cannot read: ${quoteHarnessText(detail)}. ${SYNC_ADVICE}`;
+
+    const describeUnused = (kind: "notification" | "request", method: string): string =>
+      `The harness sent the ${kind} ${quoteHarnessText(method)}, which this version does not use.`;
+
+    /**
+     * Returns a sentence that names the field of the latest reply that the
+     * vendored client refused, and its value. When the issues name more than
+     * one field, it takes the first one the reply has a value for: the client
+     * also lists what ACP version 2 would have needed.
+     */
+    const describeUnreadableReply = (method: string, issue: SchemaIssue.Issue): string => {
+      const paths = listIssuePaths(issue);
+      const path = paths.find((each) => readAtPath(latestReply, each) !== undefined) ?? paths[0];
+      const value = readAtPath(latestReply, path ?? []);
+      const field = path === undefined || path.length === 0 ? "the reply" : formatPath(path);
+      return describeUnreadable(
+        "answered",
+        method,
+        `${field} ${value === undefined ? "is missing" : `is ${JSON.stringify(value)}`}`,
+      );
+    };
+
+    /** Returns the `refused` error for a harness that answered `method` with an error of `code` and `text`. */
+    const buildRefusal = (method: string, code: number, text: string): AcpError =>
+      new AcpError({
+        reason: "refused",
+        message: `The harness refused ${method}: ${quoteHarnessText(text)} (code ${code}).`,
+        code,
+        harnessMessage: hideSecrets(text),
+      });
+
+    /** Describes why the vendored client ended its connection, for the `message` of an `AcpError`. */
+    const describeTermination = (error: VendorErrors.AcpError): string =>
+      error._tag === "AcpProtocolParseError" && error.operation === "decode-wire-message"
+        ? `The harness wrote a line that is not a JSON-RPC message, or ended in the middle of one, so nothing it sends can be trusted any more. The line starts with: ${quoteHarnessText(lastLine)}`
+        : error._tag === "AcpInputStreamEndedError"
+          ? "The harness closed its output."
+          : quoteHarnessText(error.message);
+
+    // ---- The end of the connection ----
+
+    // Completed once, with the first reason the connection ended. Once it is
+    // complete, the harness's output is no longer read.
+    const closed = Deferred.makeUnsafe<AcpError>();
+    const endConnection = (message: string): void => {
+      Deferred.doneUnsafe(closed, Effect.succeed(new AcpError({ reason: "closed", message })));
+    };
+
+    /** Ends the connection because a pipe failed, and returns the error the vendored client sees. */
+    const failPipe = (method: "read" | "write", why: string, cause: unknown) => {
+      // The exception of a pipe may hold text of the harness.
+      const description = quoteHarnessText(String(cause));
+      endConnection(`${why}: ${description}`);
+      return PlatformError.systemError({
+        _tag: "Unknown",
+        module: "AcpConnection",
+        method,
+        description,
+      });
+    };
+
+    /**
+     * Calls `onUnhandledMessage`. A throw is logged, so that one bad handler
+     * cannot stop the reader or the writer of the vendored client.
+     */
+    const reportUnhandled = (method: string, reason: string, raw: unknown): Effect.Effect<void> =>
+      Effect.try({
+        try: () => handlers.onUnhandledMessage({ method, reason, raw }),
+        catch: (error) => error,
+      }).pipe(
+        Effect.catch((error) => Effect.logError("The handler onUnhandledMessage threw", error)),
+      );
+
+    // ---- What the vendored client logs ----
+
+    /** Returns the `params` of the message being handled, or `undefined` when its line held several. */
+    const readCurrentParams = (): unknown =>
+      incoming.length === 1 ? incoming[0]?.payload : undefined;
+
+    /** Reports a notification the vendored client dropped because it could not decode it. */
+    const reportDroppedNotification = (diagnostics: unknown): Effect.Effect<void> => {
+      const dropped = readDroppedNotification(diagnostics);
+      return Option.isNone(dropped)
+        ? Effect.void
+        : reportUnhandled(
+            dropped.value.method,
+            describeUnreadable(
+              "sent",
+              dropped.value.method,
+              dropped.value.issueSummary ?? "no details",
+            ),
+            readCurrentParams(),
+          );
+    };
+
+    /** Forgets the request of the harness that `message` answers, and reports it when it was answered with an error. */
+    const reportAnswerWithError = (message: LoggedMessage): Effect.Effect<void> => {
+      if (message._tag !== "Exit" || message.requestId === undefined) return Effect.void;
+      const key = acpRequestIdentity(message.requestId);
+      const request = openRequests.get(key);
+      openRequests.delete(key);
+      if (request === undefined || message.exit?._tag !== "Failure") return Effect.void;
+      const failure = message.exit.cause?.[0];
+      const defect = failure?.defect;
+      const text =
+        failure?.error?.message ?? (typeof defect === "string" ? defect : "no reason was given");
+      return reportUnhandled(
+        request.method,
+        failure?.error?.code === METHOD_NOT_FOUND
+          ? describeUnused("request", request.method)
+          : describeUnreadable("sent", request.method, text),
+        request.params,
+      );
+    };
+
+    // ---- The pipes, as the vendored client reads them ----
+
+    const stdio = Stdio.make({
+      args: Effect.succeed([]),
+      stdin: Stream.fromAsyncIterable(pipes.stdout, (cause) =>
+        failPipe("read", "The harness's output failed", cause),
+      ).pipe(
+        Stream.map((line) => encoder.encode(`${line}\n`)),
+        // Nothing the harness sends after the end may reach a handler.
+        Stream.interruptWhen(Deferred.await(closed)),
+      ),
+      stdout: () =>
+        Sink.forEach((chunk: string | Uint8Array) =>
+          Effect.try({
+            try: () => pipes.write(typeof chunk === "string" ? chunk : decoder.decode(chunk)),
+            catch: (cause) => failPipe("write", "Could not write to the harness", cause),
+          }),
+        ),
+      stderr: () => Sink.drain,
+    });
+
+    const client = yield* VendorClient.make(stdio, {
+      logIncoming: true,
+      logOutgoing: true,
+      logger: (event) => {
+        if (event.direction === "incoming") {
+          if (event.stage === "raw") {
+            lastLine = String(event.payload).trimEnd();
+          } else if (event.stage === "decoded") {
+            const messages = readIncomingMessages(event.payload);
+            incoming = Option.getOrElse(messages, () => []);
+            for (const { exit } of incoming) {
+              if (exit?._tag === "Success") latestReply = exit.value;
+            }
+          } else {
+            return reportDroppedNotification(event.payload);
+          }
+          return Effect.void;
+        }
+        const outgoing =
+          event.stage === "decoded" ? readOutgoingMessage(event.payload) : Option.none();
+        return Option.isSome(outgoing) ? reportAnswerWithError(outgoing.value) : Effect.void;
+      },
+      onIncomingRequest: (requestId, method, params) =>
+        Effect.sync(() => {
+          openRequests.set(requestId, { method, params });
+        }),
+      onTermination: (error) => Effect.sync(() => endConnection(describeTermination(error))),
+    });
+    // Registered after the vendored client, so that it runs before the client's
+    // own finalizers when the scope closes. A pending call then finds the
+    // connection over when the client interrupts it, even while the client
+    // waits for a handler that does not stop.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => endConnection("The connection to the harness was closed.")),
+    );
+    // Does nothing when the output ended first: the first reason to end wins.
+    yield* Effect.promise(() => pipes.exited).pipe(
+      Effect.tap(() => Effect.sleep(EXIT_GRACE)),
+      Effect.flatMap((code) =>
+        Effect.sync(() =>
+          endConnection(`The harness exited with code ${code}, and its output did not end.`),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+    // The vendored client keeps up to 32 unread notifications of its own. Nobody
+    // reads them here, so drain them.
+    yield* Stream.runDrain(client.raw.notifications).pipe(Effect.forkScoped);
+
+    // ---- What the harness sends ----
+
     yield* client.handleSessionUpdate((notification) =>
-      Effect.suspend(() => {
-        const { params, message } = wire.getLastLineRead();
-        const identifierSchema = IDENTIFIER_SCHEMAS.get(notification.update.sessionUpdate);
-        const refusal =
-          identifierSchema === undefined
-            ? undefined
-            : describeRefusal({
-                sender: "sent",
-                method: "session/update",
-                schema: identifierSchema,
-                payload: params,
-                quote: wire.quoteHarnessText,
-              });
-        if (refusal !== undefined) return reportUnhandled(refusal, message);
+      Effect.sync(() =>
         handlers.onSessionUpdate({
           nativeSessionId: notification.sessionId,
           update: readSessionUpdate(notification.update),
-          raw: params,
-        });
-        return Effect.void;
-      }),
+          raw: readCurrentParams(),
+        }),
+      ),
     );
     yield* client.handleRequestPermission((request, context) => {
-      const open = wire.readOpenRequest(context.requestId);
+      const sent = openRequests.get(context.requestId)?.params;
       // Version 1 has no `title`, and the vendored client strips it. It sets
       // `title` only when it read the request as version 2, and then it builds
-      // the tool call itself, from data the harness did not send as a tool call.
-      // The user must not approve what the harness did not ask about.
-      if ("title" in request) {
+      // the tool call itself. When the harness sent a tool call, the user must
+      // not approve a different one.
+      if ("title" in request && hasToolCall(sent)) {
         return Effect.fail(
           VendorErrors.AcpRequestError.invalidParams(
             "The tool call in this request was read differently from how the harness sent it, so it was not shown for approval.",
@@ -317,16 +484,15 @@ const registerHandlers = (
       }
       return Effect.suspend(() =>
         handlers.onApprovalRequest({
-          requestId: open.id,
+          requestId: context.requestId,
           nativeSessionId: request.sessionId,
           toolCall: request.toolCall,
           options: request.options,
-          raw: open.params,
+          raw: sent,
         }),
       ).pipe(Effect.map((outcome) => ({ outcome })));
     });
     yield* client.handleElicitation((request, context) => {
-      const open = wire.readOpenRequest(context.requestId);
       if (!isFormElicitation(request)) {
         return Effect.fail(
           VendorErrors.AcpRequestError.invalidParams(
@@ -336,111 +502,88 @@ const registerHandlers = (
       }
       return Effect.suspend(() =>
         handlers.onElicitation({
-          requestId: open.id,
+          requestId: context.requestId,
           ...("sessionId" in request ? { nativeSessionId: request.sessionId } : {}),
           ...("toolCallId" in request ? { toolCallId: request.toolCallId } : {}),
           message: request.message,
           requestedSchema: request.requestedSchema,
-          raw: open.params,
+          raw: openRequests.get(context.requestId)?.params,
         }),
       );
     });
-    const reportUnusedNotification = (method: string) =>
-      reportUnhandled(
-        `The harness sent the notification ${wire.quoteHarnessText(method)}, which this version does not use.`,
-        wire.getLastLineRead().message,
-      );
-    yield* client.handleUnknownExtNotification(reportUnusedNotification);
+    yield* client.handleUnknownExtNotification((method, params) =>
+      reportUnhandled(method, describeUnused("notification", method), params),
+    );
     // This client advertises only the form mode, which never sends it. Without a
     // handler the vendored client keeps every one it receives, without bound.
-    yield* client.handleElicitationComplete(() => reportUnusedNotification("elicitation/complete"));
-  });
+    yield* client.handleElicitationComplete(() =>
+      reportUnhandled(
+        "elicitation/complete",
+        describeUnused("notification", "elicitation/complete"),
+        readCurrentParams(),
+      ),
+    );
 
-/**
- * Returns the function that runs the calls of the vendored client. It returns
- * what the call returns, or an `AcpError`:
- *
- * - `refused` when the harness answered with an error.
- * - `unreadable` when the reply holds a value that ACP version 1 does not
- *   allow, whether the vendored client refused it or let it through.
- * - `timed-out` after `CALL_DEADLINE`, unless the call has no deadline.
- * - `closed` for anything else, and for a call made after the connection ended.
- *   A call that fails as `closed` ends the connection too, so `awaitClosed`
- *   never disagrees with a call.
- *
- * The vendored client fails its own pending calls, in order, when its input
- * ends, so a reply that arrived before the end still reaches its call.
- */
-const createCallRunner = (
-  wire: WireMemory,
-  closed: Deferred.Deferred<AcpError>,
-  end: (message: string) => void,
-) => {
-  /**
-   * Fails with `closed`. Ends the connection with `reason` unless it has ended
-   * already, and then words the failure with the first reason. It never waits.
-   */
-  const failClosed = (method: string, reason: string): Effect.Effect<never, AcpError> =>
-    Effect.suspend(() => {
-      end(reason);
-      return Deferred.await(closed).pipe(
-        Effect.flatMap((ended) =>
-          Effect.fail(
-            new AcpError({
-              reason: "closed",
-              message: `The call to ${method} failed. ${ended.message}`,
-              method,
-            }),
+    // ---- The calls ----
+
+    /**
+     * Fails with `closed`. Ends the connection with `reason` unless it has ended
+     * already, and then words the failure with the first reason. It never waits.
+     */
+    const failClosed = (method: string, reason: string): Effect.Effect<never, AcpError> =>
+      Effect.suspend(() => {
+        endConnection(reason);
+        return Deferred.await(closed).pipe(
+          Effect.flatMap((ended) =>
+            Effect.fail(
+              new AcpError({
+                reason: "closed",
+                message: `The call to ${method} failed. ${ended.message}`,
+              }),
+            ),
           ),
-        ),
-      );
-    });
+        );
+      });
 
-  return <A>(
-    method: string,
-    exchange: Effect.Effect<A, VendorErrors.AcpError>,
-    options: {
-      readonly withoutDeadline?: true;
-      /** Returns a reason to fail the call although it succeeded, or `undefined`. Gets the raw reply. */
-      readonly refuseReply?: (reply: unknown) => string | undefined;
-    } = {},
-  ): Effect.Effect<A, AcpError> =>
-    Effect.suspend(() => {
-      if (Deferred.isDoneUnsafe(closed)) {
-        return failClosed(method, "The connection to the harness is over.");
-      }
-      const run = (ticket: CallTicket) =>
-        exchange.pipe(
-          Effect.provideService(CurrentCallTicket, ticket),
+    /**
+     * Runs `exchange`, a call of the vendored client, and returns what it
+     * returns, or an `AcpError`:
+     *
+     * - `refused` when the harness answered with an error.
+     * - `unreadable` when the vendored client could not decode the reply.
+     * - `timed-out` after `CALL_DEADLINE`, unless the call has no deadline.
+     * - `closed` for anything else, and for a call made after the connection
+     *   ended. A call that fails as `closed` ends the connection too, so
+     *   `awaitClosed` never disagrees with a call.
+     *
+     * The vendored client fails its own pending calls, in order, when its input
+     * ends, so a reply that arrived before the end still reaches its call.
+     */
+    const callHarness = <A>(
+      method: string,
+      exchange: Effect.Effect<A, VendorErrors.AcpError>,
+      { withoutDeadline = false }: { readonly withoutDeadline?: boolean } = {},
+    ): Effect.Effect<A, AcpError> =>
+      Effect.suspend(() => {
+        if (Deferred.isDoneUnsafe(closed)) {
+          return failClosed(method, "The connection to the harness is over.");
+        }
+        return exchange.pipe(
+          Effect.catch((error) =>
+            error._tag === "AcpRequestError"
+              ? Effect.fail(buildRefusal(method, error.code, error.errorMessage))
+              : failClosed(method, describeTermination(error)),
+          ),
           // The vendored client fails a call whose reply it cannot decode with a defect.
           Effect.catchDefect((defect) =>
             defect instanceof Schema.SchemaError
               ? Effect.fail(
                   new AcpError({
                     reason: "unreadable",
-                    message: describeUnreadableMessage(
-                      { method, sender: "answered", payload: ticket.reply, detail: defect.message },
-                      wire,
-                    ),
-                    method,
+                    message: describeUnreadableReply(method, defect.issue),
                   }),
                 )
               : Effect.die(defect),
-          ),
-          Effect.catch((error) =>
-            error instanceof AcpError
-              ? Effect.fail(error)
-              : error._tag === "AcpRequestError"
-                ? Effect.fail(
-                    new AcpError({
-                      reason: "refused",
-                      message: `The harness refused ${method}: ${wire.quoteHarnessText(error.errorMessage)} (code ${error.code}).`,
-                      method,
-                      code: error.code,
-                      harnessMessage: wire.hideSecrets(error.errorMessage),
-                    }),
-                  )
-                : failClosed(method, describeTermination(error, wire)),
           ),
           // The vendored client interrupts its pending calls from inside when
           // the scope closes. That is the connection ending, not this call
@@ -450,7 +593,7 @@ const createCallRunner = (
               ? failClosed(method, "The call was dropped when the connection ended.")
               : Effect.failCause(cause),
           ),
-          options.withoutDeadline === true
+          withoutDeadline
             ? (effect) => effect
             : Effect.timeoutOrElse({
                 duration: CALL_DEADLINE,
@@ -459,125 +602,23 @@ const createCallRunner = (
                     new AcpError({
                       reason: "timed-out",
                       message: `The harness did not answer ${method} within ${Duration.toSeconds(CALL_DEADLINE)} seconds. It is not known whether it did what was asked.`,
-                      method,
                     }),
                   ),
               }),
-          // The vendored client's reply schemas let through what ACP version 1 refuses.
-          Effect.flatMap((value) => {
-            const reason =
-              options.refuseReply?.(ticket.reply) ??
-              describeMethodRefusal({ method, sender: "answered", payload: ticket.reply }, wire);
-            return reason === undefined
-              ? Effect.succeed(value)
-              : Effect.fail(new AcpError({ reason: "unreadable", message: reason, method }));
-          }),
         );
-      return Effect.acquireUseRelease(
-        Effect.sync(() => wire.openTicket()),
-        run,
-        (ticket) => Effect.sync(() => wire.dropTicket(ticket)),
-      );
-    });
-};
+      });
 
-/**
- * Opens a connection to the harness behind `options.pipes` and performs the
- * `initialize` handshake. Fails with an `AcpError` when the handshake fails;
- * the connection is over then, and the caller closes the scope.
- *
- * The connection lives as long as the scope. It does not own the process: the
- * caller closes the scope when the process has exited, because a descendant of
- * the process may keep the pipe open.
- */
-export const openAcpConnection = (options: {
-  readonly pipes: AcpPipes;
-  readonly clientVersion: string;
-  readonly handlers: AcpHandlers;
-}): Effect.Effect<AcpConnection, AcpError, Scope.Scope> =>
-  Effect.gen(function* () {
-    const { pipes, handlers } = options;
-    const wire = createWireMemory(acpRequestIdentity);
+    /** Runs `exchange` like `callHarness`, after it has hidden the header values of `request`. */
+    const callWithSecrets = <A>(
+      method: string,
+      request: NewSessionRequest,
+      exchange: Effect.Effect<A, VendorErrors.AcpError>,
+    ) =>
+      Effect.sync(() => {
+        for (const secret of readHeaderSecrets(request)) secrets.add(secret);
+      }).pipe(Effect.andThen(callHarness(method, exchange)));
 
-    // Completed once, with the first reason the connection ended. Once it is
-    // complete, the harness's output is no longer read.
-    const closed = Deferred.makeUnsafe<AcpError>();
-    const end = (message: string): void => {
-      Deferred.doneUnsafe(closed, Effect.succeed(new AcpError({ reason: "closed", message })));
-    };
-
-    /**
-     * Calls `onUnhandledMessage`. A throw is logged, so that one bad handler
-     * cannot stop the reader or the writer.
-     */
-    const reportUnhandled = (reason: string, payload: unknown): Effect.Effect<void> =>
-      Effect.try({
-        try: () => handlers.onUnhandledMessage({ reason, payload }),
-        catch: (error) => error,
-      }).pipe(
-        Effect.catch((error) => Effect.logError("The handler onUnhandledMessage threw", error)),
-      );
-
-    const client = yield* VendorClient.make(
-      createHarnessStdio({
-        pipes,
-        wire,
-        connectionEnded: Deferred.await(closed),
-        end,
-        report: reportUnhandled,
-        onRefusedRequest: (refused) =>
-          reportUnhandled(describeRefusedRequest(refused, wire), refused.request.message),
-      }),
-      {
-        // The client logs a notification it drops, and nothing else tells us. It
-        // also logs each request of ours, which gives the call its id.
-        logIncoming: true,
-        logOutgoing: true,
-        logger: (event) => {
-          if (event.direction === "outgoing") {
-            const request =
-              event.stage === "decoded" ? readOutgoingRequest(event.payload) : Option.none();
-            return Option.isNone(request)
-              ? Effect.void
-              : Effect.gen(function* () {
-                  const ticket = yield* CurrentCallTicket;
-                  if (ticket !== undefined) wire.bindTicket(ticket, request.value.id);
-                });
-          }
-          const dropped =
-            event.stage === "decode_failed"
-              ? readDroppedNotification(event.payload)
-              : Option.none();
-          if (Option.isNone(dropped)) return Effect.void;
-          const { params, message } = wire.getLastLineRead();
-          const reason = describeUnreadableMessage(
-            {
-              method: dropped.value.method,
-              sender: "sent",
-              payload: params,
-              detail: dropped.value.issueSummary ?? "no details",
-            },
-            wire,
-          );
-          return reportUnhandled(reason, message);
-        },
-        onTermination: (error) => Effect.sync(() => end(describeTermination(error, wire))),
-      },
-    );
-    // Registered after the vendored client, so that it runs before the client's
-    // own finalizers when the scope closes. A pending call then finds the
-    // connection over when the client interrupts it, even while the client
-    // waits for a handler that does not stop.
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => end("The connection to the harness was closed.")),
-    );
-    // The vendored client keeps up to 32 unread notifications of its own. Nobody
-    // reads them here, so drain them.
-    yield* Stream.runDrain(client.raw.notifications).pipe(Effect.forkScoped);
-    yield* registerHandlers(client, handlers, wire, reportUnhandled);
-
-    const call = createCallRunner(wire, closed, end);
-    const harness = yield* call(
+    const harness = yield* callHarness(
       "initialize",
       client.agent.initialize({
         // The vendored client ignores this value and always offers version 2
@@ -590,12 +631,11 @@ export const openAcpConnection = (options: {
         },
         clientInfo: { name: "hercule", title: "Hercule", version: options.clientVersion },
       }),
-      { refuseReply: describeVersionTwoReply },
     ).pipe(
       // A connection whose handshake failed is of no use: end it, so that
       // nothing more reaches a handler while the caller closes the scope.
       Effect.tapError((error) =>
-        Effect.sync(() => end(`The handshake with the harness failed. ${error.message}`)),
+        Effect.sync(() => endConnection(`The handshake with the harness failed. ${error.message}`)),
       ),
       Effect.map(readHarnessDescription),
     );
@@ -603,48 +643,76 @@ export const openAcpConnection = (options: {
     return {
       harness,
       authenticate: (methodId) =>
-        call("authenticate", client.agent.authenticate({ methodId })).pipe(
+        callHarness("authenticate", client.agent.authenticate({ methodId })).pipe(
           Effect.map((reply) => (reply._meta == null ? {} : { meta: reply._meta })),
         ),
       newSession: (request) =>
-        call("session/new", client.agent.createSession(buildSessionParams(request))).pipe(
+        callWithSecrets(
+          "session/new",
+          request,
+          client.agent.createSession(buildSessionParams(request)),
+        ).pipe(
           Effect.map((reply) => ({
             nativeSessionId: reply.sessionId,
             ...readSessionSettings(reply),
           })),
         ),
       resumeSession: (request) =>
-        call(
+        callWithSecrets(
           "session/resume",
+          request,
           client.agent.resumeSession({
             sessionId: request.nativeSessionId,
             ...buildSessionParams(request),
           }),
         ).pipe(Effect.map(readSessionSettings)),
       closeSession: (nativeSessionId) =>
-        call("session/close", client.agent.closeSession({ sessionId: nativeSessionId })).pipe(
-          Effect.asVoid,
-        ),
+        callHarness(
+          "session/close",
+          client.agent.closeSession({ sessionId: nativeSessionId }),
+        ).pipe(Effect.asVoid),
       prompt: (nativeSessionId, content) =>
-        call(
+        callHarness(
           "session/prompt",
           client.agent.prompt({ sessionId: nativeSessionId, prompt: content }),
           { withoutDeadline: true },
         ).pipe(
-          Effect.map((reply) => ({
-            stopReason: reply.stopReason,
-            ...(reply.usage == null ? {} : { usage: reply.usage }),
-          })),
+          Effect.flatMap((reply) => {
+            if (reply.error != null) {
+              return Effect.fail(
+                buildRefusal("session/prompt", reply.error.code, reply.error.message),
+              );
+            }
+            // The vendored client leaves out a stop reason it does not know. Two
+            // prompts may be open at once, so no value is named: there is no
+            // telling which reply it was.
+            const stopReason: string | undefined = reply.stopReason;
+            return stopReason === undefined
+              ? Effect.fail(
+                  new AcpError({
+                    reason: "unreadable",
+                    message: describeUnreadable(
+                      "answered",
+                      "session/prompt",
+                      "stopReason is missing, or is not one this version knows",
+                    ),
+                  }),
+                )
+              : Effect.succeed({
+                  stopReason,
+                  ...(reply.usage == null ? {} : { usage: reply.usage }),
+                });
+          }),
         ),
       cancel: (nativeSessionId) =>
-        call("session/cancel", client.agent.cancel({ sessionId: nativeSessionId })),
+        callHarness("session/cancel", client.agent.cancel({ sessionId: nativeSessionId })),
       setMode: (nativeSessionId, modeId) =>
-        call(
+        callHarness(
           "session/set_mode",
           client.agent.setSessionMode({ sessionId: nativeSessionId, modeId }),
         ).pipe(Effect.asVoid),
       setConfigOption: (nativeSessionId, configId, value) =>
-        call(
+        callHarness(
           "session/set_config_option",
           client.agent.setSessionConfigOption({ sessionId: nativeSessionId, configId, value }),
         ).pipe(Effect.map((reply) => reply.configOptions)),

@@ -3,15 +3,15 @@ import * as Schema from "effect/Schema";
 /**
  * Why a call to the harness failed:
  *
- * - `refused`: the harness answered with a JSON-RPC error. `code` holds its
- *   code and `harnessMessage` its text.
+ * - `refused`: the harness answered with a JSON-RPC error, or reported an
+ *   error for a prompt. `code` holds its code and `harnessMessage` its text.
  * - `closed`: the connection is over: the harness exited or closed its output,
  *   a write to it failed, it wrote a line that is not a JSON-RPC message (or
  *   ended in the middle of one), the handshake failed, or the caller closed
  *   the scope.
  * - `unreadable`: the harness answered with a value this client does not know,
- *   such as a new kind of config option or a new stop reason, or it speaks ACP
- *   version 2. The message names the field and the value, and says to sync the
+ *   such as a new kind of config option, or a prompt reply without a stop
+ *   reason. The message names the field and the value, and says to sync the
  *   vendored client.
  * - `timed-out`: no reply came in time. It is not known whether the harness
  *   did what was asked.
@@ -28,13 +28,11 @@ export type AcpErrorReason = typeof AcpErrorReason.Type;
 export class AcpError extends Schema.TaggedError<AcpError>()("AcpError", {
   reason: AcpErrorReason,
   message: Schema.String,
-  /** The ACP method that failed, such as `session/new`. */
-  method: Schema.optionalKey(Schema.String),
   /** The JSON-RPC error code. Set only when `reason` is `refused`. */
   code: Schema.optionalKey(Schema.Number),
   /**
-   * The text of the harness's JSON-RPC error, whole, with the session's header
-   * values hidden. Set only when `reason` is `refused`. A caller that tells one
+   * The text of the harness's error, whole, with the session's header values
+   * hidden. Set only when `reason` is `refused`. A caller that tells one
    * refusal from another by its wording, such as "not signed in", reads this
    * and not `message`.
    */

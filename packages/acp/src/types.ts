@@ -9,13 +9,17 @@
  * not checked that way: `connection.integration.test.ts` plays recordings of a
  * real harness and compares what arrives with what was sent.
  *
- * Two rules hold for every type here:
+ * Three rules hold for every type here:
  *
  * - An optional field that the protocol allows to be `null` is typed
  *   `| null` as well. A caller treats an absent field and `null` alike.
  * - A field that holds one of a fixed set of words in the protocol (a tool
  *   kind, a status) is typed `string`. The harness ships often and adds words,
  *   and the vendored client lets some of them through.
+ * - An optional field that is absent means "not known", never "none". The
+ *   vendored client's schemas leave out a value they cannot read, in some
+ *   places, so a missing `modes` or `usage` may be a value this version
+ *   dropped, and not a harness that has none.
  */
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -36,11 +40,6 @@ export interface ToolCallContent {
   readonly newText?: string;
 }
 
-export interface ToolCallLocation {
-  readonly path: string;
-  readonly line?: number | null;
-}
-
 /**
  * The fields of a tool call, whether it starts (`tool_call`), changes
  * (`tool_call_update`), or is shown in an approval request. A harness may
@@ -53,7 +52,6 @@ export interface ToolCall {
   readonly kind?: string | null;
   readonly status?: string | null;
   readonly content?: ReadonlyArray<ToolCallContent> | null;
-  readonly locations?: ReadonlyArray<ToolCallLocation> | null;
   readonly rawInput?: unknown;
   readonly rawOutput?: unknown;
 }
@@ -67,7 +65,6 @@ export interface ConfigOptionChoice {
 
 /** A named group of choices of a select config option. */
 export interface ConfigOptionGroup {
-  readonly groupId: string;
   readonly name: string;
   readonly options: ReadonlyArray<ConfigOptionChoice>;
 }
@@ -107,20 +104,15 @@ interface MessageChunk {
 
 /**
  * What the harness reports about a session while it works. `other` stands for
- * every kind this client does not use; `name` is the kind the harness sent.
+ * every kind this client does not use, such as `usage_update` and
+ * `available_commands_update`; `name` is the kind the harness sent, and `raw`
+ * of the notification has the rest.
  */
 export type SessionUpdate =
   | (MessageChunk & { readonly sessionUpdate: "agent_message_chunk" })
   | (MessageChunk & { readonly sessionUpdate: "agent_thought_chunk" })
   | (ToolCall & { readonly sessionUpdate: "tool_call" })
   | (ToolCall & { readonly sessionUpdate: "tool_call_update" })
-  | {
-      readonly sessionUpdate: "usage_update";
-      /** How many tokens of the context window are used. */
-      readonly used: number;
-      /** How many tokens the context window holds. */
-      readonly size: number;
-    }
   | { readonly sessionUpdate: "current_mode_update"; readonly currentModeId: string }
   | {
       readonly sessionUpdate: "config_option_update";
@@ -131,7 +123,20 @@ export type SessionUpdate =
 export interface SessionUpdateNotification {
   readonly nativeSessionId: string;
   readonly update: SessionUpdate;
-  /** The `params` of the notification exactly as the harness sent them, with the fields this client does not know. */
+  /**
+   * The `params` of the notification exactly as the harness sent them, with the
+   * fields this client does not know. `undefined` when the harness sent several
+   * messages in one line, which ACP does not do.
+   *
+   * This is also true of `raw` of the requests below and of `UnhandledMessage`:
+   * it is untouched, so it may hold a secret that the harness echoes. The
+   * connection hides only what it was given: the header values and the
+   * credential after the scheme of the MCP servers of `newSession` and
+   * `resumeSession`, in the text of an `AcpError` and in a `reason`. It does not
+   * hide them in `raw`, in the text of an update, in a token that is part of a
+   * URL, or in an encoded form of a secret. A caller decides what to do with
+   * `raw` before it shows or stores it.
+   */
   readonly raw: unknown;
 }
 
@@ -147,12 +152,12 @@ export interface ApprovalOption {
  * `session/request_permission`; Hercule calls it an approval request.
  */
 export interface ApprovalRequest {
-  /** The JSON-RPC id of the request. */
-  readonly requestId: string | number;
+  /** The id of the request as the connection names it. It is only good for telling requests apart. */
+  readonly requestId: string;
   readonly nativeSessionId: string;
   readonly toolCall: ToolCall;
   readonly options: ReadonlyArray<ApprovalOption>;
-  /** The `params` of the request exactly as the harness sent them. */
+  /** The `params` of the request exactly as the harness sent them. See `SessionUpdateNotification.raw`. */
   readonly raw: unknown;
 }
 
@@ -184,8 +189,8 @@ export interface ElicitationField {
 
 /** The harness asks the user a question: a form of fields. Only the `form` mode is advertised. */
 export interface ElicitationRequest {
-  /** The JSON-RPC id of the request. */
-  readonly requestId: string | number;
+  /** The id of the request as the connection names it. It is only good for telling requests apart. */
+  readonly requestId: string;
   readonly nativeSessionId?: string;
   readonly toolCallId?: string | null;
   readonly message: string;
@@ -193,7 +198,7 @@ export interface ElicitationRequest {
     readonly properties?: Readonly<Record<string, ElicitationField>>;
     readonly required?: ReadonlyArray<string> | null;
   };
-  /** The `params` of the request exactly as the harness sent them. */
+  /** The `params` of the request exactly as the harness sent them. See `SessionUpdateNotification.raw`. */
   readonly raw: unknown;
 }
 
@@ -208,14 +213,11 @@ export type ElicitationReply =
 
 /** What an adapter needs to know about the harness, from the reply to `initialize`. */
 export interface HarnessDescription {
-  readonly name?: string;
   readonly version?: string;
   /** Whether a prompt may contain images. */
   readonly acceptsImages: boolean;
   /** Whether `session/new` may name MCP servers that are reached over HTTP. */
   readonly acceptsHttpMcpServers: boolean;
-  readonly canResumeSession: boolean;
-  readonly canCloseSession: boolean;
   /** The `_meta` of the harness's capabilities, where harness-specific features are announced. */
   readonly meta?: unknown;
 }
@@ -254,7 +256,6 @@ export interface SessionSettings {
   readonly models?: SessionModels;
   /** Empty when the harness sends none. */
   readonly configOptions: ReadonlyArray<ConfigOption>;
-  readonly meta?: unknown;
 }
 
 /** What a new session has, and the id the harness gave it. */
@@ -287,15 +288,26 @@ export interface PromptReply {
  * What the connection needs from the process of the harness. A `FramedChild`
  * fits as it is.
  *
- * The connection learns that the process is dead from the end of `stdout`, or
- * from the caller closing the scope. It does not rely on `write` throwing: the
- * `write` of a `FramedChild` never does.
+ * The connection learns that the process is dead from the end of `stdout`, from
+ * `exited`, or from the caller closing the scope.
  */
 export interface AcpPipes {
-  /** Writes `text` to the harness's stdin. It is one whole line. A throw ends the connection. */
+  /**
+   * Writes `text` to the harness's stdin. It is one whole line. A throw ends
+   * the connection. The `write` of a `FramedChild` never throws, so a write to
+   * a dead process is lost silently: the connection notices the death by
+   * `exited` or the end of `stdout`.
+   */
   readonly write: (text: string) => void;
   /** The harness's stdout. Each item is one whole line, without its newline. */
   readonly stdout: AsyncIterable<string>;
+  /**
+   * Resolves with the exit code when the process has exited. A descendant of
+   * the process may keep `stdout` open after that, so when `stdout` has not
+   * ended a short while after the exit, the connection ends and names the code.
+   * When `stdout` ends first, nothing changes: every line is read before the end.
+   */
+  readonly exited: Promise<number>;
 }
 
 /**
@@ -321,26 +333,41 @@ export interface AcpHandlers {
   readonly onElicitation: (request: ElicitationRequest) => Effect.Effect<ElicitationReply>;
   /**
    * Called for a message this client does not use or cannot read: a
-   * notification or request of a kind it does not know, or a value it cannot
-   * read. A request is answered with an error as well.
+   * notification or request of a kind it does not know, a notification it
+   * could not decode, or a request it answered with an error.
    */
   readonly onUnhandledMessage: (message: UnhandledMessage) => void;
 }
 
+/**
+ * A connection to one harness. Every call fails with an `AcpError`. Every call
+ * but `prompt` fails with `timed-out` when the harness has not answered within
+ * 30 seconds.
+ */
 export interface AcpConnection {
   readonly harness: HarnessDescription;
   /** Logs in with the authentication method `methodId`, a method id the caller knows. */
   readonly authenticate: (methodId: string) => Effect.Effect<AuthenticateReply, AcpError>;
+  /**
+   * Starts a session in `request.cwd` with the MCP servers and `_meta` of
+   * `request`, and returns its id and settings. The header values of the MCP
+   * servers are secrets: they are hidden in every message of an `AcpError`
+   * and every `reason` of an unhandled message from then on.
+   */
   readonly newSession: (request: NewSessionRequest) => Effect.Effect<NewSessionReply, AcpError>;
+  /** Resumes the session `request.nativeSessionId`. Hides secrets like `newSession`. */
   readonly resumeSession: (
     request: ResumeSessionRequest,
   ) => Effect.Effect<SessionSettings, AcpError>;
+  /** Tells the harness it may free the session `nativeSessionId`. */
   readonly closeSession: (nativeSessionId: string) => Effect.Effect<void, AcpError>;
   /**
    * Sends a prompt and waits until the turn ends, which may take as long as the
-   * agent works. Fails when the connection ends first. Updates the harness sent
-   * before its reply are handled before this returns. Updates it sends after
-   * its reply may be handled before the caller sees the reply.
+   * agent works. Fails when the connection ends first, with `refused` when the
+   * harness reports an error for the turn, and with `unreadable` when the reply
+   * has no stop reason this version knows. Updates the harness sent before its
+   * reply are handled before this returns. Updates it sends after its reply
+   * may be handled before the caller sees the reply.
    */
   readonly prompt: (
     nativeSessionId: string,
@@ -352,6 +379,7 @@ export interface AcpConnection {
    * caller answers it with `cancelled`.
    */
   readonly cancel: (nativeSessionId: string) => Effect.Effect<void, AcpError>;
+  /** Switches the session to the mode `modeId`, one of `SessionModes.availableModes`. */
   readonly setMode: (nativeSessionId: string, modeId: string) => Effect.Effect<void, AcpError>;
   /** Changes a config option and returns every config option with its current value. */
   readonly setConfigOption: (
@@ -362,22 +390,23 @@ export interface AcpConnection {
   /**
    * Waits until the connection is over, and returns why. The connection ends
    * when the harness closes its output, when a write to it fails, when it
-   * writes a line that is not a JSON-RPC message (or ended in the middle of one),
-   * a JSON array, or a request whose id is still open, when `initialize` fails,
-   * and when the scope closes. Calls then fail, nothing more reaches a handler,
-   * and parked handlers are interrupted.
+   * writes a line that is not a JSON-RPC message (or ended in the middle of
+   * one), when `initialize` fails, and when the scope closes. Calls then fail,
+   * nothing more reaches a handler, and parked handlers are interrupted.
    */
   readonly awaitClosed: Effect.Effect<AcpError>;
 }
 
 /** A message the connection could not give to any handler, and why. */
 export interface UnhandledMessage {
+  /** The ACP method of the message, such as `session/update`. */
+  readonly method: string;
   /** A sentence for a person: what was wrong and what to do about it. Secrets of the session are hidden in it. */
   readonly reason: string;
   /**
-   * The parsed message, or the line itself when it was not JSON, exactly as
-   * the harness sent it. It may hold secrets, such as a bearer token the
-   * harness echoes, so a caller must not show or store it as it is.
+   * The `params` of the message exactly as the harness sent them, or
+   * `undefined` when the harness sent several messages in one line. See
+   * `SessionUpdateNotification.raw` for the secrets it may hold.
    */
-  readonly payload: unknown;
+  readonly raw: unknown;
 }

@@ -133,4 +133,4 @@ Research findings land on `research/*` branches under `research/`; prototype cod
 
 ## Third-party code
 
-Hercule includes code copied from [T3 Code](https://github.com/pingdotgg/t3code) under the MIT licence: Copyright (c) 2026 T3 Tools Inc. It is the ACP client in [packages/acp/vendor/effect-acp](packages/acp/vendor/effect-acp), and its licence text is in [packages/acp/vendor/effect-acp/LICENSE](packages/acp/vendor/effect-acp/LICENSE).
+The Hercule binary ships code copied from [T3 Code](https://github.com/pingdotgg/t3code), which is under the MIT licence: Copyright (c) 2026 T3 Tools Inc. It is the ACP client in [packages/acp/vendor/effect-acp](packages/acp/vendor/effect-acp). The licence text is [packages/acp/vendor/effect-acp/LICENSE](packages/acp/vendor/effect-acp/LICENSE).

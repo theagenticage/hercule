@@ -34,6 +34,8 @@ import type {
   ElicitationRequest,
   ApprovalOutcome,
   ApprovalRequest,
+  AuthenticateReply,
+  NewSessionReply,
   PromptReply,
   SessionUpdateNotification,
   UnhandledMessage,
@@ -116,10 +118,26 @@ const KNOWN_UPDATE_KINDS = new Set([
   "agent_thought_chunk",
   "tool_call",
   "tool_call_update",
-  "usage_update",
   "current_mode_update",
   "config_option_update",
 ]);
+
+/** The parts of the recorded reply to `initialize` that the harness description is built from. */
+interface RecordedInitializeResult {
+  readonly agentInfo: { readonly version: string };
+  readonly agentCapabilities: {
+    readonly promptCapabilities: { readonly image: boolean };
+    readonly mcpCapabilities: { readonly http: boolean };
+    readonly _meta: unknown;
+  };
+}
+
+const NewSessionResult = Schema.Struct({
+  sessionId: Schema.String,
+  modes: Schema.Unknown,
+  models: Schema.Unknown,
+  configOptions: Schema.Array(Schema.Unknown),
+});
 
 const ApprovalParams = Schema.Struct({
   sessionId: Schema.String,
@@ -201,6 +219,7 @@ const replayRecording = (name: RecordingName) =>
           progress.notifyChange();
         },
         stdout: fake.stdout,
+        exited: fake.exited,
       },
       clientVersion: "test",
       handlers: {
@@ -238,6 +257,14 @@ const replayRecording = (name: RecordingName) =>
       readonly fiber: Fiber.Fiber<PromptReply, AcpError>;
       readonly recordedReply: JsonRpcMessage | undefined;
     }> = [];
+    const authentications: Array<{
+      readonly reply: AuthenticateReply;
+      readonly recordedReply: JsonRpcMessage | undefined;
+    }> = [];
+    const sessions: Array<{
+      readonly reply: NewSessionReply;
+      readonly recordedReply: JsonRpcMessage | undefined;
+    }> = [];
     const refusals: Array<{
       readonly effect: Effect.Effect<unknown, AcpError>;
       readonly recordedReply: JsonRpcMessage | undefined;
@@ -252,18 +279,21 @@ const replayRecording = (name: RecordingName) =>
           other.direction === "in" && other.message.method === undefined && other.message.id === id,
       )?.message;
       switch (method) {
-        case "authenticate":
-          yield* connection.authenticate(
+        case "authenticate": {
+          const reply = yield* connection.authenticate(
             Schema.decodeUnknownSync(ClientParams.authenticate)(params).methodId,
           );
+          authentications.push({ reply, recordedReply });
           break;
+        }
         case "session/new": {
           const request = Schema.decodeUnknownSync(ClientParams["session/new"])(params);
-          yield* connection.newSession({
+          const reply = yield* connection.newSession({
             cwd: request.cwd,
             mcpServers: request.mcpServers,
             ...(request._meta === undefined ? {} : { meta: request._meta }),
           });
+          sessions.push({ reply, recordedReply });
           break;
         }
         case "session/resume": {
@@ -352,6 +382,9 @@ const replayRecording = (name: RecordingName) =>
 
     return {
       recording,
+      harness: connection.harness,
+      authentications,
+      sessions,
       fake,
       updates,
       approvalRequests,
@@ -431,6 +464,27 @@ it.live.each(RECORDING_NAMES)("plays the recording %s through the connection", (
     // Every answer the client gave in the recording was written to the harness unchanged.
     for (const entry of recording.filter(isClientReply)) {
       expect(played.fake.received).toContainEqual(entry.message);
+    }
+
+    // What the handshake and the setup calls returned is what the harness replied.
+    const recordedInitialize = recording.find(
+      ({ direction, message }) => direction === "in" && message.result !== undefined,
+    )?.message.result as RecordedInitializeResult;
+    expect(played.harness).toEqual({
+      version: recordedInitialize.agentInfo.version,
+      acceptsImages: recordedInitialize.agentCapabilities.promptCapabilities.image,
+      acceptsHttpMcpServers: recordedInitialize.agentCapabilities.mcpCapabilities.http,
+      meta: recordedInitialize.agentCapabilities._meta,
+    });
+    for (const { reply, recordedReply } of played.authentications) {
+      expect(reply.meta).toEqual((recordedReply?.result as { _meta?: unknown })._meta);
+    }
+    for (const { reply, recordedReply } of played.sessions) {
+      const recorded = Schema.decodeUnknownSync(NewSessionResult)(recordedReply?.result);
+      expect(reply.nativeSessionId).toBe(recorded.sessionId);
+      expect(reply.modes).toEqual(recorded.modes);
+      expect(reply.models).toEqual(recorded.models);
+      expect(reply.configOptions).toMatchObject(recorded.configOptions);
     }
 
     // Every prompt that was answered ends as it did.
