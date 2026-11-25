@@ -37,12 +37,12 @@ Only `src/connection.ts` imports the copy, tests and `import type` included, and
 
 ## When the harness sends a value T3 does not know
 
-T3's schemas refuse a value they do not know, such as a new tool kind in an approval request or a new config option type. Every such refusal is loud:
+T3's schemas cannot decode a value they do not know, such as a new tool kind in an approval request or a new config option type. Every such failure is loud:
 
 - A call fails with an `AcpError` with reason `unreadable`. It names the ACP message, the field and the value, which is the value of that call's own reply, also when calls overlap. For an object with a `type`, it names the type first, and it quotes up to 500 characters. A prompt that ends with a stop reason T3 does not know names `stopReason` and the value.
 - A dropped update, or a request of the harness that T3 answered with an error, is reported through `onUnhandledMessage`, with T3's own text about the field and the untouched message in `raw`.
 
-A value T3 leaves out of a reply without refusing it, such as malformed `usage` or `modes`, is absent for the caller. It happens after the pinned `agy` version was raised, or when a harness adds a feature.
+A value T3 leaves out of a reply without failing the call, such as malformed `usage` or `modes`, is absent for the caller. It happens after the pinned `agy` version was raised, or when a harness adds a feature.
 
 First remedy: sync with T3 Code (below). T3 usually has the new value by then.
 
@@ -84,12 +84,21 @@ Then:
 1. Put the new commit in this README (above).
 2. Run `pnpm test:node packages/acp`, `pnpm typecheck`, `pnpm lint` and `pnpm dep-lint`.
 3. Read `git diff` of `packages/acp/vendor` for what matters to us:
-   - `client.ts`: `make`, `agent.*`, the handlers (`handleSessionUpdate`, `handleRequestPermission`, `handleElicitation`, `handleElicitationComplete`, `handleUnknownExtNotification`) and `raw.notifications`, which `src/connection.ts` calls. T3 sets `title` on an approval request only when it read the request as version 2 (`normalizePermissionRequest`), and `connection.ts` refuses a request with a `title` that the harness sent with a version 1 `toolCall`.
-   - `protocol.ts`: `acpRequestIdentity`, the `onIncomingRequest` hook, and the log events `connection.ts` reads to word an `unreadable` failure (the incoming and outgoing `decoded` events and `decode_failed`).
+   - `client.ts`: `make`, `agent.*`, the handlers (`handleSessionUpdate`, `handleRequestPermission`, `handleElicitation`, `handleElicitationComplete`, `handleUnknownExtNotification`) and `raw.notifications`, which `src/connection.ts` calls. T3 sets `title` on an approval request only when it read the request as version 2 (`normalizePermissionRequest`), and `connection.ts` answers with an error a request with a `title` that the harness sent with a version 1 `toolCall`.
+   - `protocol.ts`, the hooks and events `connection.ts` leans on:
+     - `acpRequestIdentity`, which names a request id the way the handlers' `context.requestId` does.
+     - `onIncomingRequest(requestId, method, params)`, which gives the untouched `params` of a request of the harness before it is queued.
+     - `onTermination`, which gives the error that ended the client (output ended, line that is not JSON, transport error). `connection.ts` words it as the reason of `awaitClosed`.
+     - The log events. Their payload is untyped (`unknown`). `connection.ts` reads only this shape (`LoggedMessage`): `_tag`, `id`, `requestId`, `payload`, and `exit` with `_tag`, `value` and `cause` (each with `_tag`, `error.code`, `error.message` or `defect`). For `decode_failed` it reads `operation`, `method` and `issueSummary`. A renamed field makes the reading fail silently, and only the tests notice.
+     - T3 logs an outgoing request (`decoded`, `_tag: "Request"`) in the fiber of the caller. `connection.ts` relies on it: `CurrentCall`, provided in `callHarness`, is how a request finds its call, so each call is told its own reply. If a sync logs it in another fiber, replies are named wrongly or not at all (the test of many overlapping calls fails).
+     - A reply that T3 cannot decode fails the call with a `Schema.SchemaError` defect, not with a typed error, and the issue paths start with `value`. `callHarness` turns it into `unreadable`.
+     - A request of the harness whose id is still open is answered by T3's RPC server as interrupted (`-32603`, "Internal error") and is never handed to a handler. `connection.ts` reports it when it arrives.
    - `errors.ts`, `compat.ts` and `_generated/`: the shapes `src/types.ts` must still satisfy. `pnpm typecheck` shows a required field that went away or changed type in `connection.ts`. An optional field is not checked that way: `src/connection.integration.test.ts` plays the recordings of a real harness through the connection and compares each update, tool call, form and answer with the recorded one, so a rename or a dropped field fails there.
    - The Effect version T3 uses (the `effect` entry of `catalog` in T3 Code's `pnpm-workspace.yaml`) against ours (`effect` in `package.json`). At the pinned commit T3 is on Effect 4.1.5 and we are on 4.0.7. When they differ, the copy may call an API our Effect version does not have.
    - Any new import in the copy other than `effect`: `pnpm dep-lint` fails on it.
 
 `pnpm typecheck` may fail inside `vendor/` on an unused or fallthrough check only: T3's `tsconfig.json` does not turn those on, ours does. Keep the last copy, or fix it at T3 Code first.
+
+We compile with `lib` ES2023 (`tsconfig.base.json`) and T3 with ESNext, so a sync may start to use a library type or method that our `lib` does not have. `pnpm typecheck` fails inside `vendor/` then. Keep the last copy, or fix it at T3 Code first.
 
 Never edit a file under `vendor/`. A fix we need goes to T3 Code first.

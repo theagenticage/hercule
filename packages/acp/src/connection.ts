@@ -16,9 +16,9 @@
  * it one line at a time:
  *
  * - The `logger` shows each message before it is handled, so the handler that
- *   runs next finds the untouched `params` (`raw`), and a refused reply finds
- *   the value that was refused. It also shows a dropped update and each
- *   answer to a request of the harness.
+ *   runs next finds the untouched `params` (`raw`), and a reply that could
+ *   not be decoded finds the value that could not. It also shows a dropped
+ *   update and each answer to a request of the harness.
  * - `onIncomingRequest` hands over the untouched `params` of a request of the
  *   harness, which the handler reads when it starts.
  */
@@ -67,9 +67,9 @@ const EXIT_GRACE = Duration.millis(250);
 const SYNC_ADVICE = "Sync packages/acp/vendor with T3 Code (packages/acp/README.md).";
 
 /**
- * The longest harness text that `quoteHarnessText` leaves whole. A refused
- * config option is about 400 characters with its choices cut short, and the
- * field that tells it apart from the others comes late.
+ * The longest harness text that `quoteHarnessText` leaves whole. A config
+ * option that could not be decoded is about 400 characters with its choices
+ * cut short, and the field that tells it apart from the others comes late.
  */
 const QUOTE_LENGTH = 500;
 
@@ -102,6 +102,7 @@ const LoggedMessage = Schema.Struct({
       cause: Schema.optionalKey(
         Schema.Array(
           Schema.Struct({
+            _tag: Schema.String,
             error: Schema.optionalKey(
               Schema.Struct({
                 code: Schema.optionalKey(Schema.Number),
@@ -197,14 +198,20 @@ const buildSessionParams = (request: NewSessionRequest) => ({
 /**
  * Returns the secrets in the headers of the MCP servers of `request`: each
  * header value, and the credential after the scheme (`abc` of `Bearer abc`),
- * because a harness may echo the credential alone.
+ * because a harness may echo the credential alone. Each comes with its form
+ * inside JSON text (quotes and backslashes escaped) when that differs, because
+ * the sentences for people quote values with `JSON.stringify`. A value comes
+ * before its credential, so the whole value is replaced first.
  */
 const readHeaderSecrets = (request: NewSessionRequest): ReadonlyArray<string> =>
   request.mcpServers.flatMap(({ headers }) =>
     headers.flatMap(({ value }) => {
       if (value === "") return [];
       const credential = /^\S+\s+(\S.*)$/.exec(value)?.[1];
-      return credential === undefined ? [value] : [value, credential];
+      return [value, ...(credential === undefined ? [] : [credential])].flatMap((secret) => {
+        const escaped = JSON.stringify(secret).slice(1, -1);
+        return escaped === secret ? [secret] : [secret, escaped];
+      });
     }),
   );
 
@@ -305,7 +312,7 @@ export const openAcpConnection = (options: {
 
     /**
      * Returns a sentence that names the field of `reply`, the reply to the
-     * call, that the vendored client refused, and its value. When the issues
+     * call, that the vendored client could not decode, and its value. When the issues
      * name more than one field, it takes the first one the reply has a value
      * for: the client also lists what ACP version 2 would have needed.
      */
@@ -400,6 +407,9 @@ export const openAcpConnection = (options: {
       openRequests.delete(key);
       if (request === undefined || message.exit?._tag !== "Failure") return Effect.void;
       const failure = message.exit.cause?.[0];
+      // The vendored client answers a request whose id is still open as
+      // interrupted. That request was reported when it arrived.
+      if (failure?._tag === "Interrupt") return Effect.void;
       const defect = failure?.defect;
       const text =
         failure?.error?.message ?? (typeof defect === "string" ? defect : "no reason was given");
@@ -468,10 +478,18 @@ export const openAcpConnection = (options: {
           if (call !== undefined) waitingCalls.set(acpRequestIdentity(id), call);
         });
       },
-      onIncomingRequest: (requestId, method, params) =>
-        Effect.sync(() => {
+      onIncomingRequest: (requestId, method, params) => {
+        if (openRequests.has(requestId)) {
+          return reportUnhandled(
+            method,
+            "The harness sent a request with the id of a request that was still open, so the vendored client did not hand it to a handler and answered the harness with an error.",
+            params,
+          );
+        }
+        return Effect.sync(() => {
           openRequests.set(requestId, { method, params });
-        }),
+        });
+      },
       onTermination: (error) => Effect.sync(() => endConnection(describeTermination(error))),
     });
     // Registered after the vendored client, so that it runs before the client's

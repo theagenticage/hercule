@@ -126,16 +126,18 @@ export interface SessionUpdateNotification {
   /**
    * The `params` of the notification exactly as the harness sent them, with the
    * fields this client does not know. `undefined` when the harness sent several
-   * messages in one line, which ACP does not do.
+   * messages in one line, which ACP does not do. A request keeps its own `raw`
+   * then.
    *
    * This is also true of `raw` of the requests below and of `UnhandledMessage`:
    * it is untouched, so it may hold a secret that the harness echoes. The
    * connection hides only what it was given: the header values and the
    * credential after the scheme of the MCP servers of `newSession` and
-   * `resumeSession`, in the text of an `AcpError` and in a `reason`. It does not
-   * hide them in `raw`, in the text of an update, in a token that is part of a
-   * URL, or in an encoded form of a secret. A caller decides what to do with
-   * `raw` before it shows or stores it.
+   * `resumeSession`, also as they read inside JSON text (quotes and backslashes
+   * escaped), in the text of an `AcpError` and in a `reason`. It does not hide
+   * them in `raw`, in the text of an update, in a token that is part of a URL,
+   * or in any other encoded form of a secret (URL encoding, base64). A caller
+   * decides what to do with `raw` before it shows or stores it.
    */
   readonly raw: unknown;
 }
@@ -326,7 +328,7 @@ export interface AcpHandlers {
    * The request may be handed over after updates that the harness sent right
    * after it, because it is handled apart from the updates. The tool call in
    * it is the one the harness sent: a request whose tool call was read
-   * differently is refused and reported instead.
+   * differently is answered with an error and reported instead.
    */
   readonly onApprovalRequest: (request: ApprovalRequest) => Effect.Effect<ApprovalOutcome>;
   /** Called when the harness asks the user a question. Works like `onApprovalRequest`. */

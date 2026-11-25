@@ -274,7 +274,7 @@ const describeUnreadableReply = (method: string, detail: string): string =>
 const SLIDER = { id: "volume", name: "Volume", type: "slider", currentValue: 3 };
 
 /**
- * A reply with a value the vendored client refuses, for the calls whose
+ * A reply with a value the vendored client cannot decode, for the calls whose
  * replies it checks, and the sentence that must name the field and the value.
  */
 const UNREADABLE_REPLIES: ReadonlyArray<{
@@ -378,19 +378,21 @@ it.effect("names, in each of many overlapping calls, the value that call was ans
   ),
 );
 
-it.effect("names the type of a refused object, and quotes up to 500 characters of it", () =>
-  Effect.gen(function* () {
-    const option = { id: "x", name: "n".repeat(300), type: "slider", currentValue: 3 };
-    const connection = yield* createTestHarness({
-      scripts: { "session/new": answerWith({ sessionId: SESSION, configOptions: [option] }) },
-    }).open;
+it.effect(
+  "names the type of an object it could not read, and quotes up to 500 characters of it",
+  () =>
+    Effect.gen(function* () {
+      const option = { id: "x", name: "n".repeat(300), type: "slider", currentValue: 3 };
+      const connection = yield* createTestHarness({
+        scripts: { "session/new": answerWith({ sessionId: SESSION, configOptions: [option] }) },
+      }).open;
 
-    const error = yield* Effect.flip(connection.newSession({ cwd: "/work", mcpServers: [] }));
+      const error = yield* Effect.flip(connection.newSession({ cwd: "/work", mcpServers: [] }));
 
-    expect(error.message).toContain('configOptions[0] (type "slider") is {"id":"x"');
-    // The end of the value is past the 200 characters an earlier version quoted.
-    expect(error.message).toContain('"currentValue":3}');
-  }),
+      expect(error.message).toContain('configOptions[0] (type "slider") is {"id":"x"');
+      // The end of the value is past the 200 characters an earlier version quoted.
+      expect(error.message).toContain('"currentValue":3}');
+    }),
 );
 
 it.effect("fails a prompt as refused when the harness reports an error for the turn", () =>
@@ -638,7 +640,7 @@ it.effect("is not stopped by a handler that throws", () =>
 );
 
 it.effect(
-  "is not stopped by a reporter that throws for a dropped update and for a refused request",
+  "is not stopped by a reporter that throws for a dropped update and for a request answered with an error",
   () =>
     Effect.gen(function* () {
       const harness = createTestHarness({
@@ -800,35 +802,71 @@ it.effect(
     }),
 );
 
-it.effect("gives each request and update its own raw when they arrive together", () =>
+it.effect("gives each request its own raw when the harness sends several in one line", () =>
   Effect.gen(function* () {
-    const hold = yield* Deferred.make<ApprovalOutcome>();
-    const harness = createTestHarness({ answers: { approval: () => Deferred.await(hold) } });
+    const hold = yield* Deferred.make<never>();
+    const harness = createTestHarness({
+      answers: { approval: () => Deferred.await(hold), elicitation: () => Deferred.await(hold) },
+    });
     yield* harness.open;
 
-    const count = 20;
-    const requests = Array.from({ length: count }, (_, n) => ({
-      ...APPROVAL_PARAMS,
-      zzRequest: n,
-    }));
-    const updates = Array.from({ length: count }, (_, n) => ({
-      sessionId: SESSION,
-      update: MESSAGE_CHUNK,
-      zzUpdate: n,
-    }));
-    for (const n of requests.keys()) {
-      harness.say(buildRequest(`p${n}`, "session/request_permission", requests[n]));
-      harness.say(buildNotification("session/update", updates[n]));
-    }
+    // The vendored client splits the line into four messages, so there is no one
+    // current message to take the params from.
+    const approvals = ["a", "b"].map((id) => ({ ...APPROVAL_PARAMS, zzId: id }));
+    const elicitations = ["a", "b"].map((id) => ({ ...ELICITATION_PARAMS, zzId: id }));
+    harness.say(
+      JSON.stringify([
+        buildRequest("p-a", "session/request_permission", approvals[0]),
+        buildRequest("e-a", "elicitation/create", elicitations[0]),
+        buildRequest("p-b", "session/request_permission", approvals[1]),
+        buildRequest("e-b", "elicitation/create", elicitations[1]),
+      ]),
+    );
     yield* harness.waitUntil(
-      "every request and update arrived",
-      () => harness.approvalRequests.length === count && harness.updates.length === count,
+      "all four requests arrived",
+      () => harness.approvalRequests.length === 2 && harness.elicitationRequests.length === 2,
     );
 
-    expect(harness.updates.map(({ raw }) => raw)).toEqual(updates);
-    expect(harness.approvalRequests.map(({ raw }) => raw)).toEqual(requests);
-    yield* Deferred.succeed(hold, ALLOW);
+    expect(harness.approvalRequests.map(({ raw }) => raw)).toEqual(approvals);
+    expect(harness.elicitationRequests.map(({ raw }) => raw)).toEqual(elicitations);
   }),
+);
+
+it.effect(
+  "reports a request whose id is still open, and the vendored client answers it with an error",
+  () =>
+    Effect.gen(function* () {
+      const hold = yield* Deferred.make<ApprovalOutcome>();
+      const harness = createTestHarness({ answers: { approval: () => Deferred.await(hold) } });
+      const connection = yield* harness.open;
+
+      harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
+      yield* harness.waitUntil(
+        "the first request arrived",
+        () => harness.approvalRequests.length === 1,
+      );
+      const second = { ...APPROVAL_PARAMS, zzSecond: 1 };
+      harness.say(buildRequest("p1", "session/request_permission", second));
+      yield* harness.waitUntil("the report", () => harness.unhandled.length === 1);
+      yield* harness.whenWritten("the answer to p1", isReplyTo("p1"));
+
+      expect(harness.unhandled).toHaveLength(1);
+      expect(harness.unhandled[0]).toMatchObject({
+        method: "session/request_permission",
+        raw: second,
+      });
+      expect(harness.unhandled[0]?.reason).toContain("id of a request that was still open");
+      // The second request never reached the handler. The harness got one answer
+      // for the id: an error, because the vendored client interrupted the request.
+      expect(harness.approvalRequests).toHaveLength(1);
+      expect(harness.fake.received.filter(isReplyTo("p1"))).toEqual([
+        buildFailure("p1", -32603, "Internal error"),
+      ]);
+      // The connection stays open.
+      const closed = yield* Effect.forkChild(connection.awaitClosed);
+      yield* Effect.yieldNow;
+      expect(closed.pollUnsafe()).toBeUndefined();
+    }),
 );
 
 /** Requests that the vendored client read as ACP version 2 although the harness sent a version 1 tool call. */
@@ -847,7 +885,7 @@ const APPROVALS_READ_AS_VERSION_TWO = [
 ] as const;
 
 it.effect.each(APPROVALS_READ_AS_VERSION_TWO)(
-  "refuses an approval request with $name beside its tool call, and reports it",
+  "answers an approval request with $name beside its tool call with an error, and reports it",
   ({ extra }) =>
     Effect.gen(function* () {
       const harness = createTestHarness();
@@ -1052,6 +1090,31 @@ it.effect(
       expect(error.message).not.toContain("sk-live");
       expect(error.harnessMessage).toBe('token "[hidden]" is invalid');
     }),
+);
+
+it.effect("hides a secret that has a quote or a backslash, also as the sentence quotes it", () =>
+  Effect.gen(function* () {
+    const secret = 'Bearer sk-live-"quoted"\\back';
+    const harness = createTestHarness({
+      scripts: { "session/set_config_option": answerWith({ configOptions: secret }) },
+    });
+    const connection = yield* harness.open;
+    yield* connection.newSession({
+      cwd: "/work",
+      mcpServers: [
+        {
+          name: "tools",
+          url: "http://127.0.0.1:9/mcp",
+          headers: [{ name: "Authorization", value: secret }],
+        },
+      ],
+    });
+
+    const error = yield* Effect.flip(connection.setConfigOption(SESSION, "model", "m"));
+
+    expect(error.message).toContain(`configOptions is "[hidden]"`);
+    expect(error.message).not.toContain("sk-live");
+  }),
 );
 
 it.effect("hides a secret before it cuts the text, and keeps harnessMessage whole", () =>
