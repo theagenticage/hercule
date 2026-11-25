@@ -256,6 +256,7 @@ Every harness reports an edit as an item of kind `file_change` ([./06-providers.
 - **pi** takes `args.path`.
 
   **Verify at build time:** how pi resolves a path that starts with `~` or `@`. The runner resolves such a path the way pi does, so that the path recorded is the file pi changed.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity** takes `rawInput.Path` of its edit tools, never the `locations` of the tool call, because those paths change spelling within one call ([./06-providers.md](./06-providers.md) section 10.5).
 - A harness tool whose path cannot be read reports none, and the edit is not observed.
 
 **The runner converts the paths** before it reports the event, where it forwards every adapter event to the controller:
@@ -285,6 +286,7 @@ Every harness reports an edit as an item of kind `file_change` ([./06-providers.
   - **Claude Code:** a `PreToolUse` hook for the tools that become `command_execution` and `file_change` items. It runs in the runner's own process, in every access mode, and for subagents' calls too. It takes its mark in memory and writes no file, so it cannot fail.
   - **pi:** the extension's `tool_call` handler, in every access mode, for the tools that become those items. It writes the mark file before it waits on anything. When it cannot, the call runs with no mark.
   - **Codex:** a `PreToolUse` command hook for `Bash` and `apply_patch`, given on the command line of the session's app-server. It is a short `/bin/sh` script that writes the hook input as the mark file. It always exits 0 and prints nothing, also when it cannot write the file, so the call always runs unchanged. Codex runs a hook given this way only when a trust entry holds its hash. The runner trusts this one hook by its hash and leaves every other hook as the user's settings make it. It never turns hook trust off. The hook costs about 6 ms per call on macOS.
+  - *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity:** no gate, because no hook of `agy` is known. The items of its shell commands have an unknown start, by the rule below. **Verify at build time:** [#1282](https://github.com/theagenticage/hercule/issues/1282): whether `agy` has a hook that can be a gate. If it has, the adapter takes the start from it, as the adapters above do.
 - **The start, after an approval:** a command that waits on a Request has not run. Its window is left out of every listing until the Request ends. The runner takes a new start mark just before it sends an allow answer, because the tool cannot run before the harness receives it. Only the first Request of an item that has not run moves its start:
   - Codex can ask again for the same item after a first try failed in its sandbox, and runs the command again outside the sandbox when allowed. The window keeps the start of the first allow, which is early, so it is safe.
   - Codex can ask about a command that already runs, such as to write to its input. Such a Request moves nothing and leaves the window in every listing, because the command may have written before it.
