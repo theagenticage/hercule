@@ -1,14 +1,18 @@
 #!/usr/bin/env bun
 /**
  * Enforces what each entrypoint may link: the runner's mode isolation (spec
- * 15 section 3, ADR 0018), and the import rules of the desktop app's three
- * layers (spec 17, Package). `ENTRYPOINT_RULES` below lists every rule.
+ * 15 section 3, ADR 0018), the import rules of the desktop app's three
+ * layers (spec 17, Package), and the ACP client, which the runner is to link and so
+ * must follow the runner's rule. `ENTRYPOINT_RULES` below lists every rule.
  *
  * The runner entrypoint's module graph MUST NOT include any controller
  * package: no DB engine, no plugin host, no web bundle. Each layer of the
  * desktop app links no first-party code but its own and, where allowed,
  * @hercule/contract and @hercule/client-core; each layer also has a list of
- * things it must not link.
+ * things it must not link. The ACP client (`packages/acp`) links its own
+ * folder, the copy of T3 Code's client under `vendor/`, and `effect`: the copy
+ * is replaced wholesale on every sync, so it must never gain another npm
+ * package without somebody noticing.
  *
  * Isolation is a property of the import graph per entrypoint, not of the file
  * on disk. So this script builds each entrypoint with Bun and reads the
@@ -155,6 +159,22 @@ const CLIENT_PACKAGES = ["contract", "client-core"];
  */
 const RUNTIME_BUILT_IN = new RegExp(`^(node:.*|(${builtinModules.join("|")})(/.*)?)$`);
 
+/**
+ * What the runner must not link: the controller's packages. Shared with every
+ * package the runner links and whose rule therefore carries the same ban.
+ */
+const RUNNER_FORBIDDEN: ReadonlyArray<Forbidden> = [
+  { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+  {
+    what: "the plugin host",
+    pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
+  },
+  {
+    what: "the web bundle",
+    pattern: /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+  },
+];
+
 const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
   {
     layer: "runner",
@@ -164,16 +184,32 @@ const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
     reason:
       "The runner entrypoint's module graph must contain no controller package:\n" +
       "no DB engine, no plugin host, no web bundle.",
+    forbidden: RUNNER_FORBIDDEN,
+  },
+  {
+    layer: "ACP client",
+    entrypoint: "packages/acp/src/index.ts",
+    target: "bun",
+    bundler: "bun",
+    reason:
+      "The runner can link the ACP client, so its graph follows the runner's rule: no controller\n" +
+      "package. It also links no npm package but effect (and Node built-ins). The copy of T3 Code's\n" +
+      "client under vendor/ is replaced on every sync, so a new dependency there would reach the\n" +
+      "runner unnoticed. Add a package to packages/acp/package.json and to this rule on purpose,\n" +
+      "or take the code out of the package.",
+    firstParty: { own: [".", "../vendor/effect-acp/src"], packages: [] },
     forbidden: [
-      { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+      ...RUNNER_FORBIDDEN,
       {
-        what: "the plugin host",
-        pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
-      },
-      {
-        what: "the web bundle",
-        pattern:
-          /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+        what: "an npm package other than effect",
+        // Matched against an import as written, and against a path in the
+        // pnpm store. Allowed: Node built-ins, `effect` and its subpaths,
+        // files of the effect package, and a relative import, which Bun
+        // reports as external when the file is used only for its types.
+        pattern: new RegExp(
+          `^(?!(${RUNTIME_BUILT_IN.source.slice(1, -1)}|effect(/.*)?|\\..*|` +
+            "node_modules/\\.pnpm/effect@[^/]+/node_modules/effect/.*)$)",
+        ),
       },
     ],
   },
