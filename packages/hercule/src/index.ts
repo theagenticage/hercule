@@ -79,10 +79,6 @@ function route(
   }
 }
 
-/**
- * Runs one invocation of the binary. `--version` and `licenses` are answered
- * here and start no role; every other verb is routed to its role.
- */
 export async function dispatch(argv: readonly string[]): Promise<void> {
   const parsed = parseGlobalOptions(argv);
   if (Result.isFailure(parsed)) {
@@ -94,13 +90,6 @@ export async function dispatch(argv: readonly string[]): Promise<void> {
   }
   if (parsed.success.rest[0] === "--version") {
     console.log(VERSION);
-    return;
-  }
-  // Needs no Home, controller or network, and is loaded only for this verb so
-  // that no other verb reads the licence text.
-  if (parsed.success.rest[0] === "licenses") {
-    const { buildLicensesNotice } = await import("./licenses");
-    console.log(buildLicensesNotice());
     return;
   }
   const { role, args } = route(argv, parsed.success);

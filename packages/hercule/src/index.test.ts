@@ -1,7 +1,3 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatch, VERSION } from "./index";
 
@@ -31,28 +27,6 @@ describe("dispatch", () => {
     expect(run.controller).not.toHaveBeenCalled();
     expect(run.runner).not.toHaveBeenCalled();
     expect(run.cli).not.toHaveBeenCalled();
-  });
-
-  // Runs the dispatcher's source in a real Bun, because the licence text is
-  // loaded by a Bun-only import that vitest cannot parse.
-  it("prints the third-party licence notice from an empty Home and starts no role", () => {
-    const home = mkdtempSync(join(tmpdir(), "hercule-licenses-"));
-    try {
-      const result = Bun.spawnSync(
-        [process.execPath, fileURLToPath(new URL("./main.ts", import.meta.url)), "licenses"],
-        { env: { PATH: process.env["PATH"] ?? "", HERCULE_HOME: home } },
-      );
-      const printed = result.stdout.toString();
-      expect(result.exitCode).toBe(0);
-      expect(printed).toContain("T3 Code");
-      expect(printed).toContain("Copyright (c) 2026 T3 Tools Inc.");
-      expect(printed).toContain(
-        "Permission is hereby granted, free of charge, to any person obtaining a copy",
-      );
-      expect(readdirSync(home)).toEqual([]);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   });
 
   it("sends serve to the controller", async () => {
