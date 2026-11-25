@@ -4,7 +4,7 @@ Hercule is a self-hosted agent orchestration platform: one always-on controller,
 
 ## What Hercule is
 
-Hercule orchestrates agents doing work on the user's behalf. Agents are configured identities (prompt, harness, capabilities) owned by the controller. They do their work in sessions on runners, driven by interactive coding harnesses (Claude Code, Codex, pi) behind harness adapters. Work enters the system as events (a GitHub issue labelled, a mail received, a cron tick, a manual trigger), is triaged and shaped by agents before the user sees it, and is executed by workflows: stored, editable definitions of triggers, steps, and routing. Between the user and the agents sits one public API; the web app, the `hercule` CLI, and the agents themselves are all clients of it.
+Hercule orchestrates agents doing work on the user's behalf. Agents are configured identities (prompt, harness, capabilities) owned by the controller. They do their work in sessions on runners, driven by interactive coding harnesses (~~Claude Code, Codex, pi~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Claude Code, Codex, pi, Antigravity) behind harness adapters. Work enters the system as events (a GitHub issue labelled, a mail received, a cron tick, a manual trigger), is triaged and shaped by agents before the user sees it, and is executed by workflows: stored, editable definitions of triggers, steps, and routing. Between the user and the agents sits one public API; the web app, the `hercule` CLI, and the agents themselves are all clients of it.
 
 Hercule is the successor to old agentick (Python). Old agentick is a quarry for ideas, never a constraint. Its product name is Hercule; "agentick" and "agentick-next" are retired labels (see [GLOSSARY.md](../../GLOSSARY.md)).
 
@@ -25,7 +25,7 @@ Ticket #15 adds a sixth, named **Intake**: the quality of agent prep-work before
 These decisions predate the design tickets. They are fixed context for the whole spec and are not reopened by any subsystem document.
 
 - **Clean-slate TypeScript codebase.** Controller, runner, and plugins are one language in one repository. The controller and runner are written on Effect 4, with Effect Schema as the contract language ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md), 2026-09-02); the web app stays outside Effect ([./14-web-app.md](./14-web-app.md)). Old agentick is a quarry for ideas, never a constraint, and never a data source: v1 starts empty (see [out of scope](#v1-scope-out-of-scope)).
-- **Harnesses are interactive coding agents.** The v1 harnesses are Claude Code (via the Agent SDK), Codex (via the app server), and pi (via the pi.dev SDK). A harness is only this; integrations such as GitHub are event sources, not harnesses.
+- **Harnesses are interactive coding agents.** ~~The v1 harnesses are Claude Code (via the Agent SDK), Codex (via the app server), and pi (via the pi.dev SDK).~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* The v1 harnesses are Claude Code (via the Agent SDK), Codex (via the app server), pi (via the pi.dev SDK), and Antigravity (via the ACP server of its `agy` program). A harness is only this; integrations such as GitHub are event sources, not harnesses.
 - **No repo-local config.** The controller's state is the single source of truth. A repository is one kind of workspace material and holds no Hercule configuration. This is the mistake that held back old agentick and it is not repeated.
 - **Single-user v1.** There is one user. No tenancy machinery is built, but no decision may make a later user concept a rewrite. The concrete guard: every mutation is stamped with an actor (`user` or `session:<id>`) that is widened, never restructured, when multi-user arrives.
 - **Plugin architecture is the structuring principle.** Channels, event sources, harnesses, and workflow actions are built internally as plugins in v1. Dynamic third-party loading comes later; v1 proves the plugin API by dogfooding. [05-plugins.md](./05-plugins.md).
@@ -74,7 +74,7 @@ Two concerns cut across every stage. Security (perimeter, secrets under a keycha
 | Area | V1 |
 |---|---|
 | Roles | Controller, runner, clients; one binary, Linux and macOS runners, no Windows |
-| Harnesses | Claude Code (Agent SDK), Codex (app server), pi (pi.dev SDK); each pinned to an exact harness release behind its adapter |
+| Harnesses | ~~Claude Code (Agent SDK), Codex (app server), pi (pi.dev SDK);~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Claude Code (Agent SDK), Codex (app server), pi (pi.dev SDK), Antigravity (ACP server of `agy`); each pinned to an exact harness release behind its adapter |
 | Channels | Discord, Slack (as channel plugins) |
 | Event sources | GitHub (watched-repo polling: issue and PR lifecycle plus notifications), Gmail (history.list polling); cron, manual, and platform events from the core |
 | Workflows | Declarative definitions, start and signal triggers, action and agent steps, CEL conditions, bounded cycles, structured agent output, whole-run re-run |

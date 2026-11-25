@@ -422,7 +422,7 @@ The one unit per machine that the OS supervisor keeps running: a launchd LaunchA
 _Avoid_: daemon (that is a runner process), LaunchAgent or systemd unit as the general term, service file, supervisor (that is launchd or systemd)
 
 **Harness**:
-An agent program Hercule runs for a Session or a Text Generation: Claude Code, Codex, pi. Installed on runners; one harness can run the models of several Providers, and one Provider's models can run in several harnesses.
+An agent program Hercule runs for a Session or a Text Generation: ~~Claude Code, Codex, pi~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Claude Code, Codex, pi, Antigravity. Installed on runners; one harness can run the models of several Providers, and one Provider's models can run in several harnesses.
 _Avoid_: provider (its name before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)), CLI, agent (that is a configuration)
 
 **Harness Definition**:
@@ -434,7 +434,7 @@ The runner-side code that drives one harness for a Session, and once, non-intera
 _Avoid_: provider adapter (the old name)
 
 **Provider**:
-The company that serves models and bills for them: Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax. A provider plugin declares its Account Kinds, how to read an account's Model Catalog and Account Usage, which harnesses each kind may run in, and its Default Selection. Integrations like GitHub are event sources, not providers.
+The company that serves models and bills for them: ~~Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Anthropic, OpenAI, Google, OpenRouter, Z.ai, OpenCode, MiniMax. A provider plugin declares its Account Kinds, how to read an account's Model Catalog and Account Usage, which harnesses each kind may run in, and its Default Selection. Integrations like GitHub are event sources, not providers.
 _Avoid_: vendor, model source, backend; provider for a harness (the meaning before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md))
 
 **Account Kind**:
@@ -454,7 +454,7 @@ The models one Provider Account may use, as last read for it, each with the date
 _Avoid_: catalog (bare; that is the plugin catalog), model list
 
 **Default Selection**:
-The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new.
+The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* A provider may also say that only the current models of one maker enter it. Google does, because it resells models of other makers and its menu starts with Google's own ([spec 06 section 17.3](./docs/spec/06-providers.md)).
 _Avoid_: featured models, recommended models
 
 **Model Profile**:
@@ -474,7 +474,7 @@ The session-level permission axis a harness adapter enforces: approval-required,
 _Avoid_: permission mode (vendor term), runtime mode
 
 **Capability Snapshot**:
-What one runner found out about one Provider Account in one harness: whether it is signed in and as whom, and the models it lists. Never obtained by creating or mutating a harness conversation.
+What one runner found out about one Provider Account in one harness: whether it is signed in and as whom, and the models it lists. Never obtained by creating or mutating a harness conversation. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* One exception may be needed: Antigravity's probe opens a conversation, sends no prompt and closes it, if `agy` lists its models in no other way ([spec 06 section 3.2](./docs/spec/06-providers.md)).
 _Avoid_: provider status
 
 **Text Generation**:
