@@ -1,14 +1,18 @@
 #!/usr/bin/env bun
 /**
  * Enforces what each entrypoint may link: the runner's mode isolation (spec
- * 15 section 3, ADR 0018), and the import rules of the desktop app's three
- * layers (spec 17, Package). `ENTRYPOINT_RULES` below lists every rule.
+ * 15 section 3, ADR 0018), the import rules of the desktop app's three
+ * layers (spec 17, Package), and the ACP client, which the runner is to link and so
+ * must follow the runner's rule. `ENTRYPOINT_RULES` below lists every rule.
  *
  * The runner entrypoint's module graph MUST NOT include any controller
  * package: no DB engine, no plugin host, no web bundle. Each layer of the
  * desktop app links no first-party code but its own and, where allowed,
  * @hercule/contract and @hercule/client-core; each layer also has a list of
- * things it must not link.
+ * things it must not link. The ACP client (`packages/acp`) links its own
+ * folder, the copy of T3 Code's client under `vendor/`, and `effect`: the copy
+ * is replaced wholesale on every sync, so it must never gain another npm
+ * package without somebody noticing.
  *
  * Isolation is a property of the import graph per entrypoint, not of the file
  * on disk. So this script builds each entrypoint with Bun and reads the
@@ -57,6 +61,12 @@
  * Thread on the local runner. Every other session stays isolated from them
  * (spec 06 section 9.1, ADR 0032).
  *
+ * One rule is a fence around the copy of T3 Code's ACP client: in the whole
+ * repository, only `packages/acp/src/connection.ts` imports anything inside
+ * `packages/acp/vendor/`, so the rest of Hercule never learns the library's
+ * types and a sync with T3 Code can only break that one file. Unlike the
+ * user-material fence, it counts `import type` and covers tests too.
+ *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
  * shipped binary would include them if they were installed again. The pnpm
@@ -73,7 +83,7 @@ import { existsSync, rmSync } from "node:fs";
 import { mkdtemp, readdir, realpath } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
 import ts from "typescript";
@@ -155,6 +165,22 @@ const CLIENT_PACKAGES = ["contract", "client-core"];
  */
 const RUNTIME_BUILT_IN = new RegExp(`^(node:.*|(${builtinModules.join("|")})(/.*)?)$`);
 
+/**
+ * What the runner must not link: the controller's packages. Shared with every
+ * package the runner links and whose rule therefore carries the same ban.
+ */
+const RUNNER_FORBIDDEN: ReadonlyArray<Forbidden> = [
+  { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+  {
+    what: "the plugin host",
+    pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
+  },
+  {
+    what: "the web bundle",
+    pattern: /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+  },
+];
+
 const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
   {
     layer: "runner",
@@ -164,16 +190,32 @@ const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
     reason:
       "The runner entrypoint's module graph must contain no controller package:\n" +
       "no DB engine, no plugin host, no web bundle.",
+    forbidden: RUNNER_FORBIDDEN,
+  },
+  {
+    layer: "ACP client",
+    entrypoint: "packages/acp/src/index.ts",
+    target: "bun",
+    bundler: "bun",
+    reason:
+      "The runner can link the ACP client, so its graph follows the runner's rule: no controller\n" +
+      "package. It also links no npm package but effect (and Node built-ins). The copy of T3 Code's\n" +
+      "client under vendor/ is replaced on every sync, so a new dependency there would reach the\n" +
+      "runner unnoticed. Add a package to packages/acp/package.json and to this rule on purpose,\n" +
+      "or take the code out of the package.",
+    firstParty: { own: [".", "../vendor/effect-acp/src"], packages: [] },
     forbidden: [
-      { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+      ...RUNNER_FORBIDDEN,
       {
-        what: "the plugin host",
-        pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
-      },
-      {
-        what: "the web bundle",
-        pattern:
-          /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+        what: "an npm package other than effect",
+        // Matched against an import as written, and against a path in the
+        // pnpm store. Allowed: Node built-ins, `effect` and its subpaths,
+        // files of the effect package, and a relative import, which Bun
+        // reports as external when the file is used only for its types.
+        pattern: new RegExp(
+          `^(?!(${RUNTIME_BUILT_IN.source.slice(1, -1)}|effect(/.*)?|\\..*|` +
+            "node_modules/\\.pnpm/effect@[^/]+/node_modules/effect/.*)$)",
+        ),
       },
     ],
   },
@@ -544,6 +586,15 @@ const transpiler = new Bun.Transpiler({ loader: "ts" });
 /** A relative import in a file: the specifier as written, and the path it resolves to. */
 type RelativeImport = { readonly specifier: string; readonly resolvedPath: string };
 
+/** Keeps the relative specifiers among `specifiers`, each resolved against the folder of `file`. */
+const resolveRelativeImports = (
+  file: string,
+  specifiers: ReadonlyArray<string>,
+): ReadonlyArray<RelativeImport> =>
+  specifiers
+    .filter((specifier) => specifier.startsWith("."))
+    .map((specifier) => ({ specifier, resolvedPath: resolve(dirname(file), specifier) }));
+
 /**
  * Lists the relative runtime imports in `file`: static imports, re-exports,
  * and `import()` and `require()` with a written specifier. Each resolved path
@@ -554,13 +605,10 @@ type RelativeImport = { readonly specifier: string; readonly resolvedPath: strin
  * That is what the rules below want: a type creates no import at runtime.
  */
 const listRelativeImports = async (file: string): Promise<ReadonlyArray<RelativeImport>> =>
-  transpiler
-    .scanImports(await Bun.file(file).text())
-    .filter((record) => record.path.startsWith("."))
-    .map((record) => ({
-      specifier: record.path,
-      resolvedPath: resolve(dirname(file), record.path),
-    }));
+  resolveRelativeImports(
+    file,
+    transpiler.scanImports(await Bun.file(file).text()).map((record) => record.path),
+  );
 
 const domains = await listFolders(controllerSrc);
 
@@ -754,16 +802,16 @@ const runnerSrc = resolve(root, "apps/runner/src");
 const userMaterialDir = resolve(runnerSrc, "user-material");
 const userMaterialImporter = resolve(runnerSrc, "sessions/context.ts");
 
-/** Checks whether `path` is the user material folder or a path inside it. */
-const isInUserMaterial = (path: string): boolean =>
-  path === userMaterialDir || path.startsWith(join(userMaterialDir, sep));
+/** Checks whether `path` is the folder `dir` or a path inside it. */
+const isInFolder = (dir: string, path: string): boolean =>
+  path === dir || path.startsWith(join(dir, sep));
 
 const userMaterialImports: Array<string> = [];
 const runnerFiles = existsSync(userMaterialDir) ? await listShippedFiles(runnerSrc) : [];
 for (const file of runnerFiles) {
-  if (file === userMaterialImporter || isInUserMaterial(file)) continue;
+  if (file === userMaterialImporter || isInFolder(userMaterialDir, file)) continue;
   for (const { specifier, resolvedPath } of await listRelativeImports(file)) {
-    if (isInUserMaterial(resolvedPath)) {
+    if (isInFolder(userMaterialDir, resolvedPath)) {
       userMaterialImports.push(`${relative(runnerSrc, file)} imports "${specifier}"`);
     }
   }
@@ -786,6 +834,106 @@ if (userMaterialImports.length > 0) {
 
 if (runnerFiles.length > 0) {
   console.log("dep-lint: only sessions/context.ts imports the runner's user-material/.");
+}
+
+/**
+ * The fence around the copy of T3 Code's ACP client.
+ * `packages/acp/vendor/effect-acp/` is copied from T3 Code unchanged and
+ * replaced as a whole on every sync, so the library's API may change under
+ * us. Only `packages/acp/src/connection.ts` may import anything inside
+ * `packages/acp/vendor/`; the rest of Hercule imports `@hercule/acp`, which
+ * exports only what Hercule itself defines. Files inside the vendor folder may
+ * import each other. A package reaches the folder only by path, because
+ * `packages/acp/package.json` exports only its two entrypoints.
+ *
+ * Every TypeScript and JavaScript file in the repository counts (`.ts`,
+ * `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`), tests and harnesses
+ * included, because a test that imports the library would tie its caller to
+ * it as well. The scan skips folders named `node_modules`, `dist`, `build` or
+ * `out`, and folders whose name starts with a dot, such as `.git`: they hold
+ * dependencies and build output, not our source. `import type` counts too: a
+ * type from the library would carry the library's shape into the caller.
+ * Static imports, re-exports, `import()` and `require()` with a written
+ * specifier all count, whether the specifier is relative or an absolute path.
+ * A specifier built at runtime does not, because no scan of the source can
+ * resolve it. An import by package name cannot reach the folder, because
+ * `@hercule/acp` exports only its two entrypoints.
+ *
+ * The check passes when the folder does not exist, as in the copies
+ * `scripts/dep-lint.test.ts` makes of this script.
+ */
+const acpDir = resolve(root, "packages/acp");
+const acpVendorDir = resolve(acpDir, "vendor");
+const acpVendorImporter = resolve(acpDir, "src/connection.ts");
+
+/** Folders that hold no source of ours: dependencies, build output, and dot folders such as `.git`. */
+const isSkippedFolder = (name: string): boolean =>
+  name.startsWith(".") || ["node_modules", "dist", "build", "out"].includes(name);
+
+/**
+ * Lists every TypeScript and JavaScript file (`.ts`, `.tsx`, `.mts`, `.cts`,
+ * `.js`, `.jsx`, `.mjs`, `.cjs`) under `dir`, skipping the folders
+ * `isSkippedFolder` names.
+ */
+const listSourceFiles = async (dir: string): Promise<ReadonlyArray<string>> => {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && !isSkippedFolder(entry.name))
+      .map((entry) => listSourceFiles(join(dir, entry.name))),
+  );
+  const files = entries
+    .filter((entry) => entry.isFile() && /\.[cm]?[jt]sx?$/.test(entry.name))
+    .map((entry) => join(dir, entry.name));
+  return [...files, ...nested.flat()];
+};
+
+/**
+ * Lists the imports of `file` that name a path, relative or absolute,
+ * `import type` included. Each resolved path is the specifier resolved against
+ * the file's folder, with no extension added. TypeScript's own scanner reads
+ * them, because Bun's drops a type import before it reports.
+ */
+const listPathImportsWithTypes = async (file: string): Promise<ReadonlyArray<RelativeImport>> =>
+  ts
+    .preProcessFile(await Bun.file(file).text(), true, true)
+    .importedFiles.map((imported) => imported.fileName)
+    .filter((specifier) => specifier.startsWith(".") || isAbsolute(specifier))
+    .map((specifier) => ({ specifier, resolvedPath: resolve(dirname(file), specifier) }));
+
+const acpVendorImports: Array<string> = [];
+const acpFiles = existsSync(acpVendorDir) ? await listSourceFiles(root) : [];
+await Promise.all(
+  acpFiles.map(async (file) => {
+    if (file === acpVendorImporter || isInFolder(acpVendorDir, file)) return;
+    // An import that reaches the folder names it by path, so a file that never
+    // mentions it has nothing to scan. Reading every file's imports would make
+    // this check most of the run's time.
+    if (!(await Bun.file(file).text()).includes("vendor")) return;
+    for (const { specifier, resolvedPath } of await listPathImportsWithTypes(file)) {
+      if (isInFolder(acpVendorDir, resolvedPath)) {
+        acpVendorImports.push(`${relative(root, file)} imports "${specifier}"`);
+      }
+    }
+  }),
+);
+
+if (acpVendorImports.length > 0) {
+  console.error(
+    "dep-lint: a file other than packages/acp/src/connection.ts imports packages/acp/vendor/:",
+  );
+  for (const imported of acpVendorImports.sort()) console.error(`    ${imported}`);
+  console.error(
+    "packages/acp/vendor/ is T3 Code's ACP client, copied unchanged and replaced as a whole on " +
+      "every sync, so its API can change under us. Only connection.ts may import it, even for " +
+      "a type, so that a sync can break that one file and nothing else learns the library's " +
+      "types. Import from @hercule/acp instead, and export from its index.ts what you need.",
+  );
+  process.exit(1);
+}
+
+if (acpFiles.length > 0) {
+  console.log("dep-lint: only packages/acp/src/connection.ts imports packages/acp/vendor/.");
 }
 
 const SDK = "@anthropic-ai/claude-agent-sdk";

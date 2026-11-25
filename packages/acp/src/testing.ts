@@ -1,0 +1,316 @@
+/**
+ * A fake harness for tests: it plays a recorded ACP session over the same
+ * pipes a real harness process has, so an adapter's tests need no `agy`
+ * binary.
+ *
+ * The fake does not understand ACP. It follows a recording of a real run,
+ * which lists every message in the order it crossed the wire. Messages
+ * marked "in" were sent by the harness to the client, and messages marked
+ * "out" were sent by the client to the harness.
+ */
+import { readFileSync } from "node:fs";
+
+/** The names of the recordings in `./recordings`, one file per recorded run. */
+export const RECORDING_NAMES = [
+  "bad-model",
+  "cancel",
+  "cancel-permission",
+  "compact",
+  "deny",
+  "deny2",
+  "edit-shell",
+  "plan-mode",
+  "question",
+  "question-elicit",
+  "steer",
+  "steer2",
+  "subagent",
+  "todo",
+  "websearch",
+] as const;
+
+export type RecordingName = (typeof RECORDING_NAMES)[number];
+
+/**
+ * One JSON-RPC 2.0 message as it crossed the wire. A request has `method` and
+ * `id`, a notification has `method` only, and a reply has `id` and either
+ * `result` or `error`.
+ */
+export interface JsonRpcMessage {
+  readonly jsonrpc: "2.0";
+  readonly id?: string | number;
+  readonly method?: string;
+  readonly params?: unknown;
+  readonly result?: unknown;
+  readonly error?: { readonly code: number; readonly message: string; readonly data?: unknown };
+}
+
+export interface RecordedMessage {
+  /** "in" was sent by the harness to the client, "out" by the client to the harness. */
+  readonly direction: "in" | "out";
+  readonly message: JsonRpcMessage;
+}
+
+/** A harness process the way the runner talks to it: lines in both directions, ended or killed. */
+export interface FakeHarness {
+  /** Takes what the client writes. A message is handled once its line is complete. */
+  readonly write: (text: string) => void;
+  /** The harness's output, one whole line per item, without the newline. */
+  readonly stdout: AsyncIterable<string>;
+  /** Always empty. It ends when the harness does. */
+  readonly stderr: AsyncIterable<string>;
+  /** Closes the harness's input, which ends it with exit code 0. */
+  readonly end: () => void;
+  /** Stops the harness with exit code 143, the code of a process ended by SIGTERM. */
+  readonly kill: () => void;
+  readonly exited: Promise<number>;
+  /** Every JSON-RPC message the client wrote, parsed, in the order it was written. */
+  readonly received: ReadonlyArray<JsonRpcMessage>;
+  /** Puts one raw line on stdout, for a line that is malformed or not in the recording. */
+  readonly sendLine: (text: string) => void;
+}
+
+const isJsonRpcMessage = (value: unknown): value is JsonRpcMessage =>
+  typeof value === "object" && value !== null && "jsonrpc" in value && value.jsonrpc === "2.0";
+
+/**
+ * Reads a recording from `./recordings`. Lines that are not JSON-RPC messages,
+ * such as the `{"finished": ...}` marker the recorder wrote, are left out.
+ * Fails when the file cannot be read or a line is not JSON.
+ */
+export const readRecording = (name: RecordingName): ReadonlyArray<RecordedMessage> => {
+  const text = readFileSync(new URL(`./recordings/${name}.jsonl`, import.meta.url), "utf8");
+  const recorded: Array<RecordedMessage> = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    const entry: unknown = JSON.parse(line);
+    if (
+      typeof entry === "object" &&
+      entry !== null &&
+      "direction" in entry &&
+      (entry.direction === "in" || entry.direction === "out") &&
+      "message" in entry &&
+      isJsonRpcMessage(entry.message)
+    ) {
+      recorded.push({ direction: entry.direction, message: entry.message });
+    }
+  }
+  return recorded;
+};
+
+const isRequest = (message: JsonRpcMessage): boolean =>
+  message.method !== undefined && message.id !== undefined;
+
+const isReply = (message: JsonRpcMessage): boolean =>
+  message.method === undefined && message.id !== undefined;
+
+/**
+ * A recorded client request in the setup part, with the harness messages that
+ * followed it: its reply, and any updates sent right after the reply.
+ */
+interface SetupGroup {
+  readonly request: JsonRpcMessage;
+  readonly harnessMessages: Array<JsonRpcMessage>;
+  used: boolean;
+}
+
+/**
+ * Splits the setup part of a recording into groups. A group starts at a client
+ * request and ends at the next message of the client, whatever it is.
+ */
+const buildSetupGroups = (setup: ReadonlyArray<RecordedMessage>): Array<SetupGroup> => {
+  const groups: Array<SetupGroup> = [];
+  let current: SetupGroup | undefined;
+  for (const { direction, message } of setup) {
+    if (direction === "out") {
+      current = isRequest(message)
+        ? { request: message, harnessMessages: [], used: false }
+        : undefined;
+      if (current !== undefined) groups.push(current);
+    } else {
+      current?.harnessMessages.push(message);
+    }
+  }
+  return groups;
+};
+
+/**
+ * Returns a queue of lines that can be read as an async iterable. Lines
+ * pushed before anyone reads are kept. Pushing after `end` does nothing.
+ */
+const createLineQueue = (): {
+  readonly lines: AsyncIterable<string>;
+  readonly push: (line: string) => void;
+  readonly end: () => void;
+} => {
+  const pending: Array<string> = [];
+  let wake: (() => void) | undefined;
+  let ended = false;
+  return {
+    lines: (async function* () {
+      for (;;) {
+        while (pending.length > 0) yield pending.shift()!;
+        if (ended) return;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    })(),
+    push: (line) => {
+      if (ended) return;
+      pending.push(line);
+      wake?.();
+    },
+    end: () => {
+      ended = true;
+      wake?.();
+    },
+  };
+};
+
+/**
+ * Starts a fake harness that plays `options.recording`.
+ *
+ * The recording has two parts. The setup part is everything before the first
+ * `session/prompt`, such as `initialize` and `session/new`. A client request in
+ * it is answered by method, in any order, because an adapter does not have to
+ * send its setup requests in the order the recording script did. For each
+ * request the fake sends the first unused recorded request of that method,
+ * with the harness messages that followed it.
+ *
+ * The turn part starts at the first `session/prompt` and is played in order.
+ * Harness messages are sent as they come up. A client message in the recording
+ * is a gate: the fake waits until the client writes the matching message, which
+ * is a request with the same method for a request (a second `session/prompt`
+ * included), a notification with the same method for a notification
+ * (`session/cancel`), or a reply with the same id for a reply to a harness
+ * request such as an approval request.
+ *
+ * Other client requests are answered from `options.replies`, a record from
+ * method to the `result` to send, or else with the error -32601 whose message
+ * says that the recording has no reply for the method. Other client
+ * notifications and replies are only kept in `received`.
+ *
+ * A recorded reply is sent with the id the client used for its request. The
+ * ids of harness requests are sent as recorded, and so is the session id.
+ */
+export const startFakeHarness = (options: {
+  readonly recording: ReadonlyArray<RecordedMessage>;
+  readonly replies?: Readonly<Record<string, unknown>>;
+}): FakeHarness => {
+  const { recording, replies = {} } = options;
+  const firstPrompt = recording.findIndex(
+    ({ direction, message }) => direction === "out" && message.method === "session/prompt",
+  );
+  const turnStart = firstPrompt === -1 ? recording.length : firstPrompt;
+  const setupGroups = buildSetupGroups(recording.slice(0, turnStart));
+  const turn = recording.slice(turnStart);
+  let cursor = 0;
+
+  const stdout = createLineQueue();
+  const stderr = createLineQueue();
+  const received: Array<JsonRpcMessage> = [];
+  // Maps the id a recorded request had to the id the client gave its request.
+  const clientIds = new Map<string | number, string | number>();
+  let pendingText = "";
+  let closed = false;
+  let resolveExited: (code: number) => void = () => undefined;
+  const exited = new Promise<number>((resolve) => {
+    resolveExited = resolve;
+  });
+
+  const sendRecorded = (message: JsonRpcMessage): void => {
+    const clientId = isReply(message) ? clientIds.get(message.id!) : undefined;
+    stdout.push(JSON.stringify(clientId === undefined ? message : { ...message, id: clientId }));
+  };
+
+  /** Sends the harness messages at the cursor, up to the next client message. */
+  const playUntilGate = (): void => {
+    while (cursor < turn.length && turn[cursor]!.direction === "in") {
+      sendRecorded(turn[cursor]!.message);
+      cursor += 1;
+    }
+  };
+
+  const matchesGate = (gate: JsonRpcMessage, message: JsonRpcMessage): boolean =>
+    isReply(gate)
+      ? isReply(message) && message.id === gate.id
+      : message.method === gate.method && isRequest(message) === isRequest(gate);
+
+  const answerRequest = (request: JsonRpcMessage): void => {
+    const id = request.id!;
+    const method = request.method!;
+    const group = setupGroups.find(
+      (candidate) => !candidate.used && candidate.request.method === method,
+    );
+    if (group !== undefined) {
+      group.used = true;
+      clientIds.set(group.request.id!, id);
+      for (const message of group.harnessMessages) sendRecorded(message);
+    } else if (Object.hasOwn(replies, method)) {
+      stdout.push(JSON.stringify({ jsonrpc: "2.0", id, result: replies[method] }));
+    } else {
+      const error = {
+        code: -32601,
+        message: `The recording has no reply for the method ${method}. Record one, or pass a reply for it in \`replies\`.`,
+      };
+      stdout.push(JSON.stringify({ jsonrpc: "2.0", id, error }));
+    }
+  };
+
+  const handleClientMessage = (message: JsonRpcMessage): void => {
+    received.push(message);
+    // The turn always stops at a client message, so the cursor is at a gate.
+    const gate = turn[cursor]?.message;
+    if (gate !== undefined && matchesGate(gate, message)) {
+      if (isRequest(gate) && isRequest(message)) clientIds.set(gate.id!, message.id!);
+      cursor += 1;
+      playUntilGate();
+    } else if (isRequest(message)) {
+      answerRequest(message);
+    }
+  };
+
+  const handleLine = (line: string): void => {
+    if (line.trim() === "") return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      throw new Error(`The client wrote a line that is not JSON: ${line}`);
+    }
+    if (!isJsonRpcMessage(parsed)) {
+      throw new Error(`The client wrote JSON that is not a JSON-RPC 2.0 message: ${line}`);
+    }
+    handleClientMessage(parsed);
+  };
+
+  const close = (exitCode: number): void => {
+    if (closed) return;
+    closed = true;
+    stdout.end();
+    stderr.end();
+    resolveExited(exitCode);
+  };
+
+  return {
+    write: (text) => {
+      if (closed) return;
+      pendingText += text;
+      const lines = pendingText.split("\n");
+      pendingText = lines.pop() ?? "";
+      for (const line of lines) handleLine(line);
+    },
+    stdout: stdout.lines,
+    stderr: stderr.lines,
+    end: () => {
+      close(0);
+    },
+    kill: () => {
+      close(143);
+    },
+    exited,
+    received,
+    sendLine: stdout.push,
+  };
+};

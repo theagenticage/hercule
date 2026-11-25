@@ -98,6 +98,7 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | `packages/cli` | `@hercule/cli` | The CLI role. HTTP only |
 | `packages/home` | `@hercule/home` | The Hercule Home: the global options that locate it, the layout inside it, the bootstrap config in its `config.toml`, the compiled binary every role runs as, and the build-time version (`@hercule/home/version`). A leaf every role links |
 | `packages/process-log` | `@hercule/process-log` | The log file the controller and every runner write, each its own: `<home>/logs/controller.log` or `runner.log`, rotated by size |
+| `packages/acp` | `@hercule/acp` | The ACP (Agent Client Protocol) client. `src/` is ours; `vendor/effect-acp/` is a copy of T3 Code's client, unchanged and excluded from lint and formatting, and only `src/connection.ts` imports it. Nothing links it yet. So that the runner can link it, its import graph reaches no controller package and no npm package but `effect` |
 | `packages/service` | `@hercule/service` | The service role (`hercule service`): the Service Unit on launchd and systemd that keeps the controller or a runner running. `hercule runner join` installs the runner's unit through it, so it links nothing of the controller |
 | `packages/contract` | `@hercule/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hercule/protocol` | The controller-runner WebSocket protocol in Effect Schema |
@@ -142,7 +143,7 @@ pnpm install
 pnpm typecheck   # bun check (TypeScript 7) over the backend, packages/ui, apps/web, and apps/desktop
 pnpm lint        # oxlint for the rules that need types, eslint --max-warnings 0 for the rest, then oxfmt --check
 pnpm test        # vitest across every package: the backend on Bun, the React packages on Node
-pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; only sessions/context.ts imports the runner's user-material/; the controller's domains, and the controller daemon's folders, form a DAG
+pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; the ACP client links no npm package but `effect`; only sessions/context.ts imports the runner's user-material/; only packages/acp/src/connection.ts imports packages/acp/vendor/; the controller's domains, and the controller daemon's folders, form a DAG
 ```
 
 To run only some tests, pass paths to one half of `pnpm test`. Plain `vitest run <path>` fails on backend files, which need Bun.
