@@ -604,7 +604,7 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
     "",
     "other commands:",
     ...wrapParagraph(
-      "hercule login <url>, hercule setup-url, hercule service <verb>, hercule serve, and the daemon forms of hercule runner.",
+      "hercule login <url>, hercule setup-url, hercule service <verb>, hercule serve, hercule licenses, and the daemon forms of hercule runner.",
       "  ",
     ),
     "",

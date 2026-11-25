@@ -1,12 +1,14 @@
 /**
  * `dep-lint` checks the workspace; this test checks the built binary, because
  * a dependency that gets back in is invisible until somebody downloads the
- * result.
+ * result. The same goes for the third-party licence text, which is embedded at
+ * build time: `hercule licenses` has to print it from the binary alone.
  */
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ROOT } from "../scripts/controller-process";
+import { createTemporaryHome } from "./harness";
 
 /**
  * One limit for every target, so it has to fit the biggest one. The Bun
@@ -37,5 +39,23 @@ describe("the release binary", () => {
       bytes,
       `the binary is ${(bytes / MIB).toFixed(1)} MiB, over the ${(SIZE_BUDGET_BYTES / MIB).toFixed(1)} MiB budget`,
     ).toBeLessThanOrEqual(SIZE_BUDGET_BYTES);
+  });
+
+  it("prints the third-party licence notice from an empty home", () => {
+    const state = createTemporaryHome();
+    try {
+      const result = Bun.spawnSync([binary, "licenses"], {
+        env: { ...process.env, HERCULE_HOME: state.home },
+      });
+      const printed = result.stdout.toString();
+      expect(result.exitCode).toBe(0);
+      expect(printed).toContain("T3 Code");
+      expect(printed).toContain("Copyright (c) 2026 T3 Tools Inc.");
+      expect(printed).toContain(
+        "Permission is hereby granted, free of charge, to any person obtaining a copy",
+      );
+    } finally {
+      state.remove();
+    }
   });
 });

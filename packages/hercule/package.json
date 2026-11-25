@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@hercule/acp": "workspace:*",
     "@hercule/cli": "workspace:*",
     "@hercule/controller": "workspace:*",
     "@hercule/home": "workspace:*",

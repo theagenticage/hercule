@@ -955,7 +955,7 @@ export const listWordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<str
  * The hand-written commands, which have no CLI row. Help text may mention
  * them, and `findMentions` must not treat them as unknown.
  */
-const HAND_WRITTEN = ["login", "setup-url", "service", "serve"];
+const HAND_WRITTEN = ["login", "setup-url", "service", "serve", "licenses"];
 
 /** One `hercule ...` mentioned in a text, looked up in the tree. */
 export interface Mention {

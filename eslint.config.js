@@ -155,16 +155,17 @@ const dagreFence = fenceLibrary(
  * The ACP client of `packages/acp` is a copy of T3 Code's, replaced as a whole
  * on every sync, so its API can change under us. Only `src/connection.ts`
  * imports the copy and turns what it returns into the package's own types.
- * Everyone else, tests of the package included, imports `@hercule/acp`, and
- * `@hercule/acp/testing` for the fake harness. The fence matches the text of
- * the specifier, so a relative path, an absolute path and a path through
+ * Everyone else, tests of the package included, imports `@hercule/acp`,
+ * `@hercule/acp/testing` for the fake harness, and `@hercule/acp/LICENSE` for
+ * the licence text the binary prints. The fence matches the text of the
+ * specifier, so a relative path, an absolute path and a path through
  * `node_modules` are all refused, and so is an import of a type. It also
  * refuses every other subpath of `@hercule/acp`, which would reach the copy
  * through the package.
  */
 const acpFenceMessage =
-  "The copy of T3 Code's ACP client is imported only in packages/acp/src/connection.ts, so that a sync with T3 Code can break that one file and nothing else learns the library's types. Import from @hercule/acp, and from @hercule/acp/testing for the fake harness; export from the package's index.ts what you need.";
-const acpFenceSpecifiers = "vendor/effect-acp|^@hercule/acp/(?!testing$)";
+  "The copy of T3 Code's ACP client is imported only in packages/acp/src/connection.ts, so that a sync with T3 Code can break that one file and nothing else learns the library's types. Import from @hercule/acp, from @hercule/acp/testing for the fake harness, and from @hercule/acp/LICENSE for the licence text; export from the package's index.ts what you need.";
+const acpFenceSpecifiers = "vendor/effect-acp|^@hercule/acp/(?!testing$|LICENSE$)";
 const acpFenceSource = `/${acpFenceSpecifiers.replaceAll("/", "\\x2F")}/`;
 const acpFence = {
   pattern: { regex: acpFenceSpecifiers, message: acpFenceMessage },
