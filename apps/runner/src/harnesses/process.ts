@@ -342,7 +342,7 @@ export const stopChild = (
 
 const noop = (): void => undefined;
 
-/** Spawns a line-framed harness. Shared by the Codex and pi adapters. */
+/** Spawns a line-framed harness. Shared by the Codex, pi and Antigravity adapters. */
 const spawnFramed = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,

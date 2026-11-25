@@ -4,8 +4,7 @@
  * is built here, so that all of them get the same environment and none of
  * them can run as another account.
  */
-import { constants } from "node:fs";
-import { open, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -30,7 +29,7 @@ import { isExecutableNotFound, stopChild } from "../process";
 import type { FramedChild, Run } from "../process";
 import { describeFileFailure } from "../session-files";
 import { truncateFact } from "../text";
-import { APP_DATA_DIR, hasTokenFile, makeScratchFolder } from "./harness-home";
+import { APP_DATA_DIR, hasTokenFile, makeScratchFolder, readRegularFile } from "./harness-home";
 
 /** The name the user knows the harness by. */
 export const ANTIGRAVITY_NAME = "Antigravity";
@@ -173,8 +172,8 @@ const LOG_NAME = "agy.log";
  * Fails with an `AdapterFailed` when the folder or a log cannot be read, or a
  * log is not a regular file.
  *
- * A log is opened without following a link, and without blocking, so that
- * nothing put in its place can send the read elsewhere or hang it.
+ * A log over the limit gives its first 1 MiB. See `readRegularFile` for how a
+ * log is opened.
  */
 const readWorkerLogs = (folder: string): Effect.Effect<ReadonlyArray<string>, AdapterError> =>
   Effect.tryPromise({
@@ -185,23 +184,7 @@ const readWorkerLogs = (folder: string): Effect.Effect<ReadonlyArray<string>, Ad
       );
       const texts: Array<string> = [];
       for (const name of names) {
-        const file = await open(
-          join(folder, name),
-          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-        );
-        try {
-          if (!(await file.stat()).isFile()) throw new Error("it is not a regular file");
-          const buffer = Buffer.alloc(LOG_LIMIT);
-          let length = 0;
-          while (length < LOG_LIMIT) {
-            const { bytesRead } = await file.read(buffer, length, LOG_LIMIT - length, null);
-            if (bytesRead === 0) break;
-            length += bytesRead;
-          }
-          texts.push(buffer.toString("utf8", 0, length));
-        } finally {
-          await file.close();
-        }
+        texts.push((await readRegularFile(join(folder, name), LOG_LIMIT)).text);
       }
       return texts;
     },
@@ -234,6 +217,37 @@ const drainStderr = (
   })();
   return { lastLines: () => lines.join(" "), ended };
 };
+
+/**
+ * Sends `authenticate` and returns the reply. Fails with the error `failOpening`
+ * builds for any failure, except the refusal that tells the user to run
+ * `agy acp --login`. `agy` gives that exact reply for no login, a login Google
+ * refused, and an expired login with no network. The worker logs in `folder`
+ * tell the last apart: it fails with an `AdapterFailed` asking the user to
+ * check the network, and the others with `HarnessLoginMissing`.
+ */
+const authenticateAccount = (
+  connection: AcpConnection,
+  folder: string,
+  failOpening: (error: AcpError) => Effect.Effect<never, AdapterError>,
+) =>
+  connection
+    .authenticate("oauth-personal")
+    .pipe(
+      Effect.catch((error) =>
+        error.reason === "refused" && (error.harnessMessage ?? "").includes("agy acp --login")
+          ? Effect.flatMap(readWorkerLogs(folder), (logs) =>
+              Effect.fail(
+                logs.some((log) => log.includes(NETWORK_ERROR_LINE))
+                  ? buildAdapterFailed(
+                      `${ANTIGRAVITY_NAME} could not reach Google to check the sign-in of this account. Check the network of this runner.`,
+                    )
+                  : buildNotSignedIn(),
+              ),
+            )
+          : failOpening(error),
+      ),
+    );
 
 /**
  * Starts the `agy` process of an account and signs it in over ACP. Returns the
@@ -318,23 +332,7 @@ export const openSignedInAgy = (
       handlers: options.handlers,
     }).pipe(Effect.catch(failOpening));
 
-    const reply = yield* connection
-      .authenticate("oauth-personal")
-      .pipe(
-        Effect.catch((error) =>
-          error.reason === "refused" && (error.harnessMessage ?? "").includes("agy acp --login")
-            ? Effect.flatMap(readWorkerLogs(folder), (logs) =>
-                Effect.fail(
-                  logs.some((log) => log.includes(NETWORK_ERROR_LINE))
-                    ? buildAdapterFailed(
-                        `${ANTIGRAVITY_NAME} could not reach Google to check the sign-in of this account. Check the network of this runner.`,
-                      )
-                    : buildNotSignedIn(),
-                ),
-              )
-            : failOpening(error),
-        ),
-      );
+    const reply = yield* authenticateAccount(connection, folder, failOpening);
 
     const workerLogs = yield* readWorkerLogs(folder);
     if (workerLogs.length === 0 || !workerLogs.every((log) => log.includes(FILE_STORAGE_LINE))) {
