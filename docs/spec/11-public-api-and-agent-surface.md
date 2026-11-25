@@ -691,7 +691,7 @@ A client keeps what the user typed after any of these. The audit entry `session.
 
 A client that remembers the user's recent picks sends the pick it chose; the controller never reads a client's recent list. `harnessId` left out, or null, means the account's default harness when the session starts. A harness the account cannot run in is refused `validation`, with the reason ([./06-providers.md](./06-providers.md)). The account and the harness are fixed for the session's life: `session.update` and `session.input` change the model and its options only, and `session.continue` keeps both.
 
-*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **An output schema is refused where structured output is unsupported.** `session.spawn` with an `outputSchema` fails with `validation` on `outputSchema` when the harness the session would run in declares `structuredOutput: "unsupported"`. [./06-providers.md](./06-providers.md) section 2 holds the message and the order of the check.
+*(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **An output schema is refused where structured output is unsupported.** `session.spawn` with an `outputSchema`, a field its row above does not list, fails with `validation` on `outputSchema` when the harness the session would run in declares `structuredOutput: "unsupported"`. [./06-providers.md](./06-providers.md) section 2 holds the message and the order of the check.
 
 ```ts
 interface Passage { sessionId: string; subagentId?: string; turnId: string; at: string; excerpt: string }  // subagentId added 2026-10-05, #355
