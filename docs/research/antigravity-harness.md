@@ -314,7 +314,7 @@ T3 changes `packages/effect-acp` about five times a week, and about two of those
 Branch `spike/acp-package` (commits `63d3de543`, `0153040a4`) holds a first copy as `packages/acp`: the client half, the generated schemas of ACP v1 and v2, a generator at `scripts/gen-acp-types.ts`, the MIT notice and 82 passing tests, on Effect 4.0.7 with no source change. It is a starting point, not the final shape: its second commit edits the copied files to pass lint, which the decision of 2026-11-25 undoes (exclude the folder from lint instead). Three things it found:
 
 - T3's checked-in schemas cannot be reproduced from T3's generator alone: every generator release emits open structs. The spike's script closes them, and the result then matches T3's.
-- Closed structs reject unknown fields, so an `agy` that adds a field to a known message fails decoding. `agy` ships often; loosen this for messages we receive.
+- *(Corrected 2026-11-25 by the thread of #1279, which measured it.)* T3's decoder ignores unknown fields. New **values** are what break it: a new kind of config option in the reply to `session/new`, for example, fails the whole reply. `agy` ships often, so the messages we receive need schemas of our own that tolerate values they do not know.
 - The client builds on Effect's `rpc` modules, which Effect marks unstable.
 
 The runner starts processes with `Bun.spawn`, so the adapter hands the client its stdio itself.
