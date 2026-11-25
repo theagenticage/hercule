@@ -210,7 +210,7 @@ describe("installing Antigravity", () => {
     const outcome = await install();
 
     expect(outcome.ok).toBe(false);
-    expect(outcome).toMatchObject({ message: expect.stringContaining(`${kernel} ${machine}`) });
+    expect(outcome.message).toContain(`${kernel} ${machine}`);
     expect(urlsAskedFor()).toEqual([]);
     expect(existsSync(join(bin(), "agy"))).toBe(false);
   });

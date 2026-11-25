@@ -248,10 +248,8 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
 
     const probed = await probeAccount(account);
 
-    expect(probed.auth).toEqual({
-      status: "error",
-      message: expect.stringContaining("could not reach Google"),
-    });
+    expect(probed.auth.status).toBe("error");
+    expect(probed.auth.message).toContain("could not reach Google");
     expect(probed.models).toEqual([]);
   }, 30_000);
 
@@ -263,10 +261,8 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     const probed = await probeAccount(account);
 
     expect(Date.now() - startedAt).toBeLessThan(Duration.toMillis(PROBE_DEADLINE) / 2);
-    expect(probed.auth).toEqual({
-      status: "error",
-      message: expect.stringContaining("listed no models"),
-    });
+    expect(probed.auth.status).toBe("error");
+    expect(probed.auth.message).toContain("listed no models");
     const appData = join(account.ctx.home, APP_DATA_DIR);
     expect(listTree(join(appData, "conversations"))).toEqual([]);
     expect(listTree(join(appData, "brain"))).toEqual([]);
@@ -393,10 +389,8 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
       const started = await Effect.runPromise(
         logins.start("request-1", "account-1", adapter, account.ctx, "sign-in"),
       );
-      expect(started).toMatchObject({
-        _tag: "loginUrl",
-        url: expect.stringMatching(/^https:\/\//),
-      });
+      expect(started._tag).toBe("loginUrl");
+      expect("url" in started ? started.url : "").toMatch(/^https:\/\//);
 
       const submitted = await Effect.runPromise(logins.submit("account-1", "not-a-real-code"));
 

@@ -26,7 +26,13 @@ import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercul
 import type { AdapterError } from "@hercule/protocol";
 import type { HarnessRunnerContext } from "../index";
 import type { Run } from "../process";
-import { cleanupHomes, createScratchHome, NO_CONTROLLER_UPLOADER, waitUntil } from "../testing";
+import {
+  cleanupHomes,
+  createLines,
+  createScratchHome,
+  NO_CONTROLLER_UPLOADER,
+  waitUntil,
+} from "../testing";
 import {
   buildLoginCommand,
   buildNotSignedIn,
@@ -121,7 +127,7 @@ const buildFakeAgy = (
     readonly workerLogs?: ReadonlyArray<string>;
     readonly frontLog?: string;
     readonly stderrLines?: ReadonlyArray<string>;
-    readonly throws?: unknown;
+    readonly throws?: Error;
   } = {},
 ): FakeAgy => {
   const { scripts = {}, workerLogs = [FILE_STORAGE], frontLog = "", stderrLines = [] } = options;
@@ -133,6 +139,9 @@ const buildFakeAgy = (
     workerLogs.forEach((text, index) => {
       writeFileSync(`${logFile}.${4000 + index}`, text);
     });
+    const stderr = createLines();
+    for (const line of stderrLines) stderr.push(line);
+    stderr.end();
     const harness = startFakeHarness({ recording: readRecording("cancel"), scripts });
     const signals: Array<string | undefined> = [];
     const spawned: Spawned = { command, env, cwd, harness, signals, hasExited: false };
@@ -143,9 +152,7 @@ const buildFakeAgy = (
     return {
       write: harness.write,
       stdout: harness.stdout,
-      stderr: (async function* () {
-        yield* stderrLines;
-      })(),
+      stderr: stderr.iterable,
       end: harness.end,
       kill: (signal) => {
         signals.push(signal);
