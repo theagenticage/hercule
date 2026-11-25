@@ -122,8 +122,7 @@ const addKeyAccount = (label: string | null = null) =>
 
 describe("computeArrivedModels", () => {
   // The rules of what arrives are tested through the Model Profile service,
-  // which announces it. This is the one case a profile cannot reach: a
-  // catalog that was never read has no models and no first read.
+  // except these two: a catalog never read, and a provider that names one maker.
   it("returns nothing before the first successful read", () => {
     expect(
       computeArrivedModels(
@@ -131,6 +130,24 @@ describe("computeArrivedModels", () => {
         { models: [], firstReadAt: null },
       ),
     ).toEqual([]);
+  });
+
+  it("announces only the models of the provider's maker that arrived after the first read", () => {
+    const firstReadAt = "2026-11-01T00:00:00.000Z";
+    const arrived = (slug: string, maker?: string): CatalogModel & { firstSeenAt: string } => ({
+      ...model(slug, maker === undefined ? {} : { maker }),
+      firstSeenAt: "2026-11-02T00:00:00.000Z",
+    });
+
+    const announced = computeArrivedModels(
+      { defaultSelection: "current-models", defaultSelectionMaker: "Google" },
+      {
+        models: [arrived("gemini", "Google"), arrived("claude", "Anthropic"), arrived("unknown")],
+        firstReadAt,
+      },
+    );
+
+    expect(announced.map((one) => one.model)).toEqual(["gemini"]);
   });
 });
 
@@ -163,6 +180,34 @@ describe("computeDefaultSelection", () => {
       defaultModel: null,
     });
   });
+
+  describe("for a provider that names one maker", () => {
+    const google = { defaultSelection: "current-models", defaultSelectionMaker: "Google" } as const;
+
+    it("selects only the models of that maker, compared exactly, and leaves out a model with no maker or a legacy one", () => {
+      const selection = computeDefaultSelection(google, [
+        model("flash", { maker: "Google" }),
+        model("sonnet", { maker: "Anthropic" }),
+        model("lowercase", { maker: "google" }),
+        model("unknown"),
+        model("old-gemini", { maker: "Google", isLegacy: true }),
+        model("pro", { maker: "Google" }),
+      ]);
+
+      expect(selection.models).toEqual(["flash", "pro"]);
+    });
+
+    it("names the default model only when it is of that maker", () => {
+      const others = [model("flash", { maker: "Google" }), model("opus", { maker: "Anthropic" })];
+
+      expect(
+        computeDefaultSelection(google, [others[0]!, { ...others[1]!, isDefault: true }]),
+      ).toEqual({ models: ["flash"], defaultModel: null });
+      expect(
+        computeDefaultSelection(google, [{ ...others[0]!, isDefault: true }, others[1]!]),
+      ).toEqual({ models: ["flash"], defaultModel: "flash" });
+    });
+  });
 });
 
 describe("a catalog read", () => {
@@ -173,7 +218,12 @@ describe("a catalog read", () => {
         const runner = yield* addRunner("laptop");
         yield* recordRead(runner, account.id, signedOut("Sign in on a machine first."), 1);
         const failed = yield* readCatalog(account.id);
-        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 2);
+        yield* recordRead(
+          runner,
+          account.id,
+          signedInWith(model("a", { maker: "Google" }), model("b")),
+          2,
+        );
         return { failed, read: yield* readCatalog(account.id) };
       }),
     );
@@ -183,7 +233,10 @@ describe("a catalog read", () => {
       readAt: null,
       error: "Sign in on a machine first.",
     });
-    expect(outcome.read.models.map((one) => one.slug)).toEqual(["a", "b"]);
+    expect(outcome.read.models.map((one) => [one.slug, one.maker])).toEqual([
+      ["a", "Google"],
+      ["b", undefined],
+    ]);
     expect(outcome.read.readAt).not.toBeNull();
     expect(outcome.read.error).toBeNull();
     expect(outcome.read.models.map((one) => one.firstSeenAt)).toEqual([

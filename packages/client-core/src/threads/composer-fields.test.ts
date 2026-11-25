@@ -166,7 +166,10 @@ describe("buildComposerFields", () => {
         [{ runnerId: LOCAL.id, state: "harness-missing" }],
       );
 
-      const fields = draftOn(LOCAL, missing);
+      // The build can drive pi; the machine has no pi binary.
+      const withAdapter = { ...LOCAL, facts: { ...LOCAL.facts!, adapters: ["pi/pi"] } };
+
+      const fields = draftOn(withAdapter, missing);
 
       expect(fields.blocked).toEqual({
         reason: "Z.ai is not on moss",
@@ -419,6 +422,20 @@ describe("buildComposerFields", () => {
 
     expect(fields.blocked).toEqual({
       reason: "Anthropic is not on moss",
+      signIn: null,
+      addAccount: false,
+    });
+  });
+
+  it("blocks a draft whose runner has a Hercule build with no adapter for the harness, and says to update", () => {
+    const oldBuild = { ...LOCAL, facts: { ...LOCAL.facts!, adapters: [] } };
+    const fields = composeDraft(
+      { ...buildCatalogs([NOT_HERE]), runners: [oldBuild] },
+      buildConfig({ providerAccountId: NOT_HERE.id, model: null, runnerId: null }),
+    );
+
+    expect(fields.blocked).toEqual({
+      reason: "Hercule on moss cannot run the harness; update Hercule there",
       signIn: null,
       addAccount: false,
     });

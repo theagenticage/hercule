@@ -61,7 +61,7 @@ import { mcpServerListRule, requireMcpManage } from "../../mcp-servers";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { modelProfileRepository } from "../../model-profiles";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
-import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
+import { deriveCatalogJsonSchema, PluginHost, type RegisteredHarness } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { PromotionState } from "../../promotion";
 import {
@@ -542,7 +542,11 @@ const make = Effect.gen(function* () {
    * session on `providerAccountId` starts with, in this order:
    *
    * 0. the harness: the one requested, or else the account's default. The
-   *    session stores it, so it runs in the same harness for good;
+   *    session stores it, so it runs in the same harness for good. The
+   *    output schema is checked against it (`requireUsableOutputSchema`):
+   *    the harness must give a structured result, and the schema must stay
+   *    inside the supported subset. That happens before a runner is chosen,
+   *    so the answer is the same when no machine is connected;
    * 1. the runner: the one named, or else the first placeable runner that can
    *    run the account in the harness (`ProviderAccountRunners`);
    * 2. the access mode: the nearest one at or below the requested mode that
@@ -557,7 +561,8 @@ const make = Effect.gen(function* () {
    * the harness supports no such access mode, or no model was requested and
    * no runner has reported a model list for the account in the harness yet,
    * and with `Validation` for an unknown account, harness, runner or
-   * option.
+   * option, or for an output schema that the harness cannot give a result for
+   * or that breaks the supported subset (on the path `outputSchema`).
    */
   const resolveStartSettings = (request: {
     readonly providerAccountId: string;
@@ -569,6 +574,8 @@ const make = Effect.gen(function* () {
     /** The model asked for, or undefined for the runner's default. */
     readonly model: string | undefined;
     readonly options: ModelSelection["options"];
+    /** The schema the session's result must match, or undefined for none. */
+    readonly outputSchema: SessionSpec["outputSchema"];
   }): Effect.Effect<
     {
       readonly harnessId: string;
@@ -583,6 +590,7 @@ const make = Effect.gen(function* () {
         request.providerAccountId,
         request.harnessId,
       );
+      yield* requireUsableOutputSchema(request.outputSchema, definition);
       const available = yield* accountRunners.list(request.providerAccountId, harnessId);
       const hostingRunnerId = yield* request.runnerId === undefined
         ? choosePlacement(available)
@@ -702,18 +710,36 @@ const make = Effect.gen(function* () {
     ACCESS_MODE_CHAIN.indexOf(requested) <= ACCESS_MODE_CHAIN.indexOf(agent.accessMode);
 
   /**
-   * Checks the output schema against the subset every harness supports.
-   * Returns the schema, or fails with a validation error for each rule it
-   * breaks. The check runs before anything is written, so an invalid schema
-   * leaves no session behind.
+   * Checks that a session may run with this output schema in this harness.
+   * Succeeds when there is no schema. Otherwise fails with a validation error
+   * on `outputSchema`, and names the first problem that applies:
+   *
+   * 1. the harness cannot give a structured result: one issue, and the schema
+   *    is not looked at;
+   * 2. the schema breaks a rule of the subset that every harness giving
+   *    structured results supports: one issue for each rule it breaks.
+   *
+   * The check runs before anything is written, so a refused schema leaves no
+   * session behind.
    */
-  const validateOutputSchema = (
+  const requireUsableOutputSchema = (
     schema: SessionSpec["outputSchema"],
-  ): Effect.Effect<SessionSpec["outputSchema"], Validation> => {
-    if (schema === undefined) return Effect.succeed(undefined);
+    definition: Pick<RegisteredHarness, "displayName" | "declared">,
+  ): Effect.Effect<void, Validation> => {
+    if (schema === undefined) return Effect.void;
+    if (definition.declared.structuredOutput === "unsupported") {
+      return Effect.fail(
+        createValidationError([
+          {
+            path: ["outputSchema"],
+            message: `${definition.displayName} cannot give a structured result. Leave out the output schema, or run on another harness.`,
+          },
+        ]),
+      );
+    }
     const issues = lintOutputSchema(schema);
     return issues.length === 0
-      ? Effect.succeed(schema)
+      ? Effect.void
       : Effect.fail(
           createValidationError(
             issues.map((issue) => ({ path: ["outputSchema"], message: issue })),
@@ -1205,6 +1231,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode: agent.accessMode,
           model: agent.model?.model,
           options: agent.model?.options ?? {},
+          outputSchema: undefined,
         });
         const defaults = yield* settings.allForUser(user.userId);
         const core = yield* memory.read(agent.id, MEMORY_CORE);
@@ -1328,8 +1355,8 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           model: request.model ?? agentSelection?.model,
           options: request.options ?? agentSelection?.options ?? {},
+          outputSchema: request.outputSchema,
         });
-        const outputSchema = yield* validateOutputSchema(request.outputSchema);
 
         const spec = {
           providerAccountId: agent.providerAccountId,
@@ -1340,7 +1367,7 @@ const make = Effect.gen(function* () {
           accessMode,
           systemPrompt: agent.systemPrompt,
           ...(agent.disallowedTools.length === 0 ? {} : { disallowedTools: agent.disallowedTools }),
-          ...(outputSchema === undefined ? {} : { outputSchema }),
+          ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
           timeouts: buildStepSessionTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
@@ -1567,7 +1594,6 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_ACCESS_MODE));
             }
           }
-          const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
           const projectId = decoded.projectId ?? threadDefaults?.projectId;
           // A project the call names must be live. One inherited from the
           // caller was checked when its defaults were copied.
@@ -1665,6 +1691,7 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             model: decoded.model ?? agent?.model?.model ?? defaultModel,
             options: decoded.options ?? defaultOptions ?? {},
+            outputSchema: decoded.outputSchema,
           }).pipe(
             Effect.mapError((error) =>
               caller !== undefined &&
@@ -1691,7 +1718,7 @@ const make = Effect.gen(function* () {
             ...(agent === undefined || agent.disallowedTools.length === 0
               ? {}
               : { disallowedTools: agent.disallowedTools }),
-            ...(outputSchema === undefined ? {} : { outputSchema }),
+            ...(decoded.outputSchema === undefined ? {} : { outputSchema: decoded.outputSchema }),
             timeouts: buildTimeouts(yield* settings.all()),
           } satisfies SessionSpec;
 
@@ -1793,6 +1820,10 @@ const make = Effect.gen(function* () {
      * refuses without the grant. Forking an Agent's session needs no
      * `thread.start`.
      *
+     * Fails with `InvalidState` when the parent's harness declares
+     * `fork: "unsupported"`. Resuming a session is not a fork and is not
+     * affected (it is `session.input`).
+     *
      * The fork takes the parent's profile rather than the user's thread
      * defaults. So a session may fork a session only from a parent on its own
      * profile. Any other parent would be an escalation: `session.read` is
@@ -1832,6 +1863,20 @@ const make = Effect.gen(function* () {
           }
           if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
+          }
+          // Asked before the resume check, which tells the user to stop a live
+          // parent: nobody should stop a session for a fork that can never
+          // happen. A harness this build does not carry passes here and is
+          // refused by `resolveHarnessChoice` below.
+          const parentHarness = (yield* host.harnesses()).find(
+            (harness) => harness.id === parent.harnessId,
+          );
+          if (parentHarness?.declared.fork === "unsupported") {
+            return yield* Effect.fail(
+              createInvalidStateError(
+                `${parentHarness.displayName} cannot fork a thread. Start a new thread and tell it what to build on.`,
+              ),
+            );
           }
           // A fork a session makes copies that session's list, and a fork the
           // user makes copies its parent's. An Agent's lineage has no list yet.

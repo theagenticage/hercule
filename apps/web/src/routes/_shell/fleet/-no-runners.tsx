@@ -1,15 +1,17 @@
 import type { JSX } from "react";
 import { Button, Group } from "@hercule/ui";
 
-/** The harnesses a runner reports on the machine it runs on. */
-const HARNESSES = ["Claude Code", "Codex", "pi"];
-
 /**
  * The fleet screen before any runner has joined. Nothing has checked which
  * harnesses are installed, so each harness is listed with its login state
  * shown as unknown rather than guessed.
  */
-export function NoRunners(): JSX.Element {
+export function NoRunners({
+  harnessNames,
+}: {
+  /** The names of the harnesses a runner reports on the machine it runs on. */
+  readonly harnessNames: readonly string[];
+}): JSX.Element {
   return (
     <>
       <Group>
@@ -20,7 +22,7 @@ export function NoRunners(): JSX.Element {
           </span>
           <span className="text-fine text-muted">offline</span>
         </div>
-        {HARNESSES.map((harness) => (
+        {harnessNames.map((harness) => (
           <div
             key={harness}
             className="flex items-center gap-2.5 rounded-control py-1 pr-2.5 pl-9 text-fine text-muted"

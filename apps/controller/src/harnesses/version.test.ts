@@ -6,6 +6,7 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  ANTIGRAVITY_VERSION,
   CLAUDE_CODE_VERSION,
   CODEX_VERSION,
   PI_TESTED_VERSION,
@@ -64,6 +65,7 @@ describe("readHarnessFloor", () => {
     expect(readHarnessFloor("claude-code/claude-code")).toBe(CLAUDE_CODE_VERSION);
     expect(readHarnessFloor("codex/codex")).toBe(CODEX_VERSION);
     expect(readHarnessFloor("pi/pi")).toBe(PI_VERSION);
+    expect(readHarnessFloor("antigravity/antigravity")).toBe(ANTIGRAVITY_VERSION);
     expect(readHarnessFloor("nobody-pinned-this")).toBeUndefined();
   });
 });
@@ -93,6 +95,14 @@ describe("computeHarnessVersionVerdict", () => {
     expect(computeHarnessVersionVerdict("codex/codex", CODEX_VERSION)).toBe("ok");
     expect(computeHarnessVersionVerdict("codex/codex", "0.1.0")).toBe("below-floor");
     expect(computeHarnessVersionVerdict("codex/codex", "99.0.0")).toBe("above-tested-max");
+  });
+
+  it("holds Antigravity to the one release it is tested with, floor and tested maximum alike", () => {
+    expect(computeHarnessVersionVerdict("antigravity/antigravity", ANTIGRAVITY_VERSION)).toBe("ok");
+    expect(computeHarnessVersionVerdict("antigravity/antigravity", "0.1.0")).toBe("below-floor");
+    expect(computeHarnessVersionVerdict("antigravity/antigravity", "99.0.0")).toBe(
+      "above-tested-max",
+    );
   });
 
   it("returns unknown for a harness with no pinned version", () => {

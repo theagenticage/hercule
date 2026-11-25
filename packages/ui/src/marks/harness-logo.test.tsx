@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { HarnessLogo } from "../index";
 
 describe("HarnessLogo", () => {
-  it.each(["claude-code/claude-code", "codex/codex"])(
+  it.each(["claude-code/claude-code", "codex/codex", "antigravity/antigravity"])(
     "draws %s as an SVG in the current colour",
     (harnessId) => {
       const { container } = render(<HarnessLogo harnessId={harnessId} />);

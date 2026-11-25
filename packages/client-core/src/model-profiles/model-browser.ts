@@ -4,8 +4,9 @@
  * sort it.
  *
  * The catalog's details (maker, context, price, abilities) are for showing and
- * filtering only. A model whose detail is unknown is never guessed: it does not
- * pass a filter on that detail, and it sorts after the models that have it.
+ * filtering, and a provider's default selection also reads the maker. A model
+ * whose detail is unknown is never guessed: it does not pass a filter on that
+ * detail, and it sorts after the models that have it.
  * The one exception is "newest": a model without a release date is placed by
  * the date Hercule first saw it in the catalog, which is a real date, and not
  * after the models that have a release date.

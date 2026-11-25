@@ -414,6 +414,11 @@ export const bootWith = <A, E>(
       // Probing reads the catalogs that the provider's own API lists, which
       // the provider account service does.
       Layer.provideMerge(ProviderAccountServiceLayer),
+      // Provides the observer ports that validate the stored workflows
+      // again, and `WorkflowValidity` itself. It sits here because the
+      // provider account service above needs its port, and the services
+      // built on this stack need the others.
+      Layer.provideMerge(WorkflowValidityObserversLayer),
       Layer.provideMerge(ProviderAccountProbesLayer),
       Layer.provideMerge(ModelCatalogsLayer),
       Layer.provideMerge(ProviderAccountRunnersLayer),
@@ -456,14 +461,14 @@ export const bootWith = <A, E>(
      * The session service's edit observer reaches `DiscussionInputs` the same
      * way, through `DiscussionInputsReference`.
      *
-     * The plugin and connection services report the changes that can make a
-     * stored workflow invalid through their observer ports, which the
-     * workflows domain's `WorkflowValidity` implements. The workflows domain
-     * depends on both domains, so they are joined here too. The observers are
-     * merged, so the agent service, built with the operations, finds its own
-     * observer, and the boot finds `WorkflowValidity`. The boot step that
-     * installs the shipped workflows needs the workflow service and the task
-     * service, which the HTTP routes build again for themselves.
+     * The plugin, connection, agent and provider account services report the
+     * changes that can make a stored workflow invalid through their observer
+     * ports, which the workflows domain's `WorkflowValidity` implements. The
+     * workflows domain depends on these domains, so they are joined in the
+     * stack below, which exposes the observers to the agent service built
+     * with the operations and `WorkflowValidity` to the boot. The boot step
+     * that installs the shipped workflows needs the workflow service and the
+     * task service, which the HTTP routes build again for themselves.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
@@ -474,7 +479,6 @@ export const bootWith = <A, E>(
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
       Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(DiscussionInputsReferenceLayer),
-      Layer.provideMerge(WorkflowValidityObserversLayer),
       Layer.provideMerge(WorkflowServiceWithPortsLayer),
       Layer.provideMerge(TaskServiceWithPortsLayer),
       Layer.provideMerge(HarnessReleasesLayer.pipe(Layer.provide(FetchHttpClient.layer))),

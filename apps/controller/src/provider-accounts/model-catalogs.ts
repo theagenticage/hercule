@@ -70,16 +70,23 @@ const isCatalogReadDue = (readAt: string | null, nowMillis: number): boolean =>
  * added, from the provider's rule and the account's catalog:
  *
  * - `current-models`: every model that is not legacy, in the catalog's order.
- *   `defaultModel` is the model the harness marks as its default, when that
- *   model is among them, else `null`.
+ *   When the provider declares a `defaultSelectionMaker`, only the models whose
+ *   `maker` equals it exactly (case included) are kept, so a model with no
+ *   maker is left out. `defaultModel` is the model the harness marks as its
+ *   default, when that model is among those kept, else `null`.
  * - `none`: no model.
  */
 export const computeDefaultSelection = (
-  provider: Pick<RegisteredProvider, "defaultSelection">,
+  provider: Pick<RegisteredProvider, "defaultSelection" | "defaultSelectionMaker">,
   models: ReadonlyArray<ModelDescriptor>,
 ): DefaultSelection => {
   if (provider.defaultSelection === "none") return { models: [], defaultModel: null };
-  const current = models.filter((model) => model.isLegacy !== true);
+  const current = models.filter(
+    (model) =>
+      model.isLegacy !== true &&
+      (provider.defaultSelectionMaker === undefined ||
+        model.maker === provider.defaultSelectionMaker),
+  );
   return {
     models: current.map((model) => model.slug),
     defaultModel: current.find((model) => model.isDefault === true)?.slug ?? null,
@@ -99,7 +106,8 @@ export interface CatalogWithFirstRead extends ModelCatalog {
  * Computes the models that arrived in an account's Default Selection after
  * its first successful catalog read, in the order of the catalog. Returns none
  * while the account has never been read, and none for a provider whose Default
- * Selection is `none`.
+ * Selection is `none`. A provider that declares a `defaultSelectionMaker`
+ * announces only the models of that maker.
  *
  * A model arrived when it is in the Default Selection now and was first seen
  * later than the first read. So a model of the first read never arrived, and a
@@ -109,7 +117,7 @@ export interface CatalogWithFirstRead extends ModelCatalog {
  * in the Default Selection, so a model that left the catalog is not returned.
  */
 export const computeArrivedModels = (
-  provider: Pick<RegisteredProvider, "defaultSelection">,
+  provider: Pick<RegisteredProvider, "defaultSelection" | "defaultSelectionMaker">,
   catalog: Pick<CatalogWithFirstRead, "models" | "firstReadAt">,
 ): ReadonlyArray<NewModel> => {
   if (catalog.firstReadAt === null) return [];

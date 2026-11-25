@@ -165,6 +165,12 @@ describe("listProviderAccountMachines", () => {
       list(buildProviderAccount(ANTHROPIC_IDENTITY, []), [{ ...WITH_CLAUDE, facts: binary }])[0]
         ?.action,
     ).toEqual({ kind: "unavailable", reason });
+    // The row beside that action does not say "not installed": the binary is
+    // there, and the reason above already names the harness.
+    expect(
+      list(buildProviderAccount(ANTHROPIC_IDENTITY, []), [{ ...WITH_CLAUDE, facts: binary }])[0]
+        ?.problem,
+    ).toBe("Cannot run Claude Code");
     // The binary is missing, so Install would not help either.
     expect(
       list(buildProviderAccount(ANTHROPIC_IDENTITY, []), [

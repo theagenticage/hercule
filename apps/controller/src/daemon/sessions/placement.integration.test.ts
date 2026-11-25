@@ -40,6 +40,7 @@ import {
   reportEvent,
   spawnSession,
   spawnSessionOrFail,
+  waitForRunnerGone,
   waitForSession,
   waitForStartFrames,
   waitUntil,
@@ -67,13 +68,19 @@ const ALPHA: HarnessDefinition = buildHarnessDefinition("alpha");
 const BETA: HarnessDefinition = buildHarnessDefinition("beta");
 
 /** A harness that stores a tool restriction but does not enforce it, like Codex. */
-const GAMMA: HarnessDefinition = {
-  ...buildHarnessDefinition("gamma"),
-  declared: {
-    ...buildHarnessDefinition("gamma").declared,
-    disallowedTools: "unsupported",
-  },
-};
+const GAMMA: HarnessDefinition = buildHarnessDefinition("gamma", [], {
+  disallowedTools: "unsupported",
+});
+
+/** A harness that cannot fork a thread, like Antigravity. */
+const UNFORKABLE: HarnessDefinition = buildHarnessDefinition("unforkable", [], {
+  fork: "unsupported",
+});
+
+/** A harness that cannot give a structured result, like Antigravity. */
+const UNSTRUCTURED: HarnessDefinition = buildHarnessDefinition("unstructured", [], {
+  structuredOutput: "unsupported",
+});
 
 /** What both multi-harness harnesses run: one provider's subscription, signed in on each machine. */
 const MULTI_RUN = {
@@ -89,7 +96,7 @@ const DELTA = buildHarnessDefinition("delta", [MULTI_RUN]);
 const EPSILON = buildHarnessDefinition("epsilon", [MULTI_RUN]);
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  buildPluginWithProviderPerHarness("harnesses", [ALPHA, BETA, GAMMA]),
+  buildPluginWithProviderPerHarness("harnesses", [ALPHA, BETA, GAMMA, UNFORKABLE, UNSTRUCTURED]),
   // One provider that two harnesses run, so one account can be placed in either.
   createPluginFixture({
     id: "multi",
@@ -127,6 +134,8 @@ const FACTS: RunnerFacts = {
     "harnesses/alpha",
     "harnesses/beta",
     "harnesses/gamma",
+    "harnesses/unforkable",
+    "harnesses/unstructured",
     "multi/delta",
     "multi/epsilon",
   ],
@@ -2003,6 +2012,100 @@ describe("placeSession and continueSession with a dedupKey", () => {
       // The +1 is the sentinel session of `waitForOrderedFrames`.
       expect(await countRows(arranged, "sessions")).toBe(sessionsBefore + 1);
       expect(listStartedSessionIds(arranged).filter((id) => id === child.id)).toHaveLength(1);
+    });
+  });
+});
+
+describe("placing a session on a harness that lacks a capability", () => {
+  const SCHEMA_REFUSAL =
+    "Harness unstructured cannot give a structured result. Leave out the output schema, or run on another harness.";
+
+  /** Lists the ids of every session the controller holds. */
+  const listSessionIds = async (arranged: Arranged): Promise<ReadonlyArray<string>> => {
+    const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+    expect(listing.status, await listing.clone().text()).toBe(200);
+    return ((await listing.json()) as { items: ReadonlyArray<{ id: string }> }).items.map(
+      (one) => one.id,
+    );
+  };
+
+  it("refuses a fork where the parent's harness cannot fork, even while the parent is live, and writes no session", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await spawnSessionOrFail(arranged, {
+        prompt: "start the work",
+        providerAccountId: findProviderAccountId(arranged, "harnesses/unforkable"),
+      });
+
+      const response = await fork(arranged, parent.id, "now do the tests");
+
+      expect(response.status).toBe(409);
+      const refused = await parseRefusal(response);
+      expect(refused.code).toBe("invalid_state");
+      expect(refused.text).toContain(
+        "Harness unforkable cannot fork a thread. Start a new thread and tell it what to build on.",
+      );
+      expect(await listSessionIds(arranged)).toEqual([parent.id]);
+    });
+  });
+
+  it("still accepts input for an exited session on that harness, because a resume is not a fork", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await spawnAndEnd(arranged, {
+        prompt: "start the work",
+        providerAccountId: findProviderAccountId(arranged, "harnesses/unforkable"),
+      });
+
+      const response = await post(
+        arranged.harness.base,
+        `/api/v1/sessions/${parent.id}/input`,
+        { text: "go on", steer: false },
+        arranged.token,
+      );
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await listSessionIds(arranged)).toEqual([parent.id]);
+    });
+  });
+
+  it("refuses an output schema where the harness cannot give a structured result, with no machine connected, and writes no session", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.close();
+      await waitForRunnerGone(arranged);
+      const refuse = async (outputSchema: unknown) => {
+        const response = await spawnSession(arranged, {
+          prompt: "assess this",
+          providerAccountId: findProviderAccountId(arranged, "harnesses/unstructured"),
+          outputSchema,
+        });
+        expect(response.status).toBe(400);
+        const refused = (await response.json()) as {
+          error: { code: string; details: { issues: ReadonlyArray<unknown> } };
+        };
+        expect(refused.error.code).toBe("validation");
+        return refused.error.details.issues;
+      };
+
+      expect(await refuse(SCHEMA)).toEqual([{ path: ["outputSchema"], message: SCHEMA_REFUSAL }]);
+      // The harness is judged first: a schema that also breaks the subset gets
+      // the one issue about the harness.
+      expect(
+        await refuse({
+          ...SCHEMA,
+          properties: { verdict: { type: "string", oneOf: [{ type: "string" }] } },
+        }),
+      ).toEqual([{ path: ["outputSchema"], message: SCHEMA_REFUSAL }]);
+      expect(await listSessionIds(arranged)).toEqual([]);
+    });
+  });
+
+  it("places a session on that harness when it has no output schema", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "assess this",
+        providerAccountId: findProviderAccountId(arranged, "harnesses/unstructured"),
+      });
+
+      expect(session.runnerId).toBe(arranged.runnerId);
     });
   });
 });

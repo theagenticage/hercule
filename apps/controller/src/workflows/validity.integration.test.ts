@@ -11,22 +11,35 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import type { Notification, Workflow } from "@hercule/contract";
+import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import { waitUntilRouted } from "../daemon/testing";
-import { del, get, post, readErrorBody } from "../http/testing";
+import { uuidFromString, withTransaction } from "../db";
+import { del, get, post, readErrorBody, send } from "../http/testing";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
 import { queryRuns, requestRun } from "../runs/testing";
-import { waitUntil, WAIT_DEADLINE_MS } from "../sessions/testing";
+import {
+  findProviderAccountId,
+  readProfileNamed,
+  waitUntil,
+  WAIT_DEADLINE_MS,
+  withFleet,
+} from "../sessions/testing";
 import {
   ACCEPTED_GITHUB_TOKEN,
   buildTaskStep,
   createAgent,
   createConnection,
+  createStructuredOutputAccount,
   createWorkflowOrFail,
   disablePlugin,
   emitLabeledEvent,
   enableWorkflow,
+  STRUCTURED_OUTPUT_PLUGIN,
   updateWorkflow,
+  WITH_RESULTS_HARNESS_ID,
+  WITHOUT_RESULTS_HARNESS_ID,
   withSetUpController,
   type SetUpController,
 } from "./testing";
@@ -304,5 +317,160 @@ describe("a workflow whose default Connection is deleted", () => {
       expect((await readWorkflow(controller, workflowId)).invalidSince).toEqual(expect.any(String));
       expect(await listInvalidNotifications(controller, workflowId)).toHaveLength(1);
     });
+  });
+});
+
+/** Changes the account or the harness of an Agent. */
+const updateAgent = async (
+  { base, token }: SetUpController,
+  agentId: string,
+  body: {
+    readonly name?: string;
+    readonly providerAccountId?: string;
+    readonly harnessId?: string;
+  },
+): Promise<void> => {
+  const response = await send("PATCH", base, `/api/v1/agents/${agentId}`, { body, token });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+describe("a workflow whose Agent moves to a harness that cannot give a structured result", () => {
+  it("is marked invalid and refused by run.start, and loses the mark when the Agent moves to a harness that can, but not when only its name changes", async () => {
+    await withSetUpController(
+      async (controller) => {
+        const { harness, base, token } = controller;
+        const agentId = await createAgent(base, token);
+        const original = await get(base, `/api/v1/agents/${agentId}`, token);
+        const originalAccountId = ((await original.json()) as { providerAccountId: string })
+          .providerAccountId;
+        const workflowId = await saveEnabledWorkflow(
+          controller,
+          buildLabeledSource(
+            [
+              "  - id: review",
+              "    kind: agent",
+              `    agent: ${agentId}`,
+              "    prompt: Review the pull request.",
+              '    outputSchema: {"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string"}}}',
+            ].join("\n"),
+          ),
+        );
+
+        // The new account's default harness cannot give a structured result.
+        await updateAgent(controller, agentId, {
+          providerAccountId: await createStructuredOutputAccount(base, token),
+        });
+
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toEqual(
+          expect.any(String),
+        );
+        const notifications = await listInvalidNotifications(controller, workflowId);
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0]!.body).toContain("which cannot give a structured result");
+
+        const refused = await requestRun(base, token, workflowId);
+        const refusal = await readErrorBody(refused);
+        expect(refused.status, refusal.text).toBe(400);
+        expect(refusal.message).toContain("this workflow cannot run as it is saved now");
+        expect(refusal.text).toContain("which cannot give a structured result");
+
+        await updateAgent(controller, agentId, { harnessId: WITH_RESULTS_HARNESS_ID });
+
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toBeUndefined();
+
+        // A change that leaves the harness alone validates nothing again. The
+        // mark is made stale by hand: only a validation could clear it.
+        const staleSince = "2026-11-25T08:00:00.000Z";
+        await Effect.runPromise(
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE workflows SET invalid_since = ${staleSince}
+              WHERE id = ${uuidFromString(workflowId)}`,
+          ),
+        );
+        await updateAgent(controller, agentId, { name: "renamed" });
+        await updateAgent(controller, agentId, { harnessId: WITH_RESULTS_HARNESS_ID });
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toBe(staleSince);
+
+        await updateAgent(controller, agentId, { providerAccountId: originalAccountId });
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toBeUndefined();
+      },
+      [STRUCTURED_OUTPUT_PLUGIN],
+    );
+  });
+});
+
+/** A runner that carries both harnesses of `STRUCTURED_OUTPUT_PLUGIN`, so an account may take either as its default. */
+const STRUCTURED_OUTPUT_FACTS: RunnerFacts = {
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 68719476736,
+  docker: false,
+  toolchains: [],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: [WITHOUT_RESULTS_HARNESS_ID, WITH_RESULTS_HARNESS_ID],
+  identityPort: 4939,
+};
+
+const STRUCTURED_OUTPUT_MODELS: ReadonlyArray<ModelDescriptor> = [
+  { slug: "fast", name: "Fast", imageInput: { maxBytes: null }, isDefault: true, options: [] },
+];
+
+describe("a workflow whose Agent runs in its account's default harness", () => {
+  it("is marked invalid when the default moves to a harness that cannot give a structured result, and loses the mark when it moves back", async () => {
+    await withFleet(
+      async (arranged) => {
+        const { base } = arranged.harness;
+        const { token } = arranged;
+        const controller: SetUpController = { harness: arranged.harness, base, token };
+        const accountId = findProviderAccountId(arranged, WITH_RESULTS_HARNESS_ID);
+        const created = await post(
+          base,
+          "/api/v1/agents",
+          {
+            name: "reviewer",
+            systemPrompt: "You review pull requests.",
+            providerAccountId: accountId,
+            permissionProfileId: (await readProfileNamed(arranged, "worker")).id,
+          },
+          token,
+        );
+        expect(created.status, await created.clone().text()).toBe(200);
+        const workflow = await createWorkflowOrFail(base, token, {
+          source: [
+            `name: ${WORKFLOW_NAME}`,
+            "steps:",
+            "  - id: review",
+            "    kind: agent",
+            `    agent: ${((await created.json()) as { id: string }).id}`,
+            "    prompt: Review the pull request.",
+            '    outputSchema: {"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string"}}}',
+            "",
+          ].join("\n"),
+        });
+        const setDefault = async (defaultHarnessId: string): Promise<void> => {
+          const response = await send("PATCH", base, `/api/v1/provider-accounts/${accountId}`, {
+            body: { defaultHarnessId },
+            token,
+          });
+          expect(response.status, await response.clone().text()).toBe(200);
+        };
+
+        await setDefault(WITHOUT_RESULTS_HARNESS_ID);
+
+        expect((await readWorkflow(controller, workflow.id)).invalidSince).toEqual(
+          expect.any(String),
+        );
+
+        await setDefault(WITH_RESULTS_HARNESS_ID);
+
+        expect((await readWorkflow(controller, workflow.id)).invalidSince).toBeUndefined();
+      },
+      {
+        plugins: [STRUCTURED_OUTPUT_PLUGIN],
+        facts: STRUCTURED_OUTPUT_FACTS,
+        models: STRUCTURED_OUTPUT_MODELS,
+      },
+    );
   });
 });

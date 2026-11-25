@@ -28,6 +28,8 @@ import {
 import {
   buildHarnessDefinition,
   buildPluginWithProviderPerHarness,
+  buildProviderDefinition,
+  createPluginFixture,
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
 } from "../plugins/testing";
@@ -46,6 +48,72 @@ export const AGENT_HARNESS = buildHarnessDefinition("test");
 
 /** The qualified id of `AGENT_HARNESS`: the plugin that registers it is `harnesses`. */
 const AGENT_HARNESS_ID = "harnesses/test";
+
+/** The qualified id of the harness of `STRUCTURED_OUTPUT_PLUGIN` that cannot give a structured result. */
+export const WITHOUT_RESULTS_HARNESS_ID = "structured/without-results";
+
+/** The qualified id of the harness of `STRUCTURED_OUTPUT_PLUGIN` that can give a structured result. */
+export const WITH_RESULTS_HARNESS_ID = "structured/with-results";
+
+/**
+ * A plugin with two harnesses that run the same provider: one that cannot give
+ * a structured result and one that can. The provider's default harness is the
+ * one that cannot, so an Agent on an account of this provider with no harness
+ * of its own runs in it. `createStructuredOutputAccount` makes such an account.
+ */
+export const STRUCTURED_OUTPUT_PLUGIN: Plugin = (() => {
+  const runs = [
+    {
+      providerId: "structured/structured",
+      kinds: [{ kind: "subscription", modelArgument: "{model}" }],
+      models: "all" as const,
+    },
+  ];
+  const provider = buildProviderDefinition("structured", [
+    WITHOUT_RESULTS_HARNESS_ID,
+    WITH_RESULTS_HARNESS_ID,
+  ]);
+  return createPluginFixture({
+    id: "structured",
+    capabilities: ["harnesses", "providers"],
+    definitions: [
+      buildHarnessDefinition("without-results", runs, { structuredOutput: "unsupported" }),
+      buildHarnessDefinition("with-results", runs),
+    ],
+    providers: [
+      {
+        ...provider,
+        kinds: [
+          {
+            id: "subscription",
+            title: "Subscription",
+            description: "A plan signed in on each machine.",
+            setup: [{ kind: "harness-login", method: "sign-in" }],
+            harnesses: [WITHOUT_RESULTS_HARNESS_ID, WITH_RESULTS_HARNESS_ID],
+          },
+        ],
+      },
+    ],
+  }).plugin;
+})();
+
+/**
+ * Creates a Provider Account of the provider of `STRUCTURED_OUTPUT_PLUGIN`
+ * and returns its id. Fails the test if the controller refuses it.
+ */
+export const createStructuredOutputAccount = async (
+  base: string,
+  token: string,
+): Promise<string> => {
+  const response = await post(
+    base,
+    "/api/v1/provider-accounts",
+    { providerId: "structured/structured", kind: "subscription" },
+    token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { id: string }).id;
+};
 
 /**
  * A local stand-in for the GitHub plugin, with its Connection type and the one

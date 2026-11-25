@@ -84,7 +84,8 @@ export type AccountUsageReading = Schema.Schema.Type<typeof AccountUsageReading>
  * - `credential-missing`: the controller holds no key or token for the account.
  * - `token-expired`: the account's key or token has passed its expiry. The
  *   name says token for historical reasons; it covers an expired key too.
- * - `harness-missing`: the harness is not installed on the runner.
+ * - `harness-missing`: the harness is not installed on the runner, or the
+ *   runner's build has no adapter for it.
  * - `harness-too-old`: the harness is installed but below the lowest version
  *   Hercule supports.
  *

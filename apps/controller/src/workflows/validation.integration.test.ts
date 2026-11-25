@@ -33,7 +33,7 @@ import {
   type WorkflowSaveResult,
 } from "@hercule/contract";
 import { lintOutputSchema } from "@hercule/protocol";
-import { get, post, readErrorBody } from "../http/testing";
+import { get, post, readErrorBody, send } from "../http/testing";
 import {
   buildForgePlugin,
   FORGE_CONNECTION_TYPE,
@@ -55,6 +55,7 @@ import {
   buildTaskStep,
   createAgent,
   createConnection,
+  createStructuredOutputAccount,
   createWorkflow,
   createWorkflowOrFail,
   disablePlugin,
@@ -63,8 +64,10 @@ import {
   KEBAB_CASE_STEP_ID_SOURCE,
   localMailPlugin,
   readIssues,
+  STRUCTURED_OUTPUT_PLUGIN,
   SYNTAX_ERROR_SOURCE,
   updateWorkflow,
+  WITH_RESULTS_HARNESS_ID,
   withSetUpController,
   WRONG_KIND_SOURCE,
   type SetUpController,
@@ -1454,6 +1457,85 @@ steps:
         buildOutputSchemaSource(controller.agentId, CLEAN_OUTPUT_SCHEMA),
       );
     });
+  });
+});
+
+/** The issue that the output schema of `buildOutputSchemaSource` gets on the harness that cannot give a structured result. */
+const WITHOUT_RESULTS_ISSUE: Issue = {
+  path: OUTPUT_SCHEMA_PATH,
+  message:
+    'The Agent "reviewer" runs in Harness without-results, which cannot give a structured result. Remove the output schema, or use an Agent that runs in another harness.',
+};
+
+/**
+ * Creates an Agent named "reviewer" on a new account of the provider of
+ * `STRUCTURED_OUTPUT_PLUGIN`, with the harness of its own that `harnessId` names, or none.
+ */
+const createStructuredOutputAgent = async (
+  { base, token }: SetUpController,
+  harnessId: string | null,
+): Promise<string> => {
+  const agentId = await createAgent(base, token);
+  const moved = await send("PATCH", base, `/api/v1/agents/${agentId}`, {
+    body: {
+      providerAccountId: await createStructuredOutputAccount(base, token),
+      ...(harnessId === null ? {} : { harnessId }),
+    },
+    token,
+  });
+  expect(moved.status, await moved.clone().text()).toBe(200);
+  return agentId;
+};
+
+describe("an agent step on a harness that cannot give a structured result", () => {
+  it("refuses the output schema on create and on validate, when the harness is its Provider Account's default", async () => {
+    await withSetUpController(
+      async (controller) => {
+        const { base, token } = controller;
+        const source = buildOutputSchemaSource(
+          await createStructuredOutputAgent(controller, null),
+          CLEAN_OUTPUT_SCHEMA,
+        );
+
+        expect(await readIssues(await createWorkflow(base, token, { source }))).toEqual([
+          WITHOUT_RESULTS_ISSUE,
+        ]);
+        const result = await readValidateResult(await validateWorkflow(base, token, { source }));
+        expect(result.errors).toEqual([WITHOUT_RESULTS_ISSUE]);
+        await expectNothingStored(base, token);
+      },
+      [STRUCTURED_OUTPUT_PLUGIN],
+    );
+  });
+
+  it("saves the same step without an output schema", async () => {
+    await withSetUpController(
+      async (controller) => {
+        const agentId = await createStructuredOutputAgent(controller, null);
+        const source = buildOutputSchemaSource(agentId, CLEAN_OUTPUT_SCHEMA).replace(
+          / {4}outputSchema: .*\n/,
+          "",
+        );
+        expect(source).not.toContain("outputSchema");
+
+        await createWorkflowOrFail(controller.base, controller.token, { source });
+      },
+      [STRUCTURED_OUTPUT_PLUGIN],
+    );
+  });
+
+  it("saves the step when the Agent's own harness can give one, though its account's default cannot", async () => {
+    await withSetUpController(
+      async (controller) => {
+        const source = buildOutputSchemaSource(
+          await createStructuredOutputAgent(controller, WITH_RESULTS_HARNESS_ID),
+          CLEAN_OUTPUT_SCHEMA,
+        );
+
+        await createWorkflowOrFail(controller.base, controller.token, { source });
+      },
+      [STRUCTURED_OUTPUT_PLUGIN],
+    );
   });
 });
 

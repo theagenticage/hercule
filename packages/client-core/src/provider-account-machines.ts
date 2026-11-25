@@ -9,7 +9,6 @@ import type {
   Harness,
   Provider,
   ProviderAccount,
-  ProviderAccountReadinessState,
   Runner,
 } from "@hercule/contract";
 import {
@@ -17,6 +16,7 @@ import {
   findProviderAccountKind,
   findProviderAccountReadiness,
   signsInPerMachine,
+  type AccountReadinessOnRunner,
 } from "./provider-accounts";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
@@ -90,7 +90,7 @@ export const decideMachineAction = (
  * default harness there, which holds the harness version the machine reported.
  */
 const describeMachineProblem = (
-  state: ProviderAccountReadinessState,
+  state: AccountReadinessOnRunner,
   harnessName: string,
   snapshot: CapabilitySnapshot | undefined,
 ): string | null => {
@@ -103,6 +103,11 @@ const describeMachineProblem = (
     }
     case "harness-missing":
       return `${harnessName} is not installed`;
+    case "no-adapter":
+      // The row already names the machine, and the `unavailable` action beside
+      // it says the cause is the machine's Hercule build, so the status stays
+      // short enough not to be cut off.
+      return `Cannot run ${harnessName}`;
     case "token-expired":
       return "Token expired";
     case "not-signed-in":
@@ -148,7 +153,7 @@ export const decideProviderAccountReach = (
     .filter((runner) => runner.lifecycle !== "retired")
     .map((runner) => {
       const row = buildProviderRows(runner, [account], providers, harnesses)[0];
-      const state = findProviderAccountReadiness(account, account.defaultHarnessId, runner.id);
+      const state = findProviderAccountReadiness(account, account.defaultHarnessId, runner);
       const ready = state === "ready";
       const snapshot = findDefaultHarnessSnapshot(account, runner.id);
       const auth = snapshot?.auth;

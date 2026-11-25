@@ -29,7 +29,7 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-sentry` | the `sentry` connection type, the event source that polls Sentry for issues, the signals for new, returning and escalating issues, and the workflow actions that resolve, archive and assign an issue |
 | `@hercule/plugin-linear` | the `linear` connection type, the event source that polls Linear for the issues you watch and your inbox, and the signals for watched issues, mentions and assignments |
 
-[#1280](https://github.com/theagenticage/hercule/issues/1280) adds two more: `@hercule/plugin-antigravity`, with the
+Two more packages are here and not in the registry yet: `@hercule/plugin-antigravity`, with the
 `antigravity/antigravity` harness, and `@hercule/plugin-google`, with the `google/google` provider
 and a subscription signed in on each machine. Its Default Selection holds Google's own models only.
 They are registered once the first version of Antigravity is complete, with the last of

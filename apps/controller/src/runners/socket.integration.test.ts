@@ -1938,7 +1938,7 @@ const markCatalogsRead = (harness: ServerHarness): Promise<void> =>
 
 /**
  * Runs `body` against a server with the real plugin registry, so "one request
- * per account" covers the three harnesses the binary really includes, each
+ * per account" covers the three harnesses that have a runner adapter, each
  * with an account. The probe deadline and interval are passed in like the ping
  * interval, because a real Bun server cannot run on a `TestClock`.
  */
@@ -2058,8 +2058,8 @@ describe("probing a runner's provider accounts", () => {
     );
 
   /**
-   * The facts of a runner that could run all three harnesses: an adapter for
-   * each, and each binary on the machine. A runner that lacks either is not
+   * The facts of a runner that could run the three harnesses that have a
+   * runner adapter: an adapter for each, and each binary on the machine. A runner that lacks either is not
    * probed for that harness.
    */
   const EVERY_HARNESS: RunnerFacts = {
@@ -2617,7 +2617,19 @@ describe("installing a harness on a runner", () => {
 
         const response = await installHarness(harness.base, token, joined.runnerId, "codex/codex");
         expect(response.status, await response.clone().text()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: {
+              issues: [
+                {
+                  path: ["harnessId"],
+                  message: "Hercule on atlas cannot run Codex; update Hercule on that machine",
+                },
+              ],
+            },
+          },
+        });
         // The runner's hello already listed the adapters its build has.
         expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
       } finally {
@@ -3412,7 +3424,19 @@ describe("signing a runner in to a provider account", () => {
       try {
         const response = await startLogin(harness.base, token, codex.id, joined.runnerId);
         expect(response.status, await response.clone().text()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: {
+              issues: [
+                {
+                  path: ["runnerId"],
+                  message: "Hercule on atlas cannot run Codex; update Hercule on that machine",
+                },
+              ],
+            },
+          },
+        });
         expect(wire.frames.filter((frame) => frame._tag === "loginStart")).toEqual([]);
       } finally {
         wire.close();

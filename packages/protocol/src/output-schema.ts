@@ -2,8 +2,8 @@
  * The output schema a session's turns must match, and the closed subset of JSON
  * Schema it may be written in.
  *
- * One schema must mean the same thing on every harness, and the three harnesses
- * agree on a small common core only. Outside that core, OpenAI's strict mode,
+ * One schema must mean the same thing on every harness that gives structured
+ * results, and those harnesses agree on a small common core only. Outside that core, OpenAI's strict mode,
  * draft-07 and pi's strict transform each reject or silently change different
  * things. So the subset is a closed set of keywords, not a best effort, and
  * `lintOutputSchema` below is the only place that defines what is in the set.
@@ -21,7 +21,7 @@ import { Schema } from "effect";
  * variable. An environment has a size a process cannot start past, so without a
  * bound a large schema would fail at launch instead of at the call that sent
  * it. 32 KiB is far more than the strict subset needs for any result a turn can
- * return, and well under what each of the three harnesses accepts, so the
+ * return, and well under what each harness that gives structured results accepts, so the
  * limit rejects nothing anyone would write on purpose. The limit is part of
  * the schema itself, so both sides enforce it: the controller before it writes
  * a row, the runner before it starts a harness.

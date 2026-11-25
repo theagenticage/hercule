@@ -27,8 +27,12 @@ import { withPluginColor } from "./drawing";
  * - Version 9 added MCP servers as an extension point: the `mcp-servers`
  *   capability and `registerMcpServer`. The set of extension points is part of
  *   the host contract, so a plugin built against version 8 is refused at load.
+ * - Version 10 widened `HarnessDefinition.releaseSource` to a union that also
+ *   takes GitHub releases, and added the optional `defaultSelectionMaker` of
+ *   `ProviderDefinition`. A host that does not read them cannot run a plugin
+ *   that uses them.
  */
-export const HOST_API = 9;
+export const HOST_API = 10;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

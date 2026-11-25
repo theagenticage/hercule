@@ -58,4 +58,24 @@ describe("HarnessReleaseSource", () => {
   ])("refuses the package name %j", (name) => {
     expect(decode({ kind: "npm", package: name })._tag).toBe("None");
   });
+
+  it.each(["owner/name", "a.b/c_d-e"])("accepts the GitHub repository %s", (repository) => {
+    expect(decode({ kind: "github-releases", repository })._tag).toBe("Some");
+  });
+
+  it.each([
+    "owner",
+    "owner/",
+    "/name",
+    "a/b/c",
+    "../x",
+    "./x",
+    "owner/..",
+    "owner/.",
+    "owner/na me",
+    "https://github.com/a/b",
+    `${"a".repeat(39)}/${"b".repeat(101)}`,
+  ])("refuses the GitHub repository %j", (repository) => {
+    expect(decode({ kind: "github-releases", repository })._tag).toBe("None");
+  });
 });

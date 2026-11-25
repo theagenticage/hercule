@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ProviderAccount, Runner } from "@hercule/contract";
+import { HARNESSES } from "@hercule/client-core/testing";
 import {
   buildCatalogFields,
   buildErrorBody,
@@ -93,6 +94,16 @@ const SIGNED_IN = buildSnapshot({
 
 const NOT_SIGNED_IN = buildSnapshot({ status: "unauthenticated" });
 
+/** The harnesses the controller lists: the fixture's three, and a fourth the screens must not leave out. */
+const FOUR_HARNESSES: Readonly<Record<string, Handler>> = {
+  "GET /api/v1/harnesses": {
+    body: [
+      ...HARNESSES,
+      { ...HARNESSES[0]!, id: "antigravity/antigravity", displayName: "Antigravity" },
+    ],
+  },
+};
+
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
 const buildController = (
@@ -154,11 +165,19 @@ const getNewThreadControl = (): HTMLElement => {
 
 describe("Sessions", () => {
   it("says a thread needs a runner when none is detected on this machine", async () => {
-    await openApp({ runners: [], accounts: [buildClaudeCodeProviderAccount([])], local: null });
+    await openApp({
+      runners: [],
+      accounts: [buildClaudeCodeProviderAccount([])],
+      local: null,
+      extra: FOUR_HARNESSES,
+    });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No runner has been detected on this machine.");
     });
+    expect(readPageText()).toContain(
+      "installed on it - Claude Code, Codex, pi, Antigravity - and offer to sign in to them.",
+    );
     expect(getNewThreadControl().hasAttribute("disabled")).toBe(true);
   });
 
@@ -167,11 +186,15 @@ describe("Sessions", () => {
       runners: [BARE],
       accounts: [buildClaudeCodeProviderAccount([])],
       local: BARE.id,
+      extra: FOUR_HARNESSES,
     });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No coding harness was found on this machine.");
     });
+    expect(readPageText()).toContain(
+      "A thread runs on a coding harness - Claude Code, Codex, pi or Antigravity.",
+    );
     // Installing is an action on the runner's page, so the screen links there
     // rather than describing what to type.
     expect(screen.getByRole("link", { name: /fleet/i }).getAttribute("href")).toBe(

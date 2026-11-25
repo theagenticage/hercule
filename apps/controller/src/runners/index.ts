@@ -7,7 +7,7 @@
  * on, the report is published on `RunnerConnections`, and the layer above this
  * domain decides what to do about it.
  */
-export { requireAdapter, requireOnline } from "./adapters";
+export { describeNoAdapter, requireAdapter, requireOnline } from "./adapters";
 export { RunnerJoinLayer } from "./join";
 export { JoinTokens, JoinTokensLayer } from "./join-tokens";
 export {

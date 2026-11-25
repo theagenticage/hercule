@@ -20,7 +20,7 @@ import {
   type RegisteredHarness,
   type RegisteredProvider,
 } from "../plugins";
-import { runnerRepository } from "../runners";
+import { describeNoAdapter, runnerRepository } from "../runners";
 import { Secrets } from "../secrets";
 import { AccountUsage } from "../usage";
 import {
@@ -65,8 +65,8 @@ export interface AccountRunners {
  * Returns why the account cannot run on `runnerId`, in one short sentence a
  * user can act on, or `null` when it can run there. The sentence names the one
  * cause that applies to that runner: a missing key or token, the harness not
- * installed or too old there, or no sign-in there. A runner that is not in
- * the fleet any more is retired.
+ * installed or too old there, Hercule there having no adapter for it, or no
+ * sign-in there. A runner that is not in the fleet any more is retired.
  *
  * Use it when the caller needs the account to run on one particular runner;
  * `noRunnerMessage` is for a caller that lets the controller choose.
@@ -213,7 +213,7 @@ const decideStates = (
         ? "credential-missing"
         : credentialState === "expired"
           ? "token-expired"
-          : verdict === "missing"
+          : verdict === "missing" || verdict === "no-adapter"
             ? "harness-missing"
             : verdict === "below-floor"
               ? "harness-too-old"
@@ -287,15 +287,20 @@ const make = Effect.gen(function* () {
     const { states, credentialProblem, verdicts } = decideStates(world, account, choice);
     // Returns why the account cannot run on one runner, or null when it can.
     // A missing or expired key or token is the same on every runner, and
-    // decideStates gives the credential states only with that problem.
+    // decideStates gives the credential states only with that problem. The
+    // state `harness-missing` covers two causes with different remedies, so
+    // the runner's verdict tells them apart.
     const describeRefusal = (
       state: ProviderAccountReadinessState,
+      verdict: HarnessOnRunner,
       runnerName: string,
     ): string | null => {
       if (credentialProblem !== null) return credentialProblem;
       switch (state) {
         case "harness-missing":
-          return `${harnessName} is not installed on ${runnerName}`;
+          return verdict === "no-adapter"
+            ? describeNoAdapter(runnerName, harnessName)
+            : `${harnessName} is not installed on ${runnerName}`;
         case "harness-too-old":
           return `${harnessName} on ${runnerName} is older than Hercule supports; update it${describeFloorToUpdateTo(choice.harness.id)}`;
         case "not-signed-in":
@@ -306,7 +311,7 @@ const make = Effect.gen(function* () {
     };
     const refusals = new Map<string, string>();
     states.forEach(({ runnerId, state }, index) => {
-      const refusal = describeRefusal(state, world.fleet[index]!.name);
+      const refusal = describeRefusal(state, verdicts[index]!, world.fleet[index]!.name);
       if (refusal !== null) refusals.set(runnerId, refusal);
     });
     const none = (noRunnerMessage: string): AccountRunners => ({

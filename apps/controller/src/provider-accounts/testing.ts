@@ -50,6 +50,7 @@ import { ModelCatalogs, ModelCatalogsLayer } from "./model-catalogs";
 import { ModelProfileMembership } from "./model-profile-membership";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
+import { ProviderAccountObserver } from "./observer";
 import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
 
 export const ACME_PROVIDER_ID = "acme/acme";
@@ -353,11 +354,21 @@ export const inertMembership: Layer.Layer<ModelProfileMembership> = Layer.succee
   },
 );
 
+/**
+ * A `ProviderAccountObserver` that does nothing, for a stack that stores no
+ * workflows, so no one listens to a change of an account's default harness.
+ */
+export const inertProviderAccountObserver: Layer.Layer<ProviderAccountObserver> = Layer.succeed(
+  ProviderAccountObserver,
+  { defaultHarnessChanged: () => Effect.void },
+);
+
 const buildStack = (
   providerApi: HttpClient.HttpClient,
   membership: Layer.Layer<ModelProfileMembership>,
 ) =>
   ProviderAccountServiceLayer.pipe(
+    Layer.provideMerge(inertProviderAccountObserver),
     Layer.provideMerge(ProviderKeyRequestsLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
     Layer.provideMerge(ProviderAccountProbesLayer),

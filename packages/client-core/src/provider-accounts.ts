@@ -94,20 +94,41 @@ export const listSignedInDefaultHarnessSnapshots = (
   );
 
 /**
- * Returns whether `account` can run in `harnessId` on the runner `runnerId`,
- * as the controller worked it out when it sent the account. Returns
- * `harness-missing` when the account has no row for that pair: the account's
- * kind or the harness does not allow the combination, or the runner is
- * retired or unknown. Online or draining is not part of the answer; the
- * caller reads that from the runner.
+ * What an account's readiness for a harness on a runner can be: any state the
+ * controller sends, or `no-adapter`, meaning the runner has reported its facts
+ * and its build has no adapter for the harness.
+ *
+ * The controller sends `harness-missing` for both a harness that is not
+ * installed and a build with no adapter, and it cannot send a new state:
+ * `ProviderAccountReadinessState` is a closed set, so an older client would
+ * fail to decode the new one. The client has the runner's facts, so it tells
+ * the two apart here.
+ */
+export type AccountReadinessOnRunner = ProviderAccountReadinessState | "no-adapter";
+
+/**
+ * Returns whether `account` can run in `harnessId` on `runner`, as the
+ * controller worked it out when it sent the account. Returns `harness-missing`
+ * when the account has no row for that pair: the account's kind or the harness
+ * does not allow the combination, or the runner is retired or unknown. Returns
+ * `no-adapter` instead of `harness-missing` when the runner's facts do not
+ * list an adapter for the harness. Online or draining is not part of the
+ * answer; the caller reads that from the runner.
  */
 export const findProviderAccountReadiness = (
   account: Pick<ProviderAccount, "readiness">,
   harnessId: string,
-  runnerId: string,
-): ProviderAccountReadinessState =>
-  account.readiness.find((row) => row.harnessId === harnessId && row.runnerId === runnerId)
-    ?.state ?? "harness-missing";
+  runner: Runner,
+): AccountReadinessOnRunner => {
+  const state =
+    account.readiness.find((row) => row.harnessId === harnessId && row.runnerId === runner.id)
+      ?.state ?? "harness-missing";
+  return state === "harness-missing" &&
+    runner.facts != null &&
+    !runner.facts.adapters.includes(harnessId)
+    ? "no-adapter"
+    : state;
+};
 
 /** What a runner has of a harness. */
 export interface HarnessOnRunner {

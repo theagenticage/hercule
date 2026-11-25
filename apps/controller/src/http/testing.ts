@@ -206,16 +206,13 @@ const buildServices = (
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
         Layer.provideMerge(DiscussionInputsReferenceLayer),
-        // As in the real boot: a plugin's lifecycle change and a Connection's
-        // or an agent's delete validate the stored workflows again.
-        Layer.provideMerge(WorkflowValidityObserversLayer),
         // As in the real boot: the step that installs the shipped workflows
         // uses the workflow service and the task service.
         Layer.provideMerge(WorkflowServiceWithPortsLayer),
         Layer.provideMerge(TaskServiceWithPortsLayer),
         Layer.provideMerge(
           HarnessReleasesLayer.pipe(
-            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableReleaseClient)),
           ),
         ),
       ),
@@ -229,6 +226,11 @@ const buildServices = (
         // Probing reads the catalogs that the provider's own API lists, which
         // the provider account service does.
         Layer.provideMerge(ProviderAccountServiceLayer),
+        // As in the real boot: provides the observer ports that validate the
+        // stored workflows again, and `WorkflowValidity` itself. It sits here
+        // because the provider account service above needs its port, and the
+        // services built on this stack need the others.
+        Layer.provideMerge(WorkflowValidityObserversLayer),
         Layer.provideMerge(ProviderAccountProbesLayer),
         Layer.provideMerge(ModelCatalogsLayer),
         Layer.provideMerge(ProviderAccountRunnersLayer),
@@ -362,13 +364,16 @@ const acceptingProviderKeyClient = HttpClient.make((request) =>
 );
 
 /**
- * The npm registry a test controller reads: no
- * request gets an answer, so no test reaches the real registry by accident.
+ * The release publishers a test controller reads: no request gets an answer,
+ * so no test reaches npm or GitHub by accident.
  */
-const unreachableRegistryClient = HttpClient.make((request) =>
+const unreachableReleaseClient = HttpClient.make((request) =>
   Effect.fail(
     new HttpClientError.HttpClientError({
-      reason: new HttpClientError.TransportError({ request, cause: "no registry in this test" }),
+      reason: new HttpClientError.TransportError({
+        request,
+        cause: "no release publisher in this test",
+      }),
     }),
   ),
 );

@@ -417,11 +417,34 @@ describe("buildModelMenu for a draft", () => {
       });
       const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, inPi])]);
 
+      const mossWithPi = {
+        ...MOSS,
+        facts: { ...MOSS.facts!, adapters: [...MOSS.facts!.adapters, "pi/pi"] },
+      };
+
+      const rows = readDraftProfile(
+        buildModelMenu(
+          buildCatalogs([profile], [CLAUDE, CODEX, ZAI], [mossWithPi, COVE]),
+          CURRENT,
+          { ...DRAFT, runnerId: MOSS.id },
+        ),
+      ).lanes[0]!.rows;
+
+      expect(rows.map((row) => row.problem?.message ?? null)).toEqual([null, "pi is not on moss"]);
+    });
+
+    it("says Hercule cannot run the harness where the machine's build has no adapter for it", () => {
+      const inPi = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
+        harnessId: "pi/pi",
+        resolvedHarnessId: "pi/pi",
+      });
+      const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [inPi])]);
+
       const rows = readDraftProfile(
         buildModelMenu(buildCatalogs([profile]), CURRENT, { ...DRAFT, runnerId: MOSS.id }),
       ).lanes[0]!.rows;
 
-      expect(rows.map((row) => row.problem?.message ?? null)).toEqual([null, "pi is not on moss"]);
+      expect(rows[0]!.problem?.message).toBe("Hercule on moss cannot run pi");
     });
 
     it("says why for each state the controller reports on the selected machine", () => {

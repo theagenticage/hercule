@@ -246,6 +246,35 @@ describe("GET /plugins", () => {
   });
 });
 
+describe("a plugin whose harness is published on a GitHub repository", () => {
+  it("is errored, with a message that says how to write a repository, when the repository is not <owner>/<name>", async () => {
+    const plugin = createPluginFixture({
+      id: "github",
+      definitions: [
+        {
+          ...buildHarnessDefinition("github"),
+          releaseSource: {
+            kind: "github-releases",
+            repository: "https://github.com/google-antigravity/antigravity-cli",
+          },
+        },
+      ],
+    }).plugin;
+
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+
+        const { status, contributions } = await readPlugin(base, token, "github");
+        expect(status._tag).toBe("errored");
+        expect(status.message).toContain("must be written <owner>/<name>");
+        expect(contributions).toEqual([]);
+      },
+      { plugins: [plugin] },
+    );
+  });
+});
+
 describe("GET /plugins/{id}", () => {
   it("returns the same plugin as the listing", async () => {
     await withPlugins(async ({ base }) => {
