@@ -167,7 +167,8 @@ export interface Peer {
   readonly endOutput: () => void;
   /** Makes the harness's output fail with `error`, the way a broken pipe does. */
   readonly failOutput: (error: unknown) => void;
-  readonly breakWrites: () => void;
+  /** Makes every write fail with `error`. */
+  readonly breakWrites: (error?: unknown) => void;
   /** Waits until the client has written a message that `match` accepts. */
   readonly whenWritten: (what: string, match: (message: Message) => boolean) => Effect.Effect<void>;
   /** Waits until the client stopped reading the harness's output before its end. */
@@ -193,7 +194,7 @@ export const createPeer = (scripts: Readonly<Record<string, Script>> = {}): Peer
   let ended = false;
   let outputFailure: { readonly error: unknown } | undefined;
   let readingStopped = false;
-  let writesBroken = false;
+  let writeFailure: { readonly error: unknown } | undefined;
   const lines: Array<string> = [];
   const written: Array<Message> = [];
   const allScripts = { ...DEFAULT_SCRIPTS, ...scripts };
@@ -210,7 +211,7 @@ export const createPeer = (scripts: Readonly<Record<string, Script>> = {}): Peer
   return {
     pipes: {
       write: (text) => {
-        if (writesBroken) throw new Error("EPIPE");
+        if (writeFailure !== undefined) throw writeFailure.error;
         lines.push(text);
         const message = parseMessage(text);
         written.push(message);
@@ -249,8 +250,8 @@ export const createPeer = (scripts: Readonly<Record<string, Script>> = {}): Peer
       outputFailure = { error };
       wake?.();
     },
-    breakWrites: () => {
-      writesBroken = true;
+    breakWrites: (error = new Error("EPIPE")) => {
+      writeFailure = { error };
     },
     whenWritten: (what, match) => notifier.waitUntil(what, () => written.some(match)),
     whenReadingStopped: notifier.waitUntil("the client stopped reading", () => readingStopped),

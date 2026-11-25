@@ -49,7 +49,6 @@ export interface RefusedRequest {
 
 /** A call of ours that waits for its reply. The memory fills in `reply`. */
 export interface CallTicket {
-  readonly method: string;
   /** The `result` of the harness's reply, exactly as it was sent. `undefined` until the reply arrives. */
   readonly reply: unknown;
 }
@@ -93,12 +92,13 @@ export interface WireMemory {
    * before the vendored client hands the request to a handler.
    */
   readonly readOpenRequest: (requestKey: string) => HarnessRequest;
+  /** Creates a ticket for a call. It receives no reply until `bindTicket` gives it the id of the call. */
+  readonly openTicket: () => CallTicket;
   /**
-   * Starts to wait for a reply to a call of `method`. Call it right before the
-   * vendored client writes the call. The next written line of that method gets
-   * the oldest ticket of the method that has no line yet.
+   * Makes the reply with JSON-RPC id `id` the reply of `ticket`. Call it
+   * before the call is written, because a harness may reply at once.
    */
-  readonly takeTicket: (method: string) => CallTicket;
+  readonly bindTicket: (ticket: CallTicket, id: string | number) => void;
   /** Forgets `ticket`. Call it when the call ends, however it ends. */
   readonly dropTicket: (ticket: CallTicket) => void;
   /**
@@ -117,17 +117,13 @@ export interface WireMemory {
   readonly quoteHarnessText: (text: string) => string;
 }
 
-interface Ticket {
-  readonly method: string;
-  id: string | number | undefined;
-  reply: unknown;
-}
-
 /**
- * Reads the header values of the MCP servers in the `params` of a session
- * request. Returns an empty list for any other shape.
+ * Reads the secrets in the headers of the MCP servers in the `params` of a
+ * session request: each header value, and the credential after the scheme
+ * (`abc` of `Bearer abc`), because a harness may echo the credential alone.
+ * Returns an empty list for any other shape.
  */
-const readHeaderValues = (params: unknown): ReadonlyArray<string> => {
+const readHeaderSecrets = (params: unknown): ReadonlyArray<string> => {
   if (!isJsonObject(params) || !Array.isArray(params["mcpServers"])) return [];
   return (params["mcpServers"] as ReadonlyArray<unknown>)
     .flatMap((server) =>
@@ -135,11 +131,12 @@ const readHeaderValues = (params: unknown): ReadonlyArray<string> => {
         ? (server["headers"] as ReadonlyArray<unknown>)
         : [],
     )
-    .flatMap((header) =>
-      isJsonObject(header) && typeof header["value"] === "string" && header["value"] !== ""
-        ? [header["value"]]
-        : [],
-    );
+    .flatMap((header) => {
+      const value = isJsonObject(header) ? header["value"] : undefined;
+      if (typeof value !== "string" || value === "") return [];
+      const credential = /^\S+\s+(\S.*)$/.exec(value)?.[1];
+      return credential === undefined ? [value] : [value, credential];
+    });
 };
 
 /**
@@ -154,7 +151,8 @@ export const createWireMemory = (buildRequestKey: (id: string | number) => strin
     params: undefined,
   };
   const openRequests = new Map<string, HarnessRequest>();
-  const tickets: Array<Ticket> = [];
+  // By request key. A call has one ticket, so there are few.
+  const tickets = new Map<string, { reply: unknown }>();
   const secrets = new Set<string>();
 
   const hideSecrets = (text: string): string =>
@@ -191,7 +189,8 @@ export const createWireMemory = (buildRequestKey: (id: string | number) => strin
       }
       if (typeof message["method"] !== "string") {
         // A reply. One that matches no call of ours is dropped, as the vendored client does.
-        const ticket = "id" in message ? tickets.find((t) => t.id === message["id"]) : undefined;
+        const id = message["id"];
+        const ticket = isRequestId(id) ? tickets.get(buildRequestKey(id)) : undefined;
         if (ticket !== undefined && "result" in message) ticket.reply = message["result"];
         return undefined;
       }
@@ -212,9 +211,7 @@ export const createWireMemory = (buildRequestKey: (id: string | number) => strin
       if (!isJsonObject(written) || !isRequestId(written["id"])) return undefined;
       const { id, method } = written;
       if (typeof method === "string") {
-        const ticket = tickets.find((c) => c.method === method && c.id === undefined);
-        if (ticket !== undefined) ticket.id = id;
-        for (const value of readHeaderValues(written["params"])) secrets.add(value);
+        for (const secret of readHeaderSecrets(written["params"])) secrets.add(secret);
         return undefined;
       }
       const key = buildRequestKey(id);
@@ -232,14 +229,12 @@ export const createWireMemory = (buildRequestKey: (id: string | number) => strin
       }
       return request;
     },
-    takeTicket: (method) => {
-      const ticket: Ticket = { method, id: undefined, reply: undefined };
-      tickets.push(ticket);
-      return ticket;
+    openTicket: () => ({ reply: undefined }),
+    bindTicket: (ticket, id) => {
+      tickets.set(buildRequestKey(id), ticket);
     },
     dropTicket: (ticket) => {
-      const index = tickets.indexOf(ticket as Ticket);
-      if (index !== -1) tickets.splice(index, 1);
+      for (const [key, candidate] of tickets) if (candidate === ticket) tickets.delete(key);
     },
     hideSecrets,
     quoteHarnessText,

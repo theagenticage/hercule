@@ -16,14 +16,9 @@ const decoder = new TextDecoder();
 
 const buildPlatformError = (
   method: "read" | "write",
-  cause: unknown,
+  description: string,
 ): PlatformError.PlatformError =>
-  PlatformError.systemError({
-    _tag: "Unknown",
-    module: "AcpConnection",
-    method,
-    description: String(cause),
-  });
+  PlatformError.systemError({ _tag: "Unknown", module: "AcpConnection", method, description });
 
 /**
  * Returns a stdio that reads the lines of `pipes.stdout` and writes to
@@ -52,8 +47,10 @@ export const createHarnessStdio = (options: {
   return Stdio.make({
     args: Effect.succeed([]),
     stdin: Stream.fromAsyncIterable(pipes.stdout, (cause) => {
-      end(`The harness's output failed: ${String(cause)}`);
-      return buildPlatformError("read", cause);
+      // The exception of a pipe may hold text of the harness.
+      const description = wire.quoteHarnessText(String(cause));
+      end(`The harness's output failed: ${description}`);
+      return buildPlatformError("read", description);
     }).pipe(
       Stream.filterEffect((line) => {
         const problem = wire.noteLineRead(line);
@@ -74,8 +71,9 @@ export const createHarnessStdio = (options: {
         return Effect.try({
           try: () => pipes.write(text),
           catch: (cause) => {
-            end(`Could not write to the harness: ${String(cause)}`);
-            return buildPlatformError("write", cause);
+            const description = wire.quoteHarnessText(String(cause));
+            end(`Could not write to the harness: ${description}`);
+            return buildPlatformError("write", description);
           },
         }).pipe(
           Effect.andThen(() => (refused === undefined ? Effect.void : onRefusedRequest(refused))),

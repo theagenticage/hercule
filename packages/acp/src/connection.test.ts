@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
+import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import { AcpError } from "./error";
@@ -818,6 +819,26 @@ it.effect(
     }),
 );
 
+it.effect("reports an elicitation/complete notification, which this client never asks for", () =>
+  Effect.gen(function* () {
+    const recorder = createRecorder();
+    const peer = createPeer();
+    yield* openConnection(peer, recorder);
+
+    const sent = buildNotification("elicitation/complete", { elicitationId: "e1" });
+    peer.say(sent);
+    yield* recorder.waitUntil("the report", () => recorder.unhandled.length === 1);
+
+    expect(recorder.unhandled).toEqual([
+      {
+        reason:
+          "The harness sent the notification elicitation/complete, which this version does not use.",
+        payload: sent,
+      },
+    ]);
+  }),
+);
+
 it.effect("is not stopped by a handler that throws", () =>
   Effect.gen(function* () {
     const seen: Array<string> = [];
@@ -1055,6 +1076,31 @@ it.effect("refuses an approval request whose tool call was read differently, and
 );
 
 it.effect(
+  "refuses an approval request with a title and a subject that names the same tool call",
+  () =>
+    Effect.gen(function* () {
+      const recorder = createRecorder();
+      const peer = createPeer();
+      yield* openConnection(peer, recorder);
+
+      // The vendored client shows the tool call of the subject, not the one the harness sent.
+      const sent = buildRequest("p1", "session/request_permission", {
+        ...APPROVAL_PARAMS,
+        title: "Approval",
+        subject: {
+          type: "tool_call",
+          toolCall: { toolCallId: "call_1", title: "Something else", kind: "read" },
+        },
+      });
+      peer.say(sent);
+      yield* recorder.waitUntil("the report", () => recorder.unhandled.length === 1);
+
+      expect(peer.written.find(wroteReplyTo("p1"))).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.approvalRequests).toEqual([]);
+    }),
+);
+
+it.effect(
   "answers an elicitation in a mode it did not advertise with an error, and reports it",
   () =>
     Effect.gen(function* () {
@@ -1266,6 +1312,50 @@ it.effect(
     }),
 );
 
+it.effect(
+  "gives a call the reply to its own frame when an earlier call was interrupted in the queue",
+  () =>
+    Effect.gen(function* () {
+      // Holds back what the vendored client's writer does, so that a frame stays queued.
+      let held = false;
+      const heldTasks = new Set<() => void>();
+      const scheduler = new Scheduler.MixedScheduler("async", (task) => {
+        if (held) {
+          heldTasks.add(task);
+          return () => void heldTasks.delete(task);
+        }
+        const handle = setImmediate(task);
+        return () => clearImmediate(handle);
+      });
+      const peer = createPeer({
+        "session/new": ({ id, params }) => {
+          const { cwd } = params as { cwd: string };
+          return [buildResult(id, cwd === "/first" ? { wrong: "first" } : { sessionId: cwd })];
+        },
+      });
+      const connection = yield* openConnection(peer, createRecorder()).pipe(
+        Effect.provideService(Scheduler.Scheduler, scheduler),
+      );
+      const settle = Effect.forEach(Array.from({ length: 50 }), () => Effect.yieldNow);
+
+      held = true;
+      const first = yield* Effect.forkChild(
+        connection.newSession({ cwd: "/first", mcpServers: [] }),
+      );
+      yield* settle;
+      yield* Fiber.interrupt(first);
+      const second = yield* Effect.forkChild(
+        connection.newSession({ cwd: "/second", mcpServers: [] }),
+      );
+      yield* settle;
+      held = false;
+      for (const task of heldTasks) setImmediate(task);
+      heldTasks.clear();
+
+      expect((yield* Fiber.join(second)).nativeSessionId).toBe("/second");
+    }),
+);
+
 it.effect("names, in each of two overlapping prompts, the reply that prompt got", () =>
   Effect.gen(function* () {
     const peer = createPeer({
@@ -1400,6 +1490,23 @@ const PLACES_OF_HARNESS_TEXT: ReadonlyArray<{
         return [(yield* connection.awaitClosed).message];
       }),
   },
+  {
+    name: "the exception of the pipe it reads",
+    texts: ({ peer, connection }) =>
+      Effect.gen(function* () {
+        peer.failOutput(new Error(LONG_ECHO));
+        return [(yield* connection.awaitClosed).message];
+      }),
+  },
+  {
+    name: "the exception of the pipe it writes",
+    texts: ({ peer, connection }) =>
+      Effect.gen(function* () {
+        peer.breakWrites(new Error(LONG_ECHO));
+        yield* Effect.ignore(connection.cancel(SESSION));
+        return [(yield* connection.awaitClosed).message];
+      }),
+  },
 ];
 
 it.effect.each(PLACES_OF_HARNESS_TEXT)(
@@ -1418,6 +1525,23 @@ it.effect.each(PLACES_OF_HARNESS_TEXT)(
       expect(read[0]).not.toContain("z".repeat(201));
       expect(read[0]).toContain("...");
     }),
+);
+
+it.effect("hides the credential of a header when the harness echoes it without its scheme", () =>
+  Effect.gen(function* () {
+    const credential = BEARER_TOKEN.slice("Bearer ".length);
+    const peer = createPeer({
+      "session/set_mode": ({ id }) => [
+        buildFailure(id, -32603, `token "${credential}" is invalid`),
+      ],
+    });
+    const connection = yield* openSessionWithToken(peer, createRecorder());
+
+    const error = yield* Effect.flip(connection.setMode(SESSION, "auto"));
+
+    expect(error.message).toContain("[hidden]");
+    expect(error.harnessMessage).toBe('token "[hidden]" is invalid');
+  }),
 );
 
 it.effect("hides a secret before it cuts the text, and keeps harnessMessage whole", () =>

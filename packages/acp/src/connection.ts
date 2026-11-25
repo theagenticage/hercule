@@ -14,6 +14,7 @@
  * `onUnhandledMessage` or fails the call, and names the field and the value.
  */
 import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -230,9 +231,21 @@ const IDENTIFIER_SCHEMAS = new Map<string, Schema.Decoder<unknown>>([
   ["current_mode_update", MODE_ID],
 ]);
 
-/** Reads the tool call id in the `params` of an approval request exactly as the harness sent them. */
-const readSentToolCall = Schema.decodeUnknownOption(
-  Schema.Struct({ toolCall: Schema.Struct({ toolCallId: Schema.String }) }),
+/**
+ * The ticket of the call that is being written. The vendored client's logger
+ * runs in the fiber of the call, before the frame is queued, so it can tell
+ * the wire memory which id the call got.
+ */
+const CurrentCallTicket = Context.Reference<CallTicket | undefined>("acp/CurrentCallTicket", {
+  defaultValue: () => undefined,
+});
+
+/** What the vendored client logs for a request of ours, before it queues the frame. A notification has no id. */
+const readOutgoingRequest = Schema.decodeUnknownOption(
+  Schema.Struct({
+    _tag: Schema.Literal("Request"),
+    id: Schema.Union([Schema.String, Schema.Number]),
+  }),
 );
 
 /** Checks that `request` is in the form mode, the only mode this client advertises. */
@@ -291,14 +304,11 @@ const registerHandlers = (
     );
     yield* client.handleRequestPermission((request, context) => {
       const open = wire.readOpenRequest(context.requestId);
-      // The vendored client reads a request with a top-level `title` as version 2
-      // and replaces its tool call. The user must not approve another call than
-      // the one the harness asked about.
-      const isSentToolCall = Option.exists(
-        readSentToolCall(open.params),
-        (sent) => sent.toolCall.toolCallId === request.toolCall.toolCallId,
-      );
-      if (!isSentToolCall) {
+      // Version 1 has no `title`, and the vendored client strips it. It sets
+      // `title` only when it read the request as version 2, and then it builds
+      // the tool call itself, from data the harness did not send as a tool call.
+      // The user must not approve what the harness did not ask about.
+      if ("title" in request) {
         return Effect.fail(
           VendorErrors.AcpRequestError.invalidParams(
             "The tool call in this request was read differently from how the harness sent it, so it was not shown for approval.",
@@ -335,12 +345,15 @@ const registerHandlers = (
         }),
       );
     });
-    yield* client.handleUnknownExtNotification((method) =>
+    const reportUnusedNotification = (method: string) =>
       reportUnhandled(
         `The harness sent the notification ${wire.quoteHarnessText(method)}, which this version does not use.`,
         wire.getLastLineRead().message,
-      ),
-    );
+      );
+    yield* client.handleUnknownExtNotification(reportUnusedNotification);
+    // This client advertises only the form mode, which never sends it. Without a
+    // handler the vendored client keeps every one it receives, without bound.
+    yield* client.handleElicitationComplete(() => reportUnusedNotification("elicitation/complete"));
   });
 
 /**
@@ -398,6 +411,7 @@ const createCallRunner = (
       }
       const run = (ticket: CallTicket) =>
         exchange.pipe(
+          Effect.provideService(CurrentCallTicket, ticket),
           // The vendored client fails a call whose reply it cannot decode with a defect.
           Effect.catchDefect((defect) =>
             defect instanceof Schema.SchemaError
@@ -460,7 +474,7 @@ const createCallRunner = (
           }),
         );
       return Effect.acquireUseRelease(
-        Effect.sync(() => wire.takeTicket(method)),
+        Effect.sync(() => wire.openTicket()),
         run,
         (ticket) => Effect.sync(() => wire.dropTicket(ticket)),
       );
@@ -515,9 +529,21 @@ export const openAcpConnection = (options: {
           reportUnhandled(describeRefusedRequest(refused, wire), refused.request.message),
       }),
       {
-        // The client logs a notification it drops, and nothing else tells us.
+        // The client logs a notification it drops, and nothing else tells us. It
+        // also logs each request of ours, which gives the call its id.
         logIncoming: true,
+        logOutgoing: true,
         logger: (event) => {
+          if (event.direction === "outgoing") {
+            const request =
+              event.stage === "decoded" ? readOutgoingRequest(event.payload) : Option.none();
+            return Option.isNone(request)
+              ? Effect.void
+              : Effect.gen(function* () {
+                  const ticket = yield* CurrentCallTicket;
+                  if (ticket !== undefined) wire.bindTicket(ticket, request.value.id);
+                });
+          }
           const dropped =
             event.stage === "decode_failed"
               ? readDroppedNotification(event.payload)

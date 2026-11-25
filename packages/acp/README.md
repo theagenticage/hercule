@@ -6,7 +6,7 @@ The ACP (Agent Client Protocol) client: it talks to a harness that speaks ACP ov
   - `connection.ts` opens the connection. It calls T3's typed client (`AcpClient.make`, `client.agent.*` and the handlers). T3's generated schemas decode what the harness sends, and `connection.ts` decodes each reply and message again with the ACP version 1 schema when T3 refused it or let through more than version 1 allows.
   - `types.ts` holds our own plain types and the interface of a connection. `connection.ts` assigns T3's values to them, so when a sync removes or retypes a required field, `pnpm typecheck` fails there.
   - `unreadable.ts` explains a refused value: the message, the field, the value, and the advice to sync. It takes the schema as a parameter and imports nothing from the copy.
-  - `wire.ts` remembers the lines that cross the wire: the untouched `params` (`raw`) of the line T3 is handling, the open requests of the harness, the reply that belongs to each call, and the secrets of the session. `quoteHarnessText` hides them and cuts any harness text that goes into a message.
+  - `wire.ts` remembers the lines that cross the wire: the untouched `params` (`raw`) of the line T3 is handling, the open requests of the harness, the reply that belongs to each call (by its request id), and the secrets of the session. `quoteHarnessText` hides them and cuts any harness text that goes into a message.
   - `stdio.ts` turns the harness's pipes into the stdio T3 reads and writes.
   - `error.ts` holds the errors.
   - `index.ts` is the package's interface.
@@ -24,7 +24,7 @@ The ACP (Agent Client Protocol) client: it talks to a harness that speaks ACP ov
 
 Through `client.ts` the rest of the copy is linked: `rpc.ts`, `_internal/`, `schema.ts` and the other generated files.
 
-The `elicitation/complete` notification has no handler: this client advertises only the form mode, which never sends it, and T3 would keep one it received for as long as the connection lives.
+The `elicitation/complete` notification gets a handler that only reports it: this client advertises only the form mode, which never sends it, but T3 keeps every one it receives without bound when nothing handles it.
 
 `agent.ts` (the agent side of the protocol), every `*.test.ts` and `test/` are copied only for T3's tests, which run in our suite.
 
@@ -77,8 +77,8 @@ Then:
 1. Put the new commit in this README (above).
 2. Run `pnpm test:node packages/acp`, `pnpm typecheck` and `pnpm dep-lint`.
 3. Read `git diff` of `packages/acp/vendor` for what matters to us:
-   - `client.ts`: `make`, `agent.*`, the handlers (`handleSessionUpdate`, `handleRequestPermission`, `handleElicitation`, `handleUnknownExtNotification`) and `raw.notifications`, which `src/connection.ts` calls. How T3 decides that a harness speaks ACP version 2 (an `info` field in the reply to `initialize`) is repeated in `connection.ts`.
-   - `protocol.ts`: the `decode_failed` log event (`src/connection.ts` reports a notification T3 drops from it) and `acpRequestIdentity`.
+   - `client.ts`: `make`, `agent.*`, the handlers (`handleSessionUpdate`, `handleRequestPermission`, `handleElicitation`, `handleElicitationComplete`, `handleUnknownExtNotification`) and `raw.notifications`, which `src/connection.ts` calls. T3 sets `title` on an approval request only when it read it as version 2 (`normalizePermissionRequest`), and `connection.ts` refuses such a request. How T3 decides that a harness speaks ACP version 2 (an `info` field in the reply to `initialize`) is repeated in `connection.ts`.
+   - `protocol.ts`: the `decode_failed` log event (`src/connection.ts` reports a notification T3 drops from it), the outgoing `decoded` log event (it gives each call its request id, in the fiber of the call, before the frame is queued) and `acpRequestIdentity`.
    - `errors.ts`, `compat.ts` and `_generated/`: the shapes `src/types.ts` must still satisfy. `pnpm typecheck` shows a required field that went away or changed type in `connection.ts`. An optional field is not checked that way: `src/connection.integration.test.ts` plays the recordings of a real harness through the connection and compares each update, tool call, form and answer with the recorded one, so a rename or a dropped field fails there.
    - The Effect version T3 uses (the `effect` entry of `catalog` in T3 Code's `pnpm-workspace.yaml`) against ours (`effect` in `package.json`). When they differ, the copy may call an API our Effect version does not have.
    - Any new import in the copy other than `effect`: `pnpm dep-lint` fails on it.
