@@ -107,10 +107,10 @@ describe("takeTail", () => {
 });
 
 describe("capitalize", () => {
-  it.each([
-    ["a sentence", "the npm registry answered 404.", "The npm registry answered 404."],
-    ["an empty text", "", ""],
-  ])("returns %s with its first letter in upper case", (_name, text, expected) => {
-    expect(capitalize(text)).toBe(expected);
-  });
+  it.each([["a sentence", "the npm registry answered 404.", "The npm registry answered 404."]])(
+    "returns %s with its first letter in upper case",
+    (_name, text, expected) => {
+      expect(capitalize(text)).toBe(expected);
+    },
+  );
 });

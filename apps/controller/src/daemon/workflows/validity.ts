@@ -5,6 +5,7 @@ import { AgentObserver } from "../../agents";
 import { ConnectionObserver } from "../../connections";
 import { type AuditLog, EventKindsLayer } from "../../events";
 import type { Notifier } from "../../notifications";
+import { ProviderAccountObserver } from "../../provider-accounts";
 import { EventKindCatalogLayer, PluginObserver, type PluginHost } from "../../plugins";
 import { WorkflowValidity, WorkflowValidityLayer } from "../../workflows";
 import { absorbFailures } from "../../absorbing";
@@ -38,23 +39,25 @@ export const revalidateStoredWorkflowsOrLog: Effect.Effect<void, never, Workflow
   );
 
 /**
- * Provides the plugins, agents and connections domains' observer ports from
- * the workflows domain's `WorkflowValidity`, and the validity service itself
- * for the boot step that validates every stored workflow once the plugins
- * have started. It lives in the controller daemon because the workflows
- * domain depends on all three domains, so none of them can reach it without
- * a cycle.
+ * Provides the observer ports of the plugins, agents, provider accounts and
+ * connections domains from the workflows domain's `WorkflowValidity`, and the
+ * validity service itself for the boot step that validates every stored
+ * workflow once the plugins have started. It lives in the controller daemon
+ * because the workflows domain depends on these domains (on provider accounts
+ * through the agents domain), so none of them can import it without a cycle.
  *
  * Every port validates every stored workflow again, not only those that name
  * the changed plugin, agent or Connection. Finding those would repeat what
  * validation already reads, and validating all of them is one in-memory pass
  * per workflow plus a few indexed reads.
  *
- * The agent port is called when an agent is deleted and when it moves to
- * another account or harness.
+ * The agent port is called when an agent is deleted and when the harness it
+ * runs in changes. The provider account port is called when an account's
+ * default harness changes, which changes the harness of every agent that has
+ * none of its own.
  */
 export const WorkflowValidityObserversLayer: Layer.Layer<
-  PluginObserver | AgentObserver | ConnectionObserver | WorkflowValidity,
+  PluginObserver | AgentObserver | ProviderAccountObserver | ConnectionObserver | WorkflowValidity,
   never,
   SqlClient.SqlClient | AuditLog | Notifier | PluginHost
 > = Layer.mergeAll(
@@ -65,7 +68,13 @@ export const WorkflowValidityObserversLayer: Layer.Layer<
   ),
   Layer.effect(AgentObserver)(
     Effect.map(WorkflowValidity, (validity) => ({
-      agentChanged: () => revalidate(validity),
+      agentDeleted: () => revalidate(validity),
+      agentHarnessChanged: () => revalidate(validity),
+    })),
+  ),
+  Layer.effect(ProviderAccountObserver)(
+    Effect.map(WorkflowValidity, (validity) => ({
+      defaultHarnessChanged: () => revalidate(validity),
     })),
   ),
   Layer.effect(ConnectionObserver)(

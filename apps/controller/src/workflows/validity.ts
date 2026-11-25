@@ -2,21 +2,30 @@
  * Keeps the invalid mark of the stored workflows up to date.
  *
  * A stored workflow validated when it was saved, but it can stop validating
- * without being edited: the plugin whose action it calls is disabled, the
- * agent or Connection it names is deleted, the agent it names moves to a
- * harness that cannot give the structured result its step asks for, or a
- * newer controller checks it more strictly than the one that saved it. So
- * after such a change the controller validates every stored workflow again,
+ * without being edited:
+ *
+ * - the plugin whose action it calls is disabled;
+ * - a Connection it names is deleted;
+ * - an Agent it names is deleted;
+ * - the harness an Agent it names runs in changes, because the Agent names
+ *   another harness or moves to another account, and the new harness cannot
+ *   give the structured result its step asks for;
+ * - the default harness of the account of such an Agent changes, which
+ *   changes the harness of every Agent that names none of its own;
+ * - a newer controller checks it more strictly than the one that saved it.
+ *
+ * So after such a change the controller validates every stored workflow again,
  * with the same checks a save runs, and marks the workflows that fail as
  * invalid. While a workflow is invalid its start triggers are not routed, and
  * a manual run is refused because `run.start` validates the workflow again.
  *
- * The plugins, agents and connections domains cannot import this domain,
- * because this domain depends on all three. So each declares a port that
- * reports its change, and the controller daemon implements every port with
- * `revalidateStoredWorkflows`. Boot also calls it once after the plugins
- * start, because the mark is stored, and the plugins or the controller may
- * have changed while the controller was stopped.
+ * The plugins, agents, provider accounts and connections domains cannot
+ * import this domain, because it depends on them, directly or through the
+ * agents domain. So each declares a port that reports its change, and the
+ * controller daemon implements every port with `revalidateStoredWorkflows`.
+ * Boot also calls it once after the plugins start, because the mark is
+ * stored, and the plugins or the controller may have changed while the
+ * controller was stopped.
  */
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";

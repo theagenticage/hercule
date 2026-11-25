@@ -260,10 +260,11 @@ const make = Effect.gen(function* () {
      * - `Forbidden` when a session names a profile that holds a grant only the
      *   user gives.
      *
-     * When the update names an account or a harness, it tells `AgentObserver`
-     * once it commits, so the stored workflows are validated again: the new
-     * harness may not give a structured result that a workflow's step asks for,
-     * or may give one that the old harness did not.
+     * When the harness the agent runs in really changes, whether by naming a
+     * harness or by moving to an account with another default, it tells
+     * `AgentObserver` once the update commits, so the stored workflows are
+     * validated again: the new harness may not give a structured result that
+     * a workflow's step asks for, or may give one that the old harness did not.
      */
     update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
@@ -283,7 +284,7 @@ const make = Effect.gen(function* () {
           );
         }
         const composeRecord = yield* buildAgentRecordComposer;
-        const stored = yield* withTransaction(
+        const { stored, harnessChanged } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             // Read first, so that an unknown id fails with `not_found` instead
@@ -324,12 +325,14 @@ const make = Effect.gen(function* () {
               payload: { agentId: id, changed: Object.keys(edit).sort() },
               at,
             });
-            return yield* readAgentOrFail(id);
+            const updated = yield* readAgentOrFail(id);
+            return {
+              stored: updated,
+              harnessChanged: updated.effectiveHarnessId !== current.effectiveHarnessId,
+            };
           }),
         );
-        if (edit.providerAccountId !== undefined || edit.harnessId !== undefined) {
-          yield* observer.agentChanged();
-        }
+        if (harnessChanged) yield* observer.agentHarnessChanged();
         return composeRecord(stored);
       }),
 
@@ -390,7 +393,7 @@ const make = Effect.gen(function* () {
             });
           }),
         );
-        yield* observer.agentChanged();
+        yield* observer.agentDeleted();
         return {};
       }),
   };

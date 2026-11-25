@@ -41,6 +41,7 @@ export {
   type DefaultHarnessClash,
   type DefaultSelection,
 } from "./model-profile-membership";
+export { ProviderAccountObserver } from "./observer";
 export {
   ProviderAccountProbes,
   ProviderAccountProbesLayer,

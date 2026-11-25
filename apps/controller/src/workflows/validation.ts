@@ -1142,8 +1142,8 @@ const listWorkspaceIssues = (
 
 /**
  * Lints a step's output schema. The schema must stay within the JSON Schema
- * subset that every harness accepts. Returns one issue per broken rule, at
- * `path`.
+ * subset that every harness giving structured results accepts. Returns one
+ * issue per broken rule, at `path`.
  */
 const listOutputSchemaIssues = (
   outputSchema: OutputSchema,
@@ -1151,15 +1151,16 @@ const listOutputSchemaIssues = (
 ): ReadonlyArray<Issue> =>
   lintOutputSchema(outputSchema).map((finding) => ({
     path,
-    message: `The output schema is outside the JSON Schema subset that every harness accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
+    message: `The output schema is outside the JSON Schema subset that every harness giving structured results accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
   }));
 
 /**
  * Validates an agent step's Agent and output schema. The Agent must exist and
  * must not be an assistant. The output schema is optional. When present, it is
  * linted by `listOutputSchemaIssues`, and it is refused when the Agent's
- * harness cannot give a structured result. A session runs the same checks
- * when it spawns, so a step that passes here does not fail at its first turn.
+ * harness cannot give a structured result. The check is against the Agent as
+ * it is now: an Agent can change afterwards, so a session is checked again
+ * when it is placed.
  */
 const listAgentIssues = (
   step: AgentStep,
@@ -1167,15 +1168,13 @@ const listAgentIssues = (
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
   const path = ["steps", String(index)];
-  if (step.outputSchema === undefined) {
-    return listAgentReferenceIssues(step.agent, [...path, "agent"], references);
-  }
+  const agentIssues = listAgentReferenceIssues(step.agent, [...path, "agent"], references);
+  if (step.outputSchema === undefined) return agentIssues;
   const outputSchemaPath = [...path, "outputSchema"];
   const agent = references.agentById.get(step.agent);
   const harness = agent?.harness;
-  // An assistant gets only its own error.
-  const refusedByHarness =
-    agent?.kind === "agent" && harness?.structuredOutput === "unsupported"
+  const harnessIssues =
+    agent !== undefined && harness?.structuredOutput === "unsupported"
       ? [
           {
             path: outputSchemaPath,
@@ -1184,9 +1183,9 @@ const listAgentIssues = (
         ]
       : [];
   return [
-    ...listAgentReferenceIssues(step.agent, [...path, "agent"], references),
+    ...agentIssues,
     ...listOutputSchemaIssues(step.outputSchema, outputSchemaPath),
-    ...refusedByHarness,
+    ...harnessIssues,
   ];
 };
 

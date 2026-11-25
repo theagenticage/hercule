@@ -162,7 +162,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the eleven shipped plugins, each one active", async () => {
+  it("lists the fourteen shipped plugins, each one active", async () => {
     // There is no CLI command for this, so the route is called the way the
     // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -179,8 +179,10 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "claude-code",
       "codex",
       "pi",
+      "antigravity",
       "anthropic",
       "openai",
+      "google",
       "zai",
       "openrouter",
       "opencode",
@@ -192,8 +194,9 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
-    // The three harness plugins and the six provider plugins have no capabilities asserted here. github is the connection type, the
-    // event source with the GitHub event kinds it emits, the reader of the
+    // The four harness plugins and the seven provider plugins have no
+    // capabilities asserted here. github is the connection type, the event
+    // source with the GitHub event kinds it emits, the reader of the
     // linked repo Resources it watches, the reader of the issues and pull
     // requests that concern the user (entities), and the GitHub workflow
     // actions.

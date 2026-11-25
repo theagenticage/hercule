@@ -14,7 +14,7 @@ import { HarnessReleases } from "../../harnesses";
 import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../../absorbing";
 
-/** How often the latest releases are read. Three small requests an hour. */
+/** How often the latest releases are read. Four small requests an hour. */
 const HARNESS_RELEASE_CHECK_INTERVAL: Duration.Duration = Duration.hours(1);
 
 /**
@@ -24,7 +24,7 @@ const HARNESS_RELEASE_CHECK_INTERVAL: Duration.Duration = Duration.hours(1);
  *
  * A pass starts only while the controller serves, and never once it is
  * sealed. The pass itself is not counted as running work, because a freeze
- * must not wait for a slow registry. So a pass can still finish after a
+ * must not wait for a slow publisher. So a pass can still finish after a
  * freeze began: until the database is copied its result is stored as usual,
  * and once the copy is made the write is refused, logged, and repeated by the
  * next pass.

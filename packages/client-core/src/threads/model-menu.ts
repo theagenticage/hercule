@@ -55,6 +55,7 @@ import {
   findHarnessLoginMethod,
   findProviderAccountNameIfAmbiguous,
   findProviderAccountReadiness,
+  hasAdapter,
   resolveThreadHarnessId,
   type HarnessLoginMethod,
 } from "../provider-accounts";
@@ -286,11 +287,19 @@ const findProblem = (
         (each) => canSignInOn(each) && readiness(each) === reason,
       )
     : undefined;
+  // `harness-missing` also means the runner's build has no adapter for the
+  // harness, where "not on" would send the user to install what is there.
+  const lacksAdapter =
+    reason === "harness-missing" &&
+    runner !== undefined &&
+    !hasAdapter(runner, entry.resolvedHarnessId);
   return {
-    message: describeEntryProblem(reason, {
-      ...subject,
-      machineName: (runner ?? target)?.name ?? null,
-    }),
+    message: lacksAdapter
+      ? `Hercule on ${runner.name} cannot run ${subject.harnessName}`
+      : describeEntryProblem(reason, {
+          ...subject,
+          machineName: (runner ?? target)?.name ?? null,
+        }),
     signIn: target === undefined ? null : buildSignInTarget(catalogs.providers, account, target),
   };
 };

@@ -121,6 +121,16 @@ export interface HarnessOnRunner {
   readonly reachable: boolean;
 }
 
+/**
+ * Checks whether the runner's build has an adapter for the harness. Returns
+ * `true` when the runner has reported no facts yet, because nothing says it
+ * lacks one. The controller reports `harness-missing` both for a harness that
+ * is not installed and for a build with no adapter, so a screen asks this
+ * before it says "not installed".
+ */
+export const hasAdapter = (runner: Runner, harnessId: string): boolean =>
+  runner.facts == null || runner.facts.adapters.includes(harnessId);
+
 /** Returns what `runner` has of `harness`, from the runner's facts. */
 export const describeHarnessOnRunner = (runner: Runner, harness: Harness): HarnessOnRunner => {
   // The binary name the runner reports from its `PATH` is the harness's

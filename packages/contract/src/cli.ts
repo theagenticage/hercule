@@ -3339,7 +3339,7 @@ export const CLI = {
 
   "harness.query": {
     command: "harness list",
-    help: "Lists the harnesses: the agent programs sessions run in, such as Claude Code, Codex and pi. Each row has its qualified id, its binary name, what it can do, and for every runner whether it is installed there and which version. The `latest` column is the newest release its publisher lists, as the controller last read it, and is empty until a read has succeeded; `--json` also has when it was read and why the last read failed. Use the id with --harness. If a harness is missing on a runner, install it with `hercule runner install-harness`.",
+    help: "Lists the harnesses: the agent programs that run sessions (Claude Code, Codex, pi, Antigravity). Each row has its qualified id, its binary name, what it can do, and for every runner whether it is installed there and which version. The `latest` column is the newest release its publisher lists, as the controller last read it, and is empty until a read has succeeded; `--json` also has when it was read and why the last read failed. Use the id with --harness. If a harness is missing on a runner, install it with `hercule runner install-harness`.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -5178,7 +5178,7 @@ export const CLI = {
       },
       outputSchema: {
         flag: "output-schema",
-        help: "What every turn must return, as an inline JSON Schema; a keyword outside the subset every harness supports is rejected, and the error names the keyword.",
+        help: "What every turn must return, as an inline JSON Schema; a keyword outside the subset that every harness with structured results supports is rejected, and the error names the keyword.",
       },
       role: {
         flag: "role",
@@ -5258,7 +5258,7 @@ export const CLI = {
       conflict:
         "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task. Or a thing named in --new-task changed between its read and the write: try again",
       validation:
-        "--output-schema uses a keyword outside the subset every harness supports, or the harness the session would run in cannot give a structured result: leave --output-schema out, or run on another harness",
+        "--output-schema uses a keyword outside the subset that every harness with structured results supports, or the harness the session would run in cannot give a structured result: leave --output-schema out, or run on another harness",
     },
   },
   "session.update": {

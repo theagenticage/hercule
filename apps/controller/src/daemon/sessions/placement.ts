@@ -718,10 +718,10 @@ const make = Effect.gen(function* () {
     ACCESS_MODE_CHAIN.indexOf(requested) <= ACCESS_MODE_CHAIN.indexOf(agent.accessMode);
 
   /**
-   * Checks the output schema against the subset every harness supports.
-   * Returns the schema, or fails with a validation error for each rule it
-   * breaks. The check runs before anything is written, so an invalid schema
-   * leaves no session behind.
+   * Checks the output schema against the subset that every harness giving
+   * structured results supports. Returns the schema, or fails with a
+   * validation error for each rule it breaks. The check runs before anything
+   * is written, so an invalid schema leaves no session behind.
    */
   const validateOutputSchema = (
     schema: SessionSpec["outputSchema"],

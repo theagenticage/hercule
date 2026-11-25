@@ -414,6 +414,10 @@ export const bootWith = <A, E>(
       // Probing reads the catalogs that the provider's own API lists, which
       // the provider account service does.
       Layer.provideMerge(ProviderAccountServiceLayer),
+      // A change to an account's default harness validates the stored
+      // workflows again. The same layer is merged below, so there is one
+      // `WorkflowValidity`.
+      Layer.provideMerge(WorkflowValidityObserversLayer),
       Layer.provideMerge(ProviderAccountProbesLayer),
       Layer.provideMerge(ModelCatalogsLayer),
       Layer.provideMerge(ProviderAccountRunnersLayer),

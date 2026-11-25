@@ -30,6 +30,7 @@ import {
   findHarnessLoginMethod,
   findProviderAccountNameIfAmbiguous,
   findProviderAccountReadiness,
+  hasAdapter,
 } from "../provider-accounts";
 import { isMachineProblemReason } from "../model-profiles/entry-problem";
 import { buildSignInTarget, type SignInTarget } from "./sign-in-target";
@@ -208,6 +209,7 @@ const findBlocker = (
   providers: readonly Provider[],
   account: ProviderAccount | undefined,
   runner: Runner | undefined,
+  harnessId: string | null,
   readiness: ProviderAccountReadinessState,
   signIn: SignInTarget | null,
   entry: ResolvedModelProfileEntry | undefined,
@@ -251,7 +253,9 @@ const findBlocker = (
     case "harness-too-old":
       return stop(`The harness on ${runner.name} is older than Hercule supports; update it`);
     case "harness-missing":
-      return stop(`${name} is not on ${runner.name}`);
+      return harnessId !== null && !hasAdapter(runner, harnessId)
+        ? stop(`Hercule on ${runner.name} cannot run the harness; update Hercule there`)
+        : stop(`${name} is not on ${runner.name}`);
     case "not-signed-in":
       return stop(`${name} is not signed in on ${runner.name}`, { signIn });
   }
@@ -351,7 +355,9 @@ export const buildComposerFields = (
       ? "not-signed-in"
       : findProviderAccountReadiness(account, harnessId, runner.id);
   const dimmed =
-    account === undefined || runner === undefined ? null : findDimmedReason(runner, readiness);
+    account === undefined || runner === undefined
+      ? null
+      : findDimmedReason(runner, readiness, harnessId);
   const name = runner?.name ?? "no machine";
   const signIn =
     account === undefined || runner === undefined
@@ -433,6 +439,7 @@ export const buildComposerFields = (
             catalogs.providers,
             account,
             runner,
+            harnessId,
             readiness,
             signIn,
             resolved.kind === "draft" ? resolved.entry : undefined,

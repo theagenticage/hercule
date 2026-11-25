@@ -933,7 +933,12 @@ describe("resolving entries", () => {
       }),
     );
 
-    expect(resolved.problem).toMatchObject({ reason: "harness-missing" });
+    expect(resolved.problem).toEqual({
+      reason: "harness-missing",
+      message: expect.stringMatching(
+        /^.* cannot run on laptop\. Install it there, or update Hercule there if it is installed\.$/,
+      ) as unknown,
+    });
   });
 
   it("reports a model that left the account's catalog", async () => {

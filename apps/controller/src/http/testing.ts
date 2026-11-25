@@ -215,7 +215,7 @@ const buildServices = (
         Layer.provideMerge(TaskServiceWithPortsLayer),
         Layer.provideMerge(
           HarnessReleasesLayer.pipe(
-            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableReleaseClient)),
           ),
         ),
       ),
@@ -229,6 +229,9 @@ const buildServices = (
         // Probing reads the catalogs that the provider's own API lists, which
         // the provider account service does.
         Layer.provideMerge(ProviderAccountServiceLayer),
+        // As in the real boot: a change to an account's default harness
+        // validates the stored workflows again.
+        Layer.provideMerge(WorkflowValidityObserversLayer),
         Layer.provideMerge(ProviderAccountProbesLayer),
         Layer.provideMerge(ModelCatalogsLayer),
         Layer.provideMerge(ProviderAccountRunnersLayer),
@@ -362,13 +365,16 @@ const acceptingProviderKeyClient = HttpClient.make((request) =>
 );
 
 /**
- * The npm registry a test controller reads: no
- * request gets an answer, so no test reaches the real registry by accident.
+ * The release publishers a test controller reads: no request gets an answer,
+ * so no test reaches npm or GitHub by accident.
  */
-const unreachableRegistryClient = HttpClient.make((request) =>
+const unreachableReleaseClient = HttpClient.make((request) =>
   Effect.fail(
     new HttpClientError.HttpClientError({
-      reason: new HttpClientError.TransportError({ request, cause: "no registry in this test" }),
+      reason: new HttpClientError.TransportError({
+        request,
+        cause: "no release publisher in this test",
+      }),
     }),
   ),
 );

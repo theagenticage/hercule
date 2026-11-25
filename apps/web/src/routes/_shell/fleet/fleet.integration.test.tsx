@@ -225,8 +225,10 @@ describe("Fleet", () => {
     await openApp([]);
 
     expect(readPageText()).toContain("no runner has joined yet");
+    // Each harness is a row of its own, so the name must be the whole text of
+    // its element: a bare "pi" would match any word that contains it.
     for (const harness of ["Claude Code", "Codex", "pi", "Antigravity"]) {
-      expect(readPageText()).toContain(harness);
+      expect(screen.getByText(harness)).toBeTruthy();
     }
     expect(readPageText()).toContain(
       "A runner probes the machine it runs on and reports what it found. Until one joins, Hercule knows nothing about this machine.",

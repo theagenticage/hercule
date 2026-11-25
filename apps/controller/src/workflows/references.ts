@@ -109,19 +109,17 @@ export const workflowReferences = Effect.gen(function* () {
           (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
         ),
         agentById: new Map(
-          [...(yield* agents.readSummaries(collectIds((ids) => ids.agentIds)))].map(
-            ([id, summary]) => [
-              id,
-              {
-                kind: summary.kind,
-                name: summary.name,
-                harness:
-                  summary.effectiveHarnessId === null
-                    ? undefined
-                    : harnessById.get(summary.effectiveHarnessId),
-              },
-            ],
-          ),
+          (yield* agents.readMany(collectIds((ids) => ids.agentIds))).map((agent) => [
+            agent.id,
+            {
+              kind: agent.kind,
+              name: agent.name,
+              harness:
+                agent.effectiveHarnessId === null
+                  ? undefined
+                  : harnessById.get(agent.effectiveHarnessId),
+            },
+          ]),
         ),
         connectionTypeById: yield* connections.readTypes(collectIds((ids) => ids.connectionIds)),
         connectionTypes: new Set(yield* host.listActiveConnectionTypes()),

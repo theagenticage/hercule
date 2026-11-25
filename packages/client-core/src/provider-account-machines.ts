@@ -16,6 +16,7 @@ import {
   findDefaultHarnessSnapshot,
   findProviderAccountKind,
   findProviderAccountReadiness,
+  hasAdapter,
   signsInPerMachine,
 } from "./provider-accounts";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
@@ -93,6 +94,7 @@ const describeMachineProblem = (
   state: ProviderAccountReadinessState,
   harnessName: string,
   snapshot: CapabilitySnapshot | undefined,
+  runnerHasAdapter: boolean,
 ): string | null => {
   switch (state) {
     case "ready":
@@ -102,7 +104,9 @@ const describeMachineProblem = (
       return `${harnessName}${version == null ? "" : ` ${version}`} is too old`;
     }
     case "harness-missing":
-      return `${harnessName} is not installed`;
+      // The machine's action says which harness the build cannot run, so this
+      // row only says what is wrong.
+      return runnerHasAdapter ? `${harnessName} is not installed` : "Not supported there";
     case "token-expired":
       return "Token expired";
     case "not-signed-in":
@@ -164,7 +168,12 @@ export const decideProviderAccountReach = (
         runnerName: runner.name,
         ready,
         identity: ready && auth?.status === "ok" ? (auth.identity ?? null) : null,
-        problem: describeMachineProblem(state, harnessName, snapshot),
+        problem: describeMachineProblem(
+          state,
+          harnessName,
+          snapshot,
+          hasAdapter(runner, account.defaultHarnessId),
+        ),
         action,
       };
     });

@@ -5,7 +5,7 @@
  * not matter here.
  */
 import type { ProviderAccount, ProviderAccountReadinessState, Runner } from "@hercule/contract";
-import { findProviderAccountReadiness } from "../provider-accounts";
+import { findProviderAccountReadiness, hasAdapter } from "../provider-accounts";
 
 export interface RunnerMenuRow {
   readonly runnerId: string;
@@ -35,12 +35,16 @@ const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
  * on it right now, or `null` when it can: "retired", its connectivity when it
  * is not online, "draining", "not signed in", "no key or token" when the
  * controller holds no credential for the account, "key or token expired",
- * "not installed" when the harness is not on the runner, or "harness too old"
- * when it is older than this build supports.
+ * "not installed" when the harness is not on the runner, "not supported"
+ * when the runner's build has no adapter for the harness, or "harness too old"
+ * when it is older than this build supports. `harnessId` is `null` for a
+ * thread that has no harness yet, which no runner can be missing an adapter
+ * for.
  */
 export const findDimmedReason = (
   runner: Runner,
   readiness: ProviderAccountReadinessState,
+  harnessId: string | null,
 ): string | null =>
   isRetired(runner)
     ? "retired"
@@ -57,7 +61,9 @@ export const findDimmedReason = (
               : readiness === "harness-too-old"
                 ? "harness too old"
                 : readiness === "harness-missing"
-                  ? "not installed"
+                  ? harnessId !== null && !hasAdapter(runner, harnessId)
+                    ? "not supported"
+                    : "not installed"
                   : null;
 
 /**
@@ -77,7 +83,7 @@ export const buildRunnerMenu = (
     .filter((runner) => !isRetired(runner))
     .map((runner) => {
       const readiness = findProviderAccountReadiness(account, harnessId, runner.id);
-      const dimmed = findDimmedReason(runner, readiness);
+      const dimmed = findDimmedReason(runner, readiness, harnessId);
       return {
         runnerId: runner.id,
         name: runner.name,

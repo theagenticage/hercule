@@ -1951,9 +1951,8 @@ describe("agent steps over the runner socket", () => {
               status: "failed",
               error: {
                 code: "session_failed",
-                message: expect.stringContaining(
-                  "Harness unstructured cannot give a structured result. Leave out the output schema, or run on another harness.",
-                ),
+                message:
+                  "The step's session could not be opened: the request is not valid: outputSchema: Harness unstructured cannot give a structured result. Leave out the output schema, or run on another harness.",
               },
             }),
           ]);

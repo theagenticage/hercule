@@ -167,7 +167,11 @@ describe("buildRunnerMenu", () => {
   });
 
   it("reads the readiness of the harness the thread runs in, not another harness's", () => {
-    const active = buildRunner({ id: "r-active", name: "active-box" });
+    const active = buildRunner({
+      id: "r-active",
+      name: "active-box",
+      facts: { ...WITH_AGENTS.facts!, adapters: [...WITH_AGENTS.facts!.adapters, "pi/pi"] },
+    });
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: "r-active" }]);
 
     expect(buildRunnerMenu([active], null, claude, HARNESS).rows[0]).toMatchObject({
@@ -175,6 +179,22 @@ describe("buildRunnerMenu", () => {
     });
     expect(buildRunnerMenu([active], null, claude, "pi/pi").rows[0]).toMatchObject({
       dimmed: "not installed",
+    });
+  });
+
+  it("dims a runner whose build has no adapter for the harness as not supported, not as not installed", () => {
+    const old = buildRunner({
+      id: "r-old-build",
+      facts: { ...WITH_AGENTS.facts!, adapters: [] },
+    });
+    const account = buildProviderAccount(
+      ANTHROPIC_IDENTITY,
+      [],
+      [{ runnerId: "r-old-build", state: "harness-missing" }],
+    );
+
+    expect(buildRunnerMenu([old], null, account, HARNESS).rows[0]).toMatchObject({
+      dimmed: "not supported",
     });
   });
 

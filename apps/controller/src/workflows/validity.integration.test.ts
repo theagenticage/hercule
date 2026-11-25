@@ -12,11 +12,18 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import type { Notification, Workflow } from "@hercule/contract";
+import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import { waitUntilRouted } from "../daemon/testing";
 import { del, get, post, readErrorBody, send } from "../http/testing";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
 import { queryRuns, requestRun } from "../runs/testing";
-import { waitUntil, WAIT_DEADLINE_MS } from "../sessions/testing";
+import {
+  findProviderAccountId,
+  readProfileNamed,
+  waitUntil,
+  WAIT_DEADLINE_MS,
+  withFleet,
+} from "../sessions/testing";
 import {
   ACCEPTED_GITHUB_TOKEN,
   buildTaskStep,
@@ -30,6 +37,7 @@ import {
   STRUCTURED_OUTPUT_PLUGIN,
   updateWorkflow,
   WITH_RESULTS_HARNESS_ID,
+  WITHOUT_RESULTS_HARNESS_ID,
   withSetUpController,
   type SetUpController,
 } from "./testing";
@@ -356,6 +364,81 @@ describe("a workflow whose Agent moves to a harness that cannot give a structure
         expect((await readWorkflow(controller, workflowId)).invalidSince).toBeUndefined();
       },
       [STRUCTURED_OUTPUT_PLUGIN],
+    );
+  });
+});
+
+/** A runner that carries both harnesses of `STRUCTURED_OUTPUT_PLUGIN`, so an account may take either as its default. */
+const STRUCTURED_OUTPUT_FACTS: RunnerFacts = {
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 68719476736,
+  docker: false,
+  toolchains: [],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: [WITHOUT_RESULTS_HARNESS_ID, WITH_RESULTS_HARNESS_ID],
+  identityPort: 4939,
+};
+
+const STRUCTURED_OUTPUT_MODELS: ReadonlyArray<ModelDescriptor> = [
+  { slug: "fast", name: "Fast", imageInput: { maxBytes: null }, isDefault: true, options: [] },
+];
+
+describe("a workflow whose Agent runs in its account's default harness", () => {
+  it("is marked invalid when the default moves to a harness that cannot give a structured result, and loses the mark when it moves back", async () => {
+    await withFleet(
+      async (arranged) => {
+        const { base } = arranged.harness;
+        const { token } = arranged;
+        const controller: SetUpController = { harness: arranged.harness, base, token };
+        const accountId = findProviderAccountId(arranged, WITH_RESULTS_HARNESS_ID);
+        const created = await post(
+          base,
+          "/api/v1/agents",
+          {
+            name: "reviewer",
+            systemPrompt: "You review pull requests.",
+            providerAccountId: accountId,
+            permissionProfileId: (await readProfileNamed(arranged, "worker")).id,
+          },
+          token,
+        );
+        expect(created.status, await created.clone().text()).toBe(200);
+        const workflow = await createWorkflowOrFail(base, token, {
+          source: [
+            `name: ${WORKFLOW_NAME}`,
+            "steps:",
+            "  - id: review",
+            "    kind: agent",
+            `    agent: ${((await created.json()) as { id: string }).id}`,
+            "    prompt: Review the pull request.",
+            '    outputSchema: {"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string"}}}',
+            "",
+          ].join("\n"),
+        });
+        const setDefault = async (defaultHarnessId: string): Promise<void> => {
+          const response = await send("PATCH", base, `/api/v1/provider-accounts/${accountId}`, {
+            body: { defaultHarnessId },
+            token,
+          });
+          expect(response.status, await response.clone().text()).toBe(200);
+        };
+
+        await setDefault(WITHOUT_RESULTS_HARNESS_ID);
+
+        expect((await readWorkflow(controller, workflow.id)).invalidSince).toEqual(
+          expect.any(String),
+        );
+
+        await setDefault(WITH_RESULTS_HARNESS_ID);
+
+        expect((await readWorkflow(controller, workflow.id)).invalidSince).toBeUndefined();
+      },
+      {
+        plugins: [STRUCTURED_OUTPUT_PLUGIN],
+        facts: STRUCTURED_OUTPUT_FACTS,
+        models: STRUCTURED_OUTPUT_MODELS,
+      },
     );
   });
 });
