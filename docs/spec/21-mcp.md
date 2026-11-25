@@ -444,14 +444,7 @@ The two tests are `http/mcp-pi.integration.test.ts` and `harnesses/pi/adapter-mc
 - **The order of requests.** The stand-in saw `server/discover`, `initialize`, `notifications/initialized`, `tools/list`, two `notifications/roots/list_changed`, and then `tools/call`. The stand-in does not know `server/discover` and answered it with an error, and `agy` went on with the older handshake. So `agy` tries modern discovery first, as Claude Code does. Which path it takes when the server does answer `server/discover`, as the gateway does, is not known.
 - **The bearer.** Every one of these requests carried the `Authorization` header that `session/new` gave.
 
-**The gate.** The runner lists the capability `mcpServers:antigravity/antigravity` ([section 4.4](#44-what-the-harness-is-given)) only after [#1282](https://github.com/theagenticage/hercule/issues/1282) has shown with the real binary all of these:
-
-- the gateway entry reaches the gateway when a session starts and when it resumes;
-- no configuration of a repository or of `agy`'s own home can replace or redirect the entry named `tools`;
-- the bearer goes only to the controller's address;
-- the bearer is in no file `agy` writes, in no log, and not in the stored `raw` of any event.
-
-Until then every server of an Antigravity session is left out with `runner-too-old`, as for any runner without the capability.
+**The gate.** The runner lists the capability `mcpServers:antigravity/antigravity` ([section 4.4](#44-what-the-harness-is-given)) only after [#1282](https://github.com/theagenticage/hercule/issues/1282) has passed the checks in [./06-providers.md](./06-providers.md) section 10.5. Until then every server of an Antigravity session is left out with `runner-too-old`, as for any runner without the capability.
 
 **Verify at build time:** [#1282](https://github.com/theagenticage/hercule/issues/1282): that a new MCP session opens after a 404 when the controller restarted, on the older handshake; that `agy` lists again after `notifications/tools/list_changed` (section 3.7); which path it takes with the real gateway; and that the bearer is in no file `agy` writes.
 

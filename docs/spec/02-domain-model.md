@@ -745,7 +745,7 @@ Status axis: none.
 
 ### Provider
 
-*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Purpose: the company that serves models and bills for them: Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax.
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Purpose: the company that serves models and bills for them: Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax, Google *(added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278))*.
 
 Registered by a provider plugin as a `ProviderDefinition`; nothing about it is stored as a row. Fields owned by [06-providers.md](./06-providers.md): a qualified id (`anthropic/anthropic`), display name, its Account Kinds (each with the setup steps that sign it in and the harnesses the provider allows it in), how it reads a Model Catalog and Account Usage, its Default Selection, and the small model it suggests for Text Generation.
 
