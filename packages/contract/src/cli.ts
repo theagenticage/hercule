@@ -3385,6 +3385,7 @@ export const CLI = {
         stdin: '{"apiKey":"sk-ant-xxx"}',
       },
       { args: ["--provider", "anthropic/anthropic", "--kind", "subscription-token"] },
+      { args: ["--provider", "google/google", "--kind", "subscription-per-machine"] },
     ],
     fields: {
       providerId: {
@@ -5256,6 +5257,8 @@ export const CLI = {
         "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task or --context is unknown: check `hercule entity list`",
       conflict:
         "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task. Or a thing named in --new-task changed between its read and the write: try again",
+      validation:
+        "--output-schema uses a keyword outside the subset every harness supports, or the harness the session would run in cannot give a structured result: leave --output-schema out, or run on another harness",
     },
   },
   "session.update": {
@@ -5475,7 +5478,7 @@ export const CLI = {
       forbidden:
         "you lack session.spawn, which a Permission Request can get you. Or you are a session forking a Thread without thread.start, which a Permission Request can also get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a fork keeps its parent's profile, and a session may fork only a session on its own profile, so ask the user to fork this one",
       invalid_state:
-        "the parent is still live, or it left no harness-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
+        "the parent is still live, or it left no harness-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`. Or the parent's harness cannot fork a thread: start a new thread and tell it what to build on",
     },
   },
   "session.moveToTask": {

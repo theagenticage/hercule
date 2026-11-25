@@ -1902,6 +1902,76 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "fails the run with session-failed when the harness the Agent has moved to cannot give the next step's structured result",
+    async () => {
+      const unstructured = {
+        ...buildHarnessDefinition("unstructured"),
+        declared: {
+          ...buildHarnessDefinition("unstructured").declared,
+          structuredOutput: "unsupported" as const,
+        },
+      };
+      await withFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: {
+              name: "Implement, then review",
+              steps: [
+                { id: IMPLEMENT, kind: "agent", agent: agentId, prompt: "Implement the change." },
+                {
+                  id: REVIEW,
+                  kind: "agent",
+                  agent: agentId,
+                  prompt: "Review the change.",
+                  outputSchema: DONE_SCHEMA,
+                },
+              ],
+              edges: [{ from: IMPLEMENT, to: REVIEW }],
+            },
+          });
+          const implementKey = buildStepKey(runId);
+          const implementer = await startStepSession(arranged, player, implementKey);
+          // A run is checked when it starts. The Agent moves to a harness
+          // that cannot give a structured result while the first step runs.
+          const moved = await send("PATCH", arranged.harness.base, `/api/v1/agents/${agentId}`, {
+            body: { providerAccountId: findProviderAccountId(arranged, "plain/unstructured") },
+            token: arranged.token,
+          });
+          expect(moved.status, await moved.clone().text()).toBe(200);
+
+          player.runTurn(wire, implementer, implementKey, answerText("Implemented"));
+
+          const ended = await waitForRunEnded(arranged, runId, "failed");
+          expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: REVIEW });
+          expect(findStepRecords(ended, REVIEW)).toEqual([
+            expect.objectContaining({
+              status: "failed",
+              error: {
+                code: "session_failed",
+                message: expect.stringContaining(
+                  "Harness unstructured cannot give a structured result. Leave out the output schema, or run on another harness.",
+                ),
+              },
+            }),
+          ]);
+        },
+        {
+          plugins: [
+            buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
+            buildPluginWithProviderPerHarness("plain", [unstructured]),
+          ],
+          facts: { ...FACTS, adapters: [...FACTS.adapters, "plain/unstructured"] },
+          models: MODELS,
+        },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "queues the step's session while its runner is full, and starts it once a session ends",
     async () => {
       await withAgentStepFleet(async (arranged) => {

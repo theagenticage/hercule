@@ -48,26 +48,32 @@ export const describeProviderAccount = (
  *
  * - `runnable`: its binary is present, the runner's build has an adapter for
  *   it, and its version is not below this build's floor.
- * - `missing`: the binary is absent, the runner has not reported yet, or the
- *   runner's build has no adapter for the harness.
+ * - `missing`: the runner has not reported yet, or it has an adapter for the
+ *   harness and the binary is absent.
+ * - `no-adapter`: the runner has reported and its build has no adapter for
+ *   the harness, whether or not the binary is there. Installing the harness
+ *   does not help; Hercule on that machine has to be updated.
  * - `below-floor`: it is present but older than this build supports.
  */
-export type HarnessOnRunner = "runnable" | "missing" | "below-floor";
+export type HarnessOnRunner = "runnable" | "missing" | "no-adapter" | "below-floor";
 
 /**
  * Decides whether the harness can run on a runner, from the runner's facts
  * (`null` before its first report) and the version the runner reported for
  * the harness (`null` when it reported none; an unknown version passes).
+ * Returns `no-adapter` before `missing`, so a runner whose build lacks the
+ * adapter is never told to install a binary.
  */
 export const decideHarnessOnRunner = (
   facts: RunnerFacts | null,
   harness: RegisteredHarness,
   reportedVersion: string | null,
 ): HarnessOnRunner => {
-  const present =
-    facts !== null &&
-    facts.adapters.includes(harness.id) &&
-    facts.harnesses.some((binary) => binary.name === harness.binaryName && binary.present);
+  if (facts === null) return "missing";
+  if (!facts.adapters.includes(harness.id)) return "no-adapter";
+  const present = facts.harnesses.some(
+    (binary) => binary.name === harness.binaryName && binary.present,
+  );
   if (!present) return "missing";
   return computeHarnessVersionVerdict(harness.id, reportedVersion) === "below-floor"
     ? "below-floor"
@@ -87,16 +93,26 @@ export const describeFloorToUpdateTo = (harnessId: string): string => {
 /**
  * Returns why the harness can run on none of the runners, in words a user can
  * act on, or `null` when at least one verdict is `runnable`. `verdicts` holds
- * one `decideHarnessOnRunner` result per runner.
+ * one `decideHarnessOnRunner` result per runner. The message is a whole
+ * sentence that starts with a capital letter. The first cause that applies
+ * is named:
+ *
+ * - a runner has it below the floor: update the harness;
+ * - a runner lacks the binary, or there is no runner at all: install it;
+ * - every runner lacks the adapter: update Hercule on a machine.
  */
 export const findHarnessProblem = (
   harness: RegisteredHarness,
   verdicts: ReadonlyArray<HarnessOnRunner>,
 ): string | null => {
   if (verdicts.includes("runnable")) return null;
-  return verdicts.includes("below-floor")
-    ? `${harness.displayName} is older than this version of Hercule supports on every machine that has it; update it${describeFloorToUpdateTo(harness.id)}`
-    : `${harness.displayName} is not installed on any connected machine; install it on a machine first`;
+  if (verdicts.includes("below-floor")) {
+    return `${harness.displayName} is older than this version of Hercule supports on every machine that has it; update it${describeFloorToUpdateTo(harness.id)}`;
+  }
+  if (verdicts.length > 0 && verdicts.every((verdict) => verdict === "no-adapter")) {
+    return `Hercule cannot run ${harness.displayName} on any connected machine; update Hercule on a machine first`;
+  }
+  return `${harness.displayName} is not installed on any connected machine; install it on a machine first`;
 };
 
 /**

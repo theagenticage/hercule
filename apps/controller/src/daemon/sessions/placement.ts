@@ -542,7 +542,10 @@ const make = Effect.gen(function* () {
    * session on `providerAccountId` starts with, in this order:
    *
    * 0. the harness: the one requested, or else the account's default. The
-   *    session stores it, so it runs in the same harness for good;
+   *    session stores it, so it runs in the same harness for good. A session
+   *    with an output schema needs a harness that gives a structured result.
+   *    That is checked before a runner is chosen, so the answer is the same
+   *    when no machine is connected;
    * 1. the runner: the one named, or else the first placeable runner that can
    *    run the account in the harness (`ProviderAccountRunners`);
    * 2. the access mode: the nearest one at or below the requested mode that
@@ -557,7 +560,8 @@ const make = Effect.gen(function* () {
    * the harness supports no such access mode, or no model was requested and
    * no runner has reported a model list for the account in the harness yet,
    * and with `Validation` for an unknown account, harness, runner or
-   * option.
+   * option, or for an output schema on a harness that cannot give a
+   * structured result (on the path `outputSchema`).
    */
   const resolveStartSettings = (request: {
     readonly providerAccountId: string;
@@ -569,6 +573,8 @@ const make = Effect.gen(function* () {
     /** The model asked for, or undefined for the runner's default. */
     readonly model: string | undefined;
     readonly options: ModelSelection["options"];
+    /** Whether the session is placed with an output schema. */
+    readonly hasOutputSchema: boolean;
   }): Effect.Effect<
     {
       readonly harnessId: string;
@@ -583,6 +589,16 @@ const make = Effect.gen(function* () {
         request.providerAccountId,
         request.harnessId,
       );
+      if (request.hasOutputSchema && definition.declared.structuredOutput === "unsupported") {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["outputSchema"],
+              message: `${definition.displayName} cannot give a structured result. Leave out the output schema, or run on another harness.`,
+            },
+          ]),
+        );
+      }
       const available = yield* accountRunners.list(request.providerAccountId, harnessId);
       const hostingRunnerId = yield* request.runnerId === undefined
         ? choosePlacement(available)
@@ -1205,6 +1221,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode: agent.accessMode,
           model: agent.model?.model,
           options: agent.model?.options ?? {},
+          hasOutputSchema: false,
         });
         const defaults = yield* settings.allForUser(user.userId);
         const core = yield* memory.read(agent.id, MEMORY_CORE);
@@ -1328,6 +1345,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           model: request.model ?? agentSelection?.model,
           options: request.options ?? agentSelection?.options ?? {},
+          hasOutputSchema: request.outputSchema !== undefined,
         });
         const outputSchema = yield* validateOutputSchema(request.outputSchema);
 
@@ -1665,6 +1683,7 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             model: decoded.model ?? agent?.model?.model ?? defaultModel,
             options: decoded.options ?? defaultOptions ?? {},
+            hasOutputSchema: outputSchema !== undefined,
           }).pipe(
             Effect.mapError((error) =>
               caller !== undefined &&
@@ -1793,6 +1812,10 @@ const make = Effect.gen(function* () {
      * refuses without the grant. Forking an Agent's session needs no
      * `thread.start`.
      *
+     * Fails with `InvalidState` when the parent's harness declares
+     * `fork: "unsupported"`. Resuming a session is not a fork and is not
+     * affected (it is `session.input`).
+     *
      * The fork takes the parent's profile rather than the user's thread
      * defaults. So a session may fork a session only from a parent on its own
      * profile. Any other parent would be an escalation: `session.read` is
@@ -1839,11 +1862,21 @@ const make = Effect.gen(function* () {
           const mcpServerIds =
             parent.agentId === null ? listSource.mcpServers.map((entry) => entry.mcpServerId) : [];
           const nativeSessionId = yield* resumableNativeSession(parent);
-          // Called only for its failures: it fails when the account can no
-          // longer run in the harness, or this build no longer carries it. It
-          // comes after the resume check, which refuses a deleted account
-          // with its own message.
-          yield* resolveHarnessChoice(parent.providerAccountId, parent.harnessId);
+          // It fails when the account can no longer run in the harness, or
+          // this build no longer carries it. It comes after the resume check,
+          // which refuses a deleted account with its own message. The harness
+          // it returns says whether the thread can be forked at all.
+          const { definition } = yield* resolveHarnessChoice(
+            parent.providerAccountId,
+            parent.harnessId,
+          );
+          if (definition.declared.fork === "unsupported") {
+            return yield* Effect.fail(
+              createInvalidStateError(
+                `${definition.displayName} cannot fork a thread. Start a new thread and tell it what to build on.`,
+              ),
+            );
+          }
 
           return {
             permissionProfileId: parent.permissionProfileId,

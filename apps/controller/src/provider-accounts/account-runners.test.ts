@@ -75,6 +75,22 @@ describe("ProviderAccountRunners.list", () => {
       expect(available.runnerIds).toEqual([]);
       expect(available.noRunnerMessage).toContain("is not installed on any connected machine");
     });
+
+    it("runs nowhere, and says to update Hercule, when every runner's build lacks the adapter", async () => {
+      const available = await runWithAccounts(
+        Effect.gen(function* () {
+          const account = yield* addAccount({ kind: KEY_KIND });
+          yield* storeCredential(account.id, "apiKey");
+          yield* addRunner("old-build", { adapters: [] });
+          return yield* listRunners(account.id);
+        }),
+      );
+
+      expect(available.runnerIds).toEqual([]);
+      expect(available.noRunnerMessage).toBe(
+        "Hercule cannot run Harness alpha on any connected machine; update Hercule on a machine first",
+      );
+    });
   });
 
   describe("an account that holds a token", () => {
@@ -269,6 +285,27 @@ describe("a Codex below the version this build supports", () => {
   });
 });
 
+describe("ProviderAccountRunners.listReadiness", () => {
+  it("gives a runner with no adapter the same state as a runner without the binary", async () => {
+    const { rows, bare, oldBuild } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: KEY_KIND });
+        yield* storeCredential(account.id, "apiKey");
+        const bare = yield* addRunner("bare", { binaryPresent: false });
+        const oldBuild = yield* addRunner("old-build", { adapters: [] });
+        const runners = yield* ProviderAccountRunners;
+        const readiness = yield* runners.listReadiness([account.id]);
+        return { rows: readiness.get(account.id) ?? [], bare, oldBuild };
+      }),
+    );
+
+    expect(rows).toEqual([
+      { harnessId: ALPHA_HARNESS_ID, runnerId: bare, state: "harness-missing" },
+      { harnessId: ALPHA_HARNESS_ID, runnerId: oldBuild, state: "harness-missing" },
+    ]);
+  });
+});
+
 describe("findRunnerRefusal", () => {
   it("names the one cause that applies to each runner, in one line", async () => {
     const { available, runners } = await runWithAccounts(
@@ -277,10 +314,11 @@ describe("findRunnerRefusal", () => {
         const ready = yield* addRunner("moss");
         const signedOut = yield* addRunner("atlas");
         const bare = yield* addRunner("bare", { binaryPresent: false });
+        const oldBuild = yield* addRunner("old-build", { adapters: [] });
         yield* addSnapshot(account.id, ALPHA_HARNESS_ID, ready);
         return {
           available: yield* listRunners(account.id),
-          runners: { ready, signedOut, bare },
+          runners: { ready, signedOut, bare, oldBuild },
         };
       }),
     );
@@ -291,6 +329,9 @@ describe("findRunnerRefusal", () => {
     );
     expect(findRunnerRefusal(available, runners.bare)).toBe(
       "Harness alpha is not installed on bare",
+    );
+    expect(findRunnerRefusal(available, runners.oldBuild)).toBe(
+      "Hercule on old-build cannot run Harness alpha; update Hercule on that machine",
     );
     expect(findRunnerRefusal(available, "not-in-the-fleet")).toBe("that machine is retired");
   });

@@ -57,7 +57,7 @@ describe("decideHarnessOnRunner", () => {
     expect(decideHarnessOnRunner(factsWith(), harness, CODEX_VERSION)).toBe("runnable");
   });
 
-  it("is missing before the runner's first report, without the binary, or without an adapter", () => {
+  it("is missing before the runner's first report, or when the adapter is there and the binary is not", () => {
     expect(decideHarnessOnRunner(null, harness, null)).toBe("missing");
     expect(
       decideHarnessOnRunner(
@@ -66,7 +66,17 @@ describe("decideHarnessOnRunner", () => {
         null,
       ),
     ).toBe("missing");
-    expect(decideHarnessOnRunner(factsWith({ adapters: [] }), harness, null)).toBe("missing");
+  });
+
+  it("has no adapter when the runner's build lacks it, whether or not the binary is there", () => {
+    expect(decideHarnessOnRunner(factsWith({ adapters: [] }), harness, null)).toBe("no-adapter");
+    expect(
+      decideHarnessOnRunner(
+        factsWith({ adapters: [], harnesses: [{ name: "codex", present: false }] }),
+        harness,
+        null,
+      ),
+    ).toBe("no-adapter");
   });
 
   it("is below the floor when the reported version is older than this build supports", () => {
@@ -81,6 +91,15 @@ describe("findHarnessProblem", () => {
     expect(findHarnessProblem(harness, ["missing", "below-floor"])).toBe(
       `Codex is older than this version of Hercule supports on every machine that has it; update it to ${CODEX_VERSION} or newer`,
     );
+  });
+
+  it("tells the user to update Hercule only when every runner lacks the adapter", () => {
+    const updateHercule =
+      "Hercule cannot run Codex on any connected machine; update Hercule on a machine first";
+    expect(findHarnessProblem(harness, ["no-adapter", "no-adapter"])).toBe(updateHercule);
+    expect(findHarnessProblem(harness, ["no-adapter", "missing"])).toContain("is not installed");
+    expect(findHarnessProblem(harness, ["no-adapter", "below-floor"])).toContain("is older than");
+    expect(findHarnessProblem(harness, ["no-adapter", "runnable"])).toBeNull();
   });
 });
 
