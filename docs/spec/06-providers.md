@@ -84,7 +84,7 @@ Rules:
 
 *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Fork is refused where it is unsupported.** Nothing read `declared.fork` before, because the first three harnesses all fork. Now `session.continue` in mode `fork` fails with `invalid_state` when the parent's harness declares `fork: "unsupported"`. The message is "<displayName> cannot fork a thread. Start a new thread and tell it what to build on.", so on Antigravity it reads "Antigravity cannot fork a thread. Start a new thread and tell it what to build on."
 
-- The check is made where the fork already resolves the parent's account and harness.
+- The check comes before the resume check, so nobody is told to stop a live session only to learn that its harness cannot fork.
 - A resume is not affected: it is not a fork.
 - A client draws Fork only where the harness declares it `native`. No client draws Fork today.
 
@@ -164,7 +164,7 @@ interface AccountKind {
 *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **`releaseSource` is a union, and `hostApi` is 10.** `agy` is published as GitHub releases, not on npm, so the field has a second kind:
 
 - `{ kind: "npm", package }`, read as above.
-- `{ kind: "github-releases", repository: "<owner>/<name>" }`. Antigravity's is `google-antigravity/antigravity-cli`. The controller reads `GET https://api.github.com/repos/<owner>/<name>/releases/latest` with no credential and a User-Agent that is the product name only. The version is the answer's `tag_name`. The read follows the rules of the npm read: the same semantic version check (a tag with a leading `v` is a failed read), the same 10-second deadline, the same 256 kB bound, and the same handling of a failure, with GitHub's name in the sentence ("GitHub's answer could not be read.", "GitHub answered 403."). `latest` leaves out drafts and prereleases.
+- `{ kind: "github-releases", repository: "<owner>/<name>" }`. Antigravity's is `google-antigravity/antigravity-cli`. The controller reads `GET https://api.github.com/repos/<owner>/<name>/releases/latest` with no credential and a User-Agent that is the product name only. The version is the answer's `tag_name`. The read follows the rules of the npm read: the same semantic version check (a tag with a leading `v` is a failed read), the same 10-second deadline, the same 256 kB bound, and the same handling of a failure, with GitHub's name in the sentence ("GitHub's answer could not be read.", "GitHub answered 403.", "GitHub could not be reached."). A 403 or 429 with no requests left says "GitHub's limit on requests without a sign-in ran out for this controller's address. The next check tries again." `latest` leaves out drafts and prereleases.
 - Registration refuses a `repository` that is not `<owner>/<name>`, each made of letters, digits, `.`, `_` and `-`, because it goes into a URL.
 
 Checked on 2026-11-25: the endpoint answers without a credential, with `tag_name` `1.5.17` (no leading `v`). GitHub allows 60 requests an hour per address without a credential, and the hourly read makes one. **Cost:** four small requests an hour from the controller, one of them to GitHub, and four rows in the database.
