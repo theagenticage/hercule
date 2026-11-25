@@ -3,12 +3,13 @@
  *
  * A stored workflow validated when it was saved, but it can stop validating
  * without being edited: the plugin whose action it calls is disabled, the
- * agent or Connection it names is deleted, or a newer controller checks it
- * more strictly than the one that saved it. So after such a change the
- * controller validates every stored workflow again, with the same checks a
- * save runs, and marks the workflows that fail as invalid. While a workflow
- * is invalid its start triggers are not routed, and a manual run is refused
- * because `run.start` validates the workflow again.
+ * agent or Connection it names is deleted, the agent it names moves to a
+ * harness that cannot give the structured result its step asks for, or a
+ * newer controller checks it more strictly than the one that saved it. So
+ * after such a change the controller validates every stored workflow again,
+ * with the same checks a save runs, and marks the workflows that fail as
+ * invalid. While a workflow is invalid its start triggers are not routed, and
+ * a manual run is refused because `run.start` validates the workflow again.
  *
  * The plugins, agents and connections domains cannot import this domain,
  * because this domain depends on all three. So each declares a port that

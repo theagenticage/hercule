@@ -77,8 +77,9 @@ export const workflowReferences = Effect.gen(function* () {
    * needs, with one read per kind of reference however many definitions
    * there are: the available actions, event kinds and Connection types, and
    * which of the Agents, Connections and stored workflows they refer to
-   * exist. Each definition can be validated against the result, because the
-   * validator only looks up the ids its own definition names.
+   * exist, with the name and harness of each Agent. Each definition can be
+   * validated against the result, because the validator only looks up the ids
+   * its own definition names.
    *
    * An id that is not a valid id is not looked up, so a stored definition of
    * an unexpected shape cannot fail the read for the others. The validator
@@ -91,6 +92,12 @@ export const workflowReferences = Effect.gen(function* () {
       const collectIds = (pick: (ids: ReferencedIds) => ReadonlyArray<string>) => [
         ...new Set(referenced.flatMap(pick).filter(isId)),
       ];
+      const harnessById = new Map(
+        (yield* host.harnesses()).map((harness) => [
+          harness.id,
+          { displayName: harness.displayName, structuredOutput: harness.declared.structuredOutput },
+        ]),
+      );
       return {
         actions: new Map(
           (yield* host.listActiveWorkflowActions()).map((action) => [action.id, action]),
@@ -101,7 +108,21 @@ export const workflowReferences = Effect.gen(function* () {
         eventKinds: new Map(
           (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
         ),
-        agentKindById: yield* agents.readKinds(collectIds((ids) => ids.agentIds)),
+        agentById: new Map(
+          [...(yield* agents.readSummaries(collectIds((ids) => ids.agentIds)))].map(
+            ([id, summary]) => [
+              id,
+              {
+                kind: summary.kind,
+                name: summary.name,
+                harness:
+                  summary.effectiveHarnessId === null
+                    ? undefined
+                    : harnessById.get(summary.effectiveHarnessId),
+              },
+            ],
+          ),
+        ),
         connectionTypeById: yield* connections.readTypes(collectIds((ids) => ids.connectionIds)),
         connectionTypes: new Set(yield* host.listActiveConnectionTypes()),
       };

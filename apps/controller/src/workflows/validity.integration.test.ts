@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import type { Notification, Workflow } from "@hercule/contract";
 import { waitUntilRouted } from "../daemon/testing";
-import { del, get, post, readErrorBody } from "../http/testing";
+import { del, get, post, readErrorBody, send } from "../http/testing";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
 import { queryRuns, requestRun } from "../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../sessions/testing";
@@ -22,11 +22,14 @@ import {
   buildTaskStep,
   createAgent,
   createConnection,
+  createStructuredOutputAccount,
   createWorkflowOrFail,
   disablePlugin,
   emitLabeledEvent,
   enableWorkflow,
+  STRUCTURED_OUTPUT_PLUGIN,
   updateWorkflow,
+  WITH_RESULTS_HARNESS_ID,
   withSetUpController,
   type SetUpController,
 } from "./testing";
@@ -304,5 +307,55 @@ describe("a workflow whose default Connection is deleted", () => {
       expect((await readWorkflow(controller, workflowId)).invalidSince).toEqual(expect.any(String));
       expect(await listInvalidNotifications(controller, workflowId)).toHaveLength(1);
     });
+  });
+});
+
+/** Changes the account or the harness of an Agent. */
+const updateAgent = async (
+  { base, token }: SetUpController,
+  agentId: string,
+  body: { readonly providerAccountId?: string; readonly harnessId?: string },
+): Promise<void> => {
+  const response = await send("PATCH", base, `/api/v1/agents/${agentId}`, { body, token });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+describe("a workflow whose Agent moves to a harness that cannot give a structured result", () => {
+  it("is marked invalid, and loses the mark when the Agent moves to a harness that can", async () => {
+    await withSetUpController(
+      async (controller) => {
+        const { base, token } = controller;
+        const agentId = await createAgent(base, token);
+        const workflowId = await saveEnabledWorkflow(
+          controller,
+          buildLabeledSource(
+            [
+              "  - id: review",
+              "    kind: agent",
+              `    agent: ${agentId}`,
+              "    prompt: Review the pull request.",
+              '    outputSchema: {"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string"}}}',
+            ].join("\n"),
+          ),
+        );
+
+        // The new account's default harness cannot give a structured result.
+        await updateAgent(controller, agentId, {
+          providerAccountId: await createStructuredOutputAccount(base, token),
+        });
+
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toEqual(
+          expect.any(String),
+        );
+        const notifications = await listInvalidNotifications(controller, workflowId);
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0]!.body).toContain("which cannot give a structured result");
+
+        await updateAgent(controller, agentId, { harnessId: WITH_RESULTS_HARNESS_ID });
+
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toBeUndefined();
+      },
+      [STRUCTURED_OUTPUT_PLUGIN],
+    );
   });
 });

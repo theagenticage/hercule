@@ -49,6 +49,9 @@ export const revalidateStoredWorkflowsOrLog: Effect.Effect<void, never, Workflow
  * the changed plugin, agent or Connection. Finding those would repeat what
  * validation already reads, and validating all of them is one in-memory pass
  * per workflow plus a few indexed reads.
+ *
+ * The agent port is called when an agent is deleted and when it moves to
+ * another account or harness.
  */
 export const WorkflowValidityObserversLayer: Layer.Layer<
   PluginObserver | AgentObserver | ConnectionObserver | WorkflowValidity,
@@ -62,7 +65,7 @@ export const WorkflowValidityObserversLayer: Layer.Layer<
   ),
   Layer.effect(AgentObserver)(
     Effect.map(WorkflowValidity, (validity) => ({
-      agentDeleted: () => revalidate(validity),
+      agentChanged: () => revalidate(validity),
     })),
   ),
   Layer.effect(ConnectionObserver)(

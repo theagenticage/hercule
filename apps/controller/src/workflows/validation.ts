@@ -45,6 +45,7 @@ import {
   type WorkflowIssues,
   type WorkspacePolicy,
 } from "@hercule/contract";
+import type { DeclaredCapabilities } from "@hercule/plugin-host";
 import { lintOutputSchema, type OutputSchema } from "@hercule/protocol";
 import type { AgentKind } from "../agents";
 import { CRON_TICK_EVENT_KIND, type DeclaredEventKindWithConnectionType } from "../events";
@@ -75,8 +76,8 @@ export interface ResolvedReferences {
   readonly actions: ReadonlyMap<string, RegisteredWorkflowAction>;
   /** The event kinds a trigger can listen for, by kind. */
   readonly eventKinds: ReadonlyMap<string, DeclaredEventKindWithConnectionType>;
-  /** The kind of each Agent that the definition refers to and that exists, by Agent id. */
-  readonly agentKindById: ReadonlyMap<string, AgentKind>;
+  /** Each Agent that the definition refers to and that exists, by Agent id. */
+  readonly agentById: ReadonlyMap<string, ReferencedAgent>;
   /** The qualified type of each Connection that the definition refers to and that exists, by Connection id. */
   readonly connectionTypeById: ReadonlyMap<string, string>;
   /** The qualified name of every Connection type of an active plugin. */
@@ -87,6 +88,23 @@ export interface ResolvedReferences {
    * exist is not in the map.
    */
   readonly startedWorkflowInputsById: ReadonlyMap<string, ReadonlyArray<Input>>;
+}
+
+/** What validating an agent step needs to know of the Agent it names. */
+export interface ReferencedAgent {
+  readonly kind: AgentKind;
+  readonly name: string;
+  /**
+   * The harness the Agent runs in: its own, else its Provider Account's
+   * default. `undefined` when the account is gone or this build has no such
+   * harness, which gives no issue.
+   */
+  readonly harness:
+    | {
+        readonly displayName: string;
+        readonly structuredOutput: DeclaredCapabilities["structuredOutput"];
+      }
+    | undefined;
 }
 
 /** One input a workflow declares. */
@@ -1045,7 +1063,7 @@ const listAgentReferenceIssues = (
   path: ReadonlyArray<string>,
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
-  switch (references.agentKindById.get(agentId)) {
+  switch (references.agentById.get(agentId)?.kind) {
     case "agent":
       return [];
     case "assistant":
@@ -1138,9 +1156,10 @@ const listOutputSchemaIssues = (
 
 /**
  * Validates an agent step's Agent and output schema. The Agent must exist and
- * must not be an assistant. The output schema is optional, and is linted by
- * `listOutputSchemaIssues` when present. A session runs the same lint when it
- * spawns, so a step that passes here does not fail at its first turn.
+ * must not be an assistant. The output schema is optional. When present, it is
+ * linted by `listOutputSchemaIssues`, and it is refused when the Agent's
+ * harness cannot give a structured result. A session runs the same checks
+ * when it spawns, so a step that passes here does not fail at its first turn.
  */
 const listAgentIssues = (
   step: AgentStep,
@@ -1148,11 +1167,26 @@ const listAgentIssues = (
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
   const path = ["steps", String(index)];
+  if (step.outputSchema === undefined) {
+    return listAgentReferenceIssues(step.agent, [...path, "agent"], references);
+  }
+  const outputSchemaPath = [...path, "outputSchema"];
+  const agent = references.agentById.get(step.agent);
+  const harness = agent?.harness;
+  // An assistant gets only its own error.
+  const refusedByHarness =
+    agent?.kind === "agent" && harness?.structuredOutput === "unsupported"
+      ? [
+          {
+            path: outputSchemaPath,
+            message: `The Agent ${quoteAuthorText(agent.name)} runs in ${harness.displayName}, which cannot give a structured result. Remove the output schema, or use an Agent that runs in another harness.`,
+          },
+        ]
+      : [];
   return [
     ...listAgentReferenceIssues(step.agent, [...path, "agent"], references),
-    ...(step.outputSchema === undefined
-      ? []
-      : listOutputSchemaIssues(step.outputSchema, [...path, "outputSchema"])),
+    ...listOutputSchemaIssues(step.outputSchema, outputSchemaPath),
+    ...refusedByHarness,
   ];
 };
 

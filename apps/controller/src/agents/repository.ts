@@ -58,6 +58,17 @@ export interface StoredAgent {
 }
 
 /**
+ * What validating a workflow needs to know of an agent: its kind, its name
+ * and the harness it runs in. It leaves out the prompt and the rest of the row.
+ */
+export interface AgentSummary {
+  readonly kind: AgentKind;
+  readonly name: string;
+  /** The harness its sessions run in, as on `StoredAgent`. `null` only when the account is gone. */
+  readonly effectiveHarnessId: string | null;
+}
+
+/**
  * The fields of a new agent row. Derived from the stored agent so the two
  * cannot drift apart: the repository generates the id and sets both
  * timestamps, and the effective harness is read back after the insert.
@@ -106,13 +117,16 @@ interface AgentRow {
   readonly updated_at: string;
 }
 
+// The harness the agent runs in, which determines whether its disallowed
+// tools are enforced and whether it can give a structured result.
+const EFFECTIVE_HARNESS_COLUMN =
+  "coalesce(harness_id, (SELECT default_harness_id FROM provider_accounts " +
+  "WHERE provider_accounts.id = agents.provider_account_id)) AS effective_harness_id";
+
 const COLUMNS =
   "id, kind, name, system_prompt, provider_account_id, harness_id, permission_profile_id, " +
   "access_mode, model_selection, disallowed_tools, created_at, updated_at, " +
-  // The harness the agent runs in, which determines whether its disallowed
-  // tools are enforced.
-  "coalesce(harness_id, (SELECT default_harness_id FROM provider_accounts " +
-  "WHERE provider_accounts.id = agents.provider_account_id)) AS effective_harness_id";
+  EFFECTIVE_HARNESS_COLUMN;
 
 const toAgent = (row: AgentRow): StoredAgent => ({
   id: uuidToString(row.id),
@@ -157,19 +171,35 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns the kind of each of `ids` that names an existing agent row, by
-     * id, using one query. An id that names no row is not in the map.
+     * Returns the summary of each of `ids` that names an existing agent row,
+     * by id, using one query. An id that names no row is not in the map.
      */
-    readKinds: (
+    readSummaries: (
       ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, AgentKind>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<string, AgentSummary>, SqlError> =>
       ids.length === 0
         ? Effect.succeed(new Map())
         : Effect.map(
-            sql<{ readonly id: Uint8Array; readonly kind: string }>`
-              SELECT id, kind FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            sql<{
+              readonly id: Uint8Array;
+              readonly kind: string;
+              readonly name: string;
+              readonly effective_harness_id: string | null;
+            }>`
+              SELECT id, kind, name, ${sql.literal(EFFECTIVE_HARNESS_COLUMN)}
+              FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
             `,
-            (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.kind as AgentKind])),
+            (rows) =>
+              new Map(
+                rows.map((row) => [
+                  uuidToString(row.id),
+                  {
+                    kind: row.kind as AgentKind,
+                    name: row.name,
+                    effectiveHarnessId: row.effective_harness_id,
+                  },
+                ]),
+              ),
           ),
 
     insert: (agent: NewAgent): Effect.Effect<StoredAgent, SqlError> =>

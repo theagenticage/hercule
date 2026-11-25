@@ -259,6 +259,11 @@ const make = Effect.gen(function* () {
      * - `InvalidState` if the agent belongs to an assistant;
      * - `Forbidden` when a session names a profile that holds a grant only the
      *   user gives.
+     *
+     * When the update names an account or a harness, it tells `AgentObserver`
+     * once it commits, so the stored workflows are validated again: the new
+     * harness may not give a structured result that a workflow's step asks for,
+     * or may give one that the old harness did not.
      */
     update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
@@ -322,6 +327,9 @@ const make = Effect.gen(function* () {
             return yield* readAgentOrFail(id);
           }),
         );
+        if (edit.providerAccountId !== undefined || edit.harnessId !== undefined) {
+          yield* observer.agentChanged();
+        }
         return composeRecord(stored);
       }),
 
@@ -382,7 +390,7 @@ const make = Effect.gen(function* () {
             });
           }),
         );
-        yield* observer.agentDeleted();
+        yield* observer.agentChanged();
         return {};
       }),
   };
