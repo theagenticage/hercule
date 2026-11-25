@@ -21,7 +21,10 @@
     "apps/web/src/routeTree.gen.ts",
     "apps/desktop/src/renderer/routeTree.gen.ts",
     "apps/desktop/out/**",
-    "apps/runner/src/harnesses/codex/generated/**"
+    "apps/runner/src/harnesses/codex/generated/**",
+    // Copied unchanged from T3 Code (packages/acp/README.md), so that a sync
+    // is a plain copy.
+    "packages/acp/vendor/**"
   ],
   "rules": {
     "typescript/await-thenable": "error",

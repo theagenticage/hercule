@@ -302,6 +302,9 @@ export default tseslint.config(
       "apps/desktop/src/renderer/routeTree.gen.ts",
       "apps/desktop/out/**",
       "apps/runner/src/harnesses/codex/generated/**",
+      // Copied unchanged from T3 Code (packages/acp/README.md), so that a sync
+      // is a plain copy. Its own tests run in our suite; its style is not ours.
+      "packages/acp/vendor/**",
       "/hercule",
     ],
   },
