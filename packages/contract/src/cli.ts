@@ -5890,7 +5890,7 @@ export const NOUNS = {
   },
   "wiki-page": {
     summary:
-      "Wiki Pages: per repository, lasting knowledge that agents keep for the agents after them, one page per subject, with every revision kept. Not a worklog. The repository's own docs win over them.",
+      "Wiki Pages: per repository, general lessons that agents keep for the agents after them, one page per subject, with every revision kept. Not a worklog, and never about one ticket. The repository's own docs win over them.",
     flow: "hercule wiki-page list --resource <id> to see a repository's pages, hercule wiki-page read <id> for one page, hercule wiki-page update --expected-revision <n> to add to the page on a subject, hercule wiki-page create when no page covers it, hercule wiki-page archive for a page that no longer helps.",
   },
   skill: {
