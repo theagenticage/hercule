@@ -16,13 +16,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import {
   MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
 import type { HarnessAdapter, HarnessRunnerContext } from "./harnesses";
-import { NO_CONTROLLER_UPLOADER, waitUntil } from "./harnesses/testing";
+import { NO_CONTROLLER_UPLOADER, settle, waitUntil } from "./harnesses/testing";
 import { makeTextGenerator } from "./text-generation";
 
 const BINARY = "/usr/local/bin/harness";
@@ -44,6 +45,20 @@ const REQUEST: TextGenerationRequest = {
     outputSchema: { type: "object", properties: { title: { type: "string" } } },
   },
 };
+
+/**
+ * The deadline of a call that is meant to run into it. The call runs on a test
+ * clock (`runOnTestClock`), so this is a number the test advances the clock by,
+ * not a time anyone waits for.
+ */
+const DEADLINE_MILLIS = 5_000;
+
+/**
+ * The deadline of every other call. It only has to be out of reach: those calls
+ * run on the real clock, and a deadline that a slow machine could pass would
+ * turn a test of something else into a flaky one.
+ */
+const OUT_OF_REACH_DEADLINE_MILLIS = 10 * 60_000;
 
 const OK: TextGenerationOutcome = { outcome: "ok", value: { title: "Tests" }, usage: null };
 
@@ -86,8 +101,16 @@ const buildGenerator = (
     // `null` means a machine without the binary.
     buildContext: () =>
       buildContext(options.binary === null ? undefined : (options.binary ?? BINARY)),
-    deadline: Duration.millis(options.deadlineMillis ?? 5_000),
+    deadline: Duration.millis(options.deadlineMillis ?? OUT_OF_REACH_DEADLINE_MILLIS),
   });
+
+/**
+ * Runs `program` on a test clock, which only moves when the program calls
+ * `TestClock.adjust`. A deadline then passes exactly when the test says so,
+ * however slow the machine is, and never before the adapter has started.
+ */
+const runOnTestClock = <A>(program: Effect.Effect<A>): Promise<A> =>
+  Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
 
 /** Returns the failed message of an outcome, or fails the test when it is not `failed`. */
 const readFailedMessage = (outcome: TextGenerationOutcome): string => {
@@ -120,15 +143,33 @@ describe("the outcome of a text generation", () => {
   });
 
   it("reports a timeout, and interrupts the adapter, when the call outlives the deadline", async () => {
+    let started = false;
     let interrupted = false;
     const generate = buildGenerator(
       buildAdapter(() =>
-        Effect.never.pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
+        Effect.suspend(() => {
+          started = true;
+          return Effect.never;
+        }).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
       ),
-      { deadlineMillis: 50 },
+      { deadlineMillis: DEADLINE_MILLIS },
     );
 
-    await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual({ outcome: "timeout" });
+    const outcome = await runOnTestClock(
+      Effect.gen(function* () {
+        const call = yield* Effect.forkChild(generate(REQUEST));
+        yield* Effect.promise(() => waitUntil("started the adapter", () => started));
+
+        // One millisecond short of the deadline, the adapter is left alone.
+        yield* TestClock.adjust(DEADLINE_MILLIS - 1);
+        expect(interrupted).toBe(false);
+
+        yield* TestClock.adjust(1);
+        return yield* Fiber.join(call);
+      }),
+    );
+
+    expect(outcome).toEqual({ outcome: "timeout" });
     expect(interrupted).toBe(true);
   });
 
@@ -237,7 +278,6 @@ describe("the scratch directory of a text generation", () => {
   /** Runs one call with `behaviour` and returns the directory the adapter was given. */
   const runAndFindDirectory = async (
     behaviour: (cwd: string) => ReturnType<HarnessAdapter["generateText"]>,
-    deadlineMillis = 5_000,
   ): Promise<string> => {
     let cwd = "";
     const generate = buildGenerator(
@@ -245,7 +285,6 @@ describe("the scratch directory of a text generation", () => {
         cwd = ctx.cwd;
         return behaviour(ctx.cwd);
       }),
-      { deadlineMillis },
     );
     await Effect.runPromise(generate(REQUEST));
     return cwd;
@@ -292,7 +331,27 @@ describe("the scratch directory of a text generation", () => {
   });
 
   it("is removed after a timeout", async () => {
-    const cwd = await runAndFindDirectory(() => Effect.never, 50);
+    let cwd = "";
+    const generate = buildGenerator(
+      buildAdapter((ctx) => {
+        cwd = ctx.cwd;
+        return Effect.never;
+      }),
+      { deadlineMillis: DEADLINE_MILLIS },
+    );
+
+    const outcome = await runOnTestClock(
+      Effect.gen(function* () {
+        const call = yield* Effect.forkChild(generate(REQUEST));
+        yield* Effect.promise(() => waitUntil("started the adapter", () => cwd !== ""));
+        expect(existsSync(cwd)).toBe(true);
+
+        yield* TestClock.adjust(DEADLINE_MILLIS);
+        return yield* Fiber.join(call);
+      }),
+    );
+
+    expect(outcome).toEqual({ outcome: "timeout" });
     expect(existsSync(cwd)).toBe(false);
   });
 
@@ -361,34 +420,52 @@ describe("the limit on text generations at once", () => {
 
   describe("while the adapter is still stopping its harness", () => {
     /**
-     * Starts `LIMIT` calls whose adapter, once it has its answer or is
-     * interrupted, takes until `released` resolves to finish. Returns the
-     * calls and the directories the adapter was given.
+     * Builds a generator whose adapter, once it has its answer or is
+     * interrupted, takes until `released` resolves to finish. `directories`
+     * holds the directory of every call the adapter was given, and
+     * `stopping.count` the calls that have reached the stopping step.
      */
-    const startSlowlyStoppingCalls = (
+    const buildSlowlyStoppingGenerator = (
       released: Promise<void>,
       behaviour: Effect.Effect<TextGenerationOutcome, string>,
-      deadlineMillis = 5_000,
+      deadlineMillis?: number,
     ) => {
       const directories: Array<string> = [];
+      const stopping = { count: 0 };
       const generate = buildGenerator(
         buildAdapter((ctx) =>
           Effect.suspend(() => {
             directories.push(ctx.cwd);
             return behaviour;
-          }).pipe(Effect.ensuring(Effect.promise(() => released))),
+          }).pipe(
+            Effect.ensuring(
+              Effect.suspend(() => {
+                stopping.count += 1;
+                return Effect.promise(() => released);
+              }),
+            ),
+          ),
         ),
-        { deadlineMillis },
+        deadlineMillis === undefined ? {} : { deadlineMillis },
       );
-      const calls = Array.from({ length: LIMIT }, () => Effect.runPromise(generate(REQUEST)));
-      return { generate, calls, directories };
+      return { generate, directories, stopping };
     };
 
-    /** Fails the test unless the next call is refused and every directory still exists. */
+    /** Waits until every one of `LIMIT` calls is in the stopping step, where the test holds it. */
+    const waitUntilEveryCallIsStopping = (stopping: { readonly count: number }) =>
+      waitUntil("started stopping every call", () => stopping.count === LIMIT);
+
+    /**
+     * Fails the test unless the next call is refused and every directory still
+     * exists. It first gives a runner that frees a slot or removes a directory
+     * too early the time to do it, so this can only miss a bug, never report one
+     * that is not there.
+     */
     const expectSlotsAndDirectoriesHeld = async (
       generate: ReturnType<typeof buildGenerator>,
       directories: ReadonlyArray<string>,
     ) => {
+      await settle();
       const refused = readFailedMessage(await Effect.runPromise(generate(REQUEST)));
       expect(refused).toContain(String(LIMIT));
       expect(directories).toHaveLength(LIMIT);
@@ -397,13 +474,13 @@ describe("the limit on text generations at once", () => {
 
     it("keeps the slot and the directory after an answer", async () => {
       const released = Promise.withResolvers<void>();
-      const { generate, calls, directories } = startSlowlyStoppingCalls(
+      const { generate, directories, stopping } = buildSlowlyStoppingGenerator(
         released.promise,
         Effect.succeed(OK),
       );
-      await waitUntil("started every call", () => directories.length === LIMIT);
+      const calls = Array.from({ length: LIMIT }, () => Effect.runPromise(generate(REQUEST)));
+      await waitUntilEveryCallIsStopping(stopping);
 
-      await new Promise((resolve) => setTimeout(resolve, 20));
       await expectSlotsAndDirectoriesHeld(generate, directories);
 
       released.resolve();
@@ -414,40 +491,54 @@ describe("the limit on text generations at once", () => {
 
     it("keeps the slot and the directory after the deadline", async () => {
       const released = Promise.withResolvers<void>();
-      const { generate, calls, directories } = startSlowlyStoppingCalls(
+      const { generate, directories, stopping } = buildSlowlyStoppingGenerator(
         released.promise,
         Effect.never,
-        50,
+        DEADLINE_MILLIS,
       );
-      await waitUntil("started every call", () => directories.length === LIMIT);
 
-      // Well past the deadline, with the harness still not gone.
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      await expectSlotsAndDirectoriesHeld(generate, directories);
+      await runOnTestClock(
+        Effect.gen(function* () {
+          const calls = Array.from({ length: LIMIT }, () => generate(REQUEST));
+          const fibers = yield* Effect.forEach(calls, (call) => Effect.forkChild(call));
+          yield* Effect.promise(() =>
+            waitUntil("started every call", () => directories.length === LIMIT),
+          );
+          expect(stopping.count).toBe(0);
 
-      released.resolve();
-      for (const outcome of await Promise.all(calls))
-        expect(outcome).toEqual({ outcome: "timeout" });
-      for (const directory of directories) expect(existsSync(directory)).toBe(false);
-      await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual({ outcome: "timeout" });
+          // The deadline interrupts every adapter, and each one is now held in its stopping step.
+          yield* TestClock.adjust(DEADLINE_MILLIS);
+          yield* Effect.promise(() => waitUntilEveryCallIsStopping(stopping));
+          yield* Effect.promise(() => expectSlotsAndDirectoriesHeld(generate, directories));
+
+          released.resolve();
+          for (const fiber of fibers) {
+            expect(yield* Fiber.join(fiber)).toEqual({ outcome: "timeout" });
+          }
+          for (const directory of directories) expect(existsSync(directory)).toBe(false);
+
+          // The slots are free again: a new call gets to run, and then times out the same way.
+          const next = yield* Effect.forkChild(generate(REQUEST));
+          yield* Effect.promise(() =>
+            waitUntil("started the next call", () => directories.length === LIMIT + 1),
+          );
+          yield* TestClock.adjust(DEADLINE_MILLIS);
+          expect(yield* Fiber.join(next)).toEqual({ outcome: "timeout" });
+        }),
+      );
     });
 
     it("keeps the slot and the directory after the caller gives up", async () => {
       const released = Promise.withResolvers<void>();
-      const directories: Array<string> = [];
-      const generate = buildGenerator(
-        buildAdapter((ctx) =>
-          Effect.suspend(() => {
-            directories.push(ctx.cwd);
-            return Effect.never;
-          }).pipe(Effect.ensuring(Effect.promise(() => released.promise))),
-        ),
+      const { generate, directories, stopping } = buildSlowlyStoppingGenerator(
+        released.promise,
+        Effect.never,
       );
       const fibers = Array.from({ length: LIMIT }, () => Effect.runFork(generate(REQUEST)));
       await waitUntil("started every call", () => directories.length === LIMIT);
 
       const interruptions = fibers.map((fiber) => Effect.runPromise(Fiber.interrupt(fiber)));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await waitUntilEveryCallIsStopping(stopping);
       await expectSlotsAndDirectoriesHeld(generate, directories);
 
       released.resolve();
