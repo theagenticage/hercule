@@ -60,6 +60,18 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 - *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* 17: **the composer's `+` in answer mode.** The `+` attach row is off while the composer answers a question ([14, Answer mode](./14-web-app.md#the-composer-is-the-threads-configuration)). ~~Whether the MCP servers submenu under the same `+` stays available there is [#1211](https://github.com/theagenticage/hercule/issues/1211).~~ *(Amended 2026-11-21, [#1211](https://github.com/theagenticage/hercule/issues/1211).)* Built by #1211: the row stays available, because it changes the thread's list and not the answer. Decided by Rogier, 2026-11-22.
 - ~~*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* 17, 21: **how the desktop app catches a sign-in's loopback redirect.** The desktop app catches the browser's return on a loopback address and hands the query string to the controller. Which process listens, on which address, for how long, and the channel it adds to 17's IPC contract are [#1210](https://github.com/theagenticage/hercule/issues/1210)'s.~~ **Resolved 2026-11-22, [#1210](https://github.com/theagenticage/hercule/issues/1210):** main listens on `127.0.0.1`, on an ephemeral port, only while a sign-in runs, one listener at a time, for 10 minutes, and answers only the request whose `state` matches; the channels `signInReturn.listen`, `wait` and `cancel` (17, The IPC contract).
 - *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* 17: **how a runtime line that needs the user to act is drawn.** A refused MCP call and a server left out at a start are written as a `runtime.warning`, which 17 draws quiet. The prototype drew them as errors in the failure colours, because the user must act. ~~[#1211](https://github.com/theagenticage/hercule/issues/1211) decides which.~~ *(Amended 2026-11-21, [#1211](https://github.com/theagenticage/hercule/issues/1211).)* Built by #1211: drawn in the failure colours when the line has at least one fix button; a line with none stays quiet. Decided by Rogier, 2026-11-22.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity and Google, for Rogier.** Each is written into its section as the recommendation, in one place, so that another answer is a small change there.
+  - 06 §10.5, §14.4: **Google's terms.** Whether Hercule may drive `agy acp` with a Google subscription, and, apart from that, whether Text Generation may use `agy -p`. The facts are in 06 §10.5. No reading of them is written down, and nothing is recommended here.
+  - 06 §6.5: **Deny.** Rogier's direction of 2026-11-25 is that `deny` stays offered and the turn goes on with a follow-up prompt. If [#1282](https://github.com/theagenticage/hercule/issues/1282) finds that it does not work, `deny` behaves as `cancel`, and the line the clients show for Deny is wrong on Antigravity.
+  - 06 §5: **Steering** is declared unsupported, tentatively. A message from another agent then interrupts the turn that is running.
+  - 06 §17.3: **The default selection** of a Google account holds Google's own models only, tentatively.
+  - 06 §8.1: **A mode less permissive than the one set.** A session that asked for auto and is reported in `default` starts with a warning. The other answer is to refuse the start.
+  - 06 §9.2, 12 §5.1: **Assistants on Antigravity** are allowed, with a warning about compaction. The other answer is to refuse them, which needs a declared capability.
+  - 06 §9.1, §9.4: **Skills and User Material** do not reach an Antigravity Thread in v1. A Thread that would have had skills says so; nothing says that the user's own instructions are missing, as on every Thread that has none.
+  - 06 §3.2: **The probe opens an empty conversation** while `agy models` is unproven, against the rule that discovery creates none.
+  - 06 §6.3: **`agy`'s own plan and task files.** In approval-required each write of one asks, and each shows as a file change beside the todo list or plan it feeds.
+  - 06 §14.2: **No suggested text generation model** for Google, so `automatic` never picks a Google account.
+  - 06 §13.6: **Showing a subagent's work** by reading `agy`'s private files, as a follow-up.
 
 ## B. Implementer's choices
 
@@ -166,6 +178,30 @@ Not design questions. The constraint is stated where one exists.
 - *(Added 2026-11-22, [#1212](https://github.com/theagenticage/hercule/issues/1212).)* 06 §10.4: **sweep the pi agent folders a crashed runner left behind.** A folder holds a copy of the Harness Home's `models.json`, which can hold a literal `apiKey`, and stays in the temporary directory until the operating system cleans it. Handed to [#1258](https://github.com/theagenticage/hercule/issues/1258): at runner start, remove the folders this runner made for sessions that are no longer running, from a record of its own, never by pattern.
 - *(Added 2026-11-22, [#1212](https://github.com/theagenticage/hercule/issues/1212).)* 21 §3.4: **the Thread shows a gateway tool by its original name.** It shows the changed name (`notion__search_pages_52ac82` for `search.pages`) for Claude Code, Codex and pi. Handed to [#1259](https://github.com/theagenticage/hercule/issues/1259), which decides per harness how the runner learns the original name.
 - *(Added 2026-11-22, [#1212](https://github.com/theagenticage/hercule/issues/1212).)* 21 §3.4, 06 §2: **the gateway's tool names and pi's version floor.** **Decided by Rogier, 2026-11-22** ([#1257](https://github.com/theagenticage/hercule/pull/1257)): gateway tool names are a pure function of the tool (option a), with the upgrade residual accepted and its rollout rule (restart the threads that were running at the upgrade); pi's floor is 1.3.0 and its tested maximum 1.6.0. Recorded in 21 §3.4 and 06 §2.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity, checked by [#1281](https://github.com/theagenticage/hercule/issues/1281)** on the real binary:
+  - 06 §3.2: that `agy models` gives the same models with their thinking levels and takes the Harness Home flags; until then, what `session/new` leaves on disk, that the probe closes the conversation and deletes its files on success, failure and timeout, and that nothing is spent.
+  - 06 §3.3: that the walk over the models fits the probe's 15 second deadline, and that the reply to each selection carries the new levels.
+  - 06 §4, §10.5: the real layout of the files of one session, before `deleteSessionFiles` deletes any.
+  - 06 §10.5: that the login lands in the file on a Linux runner with its real environment; whether the client's name changes which models are offered; the plan, models and thinking levels of a subscribed account.
+  - 06 §10.5, 15 §12: that `AGY_CLI_DISABLE_AUTO_UPDATE=1` stops the self-update.
+  - 06 §10.5: whether `agy` writes to its error output after the sign-in code and takes more than 2 seconds to exit, what a wrong code looks like, and whether the whole landing URL fits the 512 characters of a sign-in code.
+  - 06 §11: a login, a probe and a session at once on one Harness Home, with a second account beside it, and whether the refresh token rotates under them.
+  - 06 §14.4: that print mode meets every rule of the section.
+  - 15 §12: whether Google's install script can install an exact version.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity, checked by [#1282](https://github.com/theagenticage/hercule/issues/1282)** on the real binary, with a recording for each before the adapter relies on it:
+  - 06 §3.3: which models take an image in a prompt, and each one's limit.
+  - 06 §4: how a missing native session looks (`ResumeTranscriptMissing`).
+  - 06 §4, §10.5, 21 §3.11: the checks that gate the MCP capability; which wire path `agy` takes with the real gateway; a new MCP session after a 404; a failing MCP tool. 21 §3.7, 17: whether `agy` lists again on `notifications/tools/list_changed`.
+  - 06 §6.2, §10.5: a failed turn (network off in the middle, an exhausted quota, a revoked login); output with no prompt open, and what ends it.
+  - 06 §6.3: a file search, a directory listing, a URL fetch and a delete. 06 §10.5: a command that exits non-zero, and a background command that ends by itself.
+  - 06 §6.5: that the follow-up prompt after a denied call makes the model go on and leaves a sound conversation; `allow_always`, and how long `agy` keeps it; `session/cancel` with a Request open; two Requests at once; an answer that races an interrupt.
+  - 06 §6.5: a question answered with text alone, several questions, multi-select, declining, and a question under full-access.
+  - 06 §6.6: that a subagent's tokens are in no reply. 06 §10.5, §13.6, §13.7: a subagent's permission request; whether `session/cancel` stops subagents and background commands; `agy`'s own limits on subagents.
+  - 06 §8.1: whether `auto` can stay in `default` and differs on a subscribed account, and whether `agy` changes its mode by itself.
+  - 06 §9.1: what `agy` reads from the workspace, its parents, the Harness Home and the real `HOME`, what it writes into the workspace, and whether it has a switch for a session with no workspace.
+  - 06 §9.2, 12 §5.1: whether `AGY_CLI_AUTO_COMPACT_OVERRIDE` turns compaction off, and that `agy` does not compact before Hercule rotates; that the system prompt append is applied.
+  - 06 §10.5: that an accepted model or level change takes effect and names the new value; what a resume replays, the usage after it, and that the MCP entry and the instructions are given again.
+  - 19 §4.1: whether `agy` has a hook that can be a gate.
 
 ## D. Standing risks
 
@@ -190,6 +226,9 @@ Not design questions. The constraint is stated where one exists.
 - 19 §10: history grows without bound. Posts are capped per Discussion, but Discussions, Wiki revisions and edit rows are not. *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*
 - *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* 21: every MCP tool call passes the controller, so a controller that is down takes MCP tools with it, as it does the CLI.
 - *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* 13, 21: a call sent straight to the gateway with the Session Token, for example with `curl` from the agent's shell, skips the harness's approval card, as a CLI call does. That command is itself under the Access Mode, and the gateway's own guard is `mcp.use` plus the session's list.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §10.5: Hercule keeps several Google accounts apart on one machine by setting `SSH_CONNECTION` on every `agy` process. It is a workaround: no supported switch for file storage was found. A later `agy` may stop honouring it. The probe and the session start then refuse the account (no token file in its home) instead of using another account's login.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §4, §10.5: the Session Token is a literal header value in the `session/new` message that Hercule writes to `agy`'s input, because `agy` expands no variable there. The token is in `agy`'s memory beside its environment, which already holds it.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §10.5: while Google's terms are open, a Google account used through Hercule may be suspended by Google.
 
 ## Not yet specified (map fog)
 
