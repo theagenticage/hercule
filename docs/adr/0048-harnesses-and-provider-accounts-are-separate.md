@@ -6,11 +6,11 @@ Date: 2026-10-30
 
 Accepted by [Harness × model source: the provider model (#404)](https://github.com/theagenticage/hercule/issues/404), with the prototype of [#405](https://github.com/theagenticage/hercule/issues/405), written into the spec by [#406](https://github.com/theagenticage/hercule/issues/406). Amends [ADR 0007](./0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0015](./0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md), [0028](./0028-provider-harnesses-are-runner-installed-executables.md), [0030](./0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md), [0034](./0034-a-catalog-contribution-is-identified-by-its-qualified-id.md), [0041](./0041-text-generation-is-one-model-call-on-a-runner.md) and [0044](./0044-a-text-generation-step-is-a-third-step-kind.md), each of which carries a dated note.
 
-**Amended 2026-11-25 ([#1278](https://github.com/theagenticage/hercule/issues/1278)):** Google is a Provider, and Antigravity a Harness, and they add three points to this decision:
+**Amended 2026-11-25 ([#1278](https://github.com/theagenticage/hercule/issues/1278)):** Google is a Provider, and Antigravity a Harness, and they add these points to this decision:
 
 - Google's subscription is a per-machine sign-in, like Claude's `/login` and Codex's ChatGPT login: each runner signs in on its own.
 - A per-machine account's login stays with the vendor's CLI. The one field Hercule reads from the CLI's login file is who is signed in, because no reply of the CLI names the account (Rogier, 2026-11-25).
-- Whether Google's terms allow this use of a subscription is open, for Rogier. The facts are in [spec 06 section 10.5](../spec/06-providers.md). "Our reading of Anthropic's terms" below says nothing about Google.
+- **Rogier's reading of Google's terms (2026-11-25):** go ahead with the subscription, also for unattended use and Text Generation. Hercule drives `agy` the way T3 Code does, T3 Code has Google contributors improving that integration, and T3 Code's owner got a confirmation that its way is fine. The texts themselves are quoted in [spec 06 section 10.5](../spec/06-providers.md), and they do not settle it. "Our reading of Anthropic's terms" below says nothing about Google.
 - A Default Selection may hold the models of one maker only. Google resells models of other makers, so its Default Selection holds Google's own, and the others are found in the model browser ([spec 06 section 17.3](../spec/06-providers.md)).
 
 ## Context
