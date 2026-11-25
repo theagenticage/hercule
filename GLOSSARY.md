@@ -454,7 +454,7 @@ The models one Provider Account may use, as last read for it, each with the date
 _Avoid_: catalog (bare; that is the plugin catalog), model list
 
 **Default Selection**:
-The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* A provider may also say that only the current models of one maker enter it. Google does, because it resells models of other makers and its menu starts with Google's own ([spec 06 section 17.3](./docs/spec/06-providers.md)).
+The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* A provider may also say that only the current models of one maker enter it. Google does, because it resells models of other makers and its menu starts with Google's own ([spec 06 section 17.3](./docs/spec/06-providers.md)). Tentative (Rogier, 2026-11-24).
 _Avoid_: featured models, recommended models
 
 **Model Profile**:

@@ -187,7 +187,7 @@ Not design questions. The constraint is stated where one exists.
 - *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* **Antigravity, checked by [#1282](https://github.com/theagenticage/hercule/issues/1282)** on the real binary, each with a recording before the adapter relies on it:
   - 06 §3.3: images. 06 §4: a missing native session; the token in no file.
   - 06 §6.2: a provider failure in the middle of a turn; output with no prompt open. 06 §6.3: searches, listings, fetches, deletes.
-  - 06 §6.5: the follow-up after a deny; `allow_always`; interrupts, a Request that arrives during one, and several Requests; every reply to a question, one choice with no other text included. 06 §6.6: a subagent's tokens. 06 §6.7: what a resume replays.
+  - 06 §6.5: the follow-up after a deny; `allow_always`; interrupts, a Request that arrives during one, and several Requests; every reply to a question, one choice with no other text included. 06 §6.6: a subagent's tokens. 06 §6.7: what a resume replays; whether a slash command such as `/plan` changes the mode.
   - 06 §8.1: the modes, an irreversible command in `auto`, permission rules, the mode on a resume, and anything that runs before the mode is checked. 06 §10.5: the sandbox, and whether `hercule` reaches the controller.
   - 06 §9.1: what `agy` reads and writes outside the Harness Home. 06 §9.2, 12 §5.1: compaction, and the instructions, on a resume too.
   - 06 §10.5: model changes; the MCP checks; commands that fail or go to the background; subagents' approvals; interrupts; resume. 06 §13.6, §13.7: stopping and limits of subagents.
@@ -221,7 +221,7 @@ Not design questions. The constraint is stated where one exists.
 - *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §4, §10.5: the Session Token is a literal header value in the `session/new` message that Hercule writes to `agy`'s input, because only a literal value was tried there. The token is in `agy`'s memory beside its environment, which already holds it.
 - *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §10.5: `@hercule/acp` uses T3 Code's schemas as they are, so a new value in an ACP message from a newer `agy` fails that message, and a new kind of config option fails every start. Decided by Rogier on 2026-11-25; the decoding is replaced if that proves brittle. A message the library drops without a word shows only as silence, and the thread's silence warning and inactivity timeout are what is left (06 §6.2).
 - *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §9.4: the composer offers `$skill` in an Antigravity Thread, where it stays text. No declared capability says that a harness loads no skills, because every other harness does.
-- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §10.5: Google's texts forbid third-party software in words that Rogier reads as not meant for this use (2026-11-25). Google may read them the other way and suspend a Google account used through Hercule. Accepted by Rogier on 2026-11-25.
+- *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* 06 §10.5: Google's texts forbid third-party software. Rogier decided to go ahead as planned, also for unattended use (2026-11-25). Google may suspend a Google account used through Hercule.
 
 ## Not yet specified (map fog)
 

@@ -11,7 +11,7 @@ Accepted by [Harness × model source: the provider model (#404)](https://github.
 - Google's subscription is a per-machine sign-in, like Claude's `/login` and Codex's ChatGPT login: each runner signs in on its own.
 - A per-machine account's login stays with the vendor's CLI. The one field Hercule reads from the CLI's login file is who is signed in, because no reply of the CLI names the account (Rogier, 2026-11-25).
 - **Rogier's reading of Google's terms (2026-11-25):** go ahead with the subscription, also for unattended use. Text Generation through `agy -p` is asked on its own. Hercule drives `agy` the way T3 Code does, T3 Code has Google contributors improving that integration, and T3 Code's owner got a confirmation that its way is fine. The texts themselves are quoted in [spec 06 section 10.5](../spec/06-providers.md), and they do not settle it. "Our reading of Anthropic's terms" below says nothing about Google.
-- A Default Selection may hold the models of one maker only. Google resells models of other makers, so its Default Selection holds Google's own, and the others are found in the model browser ([spec 06 section 17.3](../spec/06-providers.md)).
+- A Default Selection may hold the models of one maker only. Google resells models of other makers, so its Default Selection holds Google's own, and the others are found in the model browser ([spec 06 section 17.3](../spec/06-providers.md)). Tentative (Rogier, 2026-11-24).
 
 ## Context
 
