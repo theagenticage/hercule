@@ -2617,7 +2617,19 @@ describe("installing a harness on a runner", () => {
 
         const response = await installHarness(harness.base, token, joined.runnerId, "codex/codex");
         expect(response.status, await response.clone().text()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: {
+              issues: [
+                {
+                  path: ["harnessId"],
+                  message: "Hercule on atlas cannot run Codex; update Hercule on that machine",
+                },
+              ],
+            },
+          },
+        });
         // The runner's hello already listed the adapters its build has.
         expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
       } finally {
@@ -3412,7 +3424,19 @@ describe("signing a runner in to a provider account", () => {
       try {
         const response = await startLogin(harness.base, token, codex.id, joined.runnerId);
         expect(response.status, await response.clone().text()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: {
+              issues: [
+                {
+                  path: ["runnerId"],
+                  message: "Hercule on atlas cannot run Codex; update Hercule on that machine",
+                },
+              ],
+            },
+          },
+        });
         expect(wire.frames.filter((frame) => frame._tag === "loginStart")).toEqual([]);
       } finally {
         wire.close();

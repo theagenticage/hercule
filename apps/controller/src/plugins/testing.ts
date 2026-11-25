@@ -50,11 +50,13 @@ import { PluginObserver } from "./observer";
 
 /**
  * Builds a harness definition that supports everything natively and, unless
- * `runs` says otherwise, runs no provider.
+ * `runs` says otherwise, runs no provider. `declared` replaces the capabilities
+ * it names, for a harness that lacks one.
  */
 export const buildHarnessDefinition = (
   id: string,
   runs: HarnessDefinition["runs"] = [],
+  declared: Partial<HarnessDefinition["declared"]> = {},
 ): HarnessDefinition => ({
   id,
   displayName: `Harness ${id}`,
@@ -73,6 +75,7 @@ export const buildHarnessDefinition = (
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    ...declared,
   },
   runs,
 });

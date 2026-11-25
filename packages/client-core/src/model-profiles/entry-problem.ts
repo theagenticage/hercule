@@ -19,9 +19,16 @@ export interface EntryProblemSubject {
   readonly loginMethod: HarnessLoginMethod | null;
 }
 
+/**
+ * What a menu row can show: the controller's reasons plus `no-adapter`, which
+ * means the machine's build has no adapter for the harness (see
+ * `AccountReadinessOnRunner`). The controller never sends that one.
+ */
+type MenuProblemReason = EntryProblemReason | "no-adapter";
+
 /** The reasons that depend on a machine: what is installed and signed in there, or whether one is connected. */
 export type MachineProblemReason = Exclude<
-  EntryProblemReason,
+  MenuProblemReason,
   "model-left-catalog" | "harness-lacks-model" | "harness-not-allowed"
 >;
 
@@ -30,20 +37,19 @@ export type MachineProblemReason = Exclude<
  * entry itself (its model, or the harness it names), so they hold on every
  * machine and no sign-in fixes them.
  */
-export const isMachineProblemReason = (
-  reason: EntryProblemReason,
-): reason is MachineProblemReason =>
+export const isMachineProblemReason = (reason: MenuProblemReason): reason is MachineProblemReason =>
   reason !== "model-left-catalog" &&
   reason !== "harness-lacks-model" &&
   reason !== "harness-not-allowed";
 
 /**
  * Returns a few words for `reason`, such as `not signed in on moss`,
- * `expired`, or `Claude Code is not on moss`. When `machineName` is `null` the
- * words speak of machines in general (`Claude Code is not on any machine`).
+ * `expired`, `Claude Code is not on moss`, or `Hercule on moss cannot run
+ * Claude Code`. When `machineName` is `null` the words speak of machines in
+ * general (`Claude Code is not on any machine`).
  */
 export const describeEntryProblem = (
-  reason: EntryProblemReason,
+  reason: MenuProblemReason,
   { harnessName, machineName, loginMethod }: EntryProblemSubject,
 ): string => {
   switch (reason) {
@@ -55,6 +61,10 @@ export const describeEntryProblem = (
       return "expired";
     case "harness-missing":
       return `${harnessName} is not on ${machineName ?? "any machine"}`;
+    case "no-adapter":
+      return machineName === null
+        ? `Hercule cannot run ${harnessName}`
+        : `Hercule on ${machineName} cannot run ${harnessName}`;
     case "harness-too-old":
       return machineName === null
         ? `${harnessName} is too old`

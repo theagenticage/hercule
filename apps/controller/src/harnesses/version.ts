@@ -3,7 +3,7 @@
  * floor, the oldest version a runner may run, and the tested maximum, the
  * newest version anyone has tested. For Claude Code and Codex both are the
  * version the build was made against, and for Antigravity both are the one
- * release anyone has run; pi has a tested maximum above its floor. They change
+ * release it is tested with; pi has a tested maximum above its floor. They change
  * only when the dependency or the tests change, which is why the verdict is
  * computed at read time rather than stored with the snapshot.
  */

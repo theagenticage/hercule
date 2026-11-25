@@ -9,15 +9,14 @@ import type {
   Harness,
   Provider,
   ProviderAccount,
-  ProviderAccountReadinessState,
   Runner,
 } from "@hercule/contract";
 import {
   findDefaultHarnessSnapshot,
   findProviderAccountKind,
   findProviderAccountReadiness,
-  hasAdapter,
   signsInPerMachine,
+  type AccountReadinessOnRunner,
 } from "./provider-accounts";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
@@ -91,10 +90,9 @@ export const decideMachineAction = (
  * default harness there, which holds the harness version the machine reported.
  */
 const describeMachineProblem = (
-  state: ProviderAccountReadinessState,
+  state: AccountReadinessOnRunner,
   harnessName: string,
   snapshot: CapabilitySnapshot | undefined,
-  runnerHasAdapter: boolean,
 ): string | null => {
   switch (state) {
     case "ready":
@@ -104,9 +102,11 @@ const describeMachineProblem = (
       return `${harnessName}${version == null ? "" : ` ${version}`} is too old`;
     }
     case "harness-missing":
-      // The machine's action says which harness the build cannot run, so this
-      // row only says what is wrong.
-      return runnerHasAdapter ? `${harnessName} is not installed` : "Not supported there";
+      return `${harnessName} is not installed`;
+    case "no-adapter":
+      // This text stands in the machine's own row, so "Its" is the machine's
+      // Hercule. The `unavailable` action beside it gives the full reason.
+      return `Its Hercule cannot run ${harnessName}`;
     case "token-expired":
       return "Token expired";
     case "not-signed-in":
@@ -152,7 +152,7 @@ export const decideProviderAccountReach = (
     .filter((runner) => runner.lifecycle !== "retired")
     .map((runner) => {
       const row = buildProviderRows(runner, [account], providers, harnesses)[0];
-      const state = findProviderAccountReadiness(account, account.defaultHarnessId, runner.id);
+      const state = findProviderAccountReadiness(account, account.defaultHarnessId, runner);
       const ready = state === "ready";
       const snapshot = findDefaultHarnessSnapshot(account, runner.id);
       const auth = snapshot?.auth;
@@ -168,12 +168,7 @@ export const decideProviderAccountReach = (
         runnerName: runner.name,
         ready,
         identity: ready && auth?.status === "ok" ? (auth.identity ?? null) : null,
-        problem: describeMachineProblem(
-          state,
-          harnessName,
-          snapshot,
-          hasAdapter(runner, account.defaultHarnessId),
-        ),
+        problem: describeMachineProblem(state, harnessName, snapshot),
         action,
       };
     });

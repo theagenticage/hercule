@@ -41,8 +41,8 @@ const PI_RELEASE = "1.3.0";
 const PI_TESTED_RELEASE = "1.6.0";
 
 /**
- * The one Antigravity release (Google's CLI `agy`) anyone has run so far. It is
- * both the oldest version a machine may run and the newest one tested.
+ * The one Antigravity release (Google's CLI `agy`) this build is tested with.
+ * It is both the oldest version a machine may run and the newest one tested.
  */
 const ANTIGRAVITY_RELEASE = "1.5.15";
 

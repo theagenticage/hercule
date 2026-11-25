@@ -241,7 +241,7 @@ describe("reading the latest releases", () => {
       () => new Response(JSON.stringify({ version: "1.0.0", padding: "x".repeat(256 * 1024) })),
       UNREADABLE,
     ],
-    ["cannot be reached", () => "unreachable", "Could not reach the npm registry."],
+    ["cannot be reached", () => "unreachable", "The npm registry could not be reached."],
   ])(
     "records the reason, with no version, when the first read finds a registry that %s",
     async (_name, answer, error) => {
@@ -433,7 +433,12 @@ describe("reading the latest release of a harness published on GitHub", () => {
       "GitHub's answer had no version.",
     ],
     ["answers 403", () => new Response("", { status: 403 }), "GitHub answered 403."],
-    ["cannot be reached", () => "unreachable", "Could not reach GitHub."],
+    [
+      "answers 403 because its limit on requests ran out",
+      () => new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0" } }),
+      "GitHub's limit on requests without a sign-in ran out for this controller's address. The next check tries again.",
+    ],
+    ["cannot be reached", () => "unreachable", "GitHub could not be reached."],
   ])("records the reason, with no version, when GitHub %s", async (_name, answer, error) => {
     const { client } = buildRegistry(answer);
 

@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hercule/ui";
-import { queryKeys, decideSessionsEmptyState } from "@hercule/client-core";
+import { queryKeys, decideSessionsEmptyState, joinNamesWithOr } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import {
   ensureProviderAccountReads,
@@ -48,6 +48,8 @@ function Sessions(): JSX.Element {
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const local = runners.find((runner) => runner.id === localId) ?? null;
 
+  const harnessNames = harnesses.map((harness) => harness.displayName);
+
   const state = decideSessionsEmptyState(local, accounts, providers, harnesses);
   // The controller probes the account when a sign-in ends and pushes the new
   // snapshot on the `provider` topic. This read only shows it sooner.
@@ -60,7 +62,7 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No runner has been detected on this machine."
-        lead="A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - Claude Code, Codex, pi, Antigravity - and offer to sign in to them."
+        lead={`A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - ${harnessNames.join(", ")} - and offer to sign in to them.`}
         fine={
           <>
             Run{" "}
@@ -78,7 +80,7 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No coding harness was found on this machine."
-        lead="A thread runs on a coding harness - Claude Code, Codex, pi or Antigravity. Install one on this machine and Hercule will offer to sign in to it."
+        lead={`A thread runs on a coding harness - ${joinNamesWithOr(harnessNames)}. Install one on this machine and Hercule will offer to sign in to it.`}
         fine={
           <Link to="/fleet/$runnerId" params={{ runnerId: local.id }} className="underline">
             Install one from Fleet

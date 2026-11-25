@@ -69,7 +69,6 @@ export const STRUCTURED_OUTPUT_PLUGIN: Plugin = (() => {
       models: "all" as const,
     },
   ];
-  const withoutResults = buildHarnessDefinition("without-results", runs);
   const provider = buildProviderDefinition("structured", [
     WITHOUT_RESULTS_HARNESS_ID,
     WITH_RESULTS_HARNESS_ID,
@@ -78,10 +77,7 @@ export const STRUCTURED_OUTPUT_PLUGIN: Plugin = (() => {
     id: "structured",
     capabilities: ["harnesses", "providers"],
     definitions: [
-      {
-        ...withoutResults,
-        declared: { ...withoutResults.declared, structuredOutput: "unsupported" },
-      },
+      buildHarnessDefinition("without-results", runs, { structuredOutput: "unsupported" }),
       buildHarnessDefinition("with-results", runs),
     ],
     providers: [

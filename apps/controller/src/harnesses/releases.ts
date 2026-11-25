@@ -24,7 +24,6 @@ import type { HarnessLatestRelease } from "@hercule/contract";
 import type { HarnessReleaseSource } from "@hercule/plugin-host";
 import { announce, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
-import { capitalize } from "../text";
 import { harnessRepository } from "./repository";
 
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
@@ -65,8 +64,8 @@ const buildFailedRead = (error: string): ReleaseReadOutcome => ({ _tag: "failed"
 
 /** What differs between publishers in the request for the newest release and in reading the answer. */
 interface ReleaseRequest {
-  /** The publisher's name as it is written inside a sentence, such as "the npm registry". */
-  readonly publisher: string;
+  /** The publisher's name as it starts a sentence, such as "The npm registry". */
+  readonly publisherName: string;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   /** The field of the answer that holds the version. */
@@ -87,20 +86,29 @@ const buildReleaseRequest = (source: HarnessReleaseSource): ReleaseRequest => {
   switch (source.kind) {
     case "npm":
       return {
-        publisher: "the npm registry",
+        publisherName: "The npm registry",
         url: `${NPM_REGISTRY_URL}/${encodeURIComponent(source.package)}/latest`,
         headers: {},
         versionField: "version",
       };
     case "github-releases":
       return {
-        publisher: "GitHub",
+        publisherName: "GitHub",
         url: `${GITHUB_API_URL}/repos/${source.repository}/releases/latest`,
         headers: { "user-agent": "Hercule" },
         versionField: "tag_name",
       };
   }
 };
+
+/**
+ * Checks whether a publisher refused the request because the limit on requests
+ * from this address ran out: a 403 or 429 answer whose `x-ratelimit-remaining`
+ * header is "0".
+ */
+const isRateLimited = (response: HttpClientResponse.HttpClientResponse): boolean =>
+  (response.status === 403 || response.status === 429) &&
+  response.headers["x-ratelimit-remaining"] === "0";
 
 /**
  * Reads the response body as text, and returns `None` when it is longer than
@@ -161,21 +169,27 @@ const make = Effect.gen(function* () {
   const readLatestRelease = (
     source: HarnessReleaseSource,
   ): Effect.Effect<ReleaseReadOutcome, never, never> => {
-    const { publisher, url, headers, versionField } = buildReleaseRequest(source);
-    const sentenceSubject = capitalize(publisher);
+    const { publisherName, url, headers, versionField } = buildReleaseRequest(source);
     return Effect.gen(function* () {
       const response = yield* client.get(url, { headers });
+      if (isRateLimited(response)) {
+        // No reset time here: a failed read is announced to clients only when
+        // its sentence changes, and a time would change it on every read.
+        return buildFailedRead(
+          `${publisherName}'s limit on requests without a sign-in ran out for this controller's address. The next check tries again.`,
+        );
+      }
       if (response.status !== 200)
-        return buildFailedRead(`${sentenceSubject} answered ${response.status}.`);
+        return buildFailedRead(`${publisherName} answered ${response.status}.`);
       const text = yield* readBoundedText(response);
       const body = Option.flatMap(text, decodeLatestBody);
       if (Option.isNone(body))
-        return buildFailedRead(`${sentenceSubject}'s answer could not be read.`);
+        return buildFailedRead(`${publisherName}'s answer could not be read.`);
       const version = body.value[versionField];
       if (version === undefined)
-        return buildFailedRead(`${sentenceSubject}'s answer had no version.`);
+        return buildFailedRead(`${publisherName}'s answer had no version.`);
       if (!isSemanticVersion(version)) {
-        return buildFailedRead(`${sentenceSubject}'s answer could not be read.`);
+        return buildFailedRead(`${publisherName}'s answer could not be read.`);
       }
       const checkedAt = new Date(yield* Clock.currentTimeMillis).toISOString();
       return { _tag: "read" as const, version, checkedAt };
@@ -185,9 +199,9 @@ const make = Effect.gen(function* () {
       Effect.provideService(HttpClient.TracerPropagationEnabled, false),
       Effect.timeoutOrElse({
         duration: RELEASE_READ_TIMEOUT,
-        orElse: () => Effect.succeed(buildFailedRead(`${sentenceSubject} did not answer in time.`)),
+        orElse: () => Effect.succeed(buildFailedRead(`${publisherName} did not answer in time.`)),
       }),
-      Effect.catch(() => Effect.succeed(buildFailedRead(`Could not reach ${publisher}.`))),
+      Effect.catch(() => Effect.succeed(buildFailedRead(`${publisherName} could not be reached.`))),
     );
   };
 

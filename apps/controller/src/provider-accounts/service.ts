@@ -333,9 +333,11 @@ const make = Effect.gen(function* () {
     harnessId: string,
     field: string,
   ): Effect.Effect<void, NotFound | SqlError | Validation | InvalidState> =>
-    Effect.flatMap(readRunnerOrFail(runnerId), (runner) =>
-      requireAdapter(runner, harnessId, field),
-    );
+    Effect.gen(function* () {
+      const runner = yield* readRunnerOrFail(runnerId);
+      const harness = yield* readHarnessDefinitionOrFail(harnessId);
+      yield* requireAdapter(runner, harness, field);
+    });
 
   /**
    * Returns the account's kind and what its sign-in produces (the `method` of

@@ -97,7 +97,7 @@ describe("computeHarnessVersionVerdict", () => {
     expect(computeHarnessVersionVerdict("codex/codex", "99.0.0")).toBe("above-tested-max");
   });
 
-  it("holds Antigravity to the one release anyone has run, floor and tested maximum alike", () => {
+  it("holds Antigravity to the one release it is tested with, floor and tested maximum alike", () => {
     expect(computeHarnessVersionVerdict("antigravity/antigravity", ANTIGRAVITY_VERSION)).toBe("ok");
     expect(computeHarnessVersionVerdict("antigravity/antigravity", "0.1.0")).toBe("below-floor");
     expect(computeHarnessVersionVerdict("antigravity/antigravity", "99.0.0")).toBe(

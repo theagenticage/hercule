@@ -45,7 +45,6 @@ import {
   type WorkflowIssues,
   type WorkspacePolicy,
 } from "@hercule/contract";
-import type { DeclaredCapabilities } from "@hercule/plugin-host";
 import { lintOutputSchema, type OutputSchema } from "@hercule/protocol";
 import type { AgentKind } from "../agents";
 import { CRON_TICK_EVENT_KIND, type DeclaredEventKindWithConnectionType } from "../events";
@@ -61,6 +60,7 @@ import {
   CONNECTION_PARAM,
   separateConnectionParam,
   type BuiltInControllerActionId,
+  type RegisteredHarness,
   type RegisteredWorkflowAction,
   type WorkspaceActionId,
 } from "../plugins";
@@ -99,12 +99,7 @@ export interface ReferencedAgent {
    * default. `undefined` when the account is gone or this build has no such
    * harness, which gives no issue.
    */
-  readonly harness:
-    | {
-        readonly displayName: string;
-        readonly structuredOutput: DeclaredCapabilities["structuredOutput"];
-      }
-    | undefined;
+  readonly harness: Pick<RegisteredHarness, "displayName" | "declared"> | undefined;
 }
 
 /** One input a workflow declares. */
@@ -1174,7 +1169,7 @@ const listAgentIssues = (
   const agent = references.agentById.get(step.agent);
   const harness = agent?.harness;
   const harnessIssues =
-    agent !== undefined && harness?.structuredOutput === "unsupported"
+    agent !== undefined && harness?.declared.structuredOutput === "unsupported"
       ? [
           {
             path: outputSchemaPath,

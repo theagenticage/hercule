@@ -143,7 +143,8 @@ const keepOfferedOptions = (
  * it. In order:
  *
  * 1. The runner the user picked, while the draft's harness can run there:
- *    the account has a readiness row for it that is not `harness-missing`.
+ *    the account has a readiness row for it that is neither `harness-missing`
+ *    nor `no-adapter`.
  *    Whatever the runner's availability, when it is offline, draining or the
  *    account is signed out, the draft keeps the runner and the composer says
  *    why it cannot start.
@@ -160,11 +161,10 @@ const decideDraftRunnerId = (
 ): string | null => {
   if (account === undefined || harnessId === null) return picks.runnerId ?? base.runnerId;
   const picked = catalogs.runners.find((runner) => runner.id === picks.runnerId);
-  if (
-    picked !== undefined &&
-    findProviderAccountReadiness(account, harnessId, picked.id) !== "harness-missing"
-  )
-    return picked.id;
+  if (picked !== undefined) {
+    const state = findProviderAccountReadiness(account, harnessId, picked);
+    if (state !== "harness-missing" && state !== "no-adapter") return picked.id;
+  }
   return account.id === base.providerAccountId &&
     harnessId === resolveThreadHarnessId(account, base.harnessId)
     ? base.runnerId

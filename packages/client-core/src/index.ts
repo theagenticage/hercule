@@ -5,6 +5,7 @@
  * import `createClient` and see only promises, plain objects and the three
  * error classes below.
  */
+export { joinNamesWithOr } from "./join-names";
 export { describeActor, readActorSessionId, type ActorReading } from "./actor-display";
 export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
 export {

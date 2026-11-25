@@ -25,7 +25,6 @@ import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import { MAX_TEXT_GENERATION_TEXT_LENGTH } from "@hercule/protocol";
 import { nowIso } from "../db";
 import { renderTemplate } from "../expressions";
-import { capitalize } from "../text";
 import { TextGeneration, type TextGenerationError } from "../text-generation";
 import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
@@ -124,6 +123,9 @@ const decideCallFailure = (
       };
   }
 };
+
+/** Returns `text` with its first letter in upper case. */
+const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
  * Builds the run engine's text generation steps, as a `StepKind`. A running

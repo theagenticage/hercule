@@ -412,7 +412,9 @@ describe("describeFleetSoftware detail", () => {
     const grid = describeGrid([ATLAS], [...HARNESSES, stranger, antigravity]);
 
     expect(findRow(grid, CLAUDE).detail.description).toBe("Runs Claude models.");
-    expect(findRow(grid, "antigravity/antigravity").detail.description).toBe("Runs Gemini models.");
+    expect(findRow(grid, "antigravity/antigravity").detail.description).toBe(
+      "Runs the models of a Google subscription.",
+    );
     expect(findRow(grid, "runner").detail.description).toBe("Hosts the sessions on a machine.");
     expect(findRow(grid, "git").detail.description).toBe("Every workspace is a git checkout.");
     expect(findRow(grid, "acme/acme").detail.description).toBeNull();

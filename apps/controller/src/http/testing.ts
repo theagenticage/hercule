@@ -206,9 +206,6 @@ const buildServices = (
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
         Layer.provideMerge(DiscussionInputsReferenceLayer),
-        // As in the real boot: a plugin's lifecycle change and a Connection's
-        // or an agent's delete validate the stored workflows again.
-        Layer.provideMerge(WorkflowValidityObserversLayer),
         // As in the real boot: the step that installs the shipped workflows
         // uses the workflow service and the task service.
         Layer.provideMerge(WorkflowServiceWithPortsLayer),
@@ -229,8 +226,10 @@ const buildServices = (
         // Probing reads the catalogs that the provider's own API lists, which
         // the provider account service does.
         Layer.provideMerge(ProviderAccountServiceLayer),
-        // As in the real boot: a change to an account's default harness
-        // validates the stored workflows again.
+        // As in the real boot: provides the observer ports that validate the
+        // stored workflows again, and `WorkflowValidity` itself. It sits here
+        // because the provider account service above needs its port, and the
+        // services built on this stack need the others.
         Layer.provideMerge(WorkflowValidityObserversLayer),
         Layer.provideMerge(ProviderAccountProbesLayer),
         Layer.provideMerge(ModelCatalogsLayer),

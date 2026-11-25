@@ -162,9 +162,12 @@ const NpmPackageName = Schema.String.check(
  * The name of a GitHub repository, `<owner>/<name>`, such as
  * `google-antigravity/antigravity-cli`. Each part is made of letters, digits,
  * `.`, `_` and `-`, because the controller puts the name into a URL. A part
- * may not be `.` or `..`, which would change the path of that URL.
+ * may not be `.` or `..`, which would change the path of that URL. GitHub
+ * allows an owner of at most 39 characters and a name of at most 100, so the
+ * whole is at most 140 characters (39, the `/`, and 100).
  */
 const GithubRepositoryName = Schema.String.check(
+  Schema.isMaxLength(140),
   Schema.isPattern(/^(?!\.\.?\/)[A-Za-z0-9._-]+\/(?!\.\.?$)[A-Za-z0-9._-]+$/, {
     message:
       "A GitHub repository must be written <owner>/<name>, such as google-antigravity/antigravity-cli. Each part may hold only letters, digits, . _ and -, and may not be . or .., because it goes into a URL.",

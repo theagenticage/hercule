@@ -97,10 +97,7 @@ const describeRunnerProblem = (
     case "harness-too-old":
       return `${harnessName} on ${joinNames(machines)} is older than this version of Hercule supports. Update it there${floorToUpdateTo}.`;
     case "harness-missing":
-      // The state covers a harness that is not installed and a runner whose
-      // build has no adapter for it. Nothing here can tell which, so the
-      // sentence gives the fix for each.
-      return `${harnessName} cannot run on ${joinNames(machines)}. Install it there, or update Hercule there if it is installed.`;
+      return `${harnessName} is not installed on ${joinNames(machines)}. Install it there.`;
   }
 };
 

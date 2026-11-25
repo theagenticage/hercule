@@ -4,8 +4,8 @@
  * account in the thread's harness; the sign-in state of other accounts does
  * not matter here.
  */
-import type { ProviderAccount, ProviderAccountReadinessState, Runner } from "@hercule/contract";
-import { findProviderAccountReadiness, hasAdapter } from "../provider-accounts";
+import type { ProviderAccount, Runner } from "@hercule/contract";
+import { findProviderAccountReadiness, type AccountReadinessOnRunner } from "../provider-accounts";
 
 export interface RunnerMenuRow {
   readonly runnerId: string;
@@ -37,34 +37,32 @@ const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
  * controller holds no credential for the account, "key or token expired",
  * "not installed" when the harness is not on the runner, "not supported"
  * when the runner's build has no adapter for the harness, or "harness too old"
- * when it is older than this build supports. `harnessId` is `null` for a
- * thread that has no harness yet, which no runner can be missing an adapter
- * for.
+ * when it is older than this build supports.
  */
 export const findDimmedReason = (
   runner: Runner,
-  readiness: ProviderAccountReadinessState,
-  harnessId: string | null,
-): string | null =>
-  isRetired(runner)
-    ? "retired"
-    : runner.connectivity !== "online"
-      ? runner.connectivity
-      : runner.lifecycle === "draining"
-        ? "draining"
-        : readiness === "not-signed-in"
-          ? "not signed in"
-          : readiness === "credential-missing"
-            ? "no key or token"
-            : readiness === "token-expired"
-              ? "key or token expired"
-              : readiness === "harness-too-old"
-                ? "harness too old"
-                : readiness === "harness-missing"
-                  ? harnessId !== null && !hasAdapter(runner, harnessId)
-                    ? "not supported"
-                    : "not installed"
-                  : null;
+  readiness: AccountReadinessOnRunner,
+): string | null => {
+  if (isRetired(runner)) return "retired";
+  if (runner.connectivity !== "online") return runner.connectivity;
+  if (runner.lifecycle === "draining") return "draining";
+  switch (readiness) {
+    case "ready":
+      return null;
+    case "not-signed-in":
+      return "not signed in";
+    case "credential-missing":
+      return "no key or token";
+    case "token-expired":
+      return "key or token expired";
+    case "harness-too-old":
+      return "harness too old";
+    case "harness-missing":
+      return "not installed";
+    case "no-adapter":
+      return "not supported";
+  }
+};
 
 /**
  * Returns one row per runner that is not retired, and the default runner: the
@@ -82,8 +80,8 @@ export const buildRunnerMenu = (
   const rows = runners
     .filter((runner) => !isRetired(runner))
     .map((runner) => {
-      const readiness = findProviderAccountReadiness(account, harnessId, runner.id);
-      const dimmed = findDimmedReason(runner, readiness, harnessId);
+      const readiness = findProviderAccountReadiness(account, harnessId, runner);
+      const dimmed = findDimmedReason(runner, readiness);
       return {
         runnerId: runner.id,
         name: runner.name,

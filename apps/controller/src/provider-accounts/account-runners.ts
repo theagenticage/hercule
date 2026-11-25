@@ -20,7 +20,7 @@ import {
   type RegisteredHarness,
   type RegisteredProvider,
 } from "../plugins";
-import { runnerRepository } from "../runners";
+import { describeNoAdapter, runnerRepository } from "../runners";
 import { Secrets } from "../secrets";
 import { AccountUsage } from "../usage";
 import {
@@ -299,7 +299,7 @@ const make = Effect.gen(function* () {
       switch (state) {
         case "harness-missing":
           return verdict === "no-adapter"
-            ? `Hercule on ${runnerName} cannot run ${harnessName}; update Hercule on that machine`
+            ? describeNoAdapter(runnerName, harnessName)
             : `${harnessName} is not installed on ${runnerName}`;
         case "harness-too-old":
           return `${harnessName} on ${runnerName} is older than Hercule supports; update it${describeFloorToUpdateTo(choice.harness.id)}`;

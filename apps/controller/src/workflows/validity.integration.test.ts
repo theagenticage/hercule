@@ -11,9 +11,11 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import type { Notification, Workflow } from "@hercule/contract";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import { waitUntilRouted } from "../daemon/testing";
+import { uuidFromString, withTransaction } from "../db";
 import { del, get, post, readErrorBody, send } from "../http/testing";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
 import { queryRuns, requestRun } from "../runs/testing";
@@ -322,18 +324,25 @@ describe("a workflow whose default Connection is deleted", () => {
 const updateAgent = async (
   { base, token }: SetUpController,
   agentId: string,
-  body: { readonly providerAccountId?: string; readonly harnessId?: string },
+  body: {
+    readonly name?: string;
+    readonly providerAccountId?: string;
+    readonly harnessId?: string;
+  },
 ): Promise<void> => {
   const response = await send("PATCH", base, `/api/v1/agents/${agentId}`, { body, token });
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
 describe("a workflow whose Agent moves to a harness that cannot give a structured result", () => {
-  it("is marked invalid, and loses the mark when the Agent moves to a harness that can", async () => {
+  it("is marked invalid and refused by run.start, and loses the mark when the Agent moves to a harness that can, but not when only its name changes", async () => {
     await withSetUpController(
       async (controller) => {
-        const { base, token } = controller;
+        const { harness, base, token } = controller;
         const agentId = await createAgent(base, token);
+        const original = await get(base, `/api/v1/agents/${agentId}`, token);
+        const originalAccountId = ((await original.json()) as { providerAccountId: string })
+          .providerAccountId;
         const workflowId = await saveEnabledWorkflow(
           controller,
           buildLabeledSource(
@@ -359,8 +368,31 @@ describe("a workflow whose Agent moves to a harness that cannot give a structure
         expect(notifications).toHaveLength(1);
         expect(notifications[0]!.body).toContain("which cannot give a structured result");
 
+        const refused = await requestRun(base, token, workflowId);
+        const refusal = await readErrorBody(refused);
+        expect(refused.status, refusal.text).toBe(400);
+        expect(refusal.message).toContain("this workflow cannot run as it is saved now");
+        expect(refusal.text).toContain("which cannot give a structured result");
+
         await updateAgent(controller, agentId, { harnessId: WITH_RESULTS_HARNESS_ID });
 
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toBeUndefined();
+
+        // A change that leaves the harness alone validates nothing again. The
+        // mark is made stale by hand: only a validation could clear it.
+        const staleSince = "2026-11-25T08:00:00.000Z";
+        await Effect.runPromise(
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE workflows SET invalid_since = ${staleSince}
+              WHERE id = ${uuidFromString(workflowId)}`,
+          ),
+        );
+        await updateAgent(controller, agentId, { name: "renamed" });
+        await updateAgent(controller, agentId, { harnessId: WITH_RESULTS_HARNESS_ID });
+        expect((await readWorkflow(controller, workflowId)).invalidSince).toBe(staleSince);
+
+        await updateAgent(controller, agentId, { providerAccountId: originalAccountId });
         expect((await readWorkflow(controller, workflowId)).invalidSince).toBeUndefined();
       },
       [STRUCTURED_OUTPUT_PLUGIN],

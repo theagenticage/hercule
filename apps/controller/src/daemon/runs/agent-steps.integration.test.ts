@@ -1904,13 +1904,9 @@ describe("agent steps over the runner socket", () => {
   it(
     "fails the run with session-failed when the harness the Agent has moved to cannot give the next step's structured result",
     async () => {
-      const unstructured = {
-        ...buildHarnessDefinition("unstructured"),
-        declared: {
-          ...buildHarnessDefinition("unstructured").declared,
-          structuredOutput: "unsupported" as const,
-        },
-      };
+      const unstructured = buildHarnessDefinition("unstructured", [], {
+        structuredOutput: "unsupported",
+      });
       await withFleet(
         async (arranged) => {
           const { wire } = arranged;

@@ -93,10 +93,7 @@ export const workflowReferences = Effect.gen(function* () {
         ...new Set(referenced.flatMap(pick).filter(isId)),
       ];
       const harnessById = new Map(
-        (yield* host.harnesses()).map((harness) => [
-          harness.id,
-          { displayName: harness.displayName, structuredOutput: harness.declared.structuredOutput },
-        ]),
+        (yield* host.harnesses()).map((harness) => [harness.id, harness]),
       );
       return {
         actions: new Map(

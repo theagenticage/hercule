@@ -17,7 +17,6 @@ import type {
   ModelOption,
   Provider,
   ProviderAccount,
-  ProviderAccountReadinessState,
   ResolvedModelProfileEntry,
   Runner,
   Workspace,
@@ -30,7 +29,7 @@ import {
   findHarnessLoginMethod,
   findProviderAccountNameIfAmbiguous,
   findProviderAccountReadiness,
-  hasAdapter,
+  type AccountReadinessOnRunner,
 } from "../provider-accounts";
 import { isMachineProblemReason } from "../model-profiles/entry-problem";
 import { buildSignInTarget, type SignInTarget } from "./sign-in-target";
@@ -209,8 +208,7 @@ const findBlocker = (
   providers: readonly Provider[],
   account: ProviderAccount | undefined,
   runner: Runner | undefined,
-  harnessId: string | null,
-  readiness: ProviderAccountReadinessState,
+  readiness: AccountReadinessOnRunner,
   signIn: SignInTarget | null,
   entry: ResolvedModelProfileEntry | undefined,
 ): ComposerBlocked | null => {
@@ -253,9 +251,9 @@ const findBlocker = (
     case "harness-too-old":
       return stop(`The harness on ${runner.name} is older than Hercule supports; update it`);
     case "harness-missing":
-      return harnessId !== null && !hasAdapter(runner, harnessId)
-        ? stop(`Hercule on ${runner.name} cannot run the harness; update Hercule there`)
-        : stop(`${name} is not on ${runner.name}`);
+      return stop(`${name} is not on ${runner.name}`);
+    case "no-adapter":
+      return stop(`Hercule on ${runner.name} cannot run the harness; update Hercule there`);
     case "not-signed-in":
       return stop(`${name} is not signed in on ${runner.name}`, { signIn });
   }
@@ -277,7 +275,7 @@ const findSignInFix = (
   catalogs: Pick<ThreadCatalogs, "providers" | "harnesses">,
   account: ProviderAccount,
   runner: Runner,
-  readiness: ProviderAccountReadinessState,
+  readiness: AccountReadinessOnRunner,
 ): SignInTarget | null => {
   const method = findHarnessLoginMethod(catalogs.providers, account);
   const fixes =
@@ -350,14 +348,12 @@ export const buildComposerFields = (
     })) ?? [];
   // Read from the runner rather than from its row, because the menu has no
   // row for a retired runner, and a draft can still refer to one.
-  const readiness: ProviderAccountReadinessState =
+  const readiness: AccountReadinessOnRunner =
     account === undefined || harnessId === null || runner === undefined
       ? "not-signed-in"
-      : findProviderAccountReadiness(account, harnessId, runner.id);
+      : findProviderAccountReadiness(account, harnessId, runner);
   const dimmed =
-    account === undefined || runner === undefined
-      ? null
-      : findDimmedReason(runner, readiness, harnessId);
+    account === undefined || runner === undefined ? null : findDimmedReason(runner, readiness);
   const name = runner?.name ?? "no machine";
   const signIn =
     account === undefined || runner === undefined
@@ -439,7 +435,6 @@ export const buildComposerFields = (
             catalogs.providers,
             account,
             runner,
-            harnessId,
             readiness,
             signIn,
             resolved.kind === "draft" ? resolved.entry : undefined,

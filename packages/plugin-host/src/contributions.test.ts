@@ -74,6 +74,7 @@ describe("HarnessReleaseSource", () => {
     "owner/.",
     "owner/na me",
     "https://github.com/a/b",
+    `${"a".repeat(39)}/${"b".repeat(101)}`,
   ])("refuses the GitHub repository %j", (repository) => {
     expect(decode({ kind: "github-releases", repository })._tag).toBe("None");
   });

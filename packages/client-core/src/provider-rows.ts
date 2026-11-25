@@ -141,7 +141,7 @@ export const buildProviderRows = (
     // The controller's verdict overrules the last probe: a missing or expired
     // credential, or a login that belongs to someone else, signs nothing in,
     // so the row offers to sign in again or to make a new token.
-    const readiness = findProviderAccountReadiness(account, harness.id, runner.id);
+    const readiness = findProviderAccountReadiness(account, harness.id, runner);
     const signedIn =
       snapshot?.auth.status === "ok" &&
       readiness !== "not-signed-in" &&

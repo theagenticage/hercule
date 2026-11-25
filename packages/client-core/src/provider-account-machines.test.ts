@@ -170,7 +170,7 @@ describe("listProviderAccountMachines", () => {
     expect(
       list(buildProviderAccount(ANTHROPIC_IDENTITY, []), [{ ...WITH_CLAUDE, facts: binary }])[0]
         ?.problem,
-    ).toBe("Not supported there");
+    ).toBe("Its Hercule cannot run Claude Code");
     // The binary is missing, so Install would not help either.
     expect(
       list(buildProviderAccount(ANTHROPIC_IDENTITY, []), [
