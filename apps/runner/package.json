@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.263",
+    "@hercule/acp": "workspace:*",
     "@hercule/home": "workspace:*",
     "@hercule/process-log": "workspace:*",
     "@hercule/protocol": "workspace:*",
@@ -17,6 +18,7 @@
     "effect": "4.0.7"
   },
   "devDependencies": {
-    "@hercule/contract": "workspace:*"
+    "@hercule/contract": "workspace:*",
+    "@hercule/plugin-google": "workspace:*"
   }
 }
