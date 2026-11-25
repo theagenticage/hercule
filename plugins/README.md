@@ -19,10 +19,8 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-claude-code` | the `claude-code/claude-code` harness |
 | `@hercule/plugin-codex` | the `codex/codex` harness |
 | `@hercule/plugin-pi` | the `pi/pi` harness |
-| `@hercule/plugin-antigravity` | the `antigravity/antigravity` harness, which runs Google's `agy` program. *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278). The package does not exist until [#1280](https://github.com/theagenticage/hercule/issues/1280) builds it.)* |
 | `@hercule/plugin-anthropic` | the `anthropic/anthropic` provider |
 | `@hercule/plugin-openai` | the `openai/openai` provider |
-| `@hercule/plugin-google` | the `google/google` provider, with a subscription signed in on each machine, whose Default Selection holds only Google's own models. *(Added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278). The package does not exist until [#1280](https://github.com/theagenticage/hercule/issues/1280) builds it.)* |
 | `@hercule/plugin-zai` | the `zai/zai` provider |
 | `@hercule/plugin-openrouter` | the `openrouter/openrouter` provider, with an API key, whose models the controller reads from OpenRouter's API |
 | `@hercule/plugin-opencode` | the `opencode/opencode` provider, with a Go key and a Zen key |
@@ -30,5 +28,9 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-github` | the `github` connection type, the event source that polls GitHub, and the workflow actions on issues and pull requests |
 | `@hercule/plugin-sentry` | the `sentry` connection type, the event source that polls Sentry for issues, the signals for new, returning and escalating issues, and the workflow actions that resolve, archive and assign an issue |
 | `@hercule/plugin-linear` | the `linear` connection type, the event source that polls Linear for the issues you watch and your inbox, and the signals for watched issues, mentions and assignments |
+
+[#1280](https://github.com/theagenticage/hercule/issues/1280) adds two more: `@hercule/plugin-antigravity`, with the
+`antigravity/antigravity` harness, and `@hercule/plugin-google`, with the `google/google` provider
+and a subscription signed in on each machine. Its Default Selection holds Google's own models only.
 
 The runner entrypoint imports no plugin host and no plugin package.
