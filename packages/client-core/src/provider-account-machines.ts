@@ -104,9 +104,10 @@ const describeMachineProblem = (
     case "harness-missing":
       return `${harnessName} is not installed`;
     case "no-adapter":
-      // This text stands in the machine's own row, so "Its" is the machine's
-      // Hercule. The `unavailable` action beside it gives the full reason.
-      return `Its Hercule cannot run ${harnessName}`;
+      // The row already names the machine, and the `unavailable` action beside
+      // it says the cause is the machine's Hercule build, so the status stays
+      // short enough not to be cut off.
+      return `Cannot run ${harnessName}`;
     case "token-expired":
       return "Token expired";
     case "not-signed-in":
