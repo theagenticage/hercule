@@ -20,7 +20,7 @@ import {
   type LoginChild,
   type LoginSpawn,
 } from "./login";
-import type { HarnessRunnerContext } from "./index";
+import type { HarnessAdapter, HarnessRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
 
 const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
@@ -87,6 +87,9 @@ interface Fake {
   readonly complains: (line: string) => void;
   readonly stdin: ReadonlyArray<string>;
   readonly exit: (code: number) => void;
+  /** Reports the exit but leaves stdout and stderr open, as a pipe a grandchild still holds. */
+  readonly exitWithOutputOpen: (code: number) => void;
+  readonly closeOutput: () => void;
   readonly killed: () => boolean;
 }
 
@@ -127,6 +130,11 @@ const createMachine = () => {
       says: out.write,
       complains: err.write,
       exit: endChild,
+      exitWithOutputOpen: settle,
+      closeOutput: () => {
+        out.end();
+        err.end();
+      },
       killed: () => killed,
     });
     return child;
@@ -456,6 +464,166 @@ describe("more than one login at a time", () => {
     );
 
     expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+});
+
+/**
+ * Google's `agy acp --login` runs on plain pipes. After a wrong code it prints
+ * a blank line and then its refusal on stdout, prints nothing on stderr, and
+ * exits 1. The command opts in to reading that line by setting `refusal`.
+ */
+describe("a plain-pipe login whose command reads a refusal", () => {
+  const AGY_URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=agy";
+  const AGY_REFUSAL = `couldn't log in: token exchange failed: oauth2: "invalid_grant" "Bad Request"`;
+  const REFUSAL_ENDING = "This sign-in cannot take another code; start it again for a new link.";
+
+  const adapterWith = (refusal: RegExp | undefined): HarnessAdapter => ({
+    ...claudeCode,
+    login: () => ({
+      command: ["agy", "acp", "--login"],
+      env: {},
+      ...(refusal === undefined ? {} : { refusal }),
+    }),
+  });
+
+  /** Starts the login, which prints its link and instructions before it waits for the code. */
+  const startLogin = (
+    driver: ReturnType<typeof makeLogins>,
+    children: ReadonlyArray<Fake>,
+    adapter: HarnessAdapter,
+    printedBeforeCode = "",
+  ) =>
+    Effect.gen(function* () {
+      const starting = yield* Effect.forkChild(
+        driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+      );
+      yield* TestClock.adjust(Duration.zero);
+      yield* Effect.sync(() =>
+        children[0]!.says(`${printedBeforeCode}${AGY_URL}\nEnter the code: `),
+      );
+      yield* Fiber.join(starting);
+    });
+
+  const submitCode = (driver: ReturnType<typeof makeLogins>) =>
+    Effect.gen(function* () {
+      const submitting = yield* Effect.forkChild(driver.submit(ACCOUNT_ID, "a-wrong-code"));
+      yield* TestClock.adjust(Duration.zero);
+      return submitting;
+    });
+
+  it("fails with the vendor's refusal and says the sign-in must start again", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(/couldn't log in/));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => {
+          children[0]!.says(`\n${AGY_REFUSAL}\n`);
+          children[0]!.exit(1);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginResult",
+      ok: false,
+      message: `${AGY_REFUSAL}. ${REFUSAL_ENDING}`,
+    });
+  });
+
+  it("still reads a refusal line that arrives after the exit, before stdout ends", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(/couldn't log in/));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.exitWithOutputOpen(1));
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => {
+          children[0]!.says(`\n${AGY_REFUSAL}`);
+          children[0]!.closeOutput();
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginResult",
+      ok: false,
+      message: `${AGY_REFUSAL}. ${REFUSAL_ENDING}`,
+    });
+  });
+
+  it("does not count a matching line printed before the code, and a silent exit still fails as unfinished", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(
+          driver,
+          children,
+          adapterWith(/couldn't log in/),
+          "couldn't log in with a saved session, starting a new one\n",
+        );
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.exit(1));
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginResult",
+      ok: false,
+      message: "the login ended without finishing",
+    });
+  });
+
+  it("reports success when the child exits with 0 after printing a matching line", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(/couldn't log in/));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => {
+          children[0]!.says(`${AGY_REFUSAL}\n`);
+          children[0]!.exit(0);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+
+  it("reports stdout only as the end of the login when the command sets no refusal", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(undefined));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => {
+          children[0]!.says(`\n${AGY_REFUSAL}\n`);
+          children[0]!.exit(1);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginResult",
+      ok: false,
+      message: "the login ended without finishing",
+    });
   });
 });
 

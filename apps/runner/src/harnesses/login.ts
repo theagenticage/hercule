@@ -17,6 +17,11 @@
  * draws a text UI that prints nothing on plain pipes. The runner reads the
  * screen that UI draws (see `TerminalScreen`), not its raw output. A login
  * that makes a token returns the token in its success result.
+ *
+ * A vendor that refuses a pasted code ends the login. On a terminal the
+ * refusal is a line on the screen. On plain pipes it is a line on stdout,
+ * and it counts only when the child then exits with a non-zero code. Either
+ * way the user must start the login again, because the link is spent.
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
@@ -91,11 +96,16 @@ export interface LoginCommand {
    */
   readonly scratchFolder?: string;
   /**
-   * For a terminal login: matches a screen line where the vendor says it
-   * refused the pasted code. Such a line ends the login with a failed result.
-   * Only a line that appeared or changed after the code was written is
-   * tested, so it can be worded to match the vendor's own refusal and need not
-   * avoid every other message the vendor draws.
+   * Matches a line where the vendor says it refused the pasted code. Only a
+   * line that appeared or changed after the code was written is tested, so it
+   * can be worded to match the vendor's own refusal and need not avoid every
+   * other message the vendor prints.
+   *
+   * - A terminal login: such a screen line ends the login with a failed
+   *   result.
+   * - A plain-pipe login: the command opts in by setting this. A matching
+   *   stdout line is the refusal only if the child then exits with a non-zero
+   *   code. Without this, a plain-pipe login reports stderr only.
    */
   readonly refusal?: RegExp;
   /**
@@ -142,6 +152,16 @@ const NO_LOGIN = "no login in progress";
  */
 const readTail = (value: string, whenSilent: string): string =>
   value.trim() === "" ? whenSilent : value.trim().slice(-MAX_FACT_LENGTH);
+
+/**
+ * Returns the message for a login whose vendor refused the pasted code: the
+ * vendor's own words, then what the user must do. The link is spent, so a
+ * second code cannot work.
+ */
+const buildRefusalMessage = (vendorLine: string): string => {
+  const reason = truncateFact(vendorLine.trim()).replace(/[.\s]+$/, "");
+  return `${reason}. This sign-in cannot take another code; start it again for a new link.`;
+};
 
 const buildLoginFailed = (message: string): LoginAnswer => ({
   _tag: "loginFailed",
@@ -229,6 +249,12 @@ interface Held {
   readonly transcript: () => string;
   /** Resolves once everything the child printed has been read. */
   readonly finished: Promise<void>;
+  /**
+   * Returns the line where the vendor refused the code, or `undefined` when
+   * there is none. Undefined itself for a login that does not read a refusal
+   * from plain pipes: a terminal login, or a command without `refusal`.
+   */
+  readonly readRefusal: (() => string | undefined) | undefined;
   /** Whether the child runs in a pseudo-terminal, which takes Enter, not a newline, to end a line. */
   readonly terminal: boolean;
   /** Whether the login makes a token, which the success result must then carry. */
@@ -367,6 +393,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       // that is not among them, so a warning the vendor drew before it asked
       // for the code cannot refuse the code.
       let linesBeforeCode = new Set<string>();
+      // The same for plain pipes, where a line is counted by when it is read.
+      let codeWritten = false;
+      let pipeRefusal: string | undefined;
       let transcript = "";
       let url: string | undefined;
       let userCode: string | undefined;
@@ -405,7 +434,12 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       };
       const spent = (
         screen === undefined
-          ? readLines(child.stdout, scanLine)
+          ? readLines(child.stdout, (line) => {
+              scanLine(line);
+              if (pipeRefusal === undefined && codeWritten && command.refusal?.test(line)) {
+                pipeRefusal = removeToken(command, line);
+              }
+            })
           : readScreen(child.stdout, screen, (lines) => {
               for (const line of lines) scanLine(line);
               if (command.refusal === undefined || complaints.length === 0) return;
@@ -440,6 +474,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         nextComplaint: () =>
           new Promise<string>((resolve) => {
             linesBeforeCode = new Set(screen?.readLines());
+            codeWritten = true;
             complaints.push(resolve);
           }),
         transcript: () =>
@@ -454,6 +489,8 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
                   .slice(-MAX_TRANSCRIPT),
           ),
         finished: spent,
+        readRefusal:
+          screen === undefined && command.refusal !== undefined ? () => pipeRefusal : undefined,
         terminal: screen !== undefined,
         makesToken: command.tokenPattern !== undefined,
         readToken,
@@ -583,10 +620,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           // The vendor's own screen answers a refused code with a new sign-in
           // and a new URL, so the URL the user holds is dead.
           yield* stopLogin(providerAccountId, login);
-          const reason = truncateFact(outcome.complaint.trim()).replace(/[.\s]+$/, "");
-          return buildLoginFailed(
-            `${reason}. This sign-in cannot take another code; start it again for a new link.`,
-          );
+          return buildLoginFailed(buildRefusalMessage(outcome.complaint));
         }
         if ("complaint" in outcome) {
           // The vendor also writes to stderr as it exits, so a stderr line only
@@ -632,14 +666,38 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
 };
 
 /**
+ * Waits for the output of a child that has exited to end. The wait is bounded
+ * because a pipe may stay open, for example when a grandchild holds it.
+ */
+const waitForOutputEnd = (login: Held): Effect.Effect<unknown> =>
+  Effect.timeoutOption(
+    Effect.promise(() => login.finished),
+    COMPLAINT_GRACE,
+  );
+
+/**
  * Returns the answer for a login whose child has exited. A non-zero exit fails
- * with the end of what the child showed. A login that makes a token also needs
+ * with the vendor's refusal line when the command reads one from plain pipes
+ * and the child printed it, and otherwise with the end of what the child
+ * showed. A login that makes a token also needs
  * the token on the screen: an exit without one is a failure, because the
  * controller would otherwise store nothing and report the account signed in.
  */
 const finishLogin = (login: Held, exit: number): Effect.Effect<LoginAnswer> =>
   Effect.gen(function* () {
     if (exit !== 0) {
+      if (login.readRefusal !== undefined) {
+        // The exit can be seen before the refusal line has been read.
+        yield* waitForOutputEnd(login);
+        const refusal = login.readRefusal();
+        if (refusal !== undefined) {
+          return {
+            _tag: "loginResult",
+            ok: false,
+            message: truncateFact(buildRefusalMessage(refusal)),
+          };
+        }
+      }
       return {
         _tag: "loginResult",
         ok: false,
@@ -648,11 +706,8 @@ const finishLogin = (login: Held, exit: number): Effect.Effect<LoginAnswer> =>
     }
     if (!login.makesToken) return { _tag: "loginResult", ok: true };
     // The token is the last thing the child prints, so read it only once the
-    // output has ended. The wait is bounded because a pipe may stay open.
-    yield* Effect.timeoutOption(
-      Effect.promise(() => login.finished),
-      COMPLAINT_GRACE,
-    );
+    // output has ended.
+    yield* waitForOutputEnd(login);
     const token = login.readToken();
     return token === undefined
       ? { _tag: "loginResult", ok: false, message: "the login finished without printing a token" }
