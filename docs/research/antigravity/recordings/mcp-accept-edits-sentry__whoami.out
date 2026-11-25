@@ -1,0 +1,27 @@
+initialize mcpCapabilities={"http":true}
+authenticate ok
+2.0s session 30363dc5-715e-48a3-9127-6002e0903a4a
+2.0s UPDATE current_mode_update {"currentModeId":"accept-edits"}
+set_mode accept-edits: {}
+2.0s UPDATE config_option_update {"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gemini-3.8-flash","options":[{"value":"gemini-3.8-flash","name":"Gemini 3.8 Flash"},{"value":"claude-sonnet-4-6","name":"Claude Sonnet 4.6 (Thinking)"},{"value":"claude-opus-4-6-thinking","name":"Claude Opus 4.6 (Thinking)"},{"value":"gpt-oss-120b-medium","name":"GPT-OSS 120B (Medium)"}]},{"id":"thought_level","name":"Th
+2.0s UPDATE usage_update {"used":0,"size":1048576}
+5.4s UPDATE usage_update {"used":9592,"size":1048576}
+5.4s UPDATE tool_call {"toolCallId":"call_10297890783570087366","name":"mcp_tools_sentry__whoami","args":{"toolSummary":"Check Sentry identity"},"status":"in_progress","kind":"other","title":"Run mcp_tools_sentry__whoami","rawInput":{"toolSummary":"Check Sentry identity"}}
+5.4s UPDATE tool_call_update {"toolCallId":"call_10297890783570087366","name":"mcp_tools_sentry__whoami","args":{"toolSummary":"Check Sentry identity"},"status":"pending","kind":"other","title":"Run mcp_tools_sentry__whoami","rawInput":{"toolSummary":"Check Sentry identity"}}
+5.4s PERMISSION title="Run mcp_tools_sentry__whoami" kind=other status=pending
+     options=["allow_once:allow:Allow","reject_once:deny:Deny"]
+5.4s UPDATE tool_call_update {"toolCallId":"call_10297890783570087366","name":"mcp_tools_sentry__whoami","args":{"toolSummary":"Check Sentry identity"},"status":"in_progress","kind":"other","title":"Run mcp_tools_sentry__whoami","rawInput":{"toolSummary":"Check Sentry identity"}}
+5.4s UPDATE tool_call_update {"toolCallId":"call_10297890783570087366","name":"mcp_tools_sentry__whoami","args":{"toolSummary":"Check Sentry identity"},"status":"completed","kind":"other","title":"Run mcp_tools_sentry__whoami","rawInput":{"toolSummary":"Check Sentry identity"}}
+6.1s UPDATE session_info_update {"title":"Sentry Whoami Tool Execution"}
+8.6s UPDATE usage_update {"used":9843,"size":1048576}
+8.6s prompt result: {"stopReason":"end_turn","usage":{"inputTokens":11716,"outputTokens":306,"cachedReadTokens":7413,"cachedWriteTokens":0,"thoughtTokens":251,"totalTokens":19435}}
+agent text: "The `sentry__whoami` tool returned timestamps for creation and completion along with the text \"result of sentry__whoami\"."
+MCP requests the fake received:
+   server/discover authorization=Bearer spike-token
+   initialize authorization=Bearer spike-token
+   notifications/initialized authorization=Bearer spike-token
+   tools/list authorization=Bearer spike-token
+   notifications/roots/list_changed authorization=Bearer spike-token
+   notifications/roots/list_changed authorization=Bearer spike-token
+   tools/call sentry__whoami authorization=Bearer spike-token
+tools called: ["sentry__whoami"]

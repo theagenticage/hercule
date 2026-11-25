@@ -1,0 +1,20 @@
+initialize mcpCapabilities={"http":true}
+authenticate ok
+1.8s session 8d48f830-7952-4235-8b82-7f9f0324dac8
+1.8s UPDATE usage_update {"used":0,"size":1048576}
+3.1s UPDATE session_info_update {"title":"Search Sentry Issues Tool"}
+3.9s UPDATE usage_update {"used":10218,"size":1048576}
+4.0s UPDATE tool_call {"toolCallId":"call_16529000494595360575","name":"mcp_tools_sentry__search_issues","args":{"query":"","toolSummary":"Search Sentry issues"},"status":"in_progress","kind":"other","title":"Run mcp_tools_sentry__search_issues","rawInput":{"query":"","toolSummary":"Search Sentry issues"}}
+4.6s UPDATE tool_call_update {"toolCallId":"call_16529000494595360575","name":"mcp_tools_sentry__search_issues","args":{"query":"","toolSummary":"Search Sentry issues"},"status":"completed","kind":"other","title":"Run mcp_tools_sentry__search_issues","rawInput":{"query":"","toolSummary":"Search Sentry issues"}}
+5.7s UPDATE usage_update {"used":10423,"size":1048576}
+5.7s prompt result: {"stopReason":"end_turn","usage":{"inputTokens":12357,"outputTokens":206,"cachedReadTokens":8078,"cachedWriteTokens":0,"thoughtTokens":146,"totalTokens":20641}}
+agent text: "The `sentry__search_issues` tool returned `\"result of sentry__search_issues\"`."
+MCP requests the fake received:
+   server/discover authorization=Bearer spike-token
+   initialize authorization=Bearer spike-token
+   notifications/initialized authorization=Bearer spike-token
+   tools/list authorization=Bearer spike-token
+   notifications/roots/list_changed authorization=Bearer spike-token
+   notifications/roots/list_changed authorization=Bearer spike-token
+   tools/call sentry__search_issues authorization=Bearer spike-token
+tools called: ["sentry__search_issues"]
