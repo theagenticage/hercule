@@ -2,13 +2,14 @@
  * Compares a reported harness version against this build's two limits: the
  * floor, the oldest version a runner may run, and the tested maximum, the
  * newest version anyone has tested. For Claude Code and Codex both are the
- * version the build was made against; pi has a tested maximum above its
- * floor. They change only when the dependency or the tests change, which is
- * why the verdict is computed at read time rather than stored with the
- * snapshot.
+ * version the build was made against, and for Antigravity both are the one
+ * release anyone has run; pi has a tested maximum above its floor. They change
+ * only when the dependency or the tests change, which is why the verdict is
+ * computed at read time rather than stored with the snapshot.
  */
 import type { VersionVerdict } from "@hercule/contract";
 import {
+  ANTIGRAVITY_VERSION,
   CLAUDE_CODE_VERSION,
   CODEX_VERSION,
   PI_TESTED_VERSION,
@@ -29,6 +30,7 @@ const LIMITS: ReadonlyMap<string, VersionLimits> = new Map([
   ["claude-code/claude-code", { floor: CLAUDE_CODE_VERSION, testedMax: CLAUDE_CODE_VERSION }],
   ["codex/codex", { floor: CODEX_VERSION, testedMax: CODEX_VERSION }],
   ["pi/pi", { floor: PI_VERSION, testedMax: PI_TESTED_VERSION }],
+  ["antigravity/antigravity", { floor: ANTIGRAVITY_VERSION, testedMax: ANTIGRAVITY_VERSION }],
 ]);
 
 /**

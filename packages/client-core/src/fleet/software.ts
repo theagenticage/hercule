@@ -149,6 +149,7 @@ const DESCRIPTIONS: ReadonlyMap<string, string> = new Map([
   ["claude-code/claude-code", "Runs Claude models."],
   ["codex/codex", "Runs OpenAI models."],
   ["pi/pi", "Runs any model with an API key."],
+  ["antigravity/antigravity", "Runs Gemini models."],
   ["git", "Every workspace is a git checkout."],
   ["gh", "GitHub's CLI. Agents open pull requests with it."],
   ["node", "JavaScript runtime."],

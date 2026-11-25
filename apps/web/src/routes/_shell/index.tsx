@@ -60,7 +60,7 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No runner has been detected on this machine."
-        lead="A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to sign in to them."
+        lead="A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - Claude Code, Codex, pi, Antigravity - and offer to sign in to them."
         fine={
           <>
             Run{" "}
@@ -78,7 +78,7 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No coding harness was found on this machine."
-        lead="A thread runs on a coding harness - Claude Code, Codex or pi. Install one on this machine and Hercule will offer to sign in to it."
+        lead="A thread runs on a coding harness - Claude Code, Codex, pi or Antigravity. Install one on this machine and Hercule will offer to sign in to it."
         fine={
           <Link to="/fleet/$runnerId" params={{ runnerId: local.id }} className="underline">
             Install one from Fleet

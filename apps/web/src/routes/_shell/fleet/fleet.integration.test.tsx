@@ -225,6 +225,9 @@ describe("Fleet", () => {
     await openApp([]);
 
     expect(readPageText()).toContain("no runner has joined yet");
+    for (const harness of ["Claude Code", "Codex", "pi", "Antigravity"]) {
+      expect(readPageText()).toContain(harness);
+    }
     expect(readPageText()).toContain(
       "A runner probes the machine it runs on and reports what it found. Until one joins, Hercule knows nothing about this machine.",
     );

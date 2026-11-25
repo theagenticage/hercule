@@ -16,7 +16,7 @@
  * Codex has no SDK to read a version from, so its release is written here as a
  * literal: a devDependency on `@openai/codex` would pull a per-platform binary
  * into `node_modules` for one string. pi's release is a literal for the same
- * reason.
+ * reason. Antigravity has no SDK either, so its release is a literal too.
  */
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
@@ -39,6 +39,12 @@ const PI_RELEASE = "1.3.0";
  * supported release and the newest tested one are no longer the same.
  */
 const PI_TESTED_RELEASE = "1.6.0";
+
+/**
+ * The one Antigravity release (Google's CLI `agy`) anyone has run so far. It is
+ * both the oldest version a machine may run and the newest one tested.
+ */
+const ANTIGRAVITY_RELEASE = "1.5.15";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { version } = (await Bun.file(`${root}package.json`).json()) as { version: string };
@@ -63,5 +69,8 @@ export const PI_VERSION = ${JSON.stringify(PI_RELEASE)};
 
 /** The newest pi release this build's adapter was tested against. */
 export const PI_TESTED_VERSION = ${JSON.stringify(PI_TESTED_RELEASE)};
+
+/** The Antigravity release this build was tested against, which is also the oldest it supports. */
+export const ANTIGRAVITY_VERSION = ${JSON.stringify(ANTIGRAVITY_RELEASE)};
 `,
 );

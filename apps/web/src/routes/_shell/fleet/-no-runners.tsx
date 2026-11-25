@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { Button, Group } from "@hercule/ui";
 
 /** The harnesses a runner reports on the machine it runs on. */
-const HARNESSES = ["Claude Code", "Codex", "pi"];
+const HARNESSES = ["Claude Code", "Codex", "pi", "Antigravity"];
 
 /**
  * The fleet screen before any runner has joined. Nothing has checked which

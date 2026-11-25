@@ -48,7 +48,7 @@ const PROBE_CONCURRENCY = 4;
  * `present: false`. The fleet needs to know which machines can host a
  * harness's sessions and which cannot.
  */
-const HARNESS_BINARIES = ["claude", "codex", "pi"] as const;
+const HARNESS_BINARIES = ["claude", "codex", "pi", "agy"] as const;
 
 /**
  * The `docker` fact says whether the binary is on the PATH, found with

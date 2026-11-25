@@ -404,9 +404,15 @@ describe("describeFleetSoftware toolchain cells", () => {
 describe("describeFleetSoftware detail", () => {
   it("describes what a tool is, and nothing for a harness it does not know", () => {
     const stranger: Harness = { ...HARNESSES[0]!, id: "acme/acme", displayName: "Acme" };
-    const grid = describeGrid([ATLAS], [...HARNESSES, stranger]);
+    const antigravity: Harness = {
+      ...HARNESSES[0]!,
+      id: "antigravity/antigravity",
+      displayName: "Antigravity",
+    };
+    const grid = describeGrid([ATLAS], [...HARNESSES, stranger, antigravity]);
 
     expect(findRow(grid, CLAUDE).detail.description).toBe("Runs Claude models.");
+    expect(findRow(grid, "antigravity/antigravity").detail.description).toBe("Runs Gemini models.");
     expect(findRow(grid, "runner").detail.description).toBe("Hosts the sessions on a machine.");
     expect(findRow(grid, "git").detail.description).toBe("Every workspace is a git checkout.");
     expect(findRow(grid, "acme/acme").detail.description).toBeNull();
