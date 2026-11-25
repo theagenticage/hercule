@@ -44,6 +44,13 @@ export const ModelDescriptor = Schema.Struct({
   /** A model the harness no longer lists but still forwards to the API. */
   isLegacy: Schema.optionalKey(Schema.Boolean),
   /**
+   * Who made the model, such as `Anthropic`: the name a catalog groups models
+   * by. A provider's Default Selection can hold the models of one maker only,
+   * and compares the name exactly, case included. Absent when the source does
+   * not say, and then the model is in no selection by maker.
+   */
+  maker: Schema.optionalKey(Fact),
+  /**
    * Whether the model takes images as input, and how large, or `null` when it
    * takes none. The composer and the controller refuse images for a model
    * whose value is `null`.
@@ -77,8 +84,6 @@ export type ModelDescriptor = Schema.Schema.Type<typeof ModelDescriptor>;
  * provider gives only some of them and an absent key means unknown.
  */
 export const ModelDetails = Schema.Struct({
-  /** Who made the model, such as `Anthropic`, as the catalog groups models by maker. */
-  maker: Schema.optionalKey(Fact),
   /** The most tokens the model reads in one request. */
   contextWindow: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
   /** The most tokens the model writes in one answer. */
@@ -129,9 +134,9 @@ export const MODEL_DECLARATION_KEYS = [
  * can run it: the model's id and name, the numbers it needs to size a request,
  * whether it reasons, and whether it takes images. It is the part of a
  * `CatalogModel` that a runner reads. The rest (options, prices, maker,
- * release date) is only for showing and filtering in the controller's
- * clients, so it never crosses to a runner. The fields are the catalog
- * model's own, with the same names and rules.
+ * release date) is only for the controller: its clients show and filter on it
+ * and its Default Selection uses the maker, so it never crosses to a runner.
+ * The fields are the catalog model's own, with the same names and rules.
  */
 export const ModelDeclaration = CatalogModel.mapFields(Struct.pick(MODEL_DECLARATION_KEYS));
 

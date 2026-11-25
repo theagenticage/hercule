@@ -1,8 +1,9 @@
 /**
- * Plain text helpers for the controller: cutting a text to a length, and
- * keeping the end of a text. They know nothing of any domain, so any domain
- * may import this file. Lengths count characters as a string's `length`
- * does (UTF-16 code units), and no cut leaves half of an emoji behind.
+ * Plain text helpers for the controller: cutting a text to a length, keeping
+ * the end of a text, and capitalizing its first letter. They know nothing of
+ * any domain, so any domain may import this file. Lengths count characters
+ * as a string's `length` does (UTF-16 code units), and no cut leaves half of
+ * an emoji behind.
  */
 
 const ELLIPSIS = "…";
@@ -69,3 +70,6 @@ export const takeTail = (text: string, max: number): string => {
   const startsInsidePair = /[\uDC00-\uDFFF]/.test(text.charAt(start));
   return text.slice(startsInsidePair ? start + 1 : start);
 };
+
+/** Returns `text` with its first letter in upper case. Returns an empty text unchanged. */
+export const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);

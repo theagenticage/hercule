@@ -1061,6 +1061,23 @@ describe("a plugin that registers a provider", () => {
     expect(message).toContain("api-key");
   });
 
+  it("is errored when it names a maker for the default selection none, which selects no models", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...buildProviderDefinition("vendor"),
+          defaultSelection: "none",
+          defaultSelectionMaker: "Google",
+        },
+      ]),
+    );
+
+    expect(message).toContain(
+      "the provider vendor/vendor declares the defaultSelectionMaker Google but its defaultSelection is none",
+    );
+    expect(message).toContain("declare defaultSelection current-models");
+  });
+
   it("is errored when an account kind has a setup step the core cannot draw", async () => {
     const definition = buildProviderDefinition("vendor");
     const message = await bootAndReadError(

@@ -1,12 +1,12 @@
 /**
- * Reads the newest release of each registered harness from the public npm
- * registry and stores what it found, so `harness.query` can tell the user
- * that a newer release exists (spec 06 section 2).
+ * Reads the newest release of each registered harness from the place that
+ * publishes it, and stores what it found, so `harness.query` can tell the
+ * user that a newer release exists (spec 06 section 2).
  *
- * The read is one HTTPS GET per harness to `<registry>/<package>/latest`. The
- * answer is the package's `package.json` for its newest release, of which
- * only `version` is used. A failed read keeps the last good version and
- * stores why it failed.
+ * A harness is published on the public npm registry or as GitHub releases.
+ * The read is one HTTPS GET per harness to that publisher. The answer
+ * describes the newest release, and only the field that holds its version is
+ * used. A failed read keeps the last good version and stores why it failed.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -24,25 +24,28 @@ import type { HarnessLatestRelease } from "@hercule/contract";
 import type { HarnessReleaseSource } from "@hercule/plugin-host";
 import { announce, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
+import { capitalize } from "../text";
 import { harnessRepository } from "./repository";
 
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
+const GITHUB_API_URL = "https://api.github.com";
 
-/** How long the registry has to answer. A hung registry must not hold the hourly read open. */
+/** How long a publisher has to answer. A hung publisher must not hold the hourly read open. */
 const RELEASE_READ_TIMEOUT: Duration.Duration = Duration.seconds(10);
 
 /**
- * The most bytes of the registry's answer that are read. The answers are
- * about 5 kB today. A body that never ends must not fill memory.
+ * The most bytes of a publisher's answer that are read. The npm registry's
+ * answers are about 5 kB and GitHub's about 18 kB today. A body that never
+ * ends must not fill memory.
  */
 const MAX_BODY_BYTES = 256 * 1024;
 
 /** The longest version that is stored. A real one is under 50 characters. */
 const MAX_VERSION_LENGTH = 100;
 
-/** The part of the registry's answer that is used. Other fields are ignored. */
+/** Parses a publisher's answer into its fields, which are looked up by name. A body that is not a JSON object is `None`. */
 const decodeLatestBody = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ version: Schema.optionalKey(Schema.Unknown) })),
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
 
 /** Three numbers, then an optional `-prerelease` and an optional `+build`. */
@@ -52,7 +55,7 @@ const SEMANTIC_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)
 const isSemanticVersion = (value: unknown): value is string =>
   typeof value === "string" && value.length <= MAX_VERSION_LENGTH && SEMANTIC_VERSION.test(value);
 
-/** What one read of the registry found. `error` is a sentence for the user. */
+/** What one read of a publisher found. `error` is a sentence for the user. */
 type ReleaseReadOutcome =
   | { readonly _tag: "read"; readonly version: string; readonly checkedAt: string }
   | { readonly _tag: "failed"; readonly error: string };
@@ -60,9 +63,44 @@ type ReleaseReadOutcome =
 /** Builds the outcome of a read that failed, with the sentence to show the user. */
 const buildFailedRead = (error: string): ReleaseReadOutcome => ({ _tag: "failed", error });
 
-/** Returns the URL of the newest release of an npm package. The name is encoded so it cannot change the path. */
-const buildLatestUrl = (source: HarnessReleaseSource): string =>
-  `${NPM_REGISTRY_URL}/${encodeURIComponent(source.package)}/latest`;
+/** What differs between publishers in the request for the newest release and in reading the answer. */
+interface ReleaseRequest {
+  /** The publisher's name as it is written inside a sentence, such as "the npm registry". */
+  readonly publisher: string;
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  /** The field of the answer that holds the version. */
+  readonly versionField: string;
+}
+
+/**
+ * Builds the request for the newest release of a harness, from where the
+ * harness says it is published.
+ *
+ * - npm: the name of the package is encoded so that it cannot change the
+ *   path, and the answer's `version` is read.
+ * - GitHub: the repository is checked at registration, and the answer's
+ *   `tag_name` is read. GitHub refuses a request that has no `user-agent`,
+ *   so one is sent, with the product name only. No credential is sent.
+ */
+const buildReleaseRequest = (source: HarnessReleaseSource): ReleaseRequest => {
+  switch (source.kind) {
+    case "npm":
+      return {
+        publisher: "the npm registry",
+        url: `${NPM_REGISTRY_URL}/${encodeURIComponent(source.package)}/latest`,
+        headers: {},
+        versionField: "version",
+      };
+    case "github-releases":
+      return {
+        publisher: "GitHub",
+        url: `${GITHUB_API_URL}/repos/${source.repository}/releases/latest`,
+        headers: { "user-agent": "Hercule" },
+        versionField: "tag_name",
+      };
+  }
+};
 
 /**
  * Reads the response body as text, and returns `None` when it is longer than
@@ -119,37 +157,39 @@ const make = Effect.gen(function* () {
   // response body that nobody read.
   const client = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
 
-  /** Reads the newest release of one package. Never fails: every problem is a `failed` outcome. */
+  /** Reads the newest release of one harness. Never fails: every problem is a `failed` outcome. */
   const readLatestRelease = (
     source: HarnessReleaseSource,
-  ): Effect.Effect<ReleaseReadOutcome, never, never> =>
-    Effect.gen(function* () {
-      const response = yield* client.get(buildLatestUrl(source));
-      if (response.status !== 200) {
-        return buildFailedRead(`The npm registry answered ${response.status}.`);
-      }
+  ): Effect.Effect<ReleaseReadOutcome, never, never> => {
+    const { publisher, url, headers, versionField } = buildReleaseRequest(source);
+    const sentenceSubject = capitalize(publisher);
+    return Effect.gen(function* () {
+      const response = yield* client.get(url, { headers });
+      if (response.status !== 200)
+        return buildFailedRead(`${sentenceSubject} answered ${response.status}.`);
       const text = yield* readBoundedText(response);
       const body = Option.flatMap(text, decodeLatestBody);
       if (Option.isNone(body))
-        return buildFailedRead("The npm registry's answer could not be read.");
-      if (body.value.version === undefined) {
-        return buildFailedRead("The npm registry's answer had no version.");
-      }
-      if (!isSemanticVersion(body.value.version)) {
-        return buildFailedRead("The npm registry's answer could not be read.");
+        return buildFailedRead(`${sentenceSubject}'s answer could not be read.`);
+      const version = body.value[versionField];
+      if (version === undefined)
+        return buildFailedRead(`${sentenceSubject}'s answer had no version.`);
+      if (!isSemanticVersion(version)) {
+        return buildFailedRead(`${sentenceSubject}'s answer could not be read.`);
       }
       const checkedAt = new Date(yield* Clock.currentTimeMillis).toISOString();
-      return { _tag: "read" as const, version: body.value.version, checkedAt };
+      return { _tag: "read" as const, version, checkedAt };
     }).pipe(
       Effect.scoped,
-      // The registry is a third party: no trace headers go to it.
+      // The publisher is a third party: no trace headers go to it.
       Effect.provideService(HttpClient.TracerPropagationEnabled, false),
       Effect.timeoutOrElse({
         duration: RELEASE_READ_TIMEOUT,
-        orElse: () => Effect.succeed(buildFailedRead("The npm registry did not answer in time.")),
+        orElse: () => Effect.succeed(buildFailedRead(`${sentenceSubject} did not answer in time.`)),
       }),
-      Effect.catch(() => Effect.succeed(buildFailedRead("Could not reach the npm registry."))),
+      Effect.catch(() => Effect.succeed(buildFailedRead(`Could not reach ${publisher}.`))),
     );
+  };
 
   /**
    * Reads the newest release of each of the harnesses, all at once, and then

@@ -159,15 +159,31 @@ const NpmPackageName = Schema.String.check(
 );
 
 /**
- * Where a harness's releases are published, so the controller can read the
- * newest one. The `kind` is a literal so that another publisher can be added
- * later as another member of a union. `npm` means the public npm registry, and
- * `package` is the package's name there, such as `@openai/codex`.
+ * The name of a GitHub repository, `<owner>/<name>`, such as
+ * `google-antigravity/antigravity-cli`. Each part is made of letters, digits,
+ * `.`, `_` and `-`, because the controller puts the name into a URL. A part
+ * may not be `.` or `..`, which would change the path of that URL.
  */
-export const HarnessReleaseSource = Schema.Struct({
-  kind: Schema.Literal("npm"),
-  package: NpmPackageName,
-});
+const GithubRepositoryName = Schema.String.check(
+  Schema.isPattern(/^(?!\.\.?\/)[A-Za-z0-9._-]+\/(?!\.\.?$)[A-Za-z0-9._-]+$/, {
+    message:
+      "A GitHub repository must be written <owner>/<name>, such as google-antigravity/antigravity-cli. Each part may hold only letters, digits, . _ and -, and may not be . or .., because it goes into a URL.",
+  }),
+);
+
+/**
+ * Where a harness's releases are published, so the controller can read the
+ * newest one. It is one of:
+ *
+ * - `npm`: the public npm registry. `package` is the package's name there,
+ *   such as `@openai/codex`.
+ * - `github-releases`: the releases of a GitHub repository. `repository` is
+ *   `<owner>/<name>`, such as `google-antigravity/antigravity-cli`.
+ */
+export const HarnessReleaseSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("npm"), package: NpmPackageName }),
+  Schema.Struct({ kind: Schema.Literal("github-releases"), repository: GithubRepositoryName }),
+]);
 
 export type HarnessReleaseSource = Schema.Schema.Type<typeof HarnessReleaseSource>;
 

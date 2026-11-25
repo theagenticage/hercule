@@ -1,6 +1,6 @@
-/** Tests cutting a text to a length and taking the end of a text. */
+/** Tests cutting a text to a length, taking the end of a text, and capitalizing it. */
 import { describe, expect, it } from "vitest";
-import { cutText, cutTextAtWord, takeTail } from "./text";
+import { capitalize, cutText, cutTextAtWord, takeTail } from "./text";
 
 describe("cutTextAtWord", () => {
   it.each([
@@ -103,5 +103,14 @@ describe("takeTail", () => {
 
   it("keeps a whole pair when the cut falls before it", () => {
     expect(takeTail("a😀b", 3)).toBe("😀b");
+  });
+});
+
+describe("capitalize", () => {
+  it.each([
+    ["a sentence", "the npm registry answered 404.", "The npm registry answered 404."],
+    ["an empty text", "", ""],
+  ])("returns %s with its first letter in upper case", (_name, text, expected) => {
+    expect(capitalize(text)).toBe(expected);
   });
 });
