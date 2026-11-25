@@ -261,13 +261,9 @@ describe("Settings > Connections", () => {
     const error = field.getByRole("alert");
     await error.waitFor();
     expect((await error.textContent())?.trim()).toBe("GitHub rejected the token.");
-    // The controller asked GitHub who the token belongs to, with the pasted
-    // token. It also reads a public release from GitHub without a credential,
-    // so only the requests that carry one are compared.
+    // The controller asked GitHub who the token belongs to, with the pasted token.
     expect(
-      standIn.requests
-        .filter(({ headers }) => headers["authorization"] !== undefined)
-        .map(({ method, path, headers }) => [method, path, headers["authorization"]]),
+      standIn.requests.map(({ method, path, headers }) => [method, path, headers["authorization"]]),
     ).toEqual([["GET", "/user", `Bearer ${FAKE_TOKEN}`]]);
     expect(await readConnections(client)).toEqual([]);
 

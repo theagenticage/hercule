@@ -14,7 +14,7 @@ import { HarnessReleases } from "../../harnesses";
 import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../../absorbing";
 
-/** How often the latest releases are read. Four small requests an hour. */
+/** How often the latest releases are read. One small request per harness. */
 const HARNESS_RELEASE_CHECK_INTERVAL: Duration.Duration = Duration.hours(1);
 
 /**

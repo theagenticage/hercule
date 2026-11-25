@@ -87,7 +87,7 @@ export interface ProviderRow {
   readonly probe: boolean;
 }
 
-const NO_ADAPTER = "no adapter in this runner build";
+const NO_ADAPTER = "this machine's Hercule cannot run the harness";
 
 const VERDICTS: Readonly<Record<string, string>> = {
   "below-floor": "below the version this build was tested with",
