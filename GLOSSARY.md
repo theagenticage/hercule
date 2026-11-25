@@ -454,7 +454,7 @@ The models one Provider Account may use, as last read for it, each with the date
 _Avoid_: catalog (bare; that is the plugin catalog), model list
 
 **Default Selection**:
-The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* A provider may also say that only the current models of one maker enter it. Google does, because it resells models of other makers and its menu starts with Google's own ([spec 06 section 17.3](./docs/spec/06-providers.md)). Tentative (Rogier, 2026-11-24).
+The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* A provider may also say that only the current models of one maker enter it. Google does, because it resells models of other makers and its menu starts with Google's own ([spec 06 section 17.3](./docs/spec/06-providers.md)).
 _Avoid_: featured models, recommended models
 
 **Model Profile**:
@@ -474,7 +474,7 @@ The session-level permission axis a harness adapter enforces: approval-required,
 _Avoid_: permission mode (vendor term), runtime mode
 
 **Capability Snapshot**:
-What one runner found out about one Provider Account in one harness: whether it is signed in and as whom, and the models it lists. Never obtained by creating or mutating a harness conversation. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* One exception: Antigravity's probe opens a conversation, sends no prompt and closes it ([spec 06 section 3.2](./docs/spec/06-providers.md)).
+What one runner found out about one Provider Account in one harness: whether it is signed in and as whom, and the models it lists. Never obtained by creating or mutating a harness conversation. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* One exception may be needed: Antigravity's probe opens a conversation, sends no prompt and closes it, if `agy` lists its models in no other way ([spec 06 section 3.2](./docs/spec/06-providers.md)).
 _Avoid_: provider status
 
 **Text Generation**:

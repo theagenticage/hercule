@@ -32,5 +32,7 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 [#1280](https://github.com/theagenticage/hercule/issues/1280) adds two more: `@hercule/plugin-antigravity`, with the
 `antigravity/antigravity` harness, and `@hercule/plugin-google`, with the `google/google` provider
 and a subscription signed in on each machine. Its Default Selection holds Google's own models only.
+They are registered once the first version of Antigravity is complete, with the last of
+[#1282](https://github.com/theagenticage/hercule/issues/1282) and [#1293](https://github.com/theagenticage/hercule/issues/1293) to merge.
 
 The runner entrypoint imports no plugin host and no plugin package.
