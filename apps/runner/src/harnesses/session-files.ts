@@ -1,5 +1,5 @@
 /**
- * What the three adapters share in `deleteSessionFiles`: reading a folder that
+ * What the adapters share in `deleteSessionFiles`: reading a folder that
  * may not exist, and removing the files found, turning a failure into an
  * `AdapterFailed` whose message is the reason the operating system gave.
  */

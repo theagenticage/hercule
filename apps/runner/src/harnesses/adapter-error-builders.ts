@@ -5,7 +5,7 @@
  * runs the session.
  *
  * `harnessName` is the name the user knows the harness by: "Claude Code",
- * "Codex" or "pi". A `reason` is text from the harness or the operating
+ * "Codex", "pi" or "Antigravity". A `reason` is text from the harness or the operating
  * system. It ends the message, after a lead-in that describes what happened,
  * and the builders cut the message to the protocol's limit because a longer
  * one cannot be put in an error.

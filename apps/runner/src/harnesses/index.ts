@@ -28,6 +28,7 @@ import type {
 } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
 import type { ResolvedSkillReference } from "../skills";
+import { ANTIGRAVITY, antigravity } from "./antigravity";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
@@ -308,7 +309,7 @@ export interface InstallOutcome {
 
 export interface HarnessAdapter {
   readonly harnessId: string;
-  /** The name the user knows the harness by: "Claude Code", "Codex" or "pi". */
+  /** The name the user knows the harness by: "Claude Code", "Codex", "pi" or "Antigravity". */
   readonly harnessName: string;
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
@@ -515,6 +516,7 @@ const ADAPTERS: ReadonlyMap<string, HarnessAdapter> = new Map([
   [CLAUDE_CODE, claudeCode],
   [CODEX, codex],
   [PI, pi],
+  [ANTIGRAVITY, antigravity],
 ]);
 
 /** Every adapter in this build. The session supervisor listens to the events of each. */
@@ -535,7 +537,7 @@ export { PROBE_DEADLINE, buildFailedProbe, limitProbeModels } from "./probe";
 
 export { removeStaleSetupTokenFolders } from "./setup-token-folder";
 
-export { CLAUDE_CODE, CODEX, PI };
+export { ANTIGRAVITY, CLAUDE_CODE, CODEX, PI };
 
 /**
  * Returns the message for a harness that this runner has no adapter for,
