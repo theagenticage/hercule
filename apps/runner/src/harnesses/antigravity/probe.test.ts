@@ -12,6 +12,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -203,9 +204,17 @@ describe("a signed-in account", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const probing = yield* Effect.forkChild(probeWith(home, fake));
-        // The account is read by the time the process has been stopped.
+        // Advancing the test clock fires the account's deadline as well as the
+        // version's, so wait for the account's work to be done. Its last
+        // cleanup, after the process has stopped, removes the log folder; only
+        // the second read of the login file comes after that.
         yield* Effect.promise(() =>
-          waitUntil("stopped the process", () => fake.spawns[0]?.hasExited === true),
+          waitUntil(
+            "removed the log folder",
+            () =>
+              fake.spawns[0]?.hasExited === true &&
+              !readdirSync(home).some((name) => name.startsWith("hercule-log-")),
+          ),
         );
         yield* Effect.promise(settle);
         yield* TestClock.adjust(PROBE_DEADLINE);
