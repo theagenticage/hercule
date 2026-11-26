@@ -203,30 +203,26 @@ const resumeConversation = (
 
 /**
  * Makes a new conversation and stores its id in the Harness Home, replacing
- * the id there. Once `agy`'s reply has arrived, the store cannot be
- * interrupted, so the id is not lost after that. An interruption while
- * `session/new` is waiting, such as the probe's deadline, stops `agy` before
- * its reply: the conversation may exist, but nobody knows its id, and the next
- * probe makes another. That costs one conversation per probe only for as long
- * as `session/new` keeps timing out. Fails with the error of
- * `newConversation`, or with an `AdapterFailed` when the id is not a UUID or
- * cannot be stored: a probe that forgot its conversation would make a new one
- * every time.
+ * the id there. `agy` hands the id over as soon as it replies, and the store
+ * runs in that same step, which cannot be interrupted, and before the check of
+ * the new worker's login. So a failing check still leaves the id stored, and
+ * the next probe resumes the conversation instead of making another.
  *
- * When the check of the new worker's login fails, the conversation exists but
- * its id is not stored. That is accepted: the failure repeats at every probe
- * and is loud, so one forgotten conversation does not pile up.
+ * An interruption while `session/new` is waiting, such as the probe's
+ * deadline, stops `agy` before its reply: the conversation may exist, but
+ * nobody knows its id, and the next probe makes another. That costs one
+ * conversation per probe only for as long as `session/new` keeps timing out.
+ *
+ * Fails with the error of `newConversation`, or with an `AdapterFailed` when
+ * the id is not a UUID or cannot be stored: a probe that forgot its
+ * conversation would make a new one every time.
  */
 const makeConversation = (
   agy: SignedInAgy,
   home: string,
   folder: string,
 ): Effect.Effect<OpenedConversation, AcpError | AdapterError> =>
-  Effect.uninterruptibleMask((restore) =>
-    restore(agy.newConversation({ cwd: folder, mcpServers: [] })).pipe(
-      Effect.tap((conversation) => writeConversationId(home, conversation.id)),
-    ),
-  );
+  agy.newConversation({ cwd: folder, mcpServers: [] }, (id) => writeConversationId(home, id));
 
 /** Tells `agy` the conversation is over. It never fails and never takes longer than `CLOSE_DEADLINE`. */
 const closeConversation = (connection: AcpConnection, id: string): Effect.Effect<void> =>

@@ -462,13 +462,30 @@ describe("an account the probe cannot trust", () => {
     expect(result.models).toEqual([]);
   });
 
-  it("is an error when the worker that session/new started does not use this account's login", async () => {
+  it("is an error when the worker that session/new started does not use this account's login, and the next probe resumes that conversation", async () => {
     const { home, fake } = setUp({ workerLogs: { "session/new": KEYRING_LINE } });
 
     const result = await probeAccount(home, fake);
+    const next = buildFakeAgy(home);
+    const nextResult = await probeAccount(home, next);
 
     expect(result.auth.status).toBe("error");
     expect(result.models).toEqual([]);
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+    expect(receivedMethods(next)).not.toContain("session/new");
+    expect(nextResult.auth.status).toBe("ok");
+  });
+
+  it("is an error when a refused resume leaves a worker log and session/new then writes none", async () => {
+    const { home, fake } = setUp({ workerLogs: { "session/new": [] } });
+    writeFileSync(storedIdPath(home), `${OTHER_CONVERSATION}\n`);
+
+    const result = await probeAccount(home, fake);
+
+    expect(receivedMethods(fake)).toEqual(
+      expect.arrayContaining(["session/resume", "session/new"]),
+    );
+    expect(result.auth.status).toBe("error");
   });
 });
 

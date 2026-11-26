@@ -118,6 +118,16 @@ describe("a text generation", () => {
   });
 });
 
+describe("the sessions of the adapter", () => {
+  it("lists none, and stopping a session it does not hold does nothing", async () => {
+    const adapter = buildAdapter(createSignedInHome());
+
+    expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
+    await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
+    expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
+  });
+});
+
 describe("a session", () => {
   it("cannot start yet, and says so", async () => {
     const home = createSignedInHome();

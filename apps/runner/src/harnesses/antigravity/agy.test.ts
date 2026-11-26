@@ -19,6 +19,7 @@ import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
 import { answerWith } from "@hercule/acp/testing";
+import { buildAdapterFailed } from "../adapter-error-builders";
 import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercule/protocol";
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
@@ -434,6 +435,7 @@ describe("the sign that a process uses the account's own login", () => {
 
 describe("opening a conversation", () => {
   const REQUEST = { cwd: "/work", mcpServers: [] };
+  const keepNothing = () => Effect.void;
 
   /** Opens `agy`, runs `use` on it, and returns what `use` returned or failed with. */
   const withSignedIn = <A, E>(
@@ -452,7 +454,9 @@ describe("opening a conversation", () => {
   it("starts a new conversation and returns its id and settings", async () => {
     const { home, fake } = setUp();
 
-    const result = await withSignedIn(fake, home, (signedIn) => signedIn.newConversation(REQUEST));
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.newConversation(REQUEST, keepNothing),
+    );
 
     expect(Result.isSuccess(result) && result.success.id).toBe(CONVERSATION);
     expect(Result.isSuccess(result) && result.success.settings.configOptions).not.toEqual([]);
@@ -482,7 +486,7 @@ describe("opening a conversation", () => {
     });
     const isHeld = async ({ home, fake }: typeof plain) => {
       const result = await withSignedIn(fake, home, (signedIn) =>
-        signedIn.newConversation(REQUEST),
+        signedIn.newConversation(REQUEST, keepNothing),
       );
       return Result.isSuccess(result) && result.success.isHeldByGoogle;
     };
@@ -497,7 +501,9 @@ describe("opening a conversation", () => {
       scripts: { "session/new": refuse(-32000, "Authentication required") },
     });
 
-    const result = await withSignedIn(fake, home, (signedIn) => signedIn.newConversation(REQUEST));
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.newConversation(REQUEST, keepNothing),
+    );
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(HarnessLoginMissing);
   });
@@ -525,7 +531,7 @@ describe("opening a conversation", () => {
 
       const result = await withSignedIn(fake, home, (signedIn) =>
         open_ === "newConversation"
-          ? signedIn.newConversation(REQUEST)
+          ? signedIn.newConversation(REQUEST, keepNothing)
           : signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
       );
 
@@ -534,10 +540,54 @@ describe("opening a conversation", () => {
     },
   );
 
+  it("hands the id of a new conversation over before it checks the worker, so a failed check still has it", async () => {
+    const { home, fake } = setUp({ workerLogs: { "session/new": KEYRING_LINE } });
+    const kept: Array<string> = [];
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.newConversation(REQUEST, (id) =>
+        Effect.sync(() => {
+          kept.push(id);
+        }),
+      ),
+    );
+
+    expect(kept).toEqual([CONVERSATION]);
+    expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
+  });
+
+  it("fails when the id cannot be kept", async () => {
+    const { home, fake } = setUp();
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.newConversation(REQUEST, () => Effect.fail(buildAdapterFailed("No room."))),
+    );
+
+    expect(Result.isFailure(result) && result.failure.message).toBe("No room.");
+  });
+
+  it("does not take the worker log of a refused resume for the worker of the next call", async () => {
+    // A refused resume starts a worker and logs, as the real agy does.
+    const { home, fake } = setUp({ workerLogs: { "session/new": [] } });
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      Effect.gen(function* () {
+        yield* Effect.ignore(
+          signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+        );
+        return yield* signedIn.newConversation(REQUEST, keepNothing);
+      }),
+    );
+
+    expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
+  });
+
   it("fails when the worker it started does not use the account's own login", async () => {
     const { home, fake } = setUp({ workerLogs: { "session/new": KEYRING_LINE } });
 
-    const result = await withSignedIn(fake, home, (signedIn) => signedIn.newConversation(REQUEST));
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.newConversation(REQUEST, keepNothing),
+    );
 
     expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
   });

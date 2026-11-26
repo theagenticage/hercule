@@ -79,9 +79,16 @@ export interface SignedInAgy {
    * own login, and with the `AcpError` of the call for any other failure. It
    * does not fail for an account that cannot be used (see
    * `OpenedConversation.isHeldByGoogle` and `checkAccountUsable`).
+   *
+   * `keepId`, when given, is called with the id of the new conversation as
+   * soon as `agy` replies, in the same step that cannot be interrupted, and
+   * before the check of the worker's login. A caller that keeps the id there
+   * never loses a conversation to a failed check. When `keepId` fails, so does
+   * the call.
    */
   readonly newConversation: (
     request: NewSessionRequest,
+    keepId?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
   /** Resumes the conversation `request.nativeSessionId`. Fails like `newConversation`. */
   readonly resumeConversation: (
@@ -551,45 +558,65 @@ export const openSignedInAgy = (
 
     const reply = yield* authenticateAccount(connection, folder, failOpening);
 
-    const knownWorkers = new Set<string>();
-    const requireFreshOwnLogin = Effect.gen(function* () {
-      const signals = yield* readWorkerLogSignals(folder);
-      const hasNewWorker = signals.workers.some((name) => !knownWorkers.has(name));
-      for (const name of signals.workers) knownWorkers.add(name);
-      if (!hasNewWorker || !signals.allUseOwnLogin) {
-        return yield* Effect.fail(
-          buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} did not confirm that it uses this account's own login, so Hercule does not use it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
-          ),
-        );
-      }
-      return signals.isHeldByGoogle;
-    });
-    yield* requireFreshOwnLogin;
+    /**
+     * Requires that a worker started after `workersBefore` was read uses the
+     * account's own login, and that every worker does. Fails with an
+     * `AdapterFailed` otherwise. Returns whether Google holds the account.
+     */
+    const requireFreshOwnLogin = (workersBefore: ReadonlySet<string>) =>
+      Effect.gen(function* () {
+        const signals = yield* readWorkerLogSignals(folder);
+        const hasNewWorker = signals.workers.some((name) => !workersBefore.has(name));
+        if (!hasNewWorker || !signals.allUseOwnLogin) {
+          return yield* Effect.fail(
+            buildAdapterFailed(
+              `${ANTIGRAVITY_NAME} did not confirm that it uses this account's own login, so Hercule does not use it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+            ),
+          );
+        }
+        return signals.isHeldByGoogle;
+      });
+    yield* requireFreshOwnLogin(new Set());
 
     /**
-     * Runs the call that opens a conversation, requires proof for the worker
-     * it started, and returns the call's reply with whether Google holds the
-     * account.
+     * Runs the call that opens a conversation, and requires proof for the
+     * worker it started: a worker log that was not there before the call. The
+     * logs are read before each call, not after the last success, because a
+     * refused call leaves a worker log too (measured on `agy` 1.5.15: a
+     * refused `session/resume` starts a worker, and its log shows file
+     * storage). Without that, the log of a refused call would pass for the
+     * worker of the next one. `afterReply` runs when the call has answered, in
+     * the same step that cannot be interrupted, before the check. Returns the
+     * call's reply with whether Google holds the account.
      */
     const openConversation = <A>(
       call: Effect.Effect<A, AcpError>,
+      afterReply: (reply: A) => Effect.Effect<void, AdapterError>,
     ): Effect.Effect<readonly [A, boolean], AcpError | AdapterError> =>
-      call.pipe(
-        Effect.catch((error) =>
-          Effect.fail(isSignInRequired(error) ? buildHarnessLoginMissing(ANTIGRAVITY_NAME) : error),
-        ),
-        Effect.flatMap((answer) =>
-          Effect.map(requireFreshOwnLogin, (isHeldByGoogle) => [answer, isHeldByGoogle] as const),
-        ),
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const workersBefore = new Set((yield* restore(readWorkerLogSignals(folder))).workers);
+          const answer = yield* restore(call).pipe(
+            Effect.catch((error) =>
+              Effect.fail(
+                isSignInRequired(error) ? buildHarnessLoginMissing(ANTIGRAVITY_NAME) : error,
+              ),
+            ),
+          );
+          yield* afterReply(answer);
+          const isHeldByGoogle = yield* restore(requireFreshOwnLogin(workersBefore));
+          return [answer, isHeldByGoogle] as const;
+        }),
       );
 
     return {
       connection,
       planLabel: readPlanLabel(reply.meta),
-      newConversation: (request) =>
+      newConversation: (request, keepId) =>
         Effect.map(
-          openConversation(connection.newSession(request)),
+          openConversation(connection.newSession(request), (opened) =>
+            keepId === undefined ? Effect.void : keepId(opened.nativeSessionId),
+          ),
           ([opened, isHeldByGoogle]) => ({
             id: opened.nativeSessionId,
             settings: opened,
@@ -598,7 +625,7 @@ export const openSignedInAgy = (
         ),
       resumeConversation: (request) =>
         Effect.map(
-          openConversation(connection.resumeSession(request)),
+          openConversation(connection.resumeSession(request), () => Effect.void),
           ([settings, isHeldByGoogle]) => ({
             id: request.nativeSessionId,
             settings,
