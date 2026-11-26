@@ -255,18 +255,31 @@ describe("the guard of the approval files", () => {
     expect(isDenied(decide(join(folder, "sub"), ".agents/hooks.json"))).toBe(true);
   });
 
-  it("denies every path inside the skills directory, and only when it has one", () => {
+  it("denies every path inside each read-only folder, and only when it lists them", () => {
     const { root, cwd } = setUpRepo();
     const skills = join(createScratchHome("hook-skills"), "skills");
+    const other = join(createScratchHome("hook-other"), "docs");
     mkdirSync(skills);
+    mkdirSync(other);
     symlinkSync(skills, join(root, "skills-link"));
-    const env = { ...GUARDED, HERCULE_AGY_SKILLS_DIR: skills };
+    const env = { ...GUARDED, HERCULE_AGY_READ_ONLY_FOLDERS: JSON.stringify([skills, other]) };
 
+    expect(isDenied(decide(cwd, join(other, "a.md"), env))).toBe(true);
     expect(isDenied(decide(cwd, join(skills, "deploy", "SKILL.md"), env))).toBe(true);
     expect(isDenied(decide(cwd, join(root, "skills-link", ".git", "config"), env))).toBe(true);
     expect(decide(cwd, join(skills, "..", "other.md"), env)).toBe("");
     expect(decide(cwd, join(skills, "deploy", "SKILL.md"))).toBe("");
   });
+
+  it.each(["{", '"x"', "[1]", '{"a":"b"}'])(
+    "denies an edit when the read-only folders value is %s",
+    (value) => {
+      const { cwd } = setUpRepo();
+      const env = { ...GUARDED, HERCULE_AGY_READ_ONLY_FOLDERS: value };
+
+      expect(isDenied(decide(cwd, "src/a.ts", env))).toBe(true);
+    },
+  );
 
   describe("the folders a plugins.json lists", () => {
     const writePluginsFile = (root: string, content: string) =>

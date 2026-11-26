@@ -46,7 +46,7 @@ import {
   GUARD_VARIABLE,
   PLUGINS_FOLDER_NAME,
   SHELL_TOOL_NAME,
-  SKILLS_DIRECTORY_VARIABLE,
+  READ_ONLY_FOLDERS_VARIABLE,
   decideAfterHookFailure,
   decidePreToolHook,
 } from "./pre-tool-hook-policy";
@@ -274,10 +274,24 @@ const readPluginFolders = (file: string, root: string): ReadonlyArray<string> =>
   }
 };
 
+/**
+ * Parses the JSON array of folder paths in `READ_ONLY_FOLDERS_VARIABLE`. An
+ * unset or empty value lists none. Throws when the value is not an array of
+ * strings, so that the hook denies the edit instead of guarding fewer folders.
+ */
+const parseReadOnlyFolders = (value: string | undefined): ReadonlyArray<string> => {
+  if (!value) return [];
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || !parsed.every((entry) => typeof entry === "string")) {
+    throw new Error(`${READ_ONLY_FOLDERS_VARIABLE} is not a JSON array of paths.`);
+  }
+  return parsed;
+};
+
 /** Returns every place the agent may not change in a session in `cwd` (spec 06 section 8.1). */
 const buildGuardedPlaces = (
   cwd: string,
-  skillsDirectory: string | undefined,
+  readOnlyFolders: ReadonlyArray<string>,
 ): ReadonlyArray<GuardedPlace> => {
   const places: Array<GuardedPlace> = [];
   for (const root of listConfigRoots(cwd)) {
@@ -295,7 +309,7 @@ const buildGuardedPlaces = (
       for (const plugins of listed) places.push(buildPlace(plugins, true));
     }
   }
-  if (skillsDirectory !== undefined) places.push(buildPlace(skillsDirectory, true));
+  for (const folder of readOnlyFolders) places.push(buildPlace(folder, true));
   return places;
 };
 
@@ -325,7 +339,10 @@ export const answerPreToolCall = (
       try {
         if (typeof path === "string") {
           const target = buildEditTarget(call.cwd, path);
-          const places = buildGuardedPlaces(call.cwd, env[SKILLS_DIRECTORY_VARIABLE] || undefined);
+          const places = buildGuardedPlaces(
+            call.cwd,
+            parseReadOnlyFolders(env[READ_ONLY_FOLDERS_VARIABLE]),
+          );
           editTarget = target;
           guardedPlaces = places;
         }

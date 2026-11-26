@@ -26,8 +26,12 @@ export const GUARD_VARIABLE = "HERCULE_AGY_GUARD";
 /** Set only on the `agy` process of a session in Approval required. The hook then denies web search, because a search runs without a card. */
 export const DENY_WEB_SEARCH_VARIABLE = "HERCULE_AGY_DENY_WEB_SEARCH";
 
-/** Holds the session's additional skills directory, when it has one. The hook denies every change inside it. */
-export const SKILLS_DIRECTORY_VARIABLE = "HERCULE_AGY_SKILLS_DIR";
+/**
+ * Holds a JSON array of the absolute paths of the folders Hercule gives the
+ * agent to read and never to change (the session's additional directories).
+ * The hook denies every change inside each of them.
+ */
+export const READ_ONLY_FOLDERS_VARIABLE = "HERCULE_AGY_READ_ONLY_FOLDERS";
 
 /** The name of the tool that runs a shell command. */
 export const SHELL_TOOL_NAME = "run_command";

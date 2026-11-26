@@ -1200,10 +1200,10 @@ describe("the pre-tool hook of a session", () => {
     expect(unwatched.env).not.toHaveProperty("HERCULE_SESSION_MARKS_DIR");
   });
 
-  it("sets the guard and the web search denial on the agy process by access mode, and the skills directory only when there is one", async () => {
+  it("sets the guard and the web search denial on the agy process by access mode, and the read-only folders only when the request has additional directories", async () => {
     const spawned = async (
       accessMode: "approval-required" | "auto-accept-edits" | "full-access",
-      additionalSkillsDirectory?: string,
+      additionalDirectories?: ReadonlyArray<string>,
     ) => {
       const home = createSignedInHome();
       const fake = buildFakeAgy(home);
@@ -1218,9 +1218,7 @@ describe("the pre-tool hook of a session", () => {
               request: {
                 cwd: "/work",
                 mcpServers: [],
-                ...(additionalSkillsDirectory === undefined
-                  ? {}
-                  : { additionalDirectories: [additionalSkillsDirectory] }),
+                ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
               },
             },
           }),
@@ -1229,16 +1227,21 @@ describe("the pre-tool hook of a session", () => {
       return fake.spawns[0]!.env;
     };
 
-    const approval = await spawned("approval-required", "/made/up/skills/../skills");
+    const approval = await spawned("approval-required", [
+      "/made/up/skills/../skills",
+      "/made/other",
+    ]);
     const edits = await spawned("auto-accept-edits");
     const full = await spawned("full-access");
 
     expect(approval["HERCULE_AGY_GUARD"]).toBe("1");
     expect(approval["HERCULE_AGY_DENY_WEB_SEARCH"]).toBe("1");
-    expect(approval["HERCULE_AGY_SKILLS_DIR"]).toBe("/made/up/skills");
+    expect(approval["HERCULE_AGY_READ_ONLY_FOLDERS"]).toBe(
+      JSON.stringify(["/made/up/skills", "/made/other"]),
+    );
     expect(edits["HERCULE_AGY_GUARD"]).toBe("1");
     expect(edits).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
-    expect(edits).not.toHaveProperty("HERCULE_AGY_SKILLS_DIR");
+    expect(edits).not.toHaveProperty("HERCULE_AGY_READ_ONLY_FOLDERS");
     expect(full).not.toHaveProperty("HERCULE_AGY_GUARD");
     expect(full).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
   });

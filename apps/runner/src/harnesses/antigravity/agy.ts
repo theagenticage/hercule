@@ -48,7 +48,7 @@ import {
   GUARD_VARIABLE,
   HOOK_MATCHER,
   PRE_TOOL_HOOK_VERB,
-  SKILLS_DIRECTORY_VARIABLE,
+  READ_ONLY_FOLDERS_VARIABLE,
 } from "./pre-tool-hook-policy";
 
 /** The name the user knows the harness by. */
@@ -540,8 +540,8 @@ interface HookRules {
   readonly guardsApprovalFiles: boolean;
   /** Whether the hook denies `search_web`. */
   readonly deniesWebSearch: boolean;
-  /** The folder in which the hook denies every change, when there is one. */
-  readonly skillsDirectory?: string;
+  /** The folders in which the hook denies every change: the ones Hercule gives the agent to read only. */
+  readonly readOnlyFolders: ReadonlyArray<string>;
 }
 
 /**
@@ -562,7 +562,7 @@ interface HookRules {
  * - `SESSION_MARKS_DIR_VARIABLE` is `sessionMarksDir` when one is given, which
  *   only a session with an edit watch has. The hook in the Harness Home reads
  *   it, and only the `agy` process of that session sees it.
- * - `GUARD_VARIABLE`, `DENY_WEB_SEARCH_VARIABLE` and `SKILLS_DIRECTORY_VARIABLE`
+ * - `GUARD_VARIABLE`, `DENY_WEB_SEARCH_VARIABLE` and `READ_ONLY_FOLDERS_VARIABLE`
  *   come from `hookRules`. The hook script in the Harness Home reads them, and
  *   only the `agy` process of that session sees them. A process without them
  *   gets the unguarded hook: no denials.
@@ -592,8 +592,8 @@ const buildAgyEnv = (
   if (sessionMarksDir !== undefined) env[SESSION_MARKS_DIR_VARIABLE] = sessionMarksDir;
   if (hookRules?.guardsApprovalFiles === true) env[GUARD_VARIABLE] = "1";
   if (hookRules?.deniesWebSearch === true) env[DENY_WEB_SEARCH_VARIABLE] = "1";
-  if (hookRules?.skillsDirectory !== undefined)
-    env[SKILLS_DIRECTORY_VARIABLE] = hookRules.skillsDirectory;
+  if (hookRules !== undefined && hookRules.readOnlyFolders.length > 0)
+    env[READ_ONLY_FOLDERS_VARIABLE] = JSON.stringify(hookRules.readOnlyFolders);
   return env;
 };
 
@@ -1022,10 +1022,8 @@ export const openSignedInAgy = (
         ? {
             guardsApprovalFiles: options.purpose.accessMode !== "full-access",
             deniesWebSearch: options.purpose.accessMode === "approval-required",
-            // The session's skills folder is the one additional directory of its request.
-            ...(request.additionalDirectories?.[0] === undefined
-              ? {}
-              : { skillsDirectory: resolve(request.additionalDirectories[0]) }),
+            // Every additional directory is a folder Hercule gives the agent to read, never to change.
+            readOnlyFolders: (request.additionalDirectories ?? []).map((folder) => resolve(folder)),
           }
         : undefined,
     );

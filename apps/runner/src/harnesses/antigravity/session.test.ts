@@ -490,7 +490,7 @@ describe("the skills folder of a session", () => {
     );
   });
 
-  it("is the folder the hook guards, on the agy process of a start and of a resume", () => {
+  it("is a read-only folder of the hook, on the agy process of a start and of a resume", () => {
     const skills = createSessionSkills({ library: ["review"] });
     const resumedSkills = createSessionSkills({ library: ["review"] });
     const skillFile = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
@@ -508,7 +508,9 @@ describe("the skills folder of a session", () => {
           yield* h.start();
 
           const env = h.fake.spawns[0]!.env;
-          expect(env["HERCULE_AGY_SKILLS_DIR"]).toBe(skills.sessionSkillsFolder);
+          expect(env["HERCULE_AGY_READ_ONLY_FOLDERS"]).toBe(
+            JSON.stringify([skills.sessionSkillsFolder]),
+          );
           expect(JSON.parse(readDecision(env)) as { decision: string }).toMatchObject({
             decision: "deny",
           });
@@ -520,8 +522,8 @@ describe("the skills folder of a session", () => {
           Effect.gen(function* () {
             yield* h.start(RESUME);
 
-            expect(h.fake.spawns[0]!.env["HERCULE_AGY_SKILLS_DIR"]).toBe(
-              resumedSkills.sessionSkillsFolder,
+            expect(h.fake.spawns[0]!.env["HERCULE_AGY_READ_ONLY_FOLDERS"]).toBe(
+              JSON.stringify([resumedSkills.sessionSkillsFolder]),
             );
           }),
         { fake: withConversation, context: () => resumedSkills.context },
