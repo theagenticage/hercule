@@ -93,7 +93,7 @@ export const encodeHookRules = (rules: HookRules): string => JSON.stringify(rule
  * shape of `HookRules`. This file reads its input with plain checks instead
  * of `effect/Schema`, which costs about 8 ms of start time at every tool call.
  */
-const decodeHookRules = (text: string): HookRules | undefined => {
+export const decodeHookRules = (text: string): HookRules | undefined => {
   let json: unknown;
   try {
     json = JSON.parse(text);

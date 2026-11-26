@@ -30,7 +30,7 @@ import {
   writeTestImage,
 } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
-import { answerPreToolCall } from "./pre-tool-hook";
+import { answerPreToolCall, decodeHookRules } from "./pre-tool-hook";
 import {
   answerConfigChange,
   answerNewSession,
@@ -494,6 +494,8 @@ describe("the skills folder of a session", () => {
     const skills = createSessionSkills({ library: ["review"] });
     const resumedSkills = createSessionSkills({ library: ["review"] });
     const skillFile = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
+    const readReadOnlyFolders = (env: Readonly<Record<string, string | undefined>>) =>
+      decodeHookRules(env["HERCULE_AGY_HOOK_RULES"] ?? "")?.readOnlyFolders;
     const readDecision = (env: Readonly<Record<string, string | undefined>>) =>
       answerPreToolCall(
         JSON.stringify({
@@ -508,9 +510,7 @@ describe("the skills folder of a session", () => {
           yield* h.start();
 
           const env = h.fake.spawns[0]!.env;
-          expect(env["HERCULE_AGY_READ_ONLY_FOLDERS"]).toBe(
-            JSON.stringify([skills.sessionSkillsFolder]),
-          );
+          expect(readReadOnlyFolders(env)).toEqual([skills.sessionSkillsFolder]);
           expect(JSON.parse(readDecision(env)) as { decision: string }).toMatchObject({
             decision: "deny",
           });
@@ -522,9 +522,9 @@ describe("the skills folder of a session", () => {
           Effect.gen(function* () {
             yield* h.start(RESUME);
 
-            expect(h.fake.spawns[0]!.env["HERCULE_AGY_READ_ONLY_FOLDERS"]).toBe(
-              JSON.stringify([resumedSkills.sessionSkillsFolder]),
-            );
+            expect(readReadOnlyFolders(h.fake.spawns[0]!.env)).toEqual([
+              resumedSkills.sessionSkillsFolder,
+            ]);
           }),
         { fake: withConversation, context: () => resumedSkills.context },
       ),
