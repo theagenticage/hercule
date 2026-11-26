@@ -7,6 +7,15 @@ Research for Rogier, 2026-11-25. Two questions:
 
 Nothing was built, no cluster was touched, and no Amp command was run. Every fact about Amp comes from Amp's own pages, read on 2026-11-25. Each section separates **Verified** (a source says it) from **Inferred** (my reading). This repository is public, so nothing about the company's own deployment is written here; [section 7](#7-what-only-the-companys-own-deployment-can-answer) lists what only that deployment can answer.
 
+## Decisions
+
+| Date | Decision |
+|---|---|
+| 2026-11-26 | Rogier: the long-term goal is the cluster's compute (option B2). The short-term way there is Amp's agent (option C). |
+| 2026-11-26 | Rogier: an orb thread may have fewer controls than a normal thread. Some of what Hercule offers in a thread may be turned off there, as long as it is said. |
+| 2026-11-26 | Rogier: take the three-verb contract (spawn, pause, delete) for machines created on demand, on the condition that it works cleanly with the runners as they are. [Section 5.6](#56-does-the-contract-fit-the-runners-as-they-are) checks that condition against the code. |
+| 2026-11-26 | Fact from Rogier: his controller is reachable only over Tailscale, so a machine in the work cluster cannot dial it today. A Tailscale integration for Hercule is being looked at in another thread and is not close. |
+
 ## 0. The short answer
 
 - **An orb is not a machine Hercule can rent.** It is the working area of exactly one Amp thread. Amp's server creates it, pauses it and deletes it, and Amp's server also runs the agent: the model loop and the model calls happen at ampcode.com, and the orb only runs the agent's tools. What the company hosts is the hands, not the head.
@@ -358,16 +367,63 @@ A sketch, to show what the idea would look like in Hercule's terms. Not a design
   5. Long-lived credentials stay out of the machine: short-lived Git tokens, model keys added at the edge.
   6. Default-deny network with an allowlist.
 
+### 5.6 Does the contract fit the runners as they are?
+
+Checked against the code on `main` at `571cae48c`. Short answer: **yes for the runner, which needs no change at all. Everything new is on the controller, plus one new capability on the pool runner.**
+
+**What already works, unchanged**
+
+| The contract needs | What the code does today | Where |
+|---|---|---|
+| A machine joins with no person present | The join is one request with a single-use token. The controller already starts a runner this way itself: its local runner writes `{"join": true}` on stdout and gets the token on stdin, so the token is never in the arguments or the environment. | `packages/protocol/src/index.ts` (`JoinRequest`, `LocalAnnouncement`, `LocalEnrolment`), `apps/controller/src/runners/join-tokens.ts` |
+| Pause must leave sessions resumable | On SIGTERM the runner stops every session with reason `runner_restart`, waits up to 5 seconds for the harnesses, and sends `goodbye`. The controller then records the runner as `offline`, not `unreachable`. | `apps/runner/src/index.ts`, `apps/runner/src/sessions/supervisor.ts` (`SHUTDOWN_STOP_BOUND`), `apps/runner/src/socket.ts` |
+| Input for a paused machine must wait, not fail | A resume is refused only when the runner is retired or draining, not when it is offline. A session whose runner is not connected goes back to `queued` with its input. | `apps/controller/src/daemon/sessions/resuming.ts`, `apps/controller/src/daemon/sessions/dispatch.ts` |
+| Work must start by itself when the machine is back | "Everything that can give a runner room comes back through here: … or a new connection." A reconnect starts the queued sessions. | same file |
+| The machine's identity must survive a pause | Credential, controller identity and storage folder are in `runner.json` and the runner's storage directory, both under Hercule Home. If the Home is on the saved disk, the same runner comes back. | `apps/runner/src/runner-file.ts` |
+| An account must work on a machine that is seconds old | "A key or token account can run on a runner that was never probed". | `apps/controller/src/provider-accounts/account-runners.ts` |
+| Delete must clean up the records | Retiring a runner ends its sessions and marks its workspaces lost, in one transaction. | `apps/controller/src/runners/service.ts` (`retire`), `apps/controller/src/daemon/runners/retirement.ts` |
+| A paused machine must not raise alarms | Only an `unreachable` runner gets the "Runner … is unreachable" notification, and only sessions that are still `starting`, `idle` or `busy` on a runner that stays away are ended as lost. A clean pause leaves neither. | `apps/controller/src/runners/connections.ts`, `apps/controller/src/daemon/sessions/lost-runners.ts` |
+
+So one pause and resume, seen from the runner, is a restart on the same disk. The runner cannot tell the difference, which is the property wanted.
+
+**What is new, all on the controller side**
+
+1. **A record of pools and of which runner is a pool's machine.** Today nothing says "this runner was made by that pool for this thread".
+2. **The wake.** A session that becomes `queued` on a runner that is `offline` and belongs to a pool makes the controller ask the pool to spawn that machine. Today such a session only waits.
+3. **The pause.** When a machine has no turn running and no open Request for some minutes, the controller asks the pool to pause it. Nothing decides this today, because a runner never goes away on the controller's initiative.
+4. **The three verbs on the wire.** A capability a pool runner lists at hello, and frames for spawn, pause and delete with their results. The protocol has no frame today by which the controller tells a runner to do something to another machine.
+5. **Placement.** One more step: "the target is a pool, so first get a machine". The rest of placement is unchanged, because after the join the machine is an ordinary runner that was named explicitly.
+
+**What does not fit cleanly, and needs a decision**
+
+- **Pause order.** The runner must have said goodbye before the snapshot is taken, or the controller sees silence, calls the runner `unreachable` and notifies the user. So "pause" in the dispatch program means: send SIGTERM to the runner, wait for it to exit, then snapshot. The contract has to say that, because a dispatch program that snapshots first would look like it works.
+- **The Fleet fills up.** Each machine is a runner row with a name from the name list, a metrics history and a place in every runner menu. One machine per thread makes dozens. The screens need a rule, such as showing a pool as one row.
+- **A retired runner stays forever.** "Nothing is deleted: the row and everything linked to it stay". Fine for a few machines a year, a lot for one per thread.
+- **Every new machine is probed.** A facts report in which a harness appears makes the controller probe each account and harness pair there (spec 03 §4.2), and each probe starts a harness process. On a machine that lives for one thread that is cost with little use. Key and token accounts do not need it.
+- **Every new machine clones from nothing.** A workspace is a worktree of a bare repository kept per Resource per runner (ADR 0039), and a new machine has none. For a large repository the first workspace is slow. This is what Amp's project snapshot solves, and why the contract carries a snapshot id on `spawn`.
+- **A Thread's background processes.** A Thread has no idle timeout today, so that a dev server it started keeps running (spec 03 §6.2). Pausing the machine ends it. That is the same trade Amp makes, with `.agents/resume` to start services again; Hercule would need its own answer or would have to say plainly that a pause ends them.
+- **Reaching the controller.** The machine dials the controller. With a controller that is only on a tailnet, the machine needs a way onto the tailnet first.
+
+None of these touches the runner's code or the session model. They are controller rules and screens.
+
+### 5.7 A path that respects all of this
+
+1. **Now: option C**, the Amp harness with its work in an orb. It uses the orbs, needs no machine concept, and the CLI runs on a runner Rogier already has, so the controller's address does not matter. It starts as `full-access` only and without steering, and says so.
+2. **Next: the contract with a driver at home.** A pool runner on a Linux machine that is already in the Fleet, with a dispatch program for Docker (spawn is `docker run`, pause is stop and `docker commit`, delete is `docker rm`). The machine is on the same network as the controller, so reachability is not in the way. This proves the five controller-side pieces and the pause order with nothing from Amp or the work cluster.
+3. **Later: the work cluster as a second driver**, once a new machine can get onto the tailnet by itself. Only the dispatch program is new at that point.
+
+Step 2 can be built before, after or beside step 1. They share no code.
+
 ## 6. Open questions for Rogier
 
-1. **Is the goal the cluster's compute, or Amp's agent?**
+1. **Is the goal the cluster's compute, or Amp's agent?** *Answered 2026-11-26: compute in the long term, Amp's agent as the short-term way there.*
    - Compute: "I want my Hercule threads, with Claude Code on my own subscription token, to run in the work cluster." Then orbs are the wrong door, and B2 is the build.
    - Amp's agent: "I want threads that colleagues can also open in Amp, run by Amp's agent." Then C is the build.
 2. **May work code go through Amp's servers from a Hercule thread?** With A and C, what the agent reads and every command's output is stored at ampcode.com with the thread. The company already accepted that for Amp. With B2 nothing goes to Amp.
-3. **Is your controller reachable from the work cluster over TLS?** B2 needs it: a runner in the cluster dials the controller. A tailnet-only address is probably refused by the chart's egress rules. C does not need it: the CLI runs on a runner you already have.
+3. **Is your controller reachable from the work cluster over TLS?** *Answered 2026-11-26: no, it is on Tailscale only.* B2 needs it: a runner in the cluster dials the controller. A tailnet-only address is probably refused by the chart's egress rules. C does not need it: the CLI runs on a runner you already have.
 4. **One machine per thread, or shared machines?** Per thread: every thread gets its own sandbox (Amp's default type is 16 vCPU and 32 GiB) and cannot touch another thread's files. Shared: one sandbox hosts eight threads, costs an eighth, and isolates the eight from the cluster but not from each other.
 5. **Which accounts must work on on-demand machines?** Claude with the subscription token and any API key: fine today. Codex on a ChatGPT subscription: not without a sign-in inside each new machine.
-6. **Are approvals needed in an orb thread?** If "the orb is the sandbox, let it run" is acceptable, C can start as `full-access` only. If you want to approve commands from Hercule, that depends on a part of Amp I could not find documented.
+6. **Are approvals needed in an orb thread?** *Answered 2026-11-26: no. An orb thread may have fewer controls, as long as it is said.* If "the orb is the sandbox, let it run" is acceptable, C can start as `full-access` only. If you want to approve commands from Hercule, that depends on a part of Amp I could not find documented.
 7. **Who pays for orb minutes?** On Amp's Enterprise plan a self-hosted orb costs per CPU and GiB while it runs. Threads started from Hercule add to that bill like any other.
 8. **Should an orb thread look like it runs on a machine?** Either "Orb · work-orbs" is a property of the thread, and the Fleet does not know it; or each orb provider appears in the Fleet as a kind of machine that is not a runner. The second reads better and changes what "Fleet" means.
 
