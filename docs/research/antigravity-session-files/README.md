@@ -148,29 +148,16 @@ So the binary holds the format `"\n⚠ %s\n"` once, right next to `end_turn`: a 
 
 ## agy's own reader of these files
 
-The `agy` 1.5.15 binary (`/tmp/hercule-1283/agy/antigravity`, sha256 starting `7b004d26c3fdea25`) embeds a JavaScript "swarm monitor" (a pane that watches the members of a swarm of agents). It reads the same `transcript.jsonl` files. It was found with `bin-ctx.ts` by searching the binary for `function turnEnded`, `function stepFailure`, `const QUOTA_RE` and `function readTranscriptCached`. These are the lines that matter, in Google's code (13 lines, some elided with `...`):
+The `agy` 1.5.15 binary (`/tmp/hercule-1283/agy/antigravity`, sha256 starting `7b004d26c3fdea25`) embeds a JavaScript "swarm monitor" (a pane that watches the members of a swarm of agents). It reads the same `transcript.jsonl` files. It was found by searching the binary with `bin-ctx.ts` for the names of its functions. This note describes what that code shows, in our own words, and does not quote it. In short:
 
-```js
-function turnEnded(lines) {
-  const results = []; // tool results after the newest planner step, newest first
-  for (let i = lines.length - 1; i >= 0; i--) {
-    ... // parse the line; a torn line returns false
-    if (step.type === 'GENERIC') {
-      results.unshift(step);
-      continue;
-    }
-    if (step.type !== 'PLANNER_RESPONSE') return false;
-    const calls = Array.isArray(step.tool_calls) ? step.tool_calls : [];
-    if (calls.length === 0) return results.length === 0;
-...
-  const modelError = last.type === 'ERROR_MESSAGE';
-const QUOTA_RE = /RESOURCE_EXHAUSTED|quota|\b429\b|exhausted your capacity|rate.?limit/i;
-```
+- It tails the transcript by byte offset and inode, and holds back a last line that is cut off (torn) until the rest arrives.
+- A turn ends at a planner step that has no tool calls.
+- An `ERROR_MESSAGE` step is a model error.
 
 What it shows:
 
 - It tails the file and only reads what was appended. A comment above `readTranscriptCached` lists four cases: an exact `mtime`, size and inode match is a cache hit; a small append past the last read offset reads only the new bytes; a cold start or a large append reads the tail from the end; a missing `step_index` falls back to an incremental read or a full read. A changed inode or a smaller file means start again. This agrees with the finding that the files are only appended.
 - The turn-end rule: walking back from the newest line, the `GENERIC` steps (tool results) are collected until the newest `PLANNER_RESPONSE` is found. With no tool calls the turn has ended, provided no tool result came after it. With tool calls, the turn has ended only if one of the calls is `swarm_wait` and every call of the batch has a result and the result of `swarm_wait` is `DONE` (a result of the other calls does not matter; a call sent to the background is logged `RUNNING` and does not hold the turn). Any other newest step (a system message, user input, a model error being retried) means mid-turn. A torn last line counts as mid-turn, and the next read settles it. The comments there also say that results are logged in call order.
 - An `ERROR_MESSAGE` step is called `modelError` by `agy`: an error of the model call. `stepFailure` also treats a tool step with status `ERROR` as failed, but only after it has stayed the newest step for 60 seconds (the agent normally carries on after one).
-- The quota pattern: the text of the failed step is tested with `QUOTA_RE`, and a match is reported as kind `quota`, else `error`.
+- The text of a failed step is tested against a pattern for quota errors. A match is reported as kind `quota`, else `error`. The pattern itself is not copied here; Hercule matches the two quota texts it has recorded.
 - This reader sees an error only if an `ERROR_MESSAGE` step is in the transcript. In `failed-turn-network-watch` the transcript got none (finding 7).
