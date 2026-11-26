@@ -298,6 +298,18 @@ describe("Settings > System, text generation", () => {
     );
   });
 
+  it("shows why text generation cannot run, before any call has failed", async () => {
+    await openSystem({
+      model: null,
+      lastFailure: null,
+      unavailableReason: "Automatic finds no model",
+    });
+
+    expect(document.querySelector(".set-note")?.textContent).toBe(
+      "Unavailable: Automatic finds no model",
+    );
+  });
+
   it("shows no failure line when nothing has failed", async () => {
     await openSystem({ model: report(SONNET), lastFailure: null, unavailableReason: null });
     expect(document.querySelector(".set-note")).toBeNull();

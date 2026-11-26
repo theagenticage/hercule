@@ -369,14 +369,14 @@ describe("describeTextGenerationProblem", () => {
     );
   });
 
-  it("prefers the last failure over the reason text generation cannot run", () => {
+  it("prefers the reason text generation cannot run now over the last failure", () => {
     const status: TextGenerationStatus = {
       ...failed("timeout"),
       unavailableReason: "no runner is signed in",
     };
 
     expect(describeTextGenerationProblem("automatic", status, NOW)).toBe(
-      "Last failure 5 minutes ago - timed out: The call went wrong.",
+      "Unavailable: no runner is signed in",
     );
   });
 

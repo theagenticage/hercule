@@ -215,10 +215,11 @@ const FAILURE_REASON_WORDS = {
  *
  * - null when the setting is `off`: a failure from before it was turned off,
  *   or a reason it cannot run, no longer applies;
- * - the last failed call, such as "Last failure 5 minutes ago - timed out:
- *   The model did not answer in time.", when one is known;
- * - otherwise `Unavailable: <reason>` when the status holds a reason no text
- *   generation can run now, so the user sees it before a call fails;
+ * - `Unavailable: <reason>` when the status holds a reason no text generation
+ *   can run now. It comes first because it is true now, so the user sees it
+ *   before a call fails and a failure from before does not hide it;
+ * - otherwise the last failed call, such as "Last failure 5 minutes ago -
+ *   timed out: The model did not answer in time.", when one is known;
  * - otherwise null.
  *
  * The failure line names no model. The status does not carry which model
@@ -232,9 +233,8 @@ export const describeTextGenerationProblem = (
   now: Date,
 ): string | null => {
   if (stored === "off") return null;
-  if (status.lastFailure === null) {
-    return status.unavailableReason === null ? null : `Unavailable: ${status.unavailableReason}`;
-  }
+  if (status.unavailableReason !== null) return `Unavailable: ${status.unavailableReason}`;
+  if (status.lastFailure === null) return null;
   const { reason, message, at } = status.lastFailure;
   return `Last failure ${describeAge(at, now)} - ${FAILURE_REASON_WORDS[reason]}: ${message}`;
 };

@@ -97,8 +97,9 @@ function System(): JSX.Element {
 
 /**
  * Renders the row that picks the model that makes text generations, such as
- * a thread's title. Under it, a quiet line gives the last failure, unless
- * text generation is off or has not failed.
+ * a thread's title. Under it, a quiet line says why text generation does not
+ * work (it cannot run now, or its last call failed), and is left out when
+ * text generation is off or works.
  */
 function TextGenerationRow(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
@@ -121,7 +122,7 @@ function TextGenerationRow(): JSX.Element {
     modelProfiles,
     textGeneration,
   );
-  const failure = describeTextGenerationProblem(model.value, textGeneration, new Date());
+  const problem = describeTextGenerationProblem(model.value, textGeneration, new Date());
   return (
     <>
       <SettingRow
@@ -147,7 +148,7 @@ function TextGenerationRow(): JSX.Element {
           </span>
         )}
       />
-      {failure === null ? null : <p className="set-note">{failure}</p>}
+      {problem === null ? null : <p className="set-note">{problem}</p>}
     </>
   );
 }

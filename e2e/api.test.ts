@@ -222,9 +222,11 @@ describe("the first run and everything after it", () => {
       // model resolves, the status says why, and no call has failed yet.
       textGeneration: {
         model: null,
-        unavailableReason: expect.stringMatching(
-          /^no model is available for text generation; add an account that offers .+ small model and can run/,
-        ) as string,
+        // The API does not expose each provider's suggested model, so this
+        // lists the providers the binary registers today that suggest one,
+        // in registration order. Adding such a provider changes it.
+        unavailableReason:
+          "Automatic finds no model; add an account that offers Anthropic's, OpenAI's, Z.ai's, OpenCode's or MiniMax's small model and can run on an up-to-date runner",
         lastFailure: null,
       },
     });

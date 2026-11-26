@@ -89,11 +89,11 @@ const buildNoAutomaticMatchMessage = (providers: ReadonlyArray<RegisteredProvide
     .filter((provider) => provider.suggestedTextGenerationModel !== undefined)
     .map((provider) => `${provider.displayName}'s`);
   if (owners.length === 0) {
-    return "no model is available for text generation; pick a model in Settings › System";
+    return "Automatic finds no model, because no provider names a small model for it; pick a model in Settings › System";
   }
   const ownerList =
     owners.length === 1 ? owners[0]! : `${owners.slice(0, -1).join(", ")} or ${owners.at(-1)!}`;
-  return `no model is available for text generation; add an account that offers ${ownerList} small model and can run on an up-to-date runner, or pick a model in Settings › System`;
+  return `Automatic finds no model; add an account that offers ${ownerList} small model and can run on an up-to-date runner`;
 };
 
 const CHOSEN_ACCOUNT_GONE =

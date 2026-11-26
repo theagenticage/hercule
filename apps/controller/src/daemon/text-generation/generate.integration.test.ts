@@ -589,9 +589,8 @@ describe("the model automatic chooses", () => {
         });
         expect(await readStatus(arranged)).toMatchObject({
           model: null,
-          unavailableReason: expect.stringContaining(
-            "pick a model in Settings › System",
-          ) as unknown,
+          unavailableReason:
+            "Automatic finds no model; add an account that offers Anthropic's, OpenAI's or Z.ai's small model and can run on an up-to-date runner",
           lastFailure: { reason: "unavailable" },
         });
       },
@@ -799,7 +798,8 @@ describe("which runner makes the call", () => {
           ok: false,
           error: {
             reason: "unavailable",
-            message: expect.stringContaining("pick a model in Settings › System") as unknown,
+            message:
+              "Automatic finds no model; add an account that offers Anthropic's, OpenAI's or Z.ai's small model and can run on an up-to-date runner",
           },
         });
       },

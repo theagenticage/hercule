@@ -11,6 +11,8 @@ import { withTransaction } from "../db";
 import { inTransaction } from "../db/testing";
 import { PluginHost } from "../plugins";
 import { antigravity } from "@hercule/plugin-antigravity";
+import { anthropic } from "@hercule/plugin-anthropic";
+import { claudeCode } from "@hercule/plugin-claude-code";
 import { google } from "@hercule/plugin-google";
 import type { Plugin } from "@hercule/plugin-host";
 import { buildPluginStack, declareNoTextGeneration } from "../plugins/testing";
@@ -63,7 +65,7 @@ interface Fleet {
   ) => Effect.Effect<void, never, SqlClient.SqlClient>;
 }
 
-/** The shipped plugins, with the Codex harness (OpenAI's) unable to make text generations. */
+/** Returns the shipped plugins, with the Codex harness (OpenAI's) unable to make text generations. */
 const buildPluginsWithCodexUnableToGenerate = (): ReadonlyArray<Plugin> =>
   buildTextGenerationPlugins().map((plugin) =>
     plugin.manifest.id === "codex" ? declareNoTextGeneration(plugin) : plugin,
@@ -341,18 +343,33 @@ describe("automatic", () => {
     expect(keys.nothingAgain).toBe(keys.nothing);
   });
 
-  it("is unresolved, with a message that says why, when nothing matches", async () => {
-    const target = await run(({ openai, addRunner, snapshot }) =>
-      Effect.gen(function* () {
-        const runner = yield* addRunner();
-        yield* snapshot(openai, runner, probed("ok", "other"));
-        return yield* resolve.pipe(Effect.orDie);
-      }),
-    );
+  describe("the message when nothing matches", () => {
+    // No runner is connected, so Automatic finds no match whatever the plugins.
+    const readNoMatchMessage = (plugins?: ReadonlyArray<Plugin>) =>
+      run(() => resolve.pipe(Effect.orDie), plugins);
 
-    expect(target).toMatchObject({
-      _tag: "unresolved",
-      message: expect.stringContaining("add an account that offers") as unknown,
+    it("names the small model of every provider that suggests one, in registration order", async () => {
+      expect(await readNoMatchMessage()).toMatchObject({
+        _tag: "unresolved",
+        message:
+          "Automatic finds no model; add an account that offers Anthropic's, OpenAI's or Z.ai's small model and can run on an up-to-date runner",
+      });
+    });
+
+    it("names the one provider that suggests a model", async () => {
+      expect(await readNoMatchMessage([anthropic, claudeCode])).toMatchObject({
+        _tag: "unresolved",
+        message:
+          "Automatic finds no model; add an account that offers Anthropic's small model and can run on an up-to-date runner",
+      });
+    });
+
+    it("says to pick a model when no provider suggests one", async () => {
+      expect(await readNoMatchMessage([google, antigravity])).toMatchObject({
+        _tag: "unresolved",
+        message:
+          "Automatic finds no model, because no provider names a small model for it; pick a model in Settings › System",
+      });
     });
   });
 
