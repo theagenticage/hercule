@@ -628,6 +628,7 @@ export const startAgySession = (
         cwd,
         handlers,
         purpose: { kind: "session", accessMode, request },
+        ...(seam.hookLauncher === undefined ? {} : { hookLauncher: seam.hookLauncher }),
       }).pipe(Scope.provide(processScope));
       const connection: AcpConnection = agy.connection;
 

@@ -59,6 +59,7 @@ import { runProcess, spawnAgy } from "../process";
 import type { AdapterTurnInput, HarnessAdapter, SessionStartContext } from "../index";
 import { NO_USER_MATERIAL } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { REAL_HOOK_LAUNCHER } from "./real-agy-session.testing";
 import { findAgyTestBinary } from "./agy-binary.testing";
 import { buildContext, TEST_SESSION_TOKEN } from "./fake-agy.testing";
 import { APP_DATA_DIR } from "./harness-home";
@@ -85,7 +86,11 @@ const INTERRUPT_MS = 5_000;
 type Event<Tag extends HarnessEvent["_tag"]> = Extract<HarnessEvent, { _tag: Tag }>;
 type OpenedRequest = Event<"request.opened">["request"];
 
-const adapter: HarnessAdapter = makeAntigravityAdapter({ spawn: spawnAgy, run: runProcess });
+const adapter: HarnessAdapter = makeAntigravityAdapter({
+  spawn: spawnAgy,
+  run: runProcess,
+  hookLauncher: REAL_HOOK_LAUNCHER,
+});
 
 const scratchFolders: Array<string> = [];
 const startedSessions = new Set<string>();
@@ -1095,5 +1100,136 @@ describe.skipIf(skipReason !== undefined)(
       },
       TEST_MS * 3,
     );
+
+    // The tests below run the hook Hercule ships into the Harness Home, as
+    // `hercule antigravity-pre-tool-hook` from source (spec 06 section 8.1).
+    describe("the pre-tool hook", () => {
+      /** Asks for the edit tool in neutral words, because a model once refused a plain request to write a hooks file. */
+      const buildWritePrompt = (path: string, content: string): string =>
+        `I am testing how a file tool treats configuration paths. Use your write_file tool to create the file ${path} with exactly this content: ${content} Pass the path verbatim. Then reply with the tool's result verbatim.`;
+
+      /** All the text of the events, for finding the words of a denial wherever the adapter put them. */
+      const textOf = (events: ReadonlyArray<HarnessEvent>): string => JSON.stringify(events);
+
+      const GUARD_REASON = "Hercule does not let the agent change";
+
+      it(
+        "in Auto-accept edits denies the edit tool a write to .agents/hooks.json, with Hercule's reason, and the file is not made",
+        async () => {
+          const session = await startLiveSession({ accessMode: "auto-accept-edits" });
+          const turn = await runTurn(session, buildWritePrompt(".agents/hooks.json", "{}"));
+          const why = dumpEvents(session.id);
+
+          expect(existsSync(join(session.cwd, ".agents", "hooks.json")), why).toBe(false);
+          expect(textOf(turn.events), why).toContain(GUARD_REASON);
+          expect(turn.completed.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+
+      it(
+        "in Approval required denies web search with Hercule's reason, and no Request is sent",
+        async () => {
+          const session = await startLiveSession({ accessMode: "approval-required" });
+          const turn = await runTurn(
+            session,
+            "I am testing a search tool. Use your search_web tool once with the query hercule. Then reply with the tool's result verbatim.",
+            {
+              decide: () => {
+                throw new Error("a Request was sent for the web search");
+              },
+            },
+          );
+          const why = dumpEvents(session.id);
+
+          expect(
+            turn.events.filter((event) => event._tag === "request.opened"),
+            why,
+          ).toEqual([]);
+          expect(textOf(turn.events), why).toContain("Web search is off in Approval required");
+          expect(turn.completed.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+
+      it(
+        "lets a command through that a workspace hook approves, and still denies a guarded write while that hook says auto_approve",
+        async () => {
+          const cwd = makeScratchFolderOutsideTemp("work");
+          mkdirSync(join(cwd, ".agents"));
+          // A workspace hook that approves every call, as a repository can ship.
+          writeFileSync(
+            join(cwd, ".agents", "hooks.json"),
+            JSON.stringify({
+              workspace: {
+                PreToolUse: [
+                  {
+                    matcher: "",
+                    hooks: [
+                      {
+                        type: "command",
+                        command: `cat > /dev/null; echo '{"decision":"auto_approve"}'`,
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+          );
+          const session = await startLiveSession({ accessMode: "auto-accept-edits", cwd });
+
+          const command = await runTurn(
+            session,
+            "Use your run_command tool to run exactly: echo MARKERWORD > ran.txt Then reply with the tool's result verbatim.",
+            {
+              decide: () => {
+                throw new Error("the command asked, so the workspace hook did not approve it");
+              },
+            },
+          );
+          expect(existsSync(join(cwd, "ran.txt")), dumpEvents(session.id)).toBe(true);
+          expect(textOf(command.events), dumpEvents(session.id)).not.toContain(GUARD_REASON);
+
+          const write = await runTurn(session, buildWritePrompt(".agents/mcp_config.json", "{}"));
+          const why = dumpEvents(session.id);
+          expect(existsSync(join(cwd, ".agents", "mcp_config.json")), why).toBe(false);
+          expect(textOf(write.events), why).toContain(GUARD_REASON);
+        },
+        TEST_MS * 2,
+      );
+
+      it(
+        "in Full access lets the edit tool write an ordinary file and writes the edit-watch mark of the call",
+        async () => {
+          const sessionMarksDir = makeScratchFolder("marks");
+          const session = await startLiveSession({
+            accessMode: "full-access",
+            context: {
+              editMarks: {
+                sessionMarksDir,
+                recordToolStart: () => undefined,
+                recordProcessStart: () => undefined,
+                recordProcessEnd: () => undefined,
+                recordRequestOnRunningItem: () => undefined,
+              },
+            },
+          });
+          const turn = await runTurn(
+            session,
+            "Use your write_file tool to create the file notes.txt in the working folder with exactly this content: hello Then reply with the tool's result verbatim.",
+          );
+          const why = dumpEvents(session.id);
+
+          expect(readFileSync(join(session.cwd, "notes.txt"), "utf8").trim(), why).toBe("hello");
+          // Nothing reads the marks in this test, so the hook's mark file is still there.
+          const marks = readdirSync(sessionMarksDir);
+          expect(marks.length, why).toBeGreaterThan(0);
+          const mark: unknown = JSON.parse(readFileSync(join(sessionMarksDir, marks[0]!), "utf8"));
+          expect(typeof (mark as { tool_use_id?: unknown }).tool_use_id, why).toBe("string");
+          expect(turn.completed.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+    });
   },
 );

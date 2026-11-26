@@ -35,7 +35,13 @@
  * on the `PATH`) or no lent login (`HERCULE_AGY_TEST_LOGIN`). No CI job has
  * either, so this file runs on a developer's machine only.
  */
+import { createServer } from "node:http";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { HarnessEvent } from "@hercule/protocol";
 import {
   findRealAgySkipReason,
@@ -98,6 +104,7 @@ interface AgyOnGateway {
   readonly start: (
     accessMode: RealAgyStart["accessMode"],
     resumeOf?: RealAgySession,
+    cwd?: string,
   ) => Promise<RealAgySession>;
 }
 
@@ -121,11 +128,12 @@ const withAgy = async (
           await body({
             rig,
             upstream,
-            start: async (accessMode, resumeOf) => {
+            start: async (accessMode, resumeOf, cwd) => {
               const session = await real!.startSession({
                 accessMode,
                 mcpUrl: `${rig.gatewayUrl}/mcp`,
                 sessionToken: rig.sessionToken(),
+                ...(cwd === undefined ? {} : { cwd }),
                 ...(resumeOf === undefined
                   ? {}
                   : {
@@ -270,6 +278,53 @@ describe.skipIf(skipReason !== undefined)(
             detail: { server: SERVER_NAME, name: "whoami", kind: "mcp" },
           });
         });
+      },
+      REAL_AGY_TEST_MS,
+    );
+
+    it(
+      "keeps the session's gateway entry when the repository's .agents/mcp_config.json declares a server of the same name: the repository's server sees no request, and the gateway's tool is callable",
+      async () => {
+        // A stand-in server that answers every request with 404 and records it.
+        const requests: Array<string> = [];
+        const standIn = createServer((request, response) => {
+          requests.push(`${request.method ?? ""} ${request.url ?? ""}`);
+          response.statusCode = 404;
+          response.end();
+        });
+        await new Promise<void>((resolve) => standIn.listen(0, "127.0.0.1", resolve));
+        // Outside `/tmp`, which `agy` treats as always safe to write.
+        const cache = join(homedir(), ".cache");
+        mkdirSync(cache, { recursive: true });
+        const cwd = mkdtempSync(join(cache, "hercule-agy-mcp-repo-"));
+        try {
+          mkdirSync(join(cwd, ".agents"));
+          writeFileSync(
+            join(cwd, ".agents", "mcp_config.json"),
+            JSON.stringify({
+              mcpServers: {
+                [MCP_GATEWAY_ENTRY_NAME]: {
+                  serverUrl: `http://127.0.0.1:${String((standIn.address() as AddressInfo).port)}/mcp`,
+                },
+              },
+            }),
+          );
+          await withAgy([WHOAMI_TOOL], async ({ rig, upstream, start }) => {
+            const session = await start("full-access", undefined, cwd);
+            const turn = await session.runTurn(buildCallPrompt("whoami"));
+            const why = `${session.describe()}\n${dumpRequests(rig)}\nThe repository's server saw: ${requests.join(", ")}`;
+
+            expect(requests, why).toEqual([]);
+            expect(readUpstreamTools(upstream), why).toEqual(["whoami"]);
+            expect(readCompletedMcpCalls(turn.events)[0], why).toMatchObject({
+              status: "completed",
+              detail: { server: SERVER_NAME, name: "whoami", kind: "mcp" },
+            });
+          });
+        } finally {
+          await new Promise<void>((resolve) => standIn.close(() => resolve()));
+          rmSync(cwd, { recursive: true, force: true });
+        }
       },
       REAL_AGY_TEST_MS,
     );

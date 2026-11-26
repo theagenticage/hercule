@@ -110,6 +110,13 @@ export type AgySpawn = (
 export interface AgySeam {
   readonly spawn: AgySpawn;
   readonly run: Run;
+  /**
+   * The words that start the `hercule` binary for the pre-tool hook in the
+   * sessions this adapter starts. Absent, the running executable starts it,
+   * which is right in the compiled binary. A test that runs from source under
+   * vitest sets it to start the real verb.
+   */
+  readonly hookLauncher?: ReadonlyArray<string>;
 }
 
 /** A conversation `agy` opened: its id, the settings it returned for it, and whether Google holds the account. */

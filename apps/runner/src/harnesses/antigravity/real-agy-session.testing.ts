@@ -32,7 +32,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
@@ -62,6 +63,17 @@ export const WAIT_MS = 100_000;
 
 /** The most one whole test takes, with room for several turns of a real model. */
 export const REAL_AGY_TEST_MS = 240_000;
+
+/**
+ * The words that start the real `hercule antigravity-pre-tool-hook` from
+ * source, for the adapter's `hookLauncher`. Under vitest the running
+ * executable is not the dispatcher, so the default launcher would start
+ * nothing useful.
+ */
+export const REAL_HOOK_LAUNCHER: ReadonlyArray<string> = [
+  process.execPath,
+  join(dirname(fileURLToPath(import.meta.url)), "../../../../../packages/hercule/src/main.ts"),
+];
 
 /**
  * Returns why a test with the real `agy` cannot run here, or `undefined` when
@@ -108,7 +120,7 @@ export interface RealAgyStart {
   readonly sessionToken: string;
   /** Resumes this conversation, in the work folder of the session that made it. */
   readonly continue?: SessionSpec["continue"];
-  /** The work folder. A fresh one when absent. */
+  /** The work folder. A fresh one when absent. A test that fills it first (a repository's `.agents` folder) makes and removes it itself. */
   readonly cwd?: string;
 }
 
@@ -165,7 +177,11 @@ export const prepareRealAgy = async (): Promise<RealAgyRig> => {
   if (pinnedBinary === undefined || loginFile === undefined || loginFile === "") {
     throw new Error("prepareRealAgy needs a binary and a lent login: check findRealAgySkipReason.");
   }
-  const adapter: HarnessAdapter = makeAntigravityAdapter({ spawn: spawnAgy, run: runProcess });
+  const adapter: HarnessAdapter = makeAntigravityAdapter({
+    spawn: spawnAgy,
+    run: runProcess,
+    hookLauncher: REAL_HOOK_LAUNCHER,
+  });
   const scratchFolders: Array<string> = [];
   const makeScratchFolder = (label: string): string => {
     const base = join(homedir(), ".cache");
