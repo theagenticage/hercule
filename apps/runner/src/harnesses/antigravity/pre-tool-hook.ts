@@ -151,16 +151,22 @@ export const buildHooksFile = (launcher: string): string =>
  * folder and every folder above it. Measured on `agy` 1.5.15: all four load a
  * `hooks.json` (which can auto-approve a command) and start the servers of an
  * `mcp_config.json`. Only those two files were measured under the names other
- * than `.agents`. Guarding the plugins file and folder under every name is the
- * safe superset.
+ * than `.agents`. Guarding the other files and the plugins folder under every
+ * name is the safe superset.
  */
 const CONFIG_FOLDER_NAMES: ReadonlyArray<string> = [".agents", ".agent", "_agents", "_agent"];
 
-/** The files in a configuration folder that `agy` loads approval rules or programs from. */
+/**
+ * The files in a configuration folder that `agy` loads approval rules or
+ * programs from. `agents.json` and `rules.json` come from `agy`'s docs and
+ * were never measured.
+ */
 const GUARDED_CONFIG_FILES: ReadonlyArray<string> = [
   "hooks.json",
   "plugins.json",
   "mcp_config.json",
+  "agents.json",
+  "rules.json",
 ];
 
 /** The folder in a configuration folder that holds plugins. Everything below it is guarded. */

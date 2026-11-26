@@ -957,6 +957,7 @@ describe("the files of the Harness Home that Hercule owns", () => {
   const REMOVED = [
     ["antigravity-acp", "settings.json"],
     ["config", "plugins"],
+    ["config", "plugins.json"],
     [".", "skills"],
     ["config", "skills"],
     ["antigravity-acp", "skills"],
@@ -1269,6 +1270,7 @@ describe("the pre-tool hook of a session", () => {
         expect.arrayContaining([
           join(home, "config", "hooks.json"),
           join(home, "config", "plugins"),
+          join(home, "config", "plugins.json"),
           join(home, "config", "mcp_config.json"),
           join(home, "antigravity-acp", "settings.json"),
           join(home, "skills"),

@@ -273,6 +273,8 @@ describe("the guard of the approval files", () => {
       `${name}/hooks.json`,
       `${name}/plugins.json`,
       `${name}/mcp_config.json`,
+      `${name}/agents.json`,
+      `${name}/rules.json`,
       `${name}/plugins/p/plugin.json`,
       `../${name}/hooks.json`,
     ]) {

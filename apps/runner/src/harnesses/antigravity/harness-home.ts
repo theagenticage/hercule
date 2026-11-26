@@ -235,6 +235,8 @@ const MCP_CONFIG_PATH = join("config", "mcp_config.json");
  *   acp`, and a tool permission would change every session of the account.
  * - `config/plugins`: `agy` loads a plugin from this folder live, and a
  *   plugin's `hooks.json` can approve a command without asking.
+ * - `config/plugins.json`: `agy`'s docs name it as the list of plugin
+ *   folders. Unmeasured: removed in case `agy` reads it from here.
  * - `skills`, `config/skills`, `antigravity-acp/skills`: the skills in these
  *   folders load into every session and are read again at each prompt.
  * - `config/skills.json`: lists folders of skills, which may be absolute paths
@@ -248,6 +250,7 @@ const MCP_CONFIG_PATH = join("config", "mcp_config.json");
 const PATHS_TO_REMOVE: ReadonlyArray<string> = [
   join(APP_DATA_DIR, "settings.json"),
   join("config", "plugins"),
+  join("config", "plugins.json"),
   "skills",
   join("config", "skills"),
   join(APP_DATA_DIR, "skills"),
