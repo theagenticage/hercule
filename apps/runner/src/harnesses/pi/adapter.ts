@@ -2286,7 +2286,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           turnId,
           text: input.text,
           attachments: input.attachments,
-          skillReferences: input.skillReferences,
+          // Only the skills pi got, so the client draws no chip for a skill the
+          // thread warns it was skipped.
+          skillReferences: input.skillReferences?.filter(
+            (reference) => !prompt.skipped.includes(reference.referenceName),
+          ),
           senderSessionId: input.senderSessionId,
           steered,
           harnessRefs: { nativeSessionId: held.binding.nativeSessionId },

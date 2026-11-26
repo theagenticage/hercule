@@ -233,7 +233,7 @@ describe("a skill pi is only pointed at", () => {
 });
 
 describe("sending an input with Skill References to pi", () => {
-  it("warns the user, after the user message, about a skill it gave no pointer line", async () => {
+  it("warns the user, and records only the skills pi got, when one has no pointer line", async () => {
     const staged = stageSkills({
       library: ["review", "gone"],
       repositories: [],
@@ -254,6 +254,10 @@ describe("sending an input with Skill References to pi", () => {
     ]);
     const tags = run.seen.map((event) => event._tag);
     expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.lastIndexOf("item.completed"));
+    const reported = filterByTag(run.seen, "item.completed").find(
+      (event) => event.kind === "user_message",
+    );
+    expect(reported?.detail).toEqual({ text: "$review and $gone", skills: ["review"] });
   });
 
   for (const [command, start] of [
