@@ -1060,16 +1060,6 @@ describe("the files of the Harness Home that Hercule owns", () => {
     expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
   });
 
-  it("removes the script an earlier Hercule wrote for its hook", async () => {
-    const { home, fake } = setUp();
-    mkdirSync(join(home, "config"));
-    writeFileSync(join(home, "config", "hercule-start-mark.sh"), "#!/bin/sh");
-
-    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
-
-    expect(existsSync(join(home, "config", "hercule-start-mark.sh"))).toBe(false);
-  });
-
   it("fails the start, changes nothing and spawns nothing when config is a link", async () => {
     const { home, fake } = setUp();
     const outside = createScratchHome("agy-outside");
@@ -1094,6 +1084,19 @@ describe("the files of the Harness Home that Hercule owns", () => {
     const failure = await runAndReadFailure(open(fake, link));
 
     expect(failure.message).toContain(link);
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("tells the user to remove a folder that stands where Hercule writes a file", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config", "hooks.json"), { recursive: true });
+
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+
+    expect(failure.message).toContain(join(home, "config", "hooks.json"));
+    expect(failure.message).toContain(
+      "is a folder, and Hercule needs a file there. Remove the folder",
+    );
     expect(fake.spawns).toHaveLength(0);
   });
 
