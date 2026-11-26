@@ -276,8 +276,11 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
 export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
-  /** The user's personal instructions file, or undefined when the user has none. */
-  readonly instructionsFile: string | undefined;
+  /**
+   * The user's personal instruction files, in the order the harness's
+   * instructions take them. Empty when the user has none.
+   */
+  readonly instructionsFiles: ReadonlyArray<string>;
 }
 
 /**

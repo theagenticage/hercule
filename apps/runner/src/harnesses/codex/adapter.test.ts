@@ -2164,7 +2164,7 @@ describe("the user's own instructions on a Codex Thread", () => {
   ): SessionStartContext => ({
     ...ctx,
     herculeTool: TOOL,
-    userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+    userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFiles: [instructionsFile] },
   });
 
   const RESUME: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "resume" };
@@ -2236,38 +2236,6 @@ describe("the user's own instructions on a Codex Thread", () => {
       }),
     ]);
   });
-
-  it.each([
-    ["a file that no longer exists", () => join(createCodexHome(), "AGENTS.md"), "ENOENT"],
-    ["a directory", () => createCodexHome(), "it is not a regular file"],
-  ])(
-    "starts the Thread with only the orientation and the skill, and logs a warning, when the instructions are %s",
-    async (_, makePath, reason) => {
-      const { adapter, ctx, requests } = createDriving();
-      const path = makePath();
-      const warnings: Array<string> = [];
-      const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(String(message));
-      });
-
-      await Effect.runPromise(
-        Effect.provide(
-          adapter.startSession(SESSION, SPEC, buildThreadContext(ctx, path)),
-          Logger.layer([collecting]),
-        ),
-      );
-
-      // The user's own files never stop a Thread from starting.
-      expect(listSentParams(requests, "thread/start")).toEqual([
-        expect.objectContaining({
-          developerInstructions: `${TOOL.orientation}\n\n${TOOL.skill}`,
-        }),
-      ]);
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain(`Did not read ${path} into the Thread's instructions: `);
-      expect(warnings[0]).toContain(reason);
-    },
-  );
 });
 
 /** Builds an agent message item. A Codex answer is read from the turn's final agent message. */

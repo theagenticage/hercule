@@ -195,7 +195,7 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
     const prompt = await renderPrompt({
       ...ctx,
       env: { ...ctx.env, HOME: userHome },
-      userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+      userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFiles: [instructionsFile] },
     });
 
     // A Thread's skills come from the Skill Library. The user's own

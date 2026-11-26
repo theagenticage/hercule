@@ -11,15 +11,21 @@
  * accident.
  *
  * Claude Code gets directory symlinks inside its Harness Home, because that
- * is where it reads the user's material from. Codex and pi get nothing
- * written: their Harness Homes are shared by every session of the account,
- * so a link there would leak into sessions that are not Threads. Their
- * adapters pass the paths returned here to the harness instead.
+ * is where it reads the user's material from. Codex, pi and Antigravity get
+ * nothing written: their Harness Homes are shared by every session of the
+ * account, so a link there would leak into sessions that are not Threads.
+ * Their adapters use the paths returned here instead: Codex and Antigravity
+ * add the instruction files' text to the session's instructions, and pi
+ * takes the paths as flags.
  */
 import {
+  closeSync,
   existsSync,
   lstatSync,
+  openSync,
   readFileSync,
+  readdirSync,
+  readSync,
   readlinkSync,
   renameSync,
   rmSync,
@@ -30,8 +36,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
-import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../harnesses";
+import { ANTIGRAVITY, CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../harnesses";
 import { isMissingPath } from "../harnesses/session-files";
+import { describeError } from "../report";
 
 /**
  * User Material with no paths. A Claude Code Thread always gets it, because
@@ -40,7 +47,7 @@ import { isMissingPath } from "../harnesses/session-files";
  */
 const NO_PATHS: UserMaterial = {
   promptTemplateDirs: [],
-  instructionsFile: undefined,
+  instructionsFiles: [],
 };
 
 /**
@@ -65,8 +72,9 @@ interface FoundMaterial {
 /**
  * Picks the user's instructions file: the first of `candidates` that is a
  * regular file (following symlinks), can be read, and has text `isUsable`
- * accepts. Returns that file, or undefined when no candidate qualifies, and a
- * warning for each candidate that exists but could not be read.
+ * accepts. Returns that file as a list of one, or an empty list when no
+ * candidate qualifies, and a warning for each candidate that exists but could
+ * not be read.
  *
  * A candidate that is missing, is not a regular file, has text `isUsable`
  * refuses, or is a file already tried under another name is skipped quietly. That is how Codex and pi themselves
@@ -77,7 +85,7 @@ interface FoundMaterial {
 const findInstructionsFile = (
   candidates: ReadonlyArray<string>,
   isUsable: (text: string) => boolean,
-): { readonly path: string | undefined; readonly warnings: ReadonlyArray<string> } => {
+): { readonly paths: ReadonlyArray<string>; readonly warnings: ReadonlyArray<string> } => {
   const warnings: Array<string> = [];
   const tried = new Set<string>();
   for (const path of candidates) {
@@ -88,14 +96,15 @@ const findInstructionsFile = (
       const identity = `${String(stats.dev)}:${String(stats.ino)}`;
       if (tried.has(identity)) continue;
       tried.add(identity);
-      if (stats.isFile() && isUsable(readFileSync(path, "utf8"))) return { path, warnings };
+      if (stats.isFile() && isUsable(readFileSync(path, "utf8")))
+        return { paths: [path], warnings };
     } catch (error) {
       if (isMissingPath(error)) continue;
       const reason = error instanceof Error ? error.message : String(error);
       warnings.push(`Did not read ${path} into the Thread's instructions: ${reason}`);
     }
   }
-  return { path: undefined, warnings };
+  return { paths: [], warnings };
 };
 
 /**
@@ -214,7 +223,7 @@ const findCodexMaterial = (
     (text) => text.trim() !== "",
   );
   return {
-    material: { ...NO_PATHS, instructionsFile: instructions.path },
+    material: { ...NO_PATHS, instructionsFiles: instructions.paths },
     warnings: instructions.warnings,
   };
 };
@@ -251,9 +260,146 @@ const findPiMaterial = (home: string): FoundMaterial => {
   return {
     material: {
       promptTemplateDirs: [join(agentDir, "prompts")].filter((path) => existsSync(path)),
-      instructionsFile: instructions.path,
+      instructionsFiles: instructions.paths,
     },
     warnings: instructions.warnings,
+  };
+};
+
+/** The most entries of `config/rules` that are checked for rules that are always on. */
+const MAX_ANTIGRAVITY_RULE_ENTRIES = 100;
+
+/** The most bytes of a rule file read to find its frontmatter. */
+const MAX_RULE_FRONTMATTER_BYTES = 64 * 1024;
+
+/**
+ * Reads at most the first `MAX_RULE_FRONTMATTER_BYTES` bytes of the file at
+ * `path` as text. Throws when the file cannot be opened or read.
+ */
+const readFileStart = (path: string): string => {
+  const descriptor = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(MAX_RULE_FRONTMATTER_BYTES);
+    const length = readSync(descriptor, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, length).toString("utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+};
+
+/**
+ * Checks whether the text of an Antigravity rule file starts with YAML
+ * frontmatter (between a first line `---` and the next line `---`) that has
+ * `trigger` set to exactly the text `always_on`. Returns false for a file with
+ * no frontmatter, frontmatter that is not valid YAML, or any other trigger:
+ * Antigravity does not load such a rule into every conversation either.
+ */
+const isAlwaysOnRule = (text: string): boolean => {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  if (lines[0]?.trimEnd() !== "---") return false;
+  const end = lines.findIndex((line, index) => index > 0 && line.trimEnd() === "---");
+  if (end === -1) return false;
+  try {
+    const frontmatter: unknown = Bun.YAML.parse(lines.slice(1, end).join("\n"));
+    return (
+      typeof frontmatter === "object" &&
+      frontmatter !== null &&
+      "trigger" in frontmatter &&
+      frontmatter.trigger === "always_on"
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Returns the paths of the `always_on` rule files in `rulesDir`, sorted by
+ * file name in byte order, and a warning for each problem it met. Looks at
+ * no more than `MAX_ANTIGRAVITY_RULE_ENTRIES` entries and warns once when it
+ * skipped the rest. Only regular files (following symlinks) with a `.md`
+ * extension count. A missing folder is not a problem.
+ */
+const findAlwaysOnRules = (
+  rulesDir: string,
+): { readonly paths: ReadonlyArray<string>; readonly warnings: ReadonlyArray<string> } => {
+  const warnings: Array<string> = [];
+  let names: Array<string>;
+  try {
+    names = readdirSync(rulesDir).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  } catch (error) {
+    if (!isMissingPath(error)) {
+      warnings.push(`Did not read the rules in ${rulesDir}: ${describeError(error)}`);
+    }
+    return { paths: [], warnings };
+  }
+  if (names.length > MAX_ANTIGRAVITY_RULE_ENTRIES) {
+    warnings.push(
+      `${rulesDir} has ${String(names.length)} entries; only the first ${String(MAX_ANTIGRAVITY_RULE_ENTRIES)} by name were checked for rules that are always on`,
+    );
+  }
+  const paths: Array<string> = [];
+  for (const name of names.slice(0, MAX_ANTIGRAVITY_RULE_ENTRIES)) {
+    if (!name.endsWith(".md")) continue;
+    const path = join(rulesDir, name);
+    try {
+      if (statSync(path).isFile() && isAlwaysOnRule(readFileStart(path))) paths.push(path);
+    } catch (error) {
+      if (isMissingPath(error)) continue;
+      warnings.push(`Did not read ${path} into the Thread's instructions: ${describeError(error)}`);
+    }
+  }
+  return { paths, warnings };
+};
+
+/**
+ * Returns the User Material of an Antigravity (`agy`) Thread: the user's
+ * instruction files, which Antigravity reads from its gemini directory,
+ * `.gemini` under the user's home. It holds no prompt templates apart from
+ * skills, so `promptTemplateDirs` stays empty. Also returns a warning for
+ * each file that exists but could not be read.
+ *
+ * Antigravity reads all of these into every conversation, and reads both
+ * `GEMINI.md` and `AGENTS.md` when a place has both. The files are returned
+ * in this order:
+ *
+ * - `GEMINI.md` and `AGENTS.md` in the gemini directory;
+ * - `GEMINI.md` and `AGENTS.md` in its `config` folder;
+ * - the files of `config/rules` whose YAML frontmatter has
+ *   `trigger: always_on`, sorted by file name. A rule with no frontmatter,
+ *   or with another trigger, is not put into every conversation, so it is
+ *   left out.
+ *
+ * A file that is the same file as an earlier one, such as an `AGENTS.md` that
+ * is a symlink to `GEMINI.md`, is returned once, at its first place.
+ *
+ * The `antigravity-acp` folder of the directory is not read by Antigravity, so
+ * it is not looked at either.
+ */
+const findAntigravityMaterial = (home: string): FoundMaterial => {
+  const geminiDir = join(home, ".gemini");
+  const fixed = [
+    join(geminiDir, "GEMINI.md"),
+    join(geminiDir, "AGENTS.md"),
+    join(geminiDir, "config", "GEMINI.md"),
+    join(geminiDir, "config", "AGENTS.md"),
+  ].map((path) => findInstructionsFile([path], () => true));
+  const rules = findAlwaysOnRules(join(geminiDir, "config", "rules"));
+  const seen = new Set<string>();
+  const instructionsFiles = [...fixed.flatMap((found) => found.paths), ...rules.paths].filter(
+    (path) => {
+      const stats = statSync(path, { throwIfNoEntry: false });
+      // A file that vanished since it was found stays in the list; reading it
+      // then fails with a warning.
+      if (stats === undefined) return true;
+      const identity = `${String(stats.dev)}:${String(stats.ino)}`;
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    },
+  );
+  return {
+    material: { ...NO_PATHS, instructionsFiles },
+    warnings: [...fixed.flatMap((found) => found.warnings), ...rules.warnings],
   };
 };
 
@@ -285,6 +431,8 @@ export const provisionUserMaterial = (
           return findCodexMaterial(home, env);
         case PI:
           return findPiMaterial(home);
+        case ANTIGRAVITY:
+          return findAntigravityMaterial(home);
         default:
           return { material: NO_PATHS, warnings: [] };
       }

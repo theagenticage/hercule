@@ -8,7 +8,7 @@
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the Harness Home's Codex directory.
  */
-import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -55,12 +55,12 @@ import type {
   SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
-  UserMaterial,
 } from "../index";
 import type { ResolvedSkillReference } from "../../skills";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
+import { readUserInstructions } from "../user-instructions";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
@@ -607,38 +607,6 @@ const buildDeveloperInstructions = (
     spec.coordination,
     spec.memory,
   ]) ?? "";
-
-/**
- * Reads the user's own instructions file. Returns its text, or `undefined`
- * when the session does not see the user's material or the user has no file.
- * Never fails: when the path is not a regular file or cannot be read, it logs
- * a warning with the path and the reason, never the file's text, and returns
- * `undefined`. A Thread never fails to start because of the user's own files
- * (spec 06 section 9.1).
- *
- * The file is read again every time a thread is opened, so a resumed or
- * forked thread gets the current text.
- */
-const readUserInstructions = (
-  material: UserMaterial | undefined,
-): Effect.Effect<string | undefined> => {
-  const path = material?.instructionsFile;
-  if (path === undefined) return Effect.succeed(undefined);
-  return Effect.try({
-    try: () => {
-      if (!statSync(path).isFile()) throw new Error("it is not a regular file");
-      return readFileSync(path, "utf8");
-    },
-    catch: describeError,
-  }).pipe(
-    Effect.catch((reason) =>
-      Effect.as(
-        Effect.logWarning(`Did not read ${path} into the Thread's instructions: ${reason}`),
-        undefined,
-      ),
-    ),
-  );
-};
 
 /** The `skill` items for a turn, and the references they were built from. */
 interface SkillInputs {
@@ -1859,7 +1827,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
-        const userInstructions = yield* readUserInstructions(ctx.userMaterial);
+        const userInstructions = yield* readUserInstructions(
+          ctx.userMaterial?.instructionsFiles ?? [],
+        );
         const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
         const method =

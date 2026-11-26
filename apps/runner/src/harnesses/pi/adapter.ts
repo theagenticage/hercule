@@ -761,7 +761,7 @@ const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>
 /**
  * Builds the flags that load the user's own material into one pi process:
  * `--prompt-template` per prompt template directory, and
- * `--append-system-prompt` with the instructions file when the user has one.
+ * `--append-system-prompt` per instructions file the user has.
  * Returns no flags when there is no material, which is the case for every
  * session that is not a Thread on the controller's local runner.
  */
@@ -770,9 +770,7 @@ const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArr
     ? []
     : [
         ...material.promptTemplateDirs.flatMap((dir) => ["--prompt-template", dir]),
-        ...(material.instructionsFile === undefined
-          ? []
-          : ["--append-system-prompt", material.instructionsFile]),
+        ...material.instructionsFiles.flatMap((file) => ["--append-system-prompt", file]),
       ];
 
 /**

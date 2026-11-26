@@ -134,7 +134,7 @@ export const filterByTag = <Tag extends HarnessEvent["_tag"]>(
  */
 export const NO_USER_MATERIAL_PATHS: UserMaterial = {
   promptTemplateDirs: [],
-  instructionsFile: undefined,
+  instructionsFiles: [],
 };
 
 /**

@@ -493,7 +493,7 @@ describe("starting pi on exactly the model that was asked for", () => {
 /** The User Material the runner finds on a machine that has all of the user's material. */
 const USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
-  instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
+  instructionsFiles: ["/Users/someone/.pi/agent/AGENTS.md"],
 };
 
 /** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */
