@@ -382,6 +382,28 @@ it.effect("does not take a response we write for the request of the same id as w
   }),
 );
 
+it.effect("keeps a request of the harness apart from our open prompt of the same id", () =>
+  Effect.gen(function* () {
+    const harness = createTestHarness({ scripts: { "session/prompt": () => [] } });
+    const connection = yield* harness.open;
+    const sending = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+    const promptId = Number(harness.fake.received.find(isMethod("session/prompt"))?.id);
+    const waitForReply = yield* Fiber.join(sending);
+
+    // The harness sends a request with the id of our prompt, which is still open.
+    harness.say(buildRequest(promptId, "session/request_permission", APPROVAL_PARAMS));
+    yield* harness.whenWritten("the response", isReplyTo(promptId));
+    yield* Effect.yieldNow;
+
+    // Neither the prompt nor the connection took the other's id for its own.
+    const stillWaiting = yield* Effect.forkChild(waitForReply);
+    yield* Effect.yieldNow;
+    expect(stillWaiting.pollUnsafe()).toBeUndefined();
+    yield* Fiber.interrupt(stillWaiting);
+  }),
+);
+
 it.effect("gives each overlapping sendPrompt its own write signal", () =>
   Effect.gen(function* () {
     const release = Promise.withResolvers<void>();
