@@ -66,13 +66,7 @@ import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../
 import { buildEnvelope } from "../normalize";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { truncateMessage } from "../text";
-import {
-  ANTIGRAVITY_NAME,
-  checkAccountUsable,
-  findAgyHooksFile,
-  openSignedInAgy,
-  readAgyModeId,
-} from "./agy";
+import { ANTIGRAVITY_NAME, checkAccountUsable, openSignedInAgy, readAgyModeId } from "./agy";
 import type { AgySeam } from "./agy";
 import { APP_DATA_DIR } from "./harness-home";
 import { buildModelCatalog } from "./model-catalog";
@@ -550,16 +544,6 @@ export const startAgySession = (
       });
 
     const start = Effect.gen(function* () {
-      // In full access nothing is asked anyway, so a repository's hooks add no power.
-      const hooksFile =
-        spec.accessMode === "full-access" ? undefined : yield* findAgyHooksFile(cwd);
-      if (hooksFile !== undefined) {
-        return yield* Effect.fail(
-          buildAdapterFailed(
-            `This repository has Antigravity hooks in ${hooksFile}. Hooks can approve actions by themselves and run the repository's own code, and Hercule cannot turn them off, so the session was not started. Remove the file, or start the thread in Full access.`,
-          ),
-        );
-      }
       const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
         cwd,
         handlers,

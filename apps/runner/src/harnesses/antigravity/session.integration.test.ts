@@ -730,29 +730,6 @@ describe.skipIf(skipReason !== undefined)(
     );
 
     it(
-      "refuses to start in approval-required in a workspace that has .agents/hooks.json (spec 06 section 8.1)",
-      async () => {
-        const cwd = makeScratchFolder("hooks");
-        mkdirSync(join(cwd, ".agents"));
-        writeFileSync(join(cwd, ".agents", "hooks.json"), "{}");
-
-        const error = await Effect.runPromise(
-          Effect.flip(
-            adapter.startSession(
-              crypto.randomUUID(),
-              buildSpec({ accessMode: "approval-required" }),
-              buildStartContext(cwd),
-            ),
-          ),
-        );
-
-        expect(error._tag).toBe("AdapterFailed");
-        expect(error.message).toContain(join(cwd, ".agents", "hooks.json"));
-      },
-      TEST_MS,
-    );
-
-    it(
       "asks nothing for a command under full-access (spec 06 section 8.1)",
       async () => {
         const session = await startLiveSession({ accessMode: "full-access" });

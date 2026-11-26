@@ -5,9 +5,9 @@
  * them can run as another account.
  */
 import { mkdtempSync } from "node:fs";
-import { lstat, readdir, rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -306,58 +306,6 @@ const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed
  */
 const makeAgyTempFolder = (): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
   makeRemovedFolder(join(tmpdir(), "hercule-agy-"), "a temporary folder");
-
-const HOOKS_FILE = join(".agents", "hooks.json");
-
-/**
- * Finds the file of Antigravity hooks that `agy` would read for a session
- * that works in `cwd`, and returns its path, or undefined when there is none.
- * `agy` reads `.agents/hooks.json` from `cwd` and from the git root of `cwd`:
- * the nearest folder at or above `cwd` that holds `.git`, a folder or a file.
- * It reads none from a parent folder that is not a git root, from a
- * subfolder, or from the real `HOME` (measured on `agy` 1.5.15).
- *
- * Any kind of entry counts, a link included, even a dangling one. Fails with
- * an `AdapterFailed` when an entry cannot be looked at for a reason other
- * than "not found", because the runner then cannot tell whether hooks exist.
- *
- * A hook can answer `auto_approve`, which makes a call run unasked in
- * `default`, and its script runs as soon as the agent calls a tool. No
- * setting of `agy` turns workspace hooks off.
- */
-export const findAgyHooksFile = (cwd: string): Effect.Effect<string | undefined, AdapterFailed> =>
-  Effect.gen(function* () {
-    const exists = (path: string) =>
-      Effect.tryPromise({
-        try: () => lstat(path).then(() => true),
-        catch: (error) => error,
-      }).pipe(
-        Effect.catch((error) =>
-          isNotFound(error)
-            ? Effect.succeed(false)
-            : Effect.fail(
-                buildAdapterFailed(
-                  `Could not check whether ${path} exists, so ${ANTIGRAVITY_NAME} was not started: ${describeFileFailure(error)}`,
-                ),
-              ),
-        ),
-      );
-    const inCwd = join(cwd, HOOKS_FILE);
-    if (yield* exists(inCwd)) return inCwd;
-    for (let folder = cwd; ; folder = dirname(folder)) {
-      if (yield* exists(join(folder, ".git"))) {
-        const atRoot = join(folder, HOOKS_FILE);
-        return folder !== cwd && (yield* exists(atRoot)) ? atRoot : undefined;
-      }
-      if (dirname(folder) === folder) return undefined;
-    }
-  });
-
-const isNotFound = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "code" in error &&
-  (error.code === "ENOENT" || error.code === "ENOTDIR");
 
 /**
  * Builds the command that signs the account in. `agy` prints a link, reads one
