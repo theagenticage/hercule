@@ -2,9 +2,9 @@
  * `hercule antigravity-pre-tool-hook`: the pre-tool hook of an `agy` session
  * (spec 06 section 8.1). The hooks file in the Harness Home runs it before
  * every `run_command`, `edit_file`, `write_file`, `search_web`,
- * `invoke_subagent` and chrome-devtools call, and the tool waits for it. `agy` writes the call as one JSON document on stdin; the
- * hook prints a denial as JSON, or nothing to let the call run. It always
- * exits 0.
+ * `invoke_subagent` and chrome-devtools call, and the tool waits for it. `agy`
+ * writes the call as one JSON document on stdin; the hook prints a denial as
+ * JSON, or nothing to let the call run. It always exits 0.
  *
  * The adapter and the hook share this file. The adapter writes the hooks file
  * (`buildHooksFile`) and the session's rules (`encodeHookRules`); the hook
@@ -455,8 +455,9 @@ const GO_SPACE_AT_ENDS =
 const buildEditTarget = (cwd: string, path: string, home: string): EditTarget => {
   const paths: Array<string> = [];
   const identities: Array<string> = [];
-  // `agy` may trim the `Path` before it writes (not measured), so the trimmed
-  // reading is compared too. Over-denying a path that ends in whitespace is harmless.
+  // `agy` was measured not to trim a `Path` (Linux; macOS not measured), so
+  // the trimmed reading only guards against a later `agy` that does. Comparing
+  // it too is harmless: it over-denies at worst a path that ends in whitespace.
   const trimmed = path.replace(GO_SPACE_AT_ENDS, "");
   const readings = trimmed === path ? [path] : [path, trimmed];
   for (const spelling of readings.flatMap((reading) => [
@@ -633,9 +634,10 @@ const isTargetInPlace = (target: EditTarget, place: GuardedPlace): boolean => {
 /**
  * Returns whether the call starts or drives the browser agent: a
  * chrome-devtools call, or `invoke_subagent` with `TypeName` "browser". The
- * `TypeName` is compared without the whitespace Go trims and without case, as
- * `agy` may do either (not measured). `Role` is free text the model writes, so
- * it is never read.
+ * `TypeName` is compared without the whitespace Go trims, and folded as a path
+ * is (case, normalization form, and the characters an HFS+ volume ignores),
+ * because `agy` may do any of these (not measured). `Role` is free text the
+ * model writes, so it is never read.
  */
 const isBrowserCall = (call: DecodedCall): boolean => {
   const kind = classifyTool(call.name);
@@ -676,13 +678,14 @@ const decideEdit = (
 
 /**
  * Decides what the hook answers for one call: a denial, or undefined to let
- * it run. It fails closed. Unless the rules say Full access, a call that could
- * not be decoded is denied, because the hook cannot tell what it would change.
- * Rules that are missing or do not decode (`rules` undefined) deny every edit
- * tool call (guarded place or not), every web search and every call that could
- * not be decoded, with a reason that says the setup is wrong. A shell command
- * runs, because `agy` asks about it. In Approval required and Auto-accept
- * edits the browser agent is denied, whatever the rules say.
+ * it run. It fails closed. Full access is the one mode that allows everything.
+ * In any other mode a call that could not be decoded is denied, because the
+ * hook cannot tell what it would change. Rules that are missing or do not
+ * decode (`rules` undefined) deny every edit tool call (guarded place or not),
+ * every web search, every browser agent call and every call that could not be
+ * decoded, with a reason that says the setup is wrong. A shell command runs,
+ * because `agy` asks about it. In Approval required and Auto-accept edits the
+ * browser agent is denied.
  */
 const decide = (
   call: DecodedCall | undefined,
