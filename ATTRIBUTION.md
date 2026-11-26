@@ -16,7 +16,7 @@ Third-party material that is copied into this repository. Each entry says what i
 
 ## LobeHub icons: harness and provider marks
 
-- What: the marks of Claude, OpenAI and Antigravity in `packages/ui/src/logos/marks.ts`, copied unchanged from [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons). The OpenCode and MiniMax marks in `plugins/opencode/src/index.ts` and `plugins/minimax/src/index.ts` come from the same set, scaled from a 24x24 to a 16x16 box. Commits and package versions: the text file below.
+- What: the marks of Claude, OpenAI and Antigravity in `packages/ui/src/logos/marks.ts`, copied unchanged from [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons), and the Antigravity mark a second time in `apps/desktop/src/renderer/screens/thread/harness-logo.tsx`. The OpenCode and MiniMax marks in `plugins/opencode/src/index.ts` and `plugins/minimax/src/index.ts` come from the same set, scaled from a 24x24 to a 16x16 box. Commits and package versions: the text file below.
 - Licence: MIT. Copyright (c) 2023 LobeHub.
 - Text: `packages/ui/src/logos/LICENSE-lobehub.txt`
 
@@ -35,7 +35,7 @@ Third-party material that is copied into this repository. Each entry says what i
 ## Fonts and libraries of the Android app
 
 - What: Bricolage Grotesque, Limelight and Recursive (fonts), the commonmark-java library, and the marked rules the markdown port follows. The licence files are the app's bundled assets.
-- Licence: SIL Open Font License 1.1 for the three fonts, BSD 2-Clause for commonmark-java (Copyright (c) 2015, Atlassian Pty Ltd), MIT for marked (Copyright (c) 2018+ MarkedJS; Copyright (c) 2011-2018 Christopher Jeffrey).
+- Licence: SIL Open Font License 1.1 for the three fonts, BSD 2-Clause for commonmark-java (Copyright (c) 2015, Atlassian Pty Ltd), MIT for marked (Copyright (c) 2018+ MarkedJS; Copyright (c) 2011-2018 Christopher Jeffrey), whose file also carries the BSD licence of Markdown (Copyright © 2004, John Gruber).
 - Text, in `apps/android/app/src/main/assets/licenses/`: `bricolage-grotesque-OFL.txt`, `limelight-OFL.txt`, `recursive-OFL.txt`, `commonmark-java-BSD-2.txt`, `marked-MIT.txt`
 
 ## Fonts of the design studies
