@@ -232,7 +232,7 @@ describe("the edit-shell recording", () => {
   });
 
   it("builds the approval Request of each held call from its item", () => {
-    expect(requests.map((r) => r?.kind)).toEqual([
+    expect(requests.map((r) => r?.description.kind)).toEqual([
       "file_change_approval",
       "file_change_approval",
       "command_approval",
@@ -241,7 +241,7 @@ describe("the edit-shell recording", () => {
     expect(requests[2]).toMatchObject({
       turnId: "turn-1",
       itemId: "call_3065961999687177868",
-      detail: { command: "ls -la && cat hello.txt" },
+      description: { detail: { command: "ls -la && cat hello.txt" } },
     });
   });
 
@@ -482,10 +482,11 @@ describe("tool items", () => {
     expect(describeRequestItem(state, "c1", snapshot)).toMatchObject({
       turnId: "t1",
       itemId: "c1",
-      kind: "command_approval",
-      detail: { command: "ls -la" },
+      description: { kind: "command_approval", detail: { command: "ls -la" } },
     });
-    expect(describeRequestItem(state, "c1")).toMatchObject({ detail: { command: "ls" } });
+    expect(describeRequestItem(state, "c1")).toMatchObject({
+      description: { detail: { command: "ls" } },
+    });
     expect(describeRequestItem(state, "nope")).toBeUndefined();
     closeTurn(state, { state: "completed" });
     expect(describeRequestItem(state, "c1")).toBeUndefined();

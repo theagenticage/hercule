@@ -152,8 +152,7 @@ export interface Normalizing {
 export interface RequestItem {
   readonly turnId: string;
   readonly itemId: string;
-  readonly kind: ApprovalDescription["kind"];
-  readonly detail: ApprovalDescription["detail"];
+  readonly description: ApprovalDescription;
 }
 
 /**
@@ -864,7 +863,11 @@ export const describeRequestItem = (
   const record = state.tools.get(toolCallId);
   if (record === undefined || record.ended || record.turnId !== state.turn?.id) return undefined;
   const call = snapshot === undefined ? record.call : mergeCall(record.call, snapshot);
-  return { turnId: record.turnId, itemId: record.itemId, ...buildApprovalDescription(call) };
+  return {
+    turnId: record.turnId,
+    itemId: record.itemId,
+    description: buildApprovalDescription(call),
+  };
 };
 
 // ---- Public: usage ----
