@@ -1284,6 +1284,43 @@ describe("a steer", () => {
       }),
     ));
 
+  it("is refused with the interrupt that comes while it is open, and is not shown after the old prompt replies cancelled", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+        yield* h.reply(0, "cancelled");
+
+        const outcome = yield* Fiber.join(steering);
+        expect(outcome).toMatchObject({ kind: "refused" });
+        expect(outcome).toHaveProperty("message", expect.stringContaining("stays queued"));
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(steeredMessages(h)).toHaveLength(0);
+      }),
+    ));
+
+  it("ends the turn when agy fails an accepted steer's prompt and then the steer open behind it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const first = yield* startSteer(h);
+        yield* h.reply(0, "end_turn", 1);
+        expect(yield* Fiber.join(first)).toEqual({ kind: "accepted" });
+        const second = yield* startSteer(h, 3);
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        yield* Deferred.fail(h.prompts[2]!.reply, agyRefusal);
+
+        // The failure of the accepted steer's prompt ends the turn through the failed path, and the second steer is not accepted.
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect((yield* Fiber.join(second)).kind).not.toBe("accepted");
+        expect(steeredMessages(h)).toHaveLength(1);
+      }),
+    ));
+
   it("lets an interrupt after it was accepted end the turn as interrupted", () =>
     run((h) =>
       Effect.gen(function* () {

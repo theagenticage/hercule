@@ -1364,6 +1364,14 @@ describe("the held error notice", () => {
     expect(only(next, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
   });
 
+  it("is shown at once as text in a synthetic turn when no input's prompt is in flight, and is not held for the next turn", () => {
+    const state = freshState();
+    const events = normalizeUpdate(state, buildChunk(NOTICE));
+    expect(only(events, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+    expect(only(events, "turn.started")).toHaveLength(1);
+    expect(takeErrorNotice(state)).toBeUndefined();
+  });
+
   it("is ordinary text inside an open assistant text item", () => {
     const state = freshState();
     openTurn(state, "t");

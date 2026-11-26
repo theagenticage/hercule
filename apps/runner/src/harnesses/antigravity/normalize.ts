@@ -25,7 +25,9 @@
  *   after it and only then is it known to be the end of the turn and not text
  *   in the middle of one. The Turn takes it (`takeErrorNotice`) when the reply
  *   comes; an update that draws something, the end of the turn and the end of
- *   the process show it as the assistant text it would have been;
+ *   the process show it as the assistant text it would have been. With no
+ *   input's prompt in flight (an automatic wake) it is shown at once as
+ *   assistant text in the synthetic turn, because no reply would ever take it;
  * - the `todo_list` and `plan` items, rebuilt from the files the model writes,
  *   because `agy` sends no ACP `plan` update. It compares a written path with
  *   the plan file paths it was given; it does not build paths.
@@ -559,8 +561,13 @@ export const takeErrorNotice = (state: NormalizerState): string | undefined => {
 /** Returns the events that show the held error notice as assistant text, or nothing when none is held. */
 const releaseErrorNotice = (state: NormalizerState): HarnessEvent[] => {
   const notice = takeErrorNotice(state);
-  return notice === undefined ? [] : appendText(state, "assistant_message", `\n⚠ ${notice}\n`);
+  return notice === undefined
+    ? []
+    : appendText(state, "assistant_message", buildNoticeText(notice));
 };
+
+/** Returns the assistant text that shows an error notice of `agy`. */
+const buildNoticeText = (notice: string): string => `\n⚠ ${notice}\n`;
 
 // ---- Text items ----
 
@@ -1005,8 +1012,12 @@ const routeUpdate = (
           ? parseAgyErrorNotice(text)
           : undefined;
       if (notice !== undefined) {
-        state.errorNotice = notice;
-        return [];
+        // Only the reply of an input's prompt can say that the notice ends the turn. With no such prompt in flight (an automatic wake), nothing would ever take the notice, so it is shown at once.
+        if (state.turn?.synthetic === false) {
+          state.errorNotice = notice;
+          return [];
+        }
+        return appendText(state, "assistant_message", buildNoticeText(notice));
       }
       return text === undefined
         ? buildUnknownItem(state, name, notification)

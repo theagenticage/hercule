@@ -732,6 +732,7 @@ export const startTurn = (
         if (phase === "ending" || phase === "closed") return "not-cancelled";
         // Marked before the first yield, so a Request that opens from now on is cancelled.
         interrupted = true;
+        refuseOpenSteer();
         const result = Deferred.makeUnsafe<InterruptResult>();
         pendingInterrupt = result;
         yield* cancelOpenRequests;
@@ -761,6 +762,7 @@ export const startTurn = (
     const stop: Turn["stop"] = (reason) =>
       Effect.suspend(() => {
         interrupted = true;
+        refuseOpenSteer();
         isStopped = true;
         isInactivityTimeout = reason === "inactivity_timeout";
         return cancelOpenRequests;
@@ -940,6 +942,19 @@ export const startTurn = (
       }
       Deferred.doneUnsafe(current.decision, Effect.succeed(outcome));
       postTurnEvent({ kind: "steer-decided" });
+    };
+
+    /**
+     * Refuses the open steer, if there is one, because an interrupt or a stop
+     * ends the Turn. Without it, the reply `cancelled` of the old prompt would
+     * accept the steer and show its message after the interrupt.
+     */
+    const refuseOpenSteer = (): void => {
+      if (openSteer === undefined) return;
+      decideSteer(openSteer.steerPrompt, {
+        kind: "refused",
+        message: `The turn was stopped before Antigravity took the message. ${STAYS_QUEUED}`,
+      });
     };
 
     /** Returns why the Turn cannot take a steer now, or undefined when it can. */
