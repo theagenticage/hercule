@@ -1,0 +1,20 @@
+import { prompt, summarize, select, sleep } from "../agy-session.ts";
+import { run1283, quotaHit } from "../lib1283.ts";
+await run1283("steer-during-request", {}, async (agy, ctx) => {
+  let req: any;
+  agy.onRequest((m) => { if (m.method === "session/request_permission") { req = m; agy.note("permission request arrived (id " + m.id + "); NOT answering"); } else agy.respond(m.id, { action: "decline" }); });
+  let r1: any, r2: any;
+  const p1 = prompt(agy, ctx.sessionId, "Run the shell command `echo REQMARK > req.txt`.").then((m) => { r1 = m; agy.note(`PROMPT1 REPLIED ${JSON.stringify(m).slice(0, 400)}`); });
+  const t0 = Date.now();
+  while (!req && Date.now() - t0 < 120_000) await sleep(50);
+  if (!req) return "no permission request in 120s";
+  agy.note("sending prompt 2 while the request is open");
+  const p2 = prompt(agy, ctx.sessionId, "Also reply with the word BRAVO.").then((m) => { r2 = m; agy.note(`PROMPT2 REPLIED ${JSON.stringify(m).slice(0, 600)}`); });
+  await sleep(3000);
+  agy.note("answering the request with allow_once");
+  select(agy, req, "allow_once");
+  await Promise.race([Promise.all([p1, p2]), sleep(60_000)]);
+  agy.note(`end of wait r1=${Boolean(r1)} r2=${Boolean(r2)}; 5s more`);
+  await sleep(5000);
+  return `${r1 ? summarize("p1", r1) : "p1 no reply"}; ${r2 ? summarize("p2", r2) : "p2 no reply"} quota=${quotaHit(agy)}`;
+});
