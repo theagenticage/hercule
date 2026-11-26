@@ -128,6 +128,7 @@ interface RecordedInitializeResult {
   readonly agentCapabilities: {
     readonly promptCapabilities: { readonly image: boolean };
     readonly mcpCapabilities: { readonly http: boolean };
+    readonly sessionCapabilities: { readonly additionalDirectories?: object };
     readonly _meta: unknown;
   };
 }
@@ -505,6 +506,9 @@ it.live.each(
       version: recordedInitialize.agentInfo.version,
       acceptsImages: recordedInitialize.agentCapabilities.promptCapabilities.image,
       acceptsHttpMcpServers: recordedInitialize.agentCapabilities.mcpCapabilities.http,
+      acceptsAdditionalDirectories:
+        recordedInitialize.agentCapabilities.sessionCapabilities.additionalDirectories !==
+        undefined,
       meta: recordedInitialize.agentCapabilities._meta,
     });
     for (const { reply, recordedReply } of played.authentications) {

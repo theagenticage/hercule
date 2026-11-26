@@ -115,6 +115,39 @@ it.effect(
     }),
 );
 
+it.effect(
+  "writes additionalDirectories in session/new and session/resume, and leaves the key out when there are none",
+  () =>
+    Effect.gen(function* () {
+      const harness = createTestHarness();
+      const connection = yield* harness.open;
+      const request = { cwd: "/work", mcpServers: [] };
+      const additionalDirectories = ["/skills/a", "/skills/b"];
+      const writtenParams = (method: string) =>
+        harness.fake.received.filter(isMethod(method)).map(({ params }) => params);
+
+      yield* connection.newSession({ ...request, additionalDirectories });
+      yield* connection.newSession({ ...request, additionalDirectories: [] });
+      yield* connection.newSession(request);
+      yield* connection.resumeSession({
+        ...request,
+        additionalDirectories,
+        nativeSessionId: SESSION,
+      });
+      yield* connection.resumeSession({ ...request, nativeSessionId: SESSION });
+
+      const [withDirectories, ...withoutDirectories] = writtenParams("session/new");
+      expect(withDirectories).toHaveProperty("additionalDirectories", additionalDirectories);
+      expect(withoutDirectories).toHaveLength(2);
+      for (const params of withoutDirectories) {
+        expect(params).not.toHaveProperty("additionalDirectories");
+      }
+      const [resumedWithDirectories, resumedWithout] = writtenParams("session/resume");
+      expect(resumedWithDirectories).toHaveProperty("additionalDirectories", additionalDirectories);
+      expect(resumedWithout).not.toHaveProperty("additionalDirectories");
+    }),
+);
+
 // ---------------------------------------------------------------------------
 // What the client returns
 // ---------------------------------------------------------------------------
@@ -130,9 +163,14 @@ it.effect("describes a harness from its reply to initialize, and one that announ
       version: "1.5.15",
       acceptsImages: true,
       acceptsHttpMcpServers: true,
+      acceptsAdditionalDirectories: true,
       meta: { antigravity: { tier: true, systemPrompt: { append: true } } },
     });
-    expect(bare.harness).toEqual({ acceptsImages: false, acceptsHttpMcpServers: false });
+    expect(bare.harness).toEqual({
+      acceptsImages: false,
+      acceptsHttpMcpServers: false,
+      acceptsAdditionalDirectories: false,
+    });
   }),
 );
 
