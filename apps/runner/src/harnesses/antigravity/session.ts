@@ -325,10 +325,12 @@ export const startAgySession = (
         generation += 1;
         if (exitReason !== undefined) return Deferred.await(exitedSignal);
         exitReason = reason;
-        const turn = readRunningTurn();
         const procedure = Effect.gen(function* () {
-          if (turn !== undefined && options.stopTurn) yield* turn.stop;
+          const runningTurn = readRunningTurn();
+          if (runningTurn !== undefined && options.stopTurn) yield* runningTurn.stop;
           yield* Scope.close(processScope, Exit.void);
+          // An input whose handoff was proven while the process closed opens its Turn meanwhile.
+          const turn = runningTurn ?? readRunningTurn();
           if (turn !== undefined) {
             // A Turn that does not end by itself is ended here, so no event of it follows `session.exited`.
             const ended = yield* Effect.timeoutOption(turn.ended, TURN_END_WAIT);
@@ -931,25 +933,23 @@ export const startAgySession = (
                 return yield* Effect.fail(buildInputStopped());
               return yield* Effect.failCause(prepared.cause);
             }
-            // The prompt is written, but a process that is going away reports no Turn.
-            if (stopping) {
-              abandonPreparation();
-              return yield* Effect.fail(buildInputStopped());
-            }
-
+            // The handoff is proven here, so the input is opened even when a stop came meanwhile: failing it would let the controller send it again. The stop then ends the Turn as interrupted.
             // The Turn opens only now: a prompt that could not be written leaves no Turn at all. What `agy` sent meanwhile is held, and replays into the Turn.
             const turnId = crypto.randomUUID();
-            emitEvents(openTurn(state, turnId));
             emitEvents(
-              buildUserMessage({
-                sessionId,
+              openTurn(
+                state,
                 turnId,
-                text: input.text,
-                attachments: input.attachments,
-                senderSessionId: input.senderSessionId,
-                steered: false,
-                harnessRefs: { nativeSessionId: nativeId },
-              }),
+                buildUserMessage({
+                  sessionId,
+                  turnId,
+                  text: input.text,
+                  attachments: input.attachments,
+                  senderSessionId: input.senderSessionId,
+                  steered: false,
+                  harnessRefs: { nativeSessionId: nativeId },
+                }),
+              ),
             );
             current = yield* startTurn(
               {
@@ -962,6 +962,7 @@ export const startAgySession = (
               { turnId, firstReply: prepared.value },
             ).pipe(Scope.provide(scope));
             endHandoff();
+            if (stopping) yield* current.stop;
             // An interrupt that came while the prompt was being written found no Turn, so it is applied now.
             if (generation !== inputGeneration) runDetached(interrupt);
             return { turnId, delivery: "opened" } satisfies SendResult;

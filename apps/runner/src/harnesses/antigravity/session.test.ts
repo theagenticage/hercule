@@ -1695,6 +1695,69 @@ describe("a Request that comes while the prompt is handed over", () => {
   });
 });
 
+describe("an input whose prompt is handed over slowly", () => {
+  const isPrompt = (message: JsonRpcMessage) => message.method === "session/prompt";
+
+  it("draws the user's message before the output that came meanwhile", () => {
+    const acknowledged = Promise.withResolvers<void>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sending = yield* Effect.forkChild(h.adapter.sendInput(SESSION, buildInput("Hi.")));
+          yield* h.untilReceived("session/prompt");
+          yield* Effect.promise(settle);
+          acknowledged.resolve();
+          yield* Fiber.join(sending);
+
+          expect(h.tags("item.started").map((event) => event.kind)).toEqual([
+            "user_message",
+            "assistant_message",
+          ]);
+        }),
+      {
+        fake: {
+          recording: readRecordedSetup("cancel"),
+          scripts: {
+            "session/prompt": () => [
+              buildUpdate({
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "Hello." },
+              }),
+            ],
+          },
+        },
+        holdAcknowledgement: (message) => (isPrompt(message) ? acknowledged.promise : undefined),
+      },
+    );
+  });
+
+  it("opens the Turn, and ends it interrupted, when a stop comes while the handoff is proven", () => {
+    const acknowledged = Promise.withResolvers<void>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sending = yield* Effect.forkChild(h.adapter.sendInput(SESSION, buildInput("Hi.")));
+          yield* h.untilReceived("session/prompt");
+          yield* Effect.promise(settle);
+          acknowledged.resolve();
+          Effect.runFork(h.adapter.stopSession(SESSION, "stopped"));
+
+          expect(yield* Fiber.join(sending)).toMatchObject({ delivery: "opened" });
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+          const order = h.seen.map((event) => event._tag);
+          expect(order.indexOf("turn.completed")).toBeLessThan(order.indexOf("session.exited"));
+          expect(h.tags("turn.completed")).toMatchObject([{ state: "interrupted" }]);
+        }),
+      {
+        fake: { recording: readRecordedSetup("cancel"), scripts: { "session/prompt": noAnswer } },
+        holdAcknowledgement: (message) => (isPrompt(message) ? acknowledged.promise : undefined),
+      },
+    );
+  });
+});
+
 describe("the output that comes before a start is ready", () => {
   const CHUNK = buildUpdate({
     sessionUpdate: "agent_message_chunk",

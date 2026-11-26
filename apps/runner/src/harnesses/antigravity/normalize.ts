@@ -373,16 +373,21 @@ export const holdTurn = (state: Normalizing): void => {
 };
 
 /**
- * Opens the turn of the held input and returns `turn.started`, followed by the
- * events of the buffered messages, now in that turn. A synthetic turn that is
+ * Opens the turn of the held input and returns `turn.started`, then
+ * `afterStart` (the input's `user_message`, which must come first in the turn),
+ * then the events of the buffered messages, now in that turn. A synthetic turn that is
  * still open is closed first as completed, because one agent never has two turns
  * at once: its running items finish in it later.
  */
-export const openTurn = (state: Normalizing, turnId: string): HarnessEvent[] => {
+export const openTurn = (
+  state: Normalizing,
+  turnId: string,
+  afterStart: ReadonlyArray<HarnessEvent> = [],
+): HarnessEvent[] => {
   const events = closeTurn(state, { state: "completed" });
   state.held = false;
   state.turn = buildTurnRecord(turnId, false);
-  events.push(buildTurnStarted(state, turnId));
+  events.push(buildTurnStarted(state, turnId), ...afterStart);
   return [...events, ...replayBuffered(state)];
 };
 
