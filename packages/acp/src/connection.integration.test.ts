@@ -406,7 +406,7 @@ const replayRecording = (name: RecordingName) =>
  * Recordings that the generic replay below cannot play, with the reason. Tests
  * of their own cover them.
  *
- * - `resume` and `tmpdir-resume` hold several harness processes in one file,
+ * - `resume`, `tmpdir-resume` and `t3-resume` hold several harness processes in one file,
  *   each starting with its own `initialize`. The replay opens one connection.
  * - `subagent-approval2` ends with the recorder closing the harness while a
  *   prompt was open, so the prompt's error reply comes from the recorder, not
@@ -422,6 +422,7 @@ const RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY: ReadonlyArray<RecordingName> = 
   "stop-bg",
   "stop-cancel",
   "subagent-approval2",
+  "t3-resume",
   "tmpdir-resume",
 ];
 

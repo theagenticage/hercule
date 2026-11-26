@@ -39,12 +39,16 @@ Only `src/connection.ts` imports the copy, tests and `import type` included, and
 
 T3's schemas cannot decode a value they do not know, such as a new tool kind in an approval request or a new config option type. Every such failure is loud:
 
-- A call fails with an `AcpError` with reason `unreadable`. It names the ACP message, the field and the value, which is the value of that call's own reply, also when calls overlap. For an object with a `type`, it names the type first, and it quotes up to 500 characters. A prompt that ends with a stop reason T3 does not know names `stopReason` and the value. `sendPrompt` is two-stage: it succeeds once the transport's awaited write of the `session/prompt` line succeeded (the client has no hook for a request's write, so the sink reads the request `id` from the line it just wrote, only while a call waits for it), and returns the effect that waits for the reply. A reply that arrives before the write is acknowledged also counts as written. When the write fails, or the connection had ended before the line was written, it fails with `not-sent` (the harness certainly did not get the prompt). When the connection ends while the write is in flight, it fails with `closed`, and it is not known whether the harness got the prompt. No reply is expected after either.
+- A call fails with an `AcpError` with reason `unreadable`. It names the ACP message, the field and the value, which is the value of that call's own reply, also when calls overlap. For an object with a `type`, it names the type first, and it quotes up to 500 characters. A prompt that ends with a stop reason T3 does not know names `stopReason` and the value.
 - A dropped update, or a request of the harness that T3 answered with an error, is reported through `onUnhandledMessage`, with T3's own text about the field and the untouched message in `raw`.
 
 A value T3 leaves out of a reply without failing the call, such as malformed `usage` or `modes`, is absent for the caller. It happens after the pinned `agy` version was raised, or when a harness adds a feature.
 
 First remedy: sync with T3 Code (below). T3 usually has the new value by then.
+
+## `sendPrompt` is two-stage
+
+`sendPrompt` succeeds once the transport's awaited write of the `session/prompt` line succeeded (the client has no hook for a request's write, so the sink reads the request `id` from the line it just wrote, only while a call waits for it), and returns the effect that waits for the reply. A reply that arrives before the write is acknowledged also counts as written. When the write fails, or the connection had ended before the line was written, it fails with `not-sent` (the harness certainly did not get the prompt). When the connection ends while the write is in flight, it fails with `closed`, and it is not known whether the harness got the prompt. No reply is expected after either.
 
 ## If syncing is not enough
 
@@ -61,7 +65,11 @@ The interface in `index.ts` stays the same, so nothing outside `connection.ts` c
 
 ## Recordings of `agy`
 
-`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 (not in this repository) added 50 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more. Personal values were replaced: the Linux user name with `user`, and the controller's address with `controller.example`. No email address or token appears in them.
+`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 added 50 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more.
+
+- The recorder is not in `main`. It lives on the branch `research/antigravity-sessions-1282`, under `docs/research/antigravity/sessions-recorder/`.
+- The first line of each of these recordings is a `{"note": ...}` line that says which scenario made it, with which flags, in which mode, with which `TMPDIR`, in which work folder and with which files in place. The replay skips every `note` line.
+- Personal values were replaced: the Linux user name with `user`, the machine's host name with `runner-host`, and the controller's address with `controller.example`. No email address or token appears in them.
 
 ## Lint, formatting and tests
 
