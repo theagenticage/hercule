@@ -9,7 +9,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
-import { isExecutableNotFound, killProcessesHolding, stopChild, type StopSignal } from "./process";
+import {
+  isExecutableNotFound,
+  killProcessesHolding,
+  spawnCheckedFramed,
+  stopChild,
+  type StopSignal,
+} from "./process";
 
 const directory = mkdtempSync(join(tmpdir(), "hercule-process-"));
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -130,6 +136,36 @@ describe("stopping a child", () => {
     };
 
     await Effect.runPromise(stopChild(child, Duration.millis(30)));
+  });
+});
+
+describe("writing to a checked framed child", () => {
+  it("resolves when the process is alive and takes the line", async () => {
+    const child = spawnCheckedFramed(["cat"], {});
+    try {
+      await expect(child.write("hello\n")).resolves.toBeUndefined();
+    } finally {
+      child.kill();
+      await child.exited;
+    }
+  });
+
+  it("rejects when the process has exited", async () => {
+    const child = spawnCheckedFramed(["true"], {});
+    await child.exited;
+    await expect(child.write("hello\n")).rejects.toThrow("has exited");
+  });
+
+  it("rejects when the process is alive but closed its stdin", async () => {
+    const child = spawnCheckedFramed(["sh", "-c", "exec 0<&-; sleep 5"], {});
+    try {
+      // Gives the shell time to close its stdin.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await expect(child.write("hello\n")).rejects.toThrow();
+    } finally {
+      child.kill();
+      await child.exited;
+    }
   });
 });
 

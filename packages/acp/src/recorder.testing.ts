@@ -161,6 +161,8 @@ export const createTestHarness = (
     readonly answers?: Answers;
     /** Replaces the exit of the fake, for a process that exits while its output stays open. */
     readonly exited?: Promise<number>;
+    /** Replaces the fake's `write`, for a pipe whose write returns a promise. `write` is the fake's own. */
+    readonly writeWith?: (write: (text: string) => void) => (text: string) => void | Promise<void>;
   } = {},
 ) => {
   const { answers = {} } = options;
@@ -190,7 +192,11 @@ export const createTestHarness = (
     /** Waits until the client stopped reading the fake's output before its end. */
     whenReadingStopped: notifier.waitUntil("the client stopped reading", fake.isReadingStopped),
     open: openAcpConnection({
-      pipes: { write: fake.write, stdout: fake.stdout, exited: options.exited ?? fake.exited },
+      pipes: {
+        write: options.writeWith?.(fake.write) ?? fake.write,
+        stdout: fake.stdout,
+        exited: options.exited ?? fake.exited,
+      },
       clientVersion: "9.9.9",
       handlers: {
         onSessionUpdate: (notification) => {

@@ -24,7 +24,7 @@ The generated schemas in `src/_generated/` come from the ACP schemas `schema-v1.
 `src/connection.ts` imports these files of the copy:
 
 - `client.ts`: the client (`make`, `agent.*`, the handlers, `raw`).
-- `protocol.ts`: `acpRequestIdentity`, which names a request id the way the client's handlers do, and the log events that `connection.ts` reads (below).
+- `protocol.ts`: `acpRequestIdentity`, which names a request id the way the client's handlers do, the hooks `onOutgoingResponse` and `onOutgoingResponseFailure`, and the log events that `connection.ts` reads (below).
 - `errors.ts` and `compat.ts`: the errors and the compatibility types.
 
 Through `client.ts` the rest of the copy is linked: `rpc.ts`, `_internal/`, `schema.ts` and the generated files.
@@ -88,6 +88,7 @@ Then:
    - `protocol.ts`, the hooks and events `connection.ts` leans on:
      - `acpRequestIdentity`, which names a request id the way the handlers' `context.requestId` does.
      - `onIncomingRequest(requestId, method, params)`, which gives the untouched `params` of a request of the harness before it is queued.
+     - `onOutgoingResponse(requestId)` and `onOutgoingResponseFailure(requestId, error)`, which tell when the reply to a request of the harness was handed to the output (or why it could not be). The `requestId` is named like `acpRequestIdentity` and the handlers' `context.requestId`. `connection.ts` turns them into `replyWritten` of an approval request and an elicitation. `onOutgoingResponse` must fire for the reply of a handler (an `Exit` message), after the write was acknowledged; `onOutgoingResponseFailure` must fire when that write fails. The success hook must wait for the transport's write effect (the `stdout` sink's `Sink.forEach`), because `connection.ts` makes that effect wait for a promise from `AcpPipes.write`: a write that rejects must reach `onOutgoingResponseFailure` and never `onOutgoingResponse` (test: "reports a reply as not written when the write of the reply ..."). A sync that moves or drops either makes `replyWritten` wait until the connection ends (tests in `connection.test.ts`).
      - `onTermination`, which gives the error that ended the client (output ended, line that is not JSON, transport error). `connection.ts` words it as the reason of `awaitClosed`.
      - The log events. Their payload is untyped (`unknown`). `connection.ts` reads only this shape (`LoggedMessage`): `_tag`, `id`, `requestId`, `payload`, and `exit` with `_tag`, `value` and `cause` (each with `_tag`, `error.code`, `error.message` or `defect`). For `decode_failed` it reads `operation`, `method` and `issueSummary`. A renamed field makes the reading fail silently, and only the tests notice.
      - T3 logs an outgoing request (`decoded`, `_tag: "Request"`) in the fiber of the caller. `connection.ts` relies on it: `CurrentCall`, provided in `callHarness`, is how a request finds its call, so each call is told its own reply. If a sync logs it in another fiber, replies are named wrongly or not at all (the test of many overlapping calls fails).

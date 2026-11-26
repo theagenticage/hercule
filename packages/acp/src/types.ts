@@ -161,6 +161,16 @@ export interface ApprovalRequest {
   readonly options: ReadonlyArray<ApprovalOption>;
   /** The `params` of the request exactly as the harness sent them. See `SessionUpdateNotification.raw`. */
   readonly raw: unknown;
+  /**
+   * Succeeds when the reply to this request was written to the harness, and
+   * fails with an `AcpError` (reason `closed`) when writing it failed or the
+   * connection ended before it was written. "Written" means the transport
+   * handed the reply to the harness's stdin: it does not prove that the
+   * harness read it. Run it after the handler returns its reply, or in a
+   * fiber beside it: it waits until the connection writes the reply, and
+   * never before. Each run reports the same result.
+   */
+  readonly replyWritten: Effect.Effect<void, AcpError>;
 }
 
 /** How an approval request is answered: with one of its options, or not at all. */
@@ -202,6 +212,16 @@ export interface ElicitationRequest {
   };
   /** The `params` of the request exactly as the harness sent them. See `SessionUpdateNotification.raw`. */
   readonly raw: unknown;
+  /**
+   * Succeeds when the reply to this request was written to the harness, and
+   * fails with an `AcpError` (reason `closed`) when writing it failed or the
+   * connection ended before it was written. "Written" means the transport
+   * handed the reply to the harness's stdin: it does not prove that the
+   * harness read it. Run it after the handler returns its reply, or in a
+   * fiber beside it: it waits until the connection writes the reply, and
+   * never before. Each run reports the same result.
+   */
+  readonly replyWritten: Effect.Effect<void, AcpError>;
 }
 
 /** An answer to one field: text, a number, a flag, or the chosen values of a multi-select. */
@@ -295,12 +315,19 @@ export interface PromptReply {
  */
 export interface AcpPipes {
   /**
-   * Writes `text` to the harness's stdin. It is one whole line. A throw ends
-   * the connection. The `write` of a `FramedChild` never throws, so a write to
-   * a dead process is lost silently: the connection notices the death by
-   * `exited` or the end of `stdout`.
+   * Writes `text` to the harness's stdin. It is one whole line. A throw, or a
+   * returned promise that rejects, means the write failed and ends the
+   * connection; the reply of an open request is then reported as not written
+   * (`replyWritten`). The connection waits for a returned promise before it
+   * reports a reply as written.
+   *
+   * A write that returns nothing and never throws, such as the `write` of a
+   * `FramedChild`, cannot fail: a write to a dead process is lost silently, and
+   * the connection notices the death by `exited` or the end of `stdout`, which
+   * may be after a reply was reported as written. A pipe that can detect a dead
+   * process returns a promise that rejects.
    */
-  readonly write: (text: string) => void;
+  readonly write: (text: string) => void | Promise<void>;
   /** The harness's stdout. Each item is one whole line, without its newline. */
   readonly stdout: AsyncIterable<string>;
   /**

@@ -294,7 +294,8 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
     });
     spawns.push(spawned);
     return {
-      write: harness.write,
+      // A checked write returns a promise, like the real one.
+      write: async (text) => harness.write(text),
       stdout: harness.stdout,
       stderr: stderr.iterable,
       end: harness.end,

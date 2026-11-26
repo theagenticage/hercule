@@ -35,7 +35,7 @@ import {
 import type { HarnessRunnerContext } from "../index";
 import type { LoginCommand } from "../login";
 import { isExecutableNotFound, stopChild } from "../process";
-import type { FramedChild, Run } from "../process";
+import type { CheckedFramedChild, FramedChild, Run } from "../process";
 import { describeFileFailure } from "../session-files";
 import { truncateFact } from "../text";
 import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
@@ -72,7 +72,7 @@ export type AgySpawn = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
-) => FramedChild;
+) => CheckedFramedChild;
 
 /** What the adapter needs from the machine: how to start `agy`, and how to run a command to its end. */
 export interface AgySeam {
@@ -457,7 +457,7 @@ const readWorkerLogSignals = (folder: string): Effect.Effect<WorkerLogSignals, A
  * process ends.
  */
 const drainStderr = (
-  child: FramedChild,
+  child: Pick<FramedChild, "stderr">,
 ): { readonly lastLines: () => string; readonly ended: Promise<void> } => {
   const lines: Array<string> = [];
   const ended = (async () => {

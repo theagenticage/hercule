@@ -345,11 +345,53 @@ export const openAcpConnection = (options: {
 
     // ---- The end of the connection ----
 
+    // The requests of the harness whose reply is not written yet, by request id.
+    const replies = new Map<string, Deferred.Deferred<void, AcpError>>();
     // Completed once, with the first reason the connection ended. Once it is
     // complete, the harness's output is no longer read.
     const closed = Deferred.makeUnsafe<AcpError>();
     const endConnection = (message: string): void => {
+      // A reply that is not written yet never will be. Each entry leaves the map as it
+      // settles. This runs before `closed` completes: completing it runs other
+      // code at once, which may end the connection again with another reason.
+      for (const [key, written] of [...replies]) {
+        replies.delete(key);
+        Deferred.doneUnsafe(
+          written,
+          Effect.fail(
+            new AcpError({
+              reason: "closed",
+              message: `The connection to the harness ended before the reply to its request was written: ${message}`,
+            }),
+          ),
+        );
+      }
       Deferred.doneUnsafe(closed, Effect.succeed(new AcpError({ reason: "closed", message })));
+    };
+
+    /**
+     * Opens the record of one request of the harness whose reply is not written
+     * yet, and returns the effect that reports when it is. The entry is removed
+     * when the vendored client reports the write or its failure, or when the
+     * connection ends.
+     */
+    const openReply = (requestId: string): Effect.Effect<void, AcpError> => {
+      const written = Deferred.makeUnsafe<void, AcpError>();
+      if (Deferred.isDoneUnsafe(closed)) {
+        Deferred.doneUnsafe(
+          written,
+          Effect.fail(
+            new AcpError({
+              reason: "closed",
+              message:
+                "The connection to the harness had ended when its request arrived, so the reply was not written.",
+            }),
+          ),
+        );
+      } else {
+        replies.set(requestId, written);
+      }
+      return Deferred.await(written);
     };
 
     /** Ends the connection because a pipe failed, and returns the error the vendored client sees. */
@@ -438,7 +480,18 @@ export const openAcpConnection = (options: {
           Effect.try({
             try: () => pipes.write(typeof chunk === "string" ? chunk : decoder.decode(chunk)),
             catch: (cause) => failPipe("write", "Could not write to the harness", cause),
-          }),
+          }).pipe(
+            // The vendored client reports a reply as written only after this
+            // effect succeeds, so a write that fails here is never reported as done.
+            Effect.flatMap((pending) =>
+              pending instanceof Promise
+                ? Effect.tryPromise({
+                    try: () => pending,
+                    catch: (cause) => failPipe("write", "Could not write to the harness", cause),
+                  })
+                : Effect.void,
+            ),
+          ),
         ),
       stderr: () => Sink.drain,
     });
@@ -490,6 +543,27 @@ export const openAcpConnection = (options: {
           openRequests.set(requestId, { method, params });
         });
       },
+      onOutgoingResponse: (requestId) =>
+        Effect.sync(() => {
+          const written = replies.get(requestId);
+          replies.delete(requestId);
+          if (written !== undefined) Deferred.doneUnsafe(written, Effect.void);
+        }),
+      onOutgoingResponseFailure: (requestId, error) =>
+        Effect.sync(() => {
+          const written = replies.get(requestId);
+          replies.delete(requestId);
+          if (written === undefined) return;
+          Deferred.doneUnsafe(
+            written,
+            Effect.fail(
+              new AcpError({
+                reason: "closed",
+                message: `Writing the reply to the harness's request failed: ${quoteHarnessText(error.message)}`,
+              }),
+            ),
+          );
+        }),
       onTermination: (error) => Effect.sync(() => endConnection(describeTermination(error))),
     });
     // Registered after the vendored client, so that it runs before the client's
@@ -544,6 +618,7 @@ export const openAcpConnection = (options: {
           toolCall: request.toolCall,
           options: request.options,
           raw: sent,
+          replyWritten: openReply(context.requestId),
         }),
       ).pipe(Effect.map((outcome) => ({ outcome })));
     });
@@ -563,6 +638,7 @@ export const openAcpConnection = (options: {
           message: request.message,
           requestedSchema: request.requestedSchema,
           raw: openRequests.get(context.requestId)?.params,
+          replyWritten: openReply(context.requestId),
         }),
       );
     });

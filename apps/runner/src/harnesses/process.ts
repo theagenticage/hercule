@@ -295,6 +295,14 @@ export interface FramedChild {
   readonly exited: Promise<number>;
 }
 
+/**
+ * A `FramedChild` whose `write` returns a promise that rejects when the line
+ * could not be written to the process's stdin.
+ */
+export interface CheckedFramedChild extends Omit<FramedChild, "write"> {
+  readonly write: (text: string) => Promise<void>;
+}
+
 /** The two signals the runner sends to stop a harness: a polite request, then a certain end. */
 export type StopSignal = "SIGTERM" | "SIGKILL";
 
@@ -342,7 +350,21 @@ export const stopChild = (
 
 const noop = (): void => undefined;
 
-/** Spawns a line-framed harness. Shared by the Codex, pi and Antigravity adapters. */
+/** Starts a harness process with piped stdin, stdout and stderr. */
+const startFramedProcess = (
+  command: ReadonlyArray<string>,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd: string | null | undefined,
+) =>
+  Bun.spawn([...command], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+    ...(cwd === undefined || cwd === null ? {} : { cwd }),
+  });
+
+/** Spawns a line-framed harness. Shared by the Codex and pi adapters. */
 const spawnFramed = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
@@ -354,13 +376,7 @@ const spawnFramed = (
    */
   cwd?: string | null,
 ): FramedChild => {
-  const child = Bun.spawn([...command], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-    ...(cwd === undefined || cwd === null ? {} : { cwd }),
-  });
+  const child = startFramedProcess(command, env, cwd);
   return {
     stdout: splitLines(child.stdout),
     stderr: splitLines(child.stderr),
@@ -380,9 +396,48 @@ const spawnFramed = (
   };
 };
 
+/**
+ * Spawns a line-framed harness whose `write` reports failure: it returns a
+ * promise that resolves once the line is written and flushed, and rejects when
+ * that fails. `spawnFramed` cannot do this, so a reply to a dead process looks
+ * written.
+ *
+ * Bun's stdin sink reports a dead process in two ways:
+ *
+ * - When the process is alive but closed its stdin, `write` rejects with EPIPE.
+ * - When the process has exited, Bun closes the sink, and `write` resolves with
+ *   `true` instead of a byte count and `flush` with `undefined`, and nothing
+ *   throws. A successful write resolves with the number of bytes.
+ */
+export const spawnCheckedFramed = (
+  command: ReadonlyArray<string>,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd?: string | null,
+): CheckedFramedChild => {
+  const child = startFramedProcess(command, env, cwd);
+  return {
+    stdout: splitLines(child.stdout),
+    stderr: splitLines(child.stderr),
+    write: async (text) => {
+      const written: unknown = await child.stdin.write(text);
+      await child.stdin.flush();
+      if (typeof written !== "number") {
+        throw new Error("The process has exited, so its stdin is closed.");
+      }
+    },
+    end: () => {
+      void child.stdin.end();
+    },
+    kill: (signal) => {
+      child.kill(signal);
+    },
+    exited: child.exited,
+  };
+};
+
 /** Spawns Codex's app-server, which is ended by killing it rather than by closing its stdin. */
 export const spawnAppServer: AppServerSpawn = spawnFramed;
 
 export const spawnPi: PiSpawn = spawnFramed;
 
-export const spawnAgy: AgySpawn = spawnFramed;
+export const spawnAgy: AgySpawn = spawnCheckedFramed;

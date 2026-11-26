@@ -705,6 +705,21 @@ it.effect("hands on an approval request and an elicitation, and writes each kind
   }),
 );
 
+it.effect("reports that the reply to an approval request and to an elicitation was written", () =>
+  Effect.gen(function* () {
+    const harness = createTestHarness();
+    yield* harness.open;
+
+    harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
+    harness.say(buildRequest("e1", "elicitation/create", ELICITATION_PARAMS));
+    yield* harness.whenWritten("both answers", isReplyTo("e1"));
+    yield* harness.whenWritten("the approval answer", isReplyTo("p1"));
+
+    yield* harness.approvalRequests[0]!.replyWritten;
+    yield* harness.elicitationRequests[0]!.replyWritten;
+  }),
+);
+
 it.effect("handles updates while an approval request waits for its answer", () =>
   Effect.gen(function* () {
     const answered = yield* Deferred.make<ApprovalOutcome>();
@@ -1231,6 +1246,44 @@ it.effect(
       expect(yield* connection.awaitClosed).toMatchObject({
         message: "Could not write to the harness: Error: EPIPE",
       });
+      // The failed write is the reply to the approval request.
+      expect(yield* Effect.flip(harness.approvalRequests[0]!.replyWritten)).toMatchObject({
+        reason: "closed",
+      });
+    }),
+);
+
+it.effect.each([
+  {
+    name: "returns a promise that rejects",
+    write: (): void | Promise<void> => Promise.reject(new Error("EPIPE")),
+  },
+  {
+    name: "throws",
+    write: (): void | Promise<void> => {
+      throw new Error("EPIPE");
+    },
+  },
+])(
+  "reports a reply as not written when the write of the reply $name, while the output is open",
+  ({ write }) =>
+    Effect.gen(function* () {
+      const harness = createTestHarness({
+        writeWith: (realWrite) => (text) => (text.includes('"result"') ? write() : realWrite(text)),
+      });
+      yield* harness.open;
+
+      harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
+      yield* harness.waitUntil(
+        "the approval request arrived",
+        () => harness.approvalRequests.length === 1,
+      );
+
+      expect(yield* Effect.flip(harness.approvalRequests[0]!.replyWritten)).toMatchObject({
+        reason: "closed",
+        message: expect.stringContaining("Could not write to the harness"),
+      });
+      expect(harness.fake.received.some(isReplyTo("p1"))).toBe(false);
     }),
 );
 
@@ -1313,9 +1366,14 @@ it.effect.each(ENDINGS)(
         "the handler is parked",
         () => harness.approvalRequests.length === 1,
       );
+      const replyWritten = yield* Effect.forkChild(
+        Effect.flip(harness.approvalRequests[0]!.replyWritten),
+      );
 
       yield* ending.end(harness, connection, scope);
 
+      // The reply was never written, and `replyWritten` says so.
+      expect(yield* Fiber.join(replyWritten)).toMatchObject({ reason: "closed" });
       const error = yield* Fiber.join(prompting);
       yield* Deferred.await(interrupted);
       const closed = yield* connection.awaitClosed;
