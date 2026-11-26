@@ -64,8 +64,8 @@ interface Scenario {
   readonly recording: RecordingName;
   readonly accessMode?: SessionSpec["accessMode"];
   readonly inputs: ReadonlyArray<Input>;
-  /** How many replies of the recorded client belong to prompts the scenario does not play. */
-  readonly unplayedReplies?: number;
+  /** The positions, among the recorded client's replies, of the replies to prompts the scenario does not play. */
+  readonly unplayedReplies?: ReadonlyArray<number>;
 }
 
 const toolStarted = (events: ReadonlyArray<HarnessEvent>) =>
@@ -108,7 +108,7 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
   },
   {
     recording: "question-variants",
-    unplayedReplies: 1,
+    unplayedReplies: [2],
     inputs: [
       { prompts: [0], actions: [{ answer: { "Question 1": "Red" } }], end: "completed" },
       { prompts: [1], actions: [{ answer: { Question: "Purple" } }], end: "completed" },
@@ -138,6 +138,9 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
 ];
 
 const summarize = ({ id, result, method }: JsonRpcMessage) => ({ id, result, method });
+
+const sortReplies = (replies: ReadonlyArray<ReturnType<typeof summarize>>) =>
+  replies.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 
 const isPrompt = (message: JsonRpcMessage) => message.method === "session/prompt";
 
@@ -278,10 +281,10 @@ describe("recordings of agy through an Antigravity session", () => {
                   (message) => message.result !== undefined || message.method === "session/cancel",
                 )
                 .map(summarize);
-              for (const message of written) expect(recordedReplies).toContainEqual(message);
-              expect(written, "and all of it").toHaveLength(
-                recordedReplies.length - (scenario.unplayedReplies ?? 0),
+              const expectedReplies = recordedReplies.filter(
+                (_reply, index) => !(scenario.unplayedReplies ?? []).includes(index),
               );
+              expect(sortReplies(written)).toEqual(sortReplies(expectedReplies));
 
               const turns = tags("turn.completed");
               expect(tags("turn.started"), "one turn per input").toHaveLength(

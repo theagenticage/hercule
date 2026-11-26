@@ -1,36 +1,15 @@
 /**
  * The controller side of the test that runs the real `agy` against the real MCP
- * Gateway (`mcp-antigravity.integration.test.ts`). It adds two things to the
- * rig of `mcp-gateway-rig.testing.ts`:
- *
- * - a recorder in front of the recording proxy that keeps the `Authorization`
- *   header of every request, which the recording proxy does not keep, and that
- *   can answer one request with 404 without forwarding it;
- * - a way to end the Thread's session and resume it, which makes the
- *   controller mint a new session token, as a real resume does.
+ * Gateway (`mcp-antigravity.integration.test.ts`). It is the rig of
+ * `mcp-gateway-rig.testing.ts` with a recorder in front of the recording proxy
+ * that keeps the `Authorization` header of every request, which the recording
+ * proxy does not keep, and that can answer one request with 404 without
+ * forwarding it. The rig's `resumeSession` makes the controller mint a new
+ * session token, as a real resume does.
  */
-import { expect } from "vitest";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import {
-  at,
-  createProfile,
-  readSessionToken,
-  reportEvent,
-  spawnThreadUnder,
-  waitForSession,
-  waitForStartFrames,
-} from "../sessions/testing";
-import {
-  createServers,
-  eventually,
-  readServer,
-  requestCheck,
-  type FakeTool,
-  type FakeUpstream,
-} from "../mcp-servers/testing";
-import { withFleet } from "../workspaces/testing";
-import { startRecordingProxy, type RecordingProxy } from "./mcp-recording-proxy.testing";
-import { post, send } from "./testing";
+import type { FakeTool, FakeUpstream } from "../mcp-servers/testing";
+import { withGatewayRig } from "./mcp-gateway-rig.testing";
+import type { RecordingProxy } from "./mcp-recording-proxy.testing";
 
 /** One request that reached the recorder, from the harness. */
 export interface RecordedBearerRequest {
@@ -147,97 +126,26 @@ export const withAntigravityGatewayRig = (
     readonly listed: ReadonlyArray<string>;
   },
   body: (rig: AntigravityGatewayRig) => Promise<void>,
-): Promise<void> =>
-  withFleet(
-    async (arranged) => {
-      const controller = {
-        harness: arranged.harness,
-        base: arranged.harness.base,
-        token: arranged.token,
-      };
-      const servers = await createServers(controller, options.serverNames);
-      for (const server of servers) {
-        await eventually(
-          () => readServer(controller, server.id),
-          (record) => record.status === "ready",
-        );
-      }
-      const idsByName = Object.fromEntries(servers.map((server) => [server.name, server.id]));
-      const profile = await createProfile(arranged, "antigravity-gateway", ["mcp.use"]);
-      const thread = await spawnThreadUnder(arranged, profile, {
-        mcpServerIds: options.listed.map((name) => idsByName[name]!),
-      });
-      const proxy = startRecordingProxy(arranged.harness.base, {
-        answerDiscoverLikeOlderServer: false,
-      });
-      const recorder = startBearerRecorder(proxy.url);
-      let token = thread.token;
-      try {
-        await body({
-          proxy,
-          recorder,
-          gatewayUrl: recorder.url,
-          sessionToken: () => token,
-          setList: async (names) => {
-            const response = await send(
-              "PATCH",
-              arranged.harness.base,
-              `/api/v1/sessions/${thread.session.id}`,
-              {
-                body: { mcpServerIds: names.map((name) => idsByName[name]) },
-                token: arranged.token,
-              },
-            );
-            expect(response.status).toBe(200);
-          },
-          replaceTools: async (tools) => {
-            await options.upstream.configure({ tools });
-            for (const server of servers) {
-              expect((await requestCheck(controller, server.id)).status).toBe(200);
-              await eventually(
-                async () => (await readServer(controller, server.id)).tools.length,
-                (count) => count === tools.length,
-              );
-            }
-          },
-          resumeSession: async () => {
-            const sessionId = thread.session.id;
-            reportEvent(arranged.wire, 2, {
-              eventId: crypto.randomUUID(),
-              sessionId,
-              at,
-              _tag: "session.exited",
-              reason: "stopped",
-            });
-            await waitForSession(arranged, sessionId, (one) => one.status === "exited");
-            const resumed = await post(
-              arranged.harness.base,
-              `/api/v1/sessions/${sessionId}/input`,
-              { text: "carry on" },
-              arranged.token,
-            );
-            expect(resumed.status, await resumed.clone().text()).toBe(200);
-            const frames = await waitForStartFrames(arranged, sessionId, 2);
-            token = readSessionToken(frames[1]!);
-            reportEvent(arranged.wire, 1, {
-              eventId: crypto.randomUUID(),
-              sessionId,
-              at,
-              _tag: "session.started",
-              harnessRefs: { nativeSessionId: "native-1" },
-            });
-            await waitForSession(arranged, sessionId, (one) => one.status === "busy");
-            return token;
-          },
-        });
-      } finally {
-        await recorder.stop();
-        await proxy.stop();
-      }
-    },
+): Promise<void> => {
+  let recorder: BearerRecorder | undefined;
+  return withGatewayRig(
     {
-      plugins: [
-        buildMcpServerPlugin("acme", { server: buildDeskMcpServer("acme", options.upstream) }),
-      ],
+      ...options,
+      profileName: "antigravity-gateway",
+      answerDiscoverLikeOlderServer: false,
+      front: (target) => (recorder = startBearerRecorder(target)),
+    },
+    (rig) => {
+      let token = rig.sessionToken;
+      return body({
+        proxy: rig.proxy,
+        recorder: recorder!,
+        gatewayUrl: rig.gatewayUrl,
+        sessionToken: () => token,
+        setList: rig.setList,
+        replaceTools: rig.replaceTools,
+        resumeSession: async () => (token = await rig.resumeSession()),
+      });
     },
   );
+};
