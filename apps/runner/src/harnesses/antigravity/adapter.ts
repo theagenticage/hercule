@@ -20,7 +20,7 @@ import type { HarnessAdapter } from "../index";
 import { buildFailedProbe } from "../probe";
 import { runProcess, spawnAgy } from "../process";
 import { ANTIGRAVITY_NAME, buildLoginCommand, type AgySeam } from "./agy";
-import { makeHarnessHomeLeases } from "../harness-home-leases";
+import { makeHarnessHomeLeases, type ReadLeaseKind } from "../harness-home-leases";
 import { deleteSessionFiles } from "./harness-home";
 import { makeAntigravityInstall } from "./install";
 import { makeProbe } from "./probe";
@@ -62,6 +62,18 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
       return Scope.close(entry.scope, Exit.void);
     });
 
+  /**
+   * Takes a read lease on `home` for as long as the surrounding scope is open.
+   * Gives the lease, or a refused result whose message is for the user; a
+   * refused result needs no release. Both the probe and a session start take
+   * the lease this way, so a closing scope, however it closes, gives it back.
+   */
+  const holdReadLease = (home: string, kind: ReadLeaseKind) =>
+    Effect.acquireRelease(
+      Effect.sync(() => leases.acquireRead(home, kind)),
+      (held) => (held.acquired ? Effect.sync(held.release) : Effect.void),
+    );
+
   const readHosted = (sessionId: string): Hosted | undefined => {
     const entry = hosted.get(sessionId);
     return entry === "starting" ? undefined : entry;
@@ -82,13 +94,9 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
       if (binary === undefined) {
         return Effect.succeed(buildFailedProbe(null, `no ${ANTIGRAVITY_BINARY} on this machine`));
       }
-      // The lease and its release are one `acquireRelease`, so an interrupt cannot take the lease and skip the release.
       return Effect.scoped(
         Effect.gen(function* () {
-          const lease = yield* Effect.acquireRelease(
-            Effect.sync(() => leases.acquireRead(ctx.home, "probe")),
-            (held) => (held.acquired ? Effect.sync(held.release) : Effect.void),
-          );
+          const lease = yield* holdReadLease(ctx.home, "probe");
           if (!lease.acquired) return buildFailedProbe(null, lease.message);
           return yield* probe(ctx, binary);
         }),
@@ -105,13 +113,15 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
           if (hosted.has(sessionId)) return yield* Effect.fail(buildSessionAlreadyRunning());
           // Taken before the session reads the account's login, so a sign-in that
           // is in progress is never read half written.
-          const lease = leases.acquireRead(ctx.home, "session");
-          if (!lease.acquired) return yield* Effect.fail(buildAdapterFailed(lease.message));
-          hosted.set(sessionId, "starting");
           // The session's own scope: closing it stops its process, which happens when it exits or fails to start.
           const scope = Scope.makeUnsafe();
-          // Added first, so it runs last: the lease ends after the process is gone.
-          yield* Scope.addFinalizer(scope, Effect.sync(lease.release));
+          // Taken first, so it is given back last: the lease ends after the process is gone.
+          const lease = yield* holdReadLease(ctx.home, "session").pipe(Scope.provide(scope));
+          if (!lease.acquired) {
+            yield* Scope.close(scope, Exit.void);
+            return yield* Effect.fail(buildAdapterFailed(lease.message));
+          }
+          hosted.set(sessionId, "starting");
           const session = yield* restore(startAgySession(seam, sessionId, spec, ctx, emit)).pipe(
             Scope.provide(scope),
             // Also on interruption: an interrupted start must not hold the id for good.
