@@ -14,6 +14,8 @@ Nothing was built, no cluster was touched, and no Amp command was run. Every fac
 | 2026-11-26 | Rogier: the long-term goal is the cluster's compute (option B2). The short-term way there is Amp's agent (option C). |
 | 2026-11-26 | Rogier: an orb thread may have fewer controls than a normal thread. Some of what Hercule offers in a thread may be turned off there, as long as it is said. |
 | 2026-11-26 | Rogier: take the three-verb contract (spawn, pause, delete) for machines created on demand, on the condition that it works cleanly with the runners as they are. [Section 5.6](#56-does-the-contract-fit-the-runners-as-they-are) checks that condition against the code. |
+| 2026-11-26 | Rogier: start with option C. The three-verb contract is a ticket of its own. |
+| 2026-11-26 | Rogier: not ready to implement yet. More testing and prototyping first; [section 11](#11-tests-before-implementation) is the plan. |
 | 2026-11-26 | Fact from Rogier: his controller is reachable only over Tailscale, so a machine in the work cluster cannot dial it today. A Tailscale integration for Hercule is being looked at in another thread and is not close. |
 
 ## 0. The short answer
@@ -68,7 +70,7 @@ So "amp orbs (runners)" mixes two of Amp's terms. Amp's *runner* is the nearest 
 
 **Inferred**
 
-- The local Amp CLI works the same way. The security page says the client "communicates with and executes tools as requested by Amp Server" and sends results back "for the next step in the agentic loop". The CLI pages do not say it in those words. So with Amp there is no way to run the agent loop yourself, on an orb or anywhere else.
+- For the local CLI the sources disagree. The security page says the client "communicates with and executes tools as requested by Amp Server" and sends results back "for the next step in the agentic loop". The SDK's README says "By default the agent runs in the local Amp CLI process." Either way the model calls leave from Amp's servers. For an orb or a runner there is no doubt: "the local process only streams the results."
 
 ### 1.3 The details asked for
 
@@ -109,7 +111,8 @@ So "amp orbs (runners)" mixes two of Amp's terms. Amp's *runner* is the nearest 
 
 **Not found, needs a test run**
 
-- How approvals work without a terminal. The stream has `permission_denials`, and the REST agent state has `awaiting_approval` ("the agent waits for a person to approve a tool call"), but no page describes answering an approval from a program.
+- How approvals work without a terminal. The stream has `permission_denials`, and the REST agent state has `awaiting_approval` ("the agent waits for a person to approve a tool call"), but the REST API has no call that answers one. [Section 9](#9-what-the-cli-the-sdk-and-the-plugin-api-show) has what a plugin in the orb can do instead.
+- How a program stops a turn that is running in an orb. The REST API has no cancel call, and no page says what killing the streaming CLI does to the turn.
 - Whether a thread started over REST or the SDK lands on the self-hosted provider. Only the CLI flag picks a provider. My guess is the project's Default Orb.
 - What an orb thread's stream shows while the orb is created, set up or woken.
 
@@ -207,7 +210,7 @@ The Amp harness of option A, with one difference: the work runs in an orb, not o
   - The pull request is not linked to the Task by itself. Hercule finds a Thread's pull request by joining the pull request's head branch with the branch of the Thread's checkout (spec 20 §14.4), and here Hercule has no checkout. The user links it by hand, or the adapter has to report the orb's branch some other way.
 - **What Hercule adds.**
   - The provider plugin and harness plugin of A.
-  - In the adapter, a second way to run: one `amp -ox … --stream-json` process per turn, and `amp threads continue T-… -ox` for each later turn. The session has no workspace (`workspaceId: null`), which exists today.
+  - In the adapter, a second way to run: one `amp -ox … --stream-json` process per turn, and `amp threads continue T-… -ox` for each later turn. The session has no workspace (`workspaceId: null`), which exists today. Two flags matter, both from [section 9](#9-what-the-cli-the-sdk-and-the-plugin-api-show): `--no-archive-after-execute`, or every turn ends with the orb paused; and `--visibility private`, or the thread is shown to the whole Amp workspace.
   - A place to say which orb provider and which Amp project a thread uses. The Amp project can be found from the Resource's remote, because `--project` accepts a repository URL.
 - **What breaks.**
   - "A session has a turn running while its process runs" stops being true between turns: there is no process, and the orb may be paused. The adapter has to report the session as idle with nothing running, which the spec allows ("spawns or attaches").
@@ -460,6 +463,90 @@ Nothing here was run. Each costs a little Amp usage. `<provider>` and `<owner/re
 5. **How do approvals behave without a terminal?** Run check 1 with a prompt that needs a command Amp would ask about, and watch for `permission_denials` in `result`.
    - Settles: whether C can offer more than `full-access`.
 
+## 9. What the CLI, the SDK and the plugin API show
+
+Inspected on 2026-11-26 from the public npm packages, run with an empty home folder and no sign-in. Versions are under Sources. Everything here is **verified** from the package's own help text, type definitions or README, and none of it has been run against Amp.
+
+**The stream, exactly** (`@ampcode/sdk`, `dist/types.d.ts`)
+
+- Every line has `type` (`system`, `assistant`, `user`, `result`) and `session_id`.
+- `system` / `init` carries `cwd`, `tools` and `mcp_servers` with a status each.
+- `assistant` carries a `message` with `id`, `model`, `content` (text and `tool_use` blocks), `stop_reason`, an optional `usage`, and `parent_tool_use_id`, which is how a subagent's lines are told apart.
+- `user` carries `tool_result` blocks (`tool_use_id`, `content`, `is_error`).
+- `result` carries `duration_ms`, `num_turns`, an optional `usage`, an optional `permission_denials`, and either `result` (success) or `error`.
+- `usage` is `input_tokens`, `output_tokens` and the two cache counts. No cost.
+- An input line is `{ type: "user", requestId?, message: { role: "user", content: [text blocks] } }`. Text only: no image block in the input type.
+
+**Options that matter for option C**
+
+- **Three executors, not two**: `--executor local | orb | runner:<id>`. A *runner* is `amp --no-tui --runner-id <id>` on any machine. With `orb` and with `runner`, "the local process only streams the results." So the remote way of working can be tried on a runner, with no orb and no cluster.
+- **Local-only options do not reach a remote executor**: "Local-only options (`permissions`, `enabledTools`, `skills`, `mcpConfig`, `dangerouslyAllowAll`) and streaming input prompts do not apply to remote executors."
+- **A finished turn archives the thread, and archiving pauses the orb at once.** "Like local execute mode, `-ox --stream-json` archives a new thread when the turn finishes. Pass `--no-archive-after-execute` to keep it." Without that flag every follow-up would start with a wake.
+- **Threads are visible to the whole workspace by default.** `--visibility private` exists. A test thread at work without it is seen by every colleague.
+- **Model choice** is `--mode` (`low`, `medium`, `high`, `ultra`, `claude-code`, or a plugin's mode) or `--model provider/name` with `--effort`. Both are ignored when continuing a thread.
+- **Files go along with `--attach <path>`** in remote execute mode: the CLI uploads the file and adds its URL to the message.
+- **The transcript can be read back later**: `amp threads export` (JSON), `amp threads markdown`, `amp threads usage`, and over REST `GET /api/v2/threads/{id}/messages`. This matters when the streaming process died while the orb worked on.
+- **Dispatch jobs have deadlines**: each must "finish within five minutes, or ten minutes for a `pause` that saves a snapshot."
+- **Amp's Docker example** is the whole contract in a few lines: spawn is `docker start` or `docker run … sleep infinity` from the snapshot image if it exists, then `docker exec -d … amp orb bootstrap`; pause is `docker stop` and `docker commit`; delete is `docker rm -f`.
+
+**Plugins run in the orb, and can hold a tool call** (`amp plugins show-docs`)
+
+- Plugins are TypeScript files loaded from `.amp/plugins/*.ts` in the repository, from `~/.config/amp/plugins/*.ts` on the machine, or from workspace settings. The second place means an orb image can carry one.
+- A plugin handles `session.start`, `tool.call`, `tool.result`, `agent.start` and `agent.end`. "`tool.call` and `tool.result` fire for tools that run in the Amp CLI, an orb, or a runner".
+- A `tool.call` handler is asked before the tool runs and answers `allow`, `reject-and-continue` with a message, `modify` with new input, or `synthesize` with a made-up result. The handler is asynchronous, so it can wait.
+- A plugin can show a dialog (`ctx.ui.confirm`, with `requireHuman`), register tools and skills, and "register a durable generic webhook for this plugin in an Orb thread, including Orbs from a self-hosted Orb provider": a URL that reaches the plugin from outside and wakes the orb.
+- *Inferred:* this is the route to approvals from Hercule in an orb, later. A plugin in the image holds the tool call; Hercule learns of it and answers through the plugin's webhook, which needs only an outbound call from Hercule. Not needed for the first build, and untested.
+
+**What does not exist**
+
+- No REST call to cancel a turn, to answer an approval, or to read whether an orb is running or paused. The agent state (`working`, `idle`, `awaiting_approval`, `error`) "can trail the agent by about 10 seconds."
+- No route from an orb to a private network. Orb Network Routing sends an orb's traffic through the user's computer, but "the runner connects orbs only to public internet addresses, so they can't reach the runner's own computer or other devices on its local network." So an orb cannot reach a controller that is on a tailnet only, and the `hercule` CLI cannot work in an orb for now.
+
+**What this changes in option C**
+
+- The harness can be described with what spec 06 §2 already has: `steering: "unsupported"`, `fork: "unsupported"`, `accessModes` with only `full-access` native, `mcpPassthrough: "unsupported"`, `disallowedTools: "unsupported"`, `structuredOutput: "unsupported"`. No new kind of declaration is needed.
+- Two rules of the spec meet a harness like this for the first time and need a ticket's attention:
+  - With `steering: "unsupported"`, "a steer on such a session interrupts the running turn and sends the input as the next turn." Nobody knows yet how to interrupt a turn in an orb.
+  - The Access Mode fallback "only ever moves to a less permissive mode". From `approval-required` there is nothing less permissive that this harness has, so the start must be refused with a message, or the rule needs a sentence for a harness whose sandbox is the machine.
+- The adapter must pass `--no-archive-after-execute`, and should pass `--visibility private` unless Rogier wants colleagues to see the threads.
+
+## 10. Would option C benefit from the machine contract?
+
+**No, not in its code. Yes, in one shared part and in how it is tested.**
+
+- **C needs none of the controller-side contract.** Amp decides when an orb is spawned, paused and deleted. Hercule never sends those verbs for an orb, and Amp's API does not even tell it the orb's state.
+- **The dispatch program is the shared part.** Amp's contract and the one sketched in section 5 are the same three verbs. A dispatch program for one kind of machine (Docker on a Linux box, say) serves both: started with `amp orb bootstrap` inside, it makes an Amp orb; started with `hercule runner` inside, it would make a Hercule machine. Writing one for the tests of C is the first driver of the later contract.
+- **The test bed is shared too.** A personal orb provider on a home machine shows the contract working from the provider's side: which variables arrive, in what order, how long a pause may take, what a snapshot id is for. That is the cheapest way to learn what Hercule's own contract must say, before any of it is designed.
+- **One thing to keep apart on purpose.** It is tempting to give an orb thread a "machine" record now, so that the later concept can adopt it. Amp does not report the orb's state, so the record would be a guess. Better: C shows "Orb · <provider>" as a plain property of the thread, and the machine concept arrives with its own ticket.
+
+## 11. Tests before implementation
+
+Ordered so that each tier needs less trust and less money than the next. Tier 0 is done. Every other tier needs an Amp sign-in, which only Rogier can give.
+
+| Tier | What | Needs | Settles |
+|---|---|---|---|
+| 0 | Read the CLI, the SDK and the plugin API offline | nothing | Done, section 9 |
+| 1 | Local turns: `amp -x … --stream-json --stream-json-thinking`, then `--stream-json-input` with a steer | an Amp account; a few cents of inference | The real lines for the event mapping: tool names, subagent lines, usage, what `session_id` is, how an error ends a turn. These become the fixtures of the adapter's tests. |
+| 2 | A runner as the remote executor: `amp --no-tui --runner-id t` on one machine, `amp -x … --executor runner:t --stream-json` from another | the same account; no orb, no cluster | Everything about "the local process only streams" without paying for an orb: is the stream the same; what happens to the turn when the streaming process is killed; can the missed part be read back with `amp threads export`; how a follow-up is sent; what a second message does while the first turn runs. |
+| 3 | A personal orb provider at home: Amp's Docker dispatch script on a Linux machine | the same account; Docker on one machine. Self-hosted orbs are free on non-Enterprise plans | The whole life of an orb seen from both sides: what the stream shows during spawn and wake; pause after 5 and 20 minutes and at once on archive; `--no-archive-after-execute`; `.agents/setup` and snapshot ids; a plugin in the image holding a tool call. Also the first driver for the contract (section 10). |
+| 4 | The work cluster: two or three threads with `--orb-provider` and `--visibility private` | the work Amp account; real cost and a cold start of minutes | Only what differs there: cold start and wake times as Hercule would show them, the company image, and what its egress rules allow. |
+| H | A throwaway adapter on a `prototype/amp-harness` branch, fed first by a fake `amp` that replays the tier 1 to 3 captures, then by the real CLI | a throwaway Hercule Home; the captures | Hercule's side: a session with no process between turns; a runner restart in the middle of a turn; a resume from another runner; the thread screen with no workspace; the two spec rules of section 9. |
+
+**Questions the tiers must answer before a spec is written**
+
+1. How is a running turn in an orb stopped? (tier 2, then 3)
+2. Does a turn survive the death of the streaming process, and can Hercule read back what it missed? (tier 2)
+3. What does the user see in Hercule while an orb is created or woken, which at work takes minutes? (tiers 3 and 4)
+4. Which model choices does the harness offer: Amp's modes, a model list, or both, and where does the list come from? (tier 1, plus `GET /api/v2/inference/models`)
+5. Can images be sent? The input type has text blocks only; `--attach` uploads a file. (tier 2)
+6. What identifies the thread for a resume: is `session_id` the `T-…` id? (tier 1)
+7. How does a pull request made in the orb get linked to the Task with no checkout to match? (tier 3, then design)
+8. Which Amp project does a Hercule Resource map to, and what happens when there is none? (tier 3)
+
+**How the captures can be made without handing over a credential**
+
+Rogier signs in once (`amp login`) on a machine of his choice and runs [`amp-orbs/capture-streams.sh`](./amp-orbs/capture-streams.sh), which makes the calls of tier 1 (`local`) or tier 2 (`runner`) in a throwaway repository and saves each stream to a file. Every thread it makes is private and is listed at the end. The script's plumbing was run against a stand-in for the CLI; it has not been run against Amp. The files are then read here. The alternative is an access token given to this thread as a secret, which is faster and means the token is in an agent's hands.
+
 ## Sources
 
 Amp, read 2026-11-25:
@@ -485,4 +572,6 @@ Agent Substrate and the alternatives:
 
 Hercule: `GLOSSARY.md`; `docs/spec/03-controller-and-runners.md`; `docs/spec/06-providers.md` sections 1 to 4 and 15; `docs/spec/13-security.md`; `docs/spec/16-open-items.md`; ADRs 0002, 0003, 0018, 0028, 0036, 0039, 0048; issue [#587](https://github.com/theagenticage/hercule/issues/587); `docs/research/antigravity-harness.md` on branch `research/antigravity-harness`.
 
-Quotes that could not be confirmed word for word on a second read are not used. Two things the first read reported and the second did not find: a `--dangerously-allow-all` flag, and the sentence "Use a custom plugin to control tool use". Neither is relied on here.
+Quotes that could not be confirmed word for word on a second read are not used. Two things the first read reported and the second did not find on the docs pages turned up in the packages themselves on 2026-11-26: the SDK passes a `--dangerously-allow-all` flag, and its README has the sentence "Use a custom plugin to control tool use."
+
+Packages inspected offline on 2026-11-26, with an empty home folder and no sign-in: `@ampcode/cli` 0.0.1795680045-g9e093e (`amp --help`, `amp plugins show-docs`) and `@ampcode/sdk` 0.1.0-20261126081718-g4ce7a36 (`dist/types.d.ts`, `README.md`).
