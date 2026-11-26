@@ -1,0 +1,10 @@
+gemini-4-neon: tool calls=0
+gemini-4-carbon: tool calls=0
+gemini-4-argon: tool calls=0
+gemini-4-hydrogen: tool calls=0
+pro-orch-neon: tool calls=0
+pro-orch: tool calls=0
+pro-orch-argon: tool calls=0
+claude-opus-5-5: tool calls=0
+claude-sonnet-5-5: tool calls=0
+gpt-oss-120b-medium: tool calls=7

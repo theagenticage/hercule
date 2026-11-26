@@ -24,3 +24,5 @@ Scrubbed before publishing: the machine's user name (`<user>`), host name (`<hos
 | `notes/skill-frontmatter-research.md` | Skill frontmatter against approvals | `recordings/rec9/` | `scenarios/skill-fm.ts` |
 | `notes/t11-research.md` | PreToolUse hook facts | `recordings/rec11/` | `scenarios/t11-run.ts`, `t11-session.ts` |
 | `notes/t12-research.md` | What agy does with a failing PreToolUse hook | `recordings/rec12/` (hook log, `hook.sh`, `run.sh`, `agylogs/`) | `scenarios/t12-run.ts`, `t12-session.ts` |
+| `notes/t13-research.md` | The browser subagent: hook order, the hook running before the launcher, the launcher and what it leaves behind | `recordings/rec13/` (hook logs, `agy.log`, process and file listings) | `scenarios/t13-run.ts`, `t13-session.ts` |
+| `notes/live-run-partA-results.md` | The part A live run of the Hercule Antigravity harness against real `agy` (2026-11-26, Linux x64 test machine, agy 1.5.15) | `recordings/live-run-partA/` (transcripts and logs per item) | - |

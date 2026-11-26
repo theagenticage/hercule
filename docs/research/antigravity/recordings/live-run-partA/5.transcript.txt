@@ -1,0 +1,10 @@
+2 19:16:49.418 turn.started {"turnId": "af12e105-627d-475c-bbf5-8da3c17b1992"}
+4 19:16:49.417 item.completed user_message completed {"text": "Use the whoami tool of the alpha MCP server and tell me what it returns. Nothing else."}
+5 19:16:52.206 item.started tool_call  {"server": "alpha", "name": "whoami", "kind": "mcp"}
+6 19:16:52.209 request.opened {"_tag": "request.opened", "request": {"requestId": "12722ffc-b5c2-4895-a43c-aadd981ce548", "itemId": "call_17124383856213256003", "kind": "tool_approval", "detail": {"toolName": "mcp_tools_alpha__whoami"}, "decisions": ["allow", "deny", "cancel"]}}
+7 19:17:15.528 request.resolved {"_tag": "request.resolved", "requestId": "12722ffc-b5c2-4895-a43c-aadd981ce548", "decision": "allow"}
+8 19:17:15.543 item.completed tool_call completed {"server": "alpha", "name": "whoami", "kind": "mcp"}
+10 19:17:17.609 content.delta {"turnId": "af12e105-627d-475c-bbf5-8da3c17b1992", "itemId": "7ee3119d-5a61-4ed0-b054-88c9532c5290", "streamKind": "assistant_text", "delta": "Created At: 2026-11-26T19:16:52Z\nCompleted At: 2026-11-26T19:17:15Z\nstandin-alpha whoami says: user=alice auth=none"}
+11 19:17:18.066 item.completed assistant_message completed null
+12 19:17:18.070 session.usage.updated {"usage": {"inputTokens": 13195, "outputTokens": 295, "cacheReadTokens": 8907, "cacheWriteTokens": 0}}
+13 19:17:18.070 turn.completed {"_tag": "turn.completed", "turnId": "af12e105-627d-475c-bbf5-8da3c17b1992", "state": "completed", "usage": {"inputTokens": 13195, "outputTokens": 295, "cacheReadTokens": 8907, "cacheWriteTokens": 0}}

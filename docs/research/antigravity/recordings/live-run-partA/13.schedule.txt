@@ -1,0 +1,15 @@
+2 19:33:14.399 turn.started {"turnId": "b3988414-a972-47bc-9906-8279c6d28154"}
+4 19:33:14.399 item.completed user_message completed {"text": "/schedule"}
+6 19:33:17.324 content.delta {"turnId": "b3988414-a972-47bc-9906-8279c6d28154", "itemId": "e226e466-441a-41f5-b97c-56a7c23b15a2", "streamKind": "reasoning_text", "delta": "Slash command invocation lacks parameters, preventing immediate execution. Defaulting to empty arguments risks invalid configuration; prompting the user for 
+7 19:33:18.503 item.completed reasoning completed null
+8 19:33:18.506 item.started tool_call  {"name": "manage_task", "kind": "native"}
+9 19:33:18.507 item.completed tool_call completed {"name": "manage_task", "kind": "native"}
+10 19:33:20.254 item.started command_execution  {"command": "ls -la", "description": "List workspace files"}
+11 19:33:20.324 request.opened {"_tag": "request.opened", "request": {"requestId": "3986ec8e-3f91-4092-90c7-8f718bf58d6d", "itemId": "call_3645542619092568226", "kind": "command_approval", "detail": {"command": "ls -la"}, "decisions": ["allow", "deny", "cancel"]}}
+12 19:33:24.219 request.resolved {"_tag": "request.resolved", "requestId": "3986ec8e-3f91-4092-90c7-8f718bf58d6d", "decision": "deny"}
+13 19:33:24.221 item.completed command_execution declined {"command": "ls -la", "description": "List workspace files"}
+14 19:33:24.222 session.usage.updated {"usage": {"inputTokens": 13123, "outputTokens": 338, "cacheReadTokens": 8678, "cacheWriteTokens": 0}}
+16 19:33:27.668 content.delta {"turnId": "b3988414-a972-47bc-9906-8279c6d28154", "itemId": "3cff7867-97ef-4f13-b831-6ffe766b9017", "streamKind": "assistant_text", "delta": "To set up a schedule or timer, please let me know:\n\n1. **What to execute or remind you of** (the prompt/action to run when triggered).\n2. **Timing**:\n   
+17 19:33:28.587 item.completed assistant_message completed null
+18 19:33:28.589 session.usage.updated {"usage": {"inputTokens": 15453, "outputTokens": 567, "cacheReadTokens": 17714, "cacheWriteTokens": 0}}
+19 19:33:28.589 turn.completed {"_tag": "turn.completed", "turnId": "b3988414-a972-47bc-9906-8279c6d28154", "state": "completed", "usage": {"inputTokens": 15453, "outputTokens": 567, "cacheReadTokens": 17714, "cacheWriteTokens": 0}}

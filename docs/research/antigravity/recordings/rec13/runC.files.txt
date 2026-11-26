@@ -1,0 +1,3 @@
+# SETUP: Extra run: /browser prompt as run A, but PATH=/usr/bin:/bin (no node, no npx). Paths seen (first-level: /tmp/node-*, fakehome/.npm/_npx, tmp/*, fakehome/*) per tick; '<epoch ms> FILE path'
+1795723171699 FILE /tmp/node-compile-cache
+1795723171699 FILE /tmp/node-jiti

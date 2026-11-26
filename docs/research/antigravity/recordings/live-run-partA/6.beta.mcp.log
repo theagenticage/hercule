@@ -1,0 +1,8 @@
+{"t":1795720642402,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":null,"ua":"Bun/1.4.4","proto":"2026-07-28","rpc":"server/discover","id":1}
+{"t":1795720642404,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":null,"ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"initialize","id":1}
+{"t":1795720642405,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":"4364efdb-f6a7-49bb-8340-2d4bb1e82584","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795720642406,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":"4364efdb-f6a7-49bb-8340-2d4bb1e82584","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"tools/list","id":2}
+{"t":1795720642407,"server":"beta","http":"DELETE","path":"/mcp","auth":null,"sid":"4364efdb-f6a7-49bb-8340-2d4bb1e82584","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"(DELETE)"}
+{"t":1795720669483,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":null,"ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"initialize","id":1}
+{"t":1795720669484,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":"185abcb9-5bd2-4b56-b577-ba7c8fcdd600","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795720669485,"server":"beta","http":"POST","path":"/mcp","auth":null,"sid":"185abcb9-5bd2-4b56-b577-ba7c8fcdd600","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":2}

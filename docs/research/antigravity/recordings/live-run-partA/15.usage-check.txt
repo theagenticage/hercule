@@ -1,0 +1,4 @@
+Parent turn 2 reply usage (turn.completed): input 21135, output 8725, cacheRead 115506.
+Parent brain transcript model steps of that turn (input/cache/output): 2645/11255/404, 2820/11859/2635, 3018/14687/1936, 2197/17708/57, 2739/17862/1042, 2194/19961/2172, 5522/22174/479
+ sum input 21135, sum output 8725 = the reply exactly.
+Subagent brain transcript steps: 10867/0/7276 and 7345/10898/668 (input 18212, output 7944): in no reply.

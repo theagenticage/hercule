@@ -1,0 +1,10 @@
+RESULT gemini-4-neon setModel=ok reply=end_turn text="Red" usage={"inputTokens":10026,"outputTokens":29,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":27,"totalTokens":10055}
+RESULT gemini-4-carbon setModel=ok reply=end_turn text="Red" usage={"inputTokens":10011,"outputTokens":146,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":141,"totalTokens":10157}
+RESULT gemini-4-argon setModel=ok reply=end_turn text="Red" usage={"inputTokens":10010,"outputTokens":57,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":52,"totalTokens":10067}
+RESULT gemini-4-hydrogen setModel=ok reply=end_turn text="Red" usage={"inputTokens":10729,"outputTokens":49,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":44,"totalTokens":10778}
+RESULT gemini-pro-orchestrator-neon setModel=ok reply=end_turn text="Red" usage={"inputTokens":10976,"outputTokens":77,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":75,"totalTokens":11053}
+RESULT gemini-pro-orchestrator setModel=ok reply=end_turn text="Red" usage={"inputTokens":10976,"outputTokens":165,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":160,"totalTokens":11141}
+RESULT gemini-pro-orchestrator-argon setModel=ok reply=end_turn text="Red" usage={"inputTokens":10972,"outputTokens":96,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":91,"totalTokens":11068}
+RESULT claude-opus-5-5 setModel=ok reply=end_turn text="Red" usage={"inputTokens":5862,"outputTokens":4,"cachedReadTokens":7694,"cachedWriteTokens":0,"thoughtTokens":0,"totalTokens":13560}
+RESULT claude-sonnet-5-5 setModel=ok reply=end_turn text="Red." usage={"inputTokens":13540,"outputTokens":5,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":0,"totalTokens":13545}
+RESULT gpt-oss-120b-medium setModel=ok reply=end_turn text="**red**" usage={"inputTokens":14571,"outputTokens":4697,"cachedReadTokens":63680,"cachedWriteTokens":0,"thoughtTokens":0,"totalTokens":82948}

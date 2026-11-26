@@ -1,0 +1,336 @@
+# SETUP: Extra run: /browser prompt as run A, but the hook sleeps 4 s on invoke_subagent (to order hook vs launcher). ps -eo pid,ppid,args every ~0.5 s (0.1 s for sleep/deny/C), filtered for npx|node|chrome|devtools|agy; format '<epoch ms> PS pid ppid args'. Unrelated rabbitmq/beam lines removed.
+1795723097509 PS 2758826 2758816 /var/tmp/hercule-1282-t13/bin/agy acp --process-per-session --gemini-dir /var/tmp/hercule-1282-t13/home --app-data-dir antigravity-acp --log-file /var/tmp/hercule-1282-t13/run_sleep.agy.log
+1795723097697 PS 2758861 2758826 /var/tmp/hercule-1282-t13/bin/agy acp --worker --gemini_dir=/var/tmp/hercule-1282-t13/home --app_data_dir=antigravity-acp --cloud_code_endpoint=https://daily-cloudcode-pa.googleapis.com --log-file=/var/tmp/hercule-1282-t13/run_sleep.agy.log
+1795723098625 PS 2758952 2758826 /var/tmp/hercule-1282-t13/bin/agy acp --worker --gemini_dir=/var/tmp/hercule-1282-t13/home --app_data_dir=antigravity-acp --cloud_code_endpoint=https://daily-cloudcode-pa.googleapis.com --log-file=/var/tmp/hercule-1282-t13/run_sleep.agy.log
+1795723111069 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723111255 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723111440 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723111626 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723111814 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112003 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112188 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112188 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723112188 PS 2760500 2760499 chrome-devtools-mcp
+1795723112375 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112375 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723112375 PS 2760500 2760499 chrome-devtools-mcp
+1795723112375 PS 2760527 2760500 /home/<user>/n/bin/node /var/tmp/hercule-1282-t13/fakehome/.npm/_npx/15c61037b1978c83/node_modules/chrome-devtools-mcp/out/Default/gen/src/bin/check-latest-version.js /var/tmp/hercule-1282-t13/fakehome/.cache/chrome-devtools-mcp/latest.json
+1795723112563 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112563 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723112563 PS 2760500 2760499 chrome-devtools-mcp
+1795723112746 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112746 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723112746 PS 2760500 2760499 chrome-devtools-mcp
+1795723112931 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723112931 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723112931 PS 2760500 2760499 chrome-devtools-mcp
+1795723113117 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723113117 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723113117 PS 2760500 2760499 chrome-devtools-mcp
+1795723113301 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723113301 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723113301 PS 2760500 2760499 chrome-devtools-mcp
+1795723113488 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723113488 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723113488 PS 2760500 2760499 chrome-devtools-mcp
+1795723113675 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723113675 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723113675 PS 2760500 2760499 chrome-devtools-mcp
+1795723113863 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723113863 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723113863 PS 2760500 2760499 chrome-devtools-mcp
+1795723114050 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723114050 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723114050 PS 2760500 2760499 chrome-devtools-mcp
+1795723114236 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723114236 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723114236 PS 2760500 2760499 chrome-devtools-mcp
+1795723114424 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723114424 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723114424 PS 2760500 2760499 chrome-devtools-mcp
+1795723114608 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723114608 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723114608 PS 2760500 2760499 chrome-devtools-mcp
+1795723114794 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723114794 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723114794 PS 2760500 2760499 chrome-devtools-mcp
+1795723114980 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723114980 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723114980 PS 2760500 2760499 chrome-devtools-mcp
+1795723115168 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723115168 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723115168 PS 2760500 2760499 chrome-devtools-mcp
+1795723115355 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723115355 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723115355 PS 2760500 2760499 chrome-devtools-mcp
+1795723115542 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723115542 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723115542 PS 2760500 2760499 chrome-devtools-mcp
+1795723115728 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723115728 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723115728 PS 2760500 2760499 chrome-devtools-mcp
+1795723115917 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723115917 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723115917 PS 2760500 2760499 chrome-devtools-mcp
+1795723116103 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723116103 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723116103 PS 2760500 2760499 chrome-devtools-mcp
+1795723116289 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723116289 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723116289 PS 2760500 2760499 chrome-devtools-mcp
+1795723116476 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723116476 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723116476 PS 2760500 2760499 chrome-devtools-mcp
+1795723116661 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723116661 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723116661 PS 2760500 2760499 chrome-devtools-mcp
+1795723116850 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723116850 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723116850 PS 2760500 2760499 chrome-devtools-mcp
+1795723117039 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723117039 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723117039 PS 2760500 2760499 chrome-devtools-mcp
+1795723117227 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723117227 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723117227 PS 2760500 2760499 chrome-devtools-mcp
+1795723117411 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723117411 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723117411 PS 2760500 2760499 chrome-devtools-mcp
+1795723117597 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723117597 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723117597 PS 2760500 2760499 chrome-devtools-mcp
+1795723117783 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723117783 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723117783 PS 2760500 2760499 chrome-devtools-mcp
+1795723117968 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723117968 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723117968 PS 2760500 2760499 chrome-devtools-mcp
+1795723118154 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723118154 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723118154 PS 2760500 2760499 chrome-devtools-mcp
+1795723118339 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723118339 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723118339 PS 2760500 2760499 chrome-devtools-mcp
+1795723118524 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723118524 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723118524 PS 2760500 2760499 chrome-devtools-mcp
+1795723118709 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723118709 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723118709 PS 2760500 2760499 chrome-devtools-mcp
+1795723118893 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723118893 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723118893 PS 2760500 2760499 chrome-devtools-mcp
+1795723119081 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723119081 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723119081 PS 2760500 2760499 chrome-devtools-mcp
+1795723119270 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723119270 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723119270 PS 2760500 2760499 chrome-devtools-mcp
+1795723119456 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723119456 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723119456 PS 2760500 2760499 chrome-devtools-mcp
+1795723119646 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723119646 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723119646 PS 2760500 2760499 chrome-devtools-mcp
+1795723119833 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723119833 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723119833 PS 2760500 2760499 chrome-devtools-mcp
+1795723120020 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723120020 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723120020 PS 2760500 2760499 chrome-devtools-mcp
+1795723120206 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723120206 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723120206 PS 2760500 2760499 chrome-devtools-mcp
+1795723120392 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723120392 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723120392 PS 2760500 2760499 chrome-devtools-mcp
+1795723120579 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723120579 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723120579 PS 2760500 2760499 chrome-devtools-mcp
+1795723120768 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723120768 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723120768 PS 2760500 2760499 chrome-devtools-mcp
+1795723120953 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723120953 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723120953 PS 2760500 2760499 chrome-devtools-mcp
+1795723121141 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723121141 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723121141 PS 2760500 2760499 chrome-devtools-mcp
+1795723121327 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723121327 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723121327 PS 2760500 2760499 chrome-devtools-mcp
+1795723121514 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723121514 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723121514 PS 2760500 2760499 chrome-devtools-mcp
+1795723121700 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723121700 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723121700 PS 2760500 2760499 chrome-devtools-mcp
+1795723121888 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723121888 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723121888 PS 2760500 2760499 chrome-devtools-mcp
+1795723122075 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723122075 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723122075 PS 2760500 2760499 chrome-devtools-mcp
+1795723122262 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723122262 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723122262 PS 2760500 2760499 chrome-devtools-mcp
+1795723122449 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723122449 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723122449 PS 2760500 2760499 chrome-devtools-mcp
+1795723122637 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723122637 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723122637 PS 2760500 2760499 chrome-devtools-mcp
+1795723122824 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723122824 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723122824 PS 2760500 2760499 chrome-devtools-mcp
+1795723123011 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723123011 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723123011 PS 2760500 2760499 chrome-devtools-mcp
+1795723123197 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723123197 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723123197 PS 2760500 2760499 chrome-devtools-mcp
+1795723123384 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723123384 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723123384 PS 2760500 2760499 chrome-devtools-mcp
+1795723123568 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723123568 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723123568 PS 2760500 2760499 chrome-devtools-mcp
+1795723123750 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723123750 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723123750 PS 2760500 2760499 chrome-devtools-mcp
+1795723123936 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723123936 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723123936 PS 2760500 2760499 chrome-devtools-mcp
+1795723124122 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723124122 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723124122 PS 2760500 2760499 chrome-devtools-mcp
+1795723124309 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723124309 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723124309 PS 2760500 2760499 chrome-devtools-mcp
+1795723124498 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723124498 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723124498 PS 2760500 2760499 chrome-devtools-mcp
+1795723124684 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723124684 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723124684 PS 2760500 2760499 chrome-devtools-mcp
+1795723124873 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723124873 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723124873 PS 2760500 2760499 chrome-devtools-mcp
+1795723125059 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723125059 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723125059 PS 2760500 2760499 chrome-devtools-mcp
+1795723125245 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723125245 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723125245 PS 2760500 2760499 chrome-devtools-mcp
+1795723125429 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723125429 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723125429 PS 2760500 2760499 chrome-devtools-mcp
+1795723125617 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723125617 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723125617 PS 2760500 2760499 chrome-devtools-mcp
+1795723125802 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723125802 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723125802 PS 2760500 2760499 chrome-devtools-mcp
+1795723125987 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723125987 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723125987 PS 2760500 2760499 chrome-devtools-mcp
+1795723126174 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723126174 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723126174 PS 2760500 2760499 chrome-devtools-mcp
+1795723126360 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723126360 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723126360 PS 2760500 2760499 chrome-devtools-mcp
+1795723126548 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723126548 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723126548 PS 2760500 2760499 chrome-devtools-mcp
+1795723126737 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723126737 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723126737 PS 2760500 2760499 chrome-devtools-mcp
+1795723126925 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723126925 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723126925 PS 2760500 2760499 chrome-devtools-mcp
+1795723127110 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723127110 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723127110 PS 2760500 2760499 chrome-devtools-mcp
+1795723127297 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723127297 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723127297 PS 2760500 2760499 chrome-devtools-mcp
+1795723127483 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723127483 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723127483 PS 2760500 2760499 chrome-devtools-mcp
+1795723127668 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723127668 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723127668 PS 2760500 2760499 chrome-devtools-mcp
+1795723127851 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723127851 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723127851 PS 2760500 2760499 chrome-devtools-mcp
+1795723128037 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723128037 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723128037 PS 2760500 2760499 chrome-devtools-mcp
+1795723128223 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723128223 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723128223 PS 2760500 2760499 chrome-devtools-mcp
+1795723128410 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723128410 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723128410 PS 2760500 2760499 chrome-devtools-mcp
+1795723128594 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723128594 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723128594 PS 2760500 2760499 chrome-devtools-mcp
+1795723128780 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723128780 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723128780 PS 2760500 2760499 chrome-devtools-mcp
+1795723128964 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723128964 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723128964 PS 2760500 2760499 chrome-devtools-mcp
+1795723129149 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723129149 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723129149 PS 2760500 2760499 chrome-devtools-mcp
+1795723129334 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723129334 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723129334 PS 2760500 2760499 chrome-devtools-mcp
+1795723129524 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723129524 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723129524 PS 2760500 2760499 chrome-devtools-mcp
+1795723129708 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723129708 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723129708 PS 2760500 2760499 chrome-devtools-mcp
+1795723129892 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723129892 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723129892 PS 2760500 2760499 chrome-devtools-mcp
+1795723130076 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723130076 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723130076 PS 2760500 2760499 chrome-devtools-mcp
+1795723130261 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723130261 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723130261 PS 2760500 2760499 chrome-devtools-mcp
+1795723130450 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723130450 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723130450 PS 2760500 2760499 chrome-devtools-mcp
+1795723130636 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723130636 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723130636 PS 2760500 2760499 chrome-devtools-mcp
+1795723130822 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723130822 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723130822 PS 2760500 2760499 chrome-devtools-mcp
+1795723131008 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723131008 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723131008 PS 2760500 2760499 chrome-devtools-mcp
+1795723131196 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723131196 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723131196 PS 2760500 2760499 chrome-devtools-mcp
+1795723131383 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723131383 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723131383 PS 2760500 2760499 chrome-devtools-mcp
+1795723131569 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723131569 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723131569 PS 2760500 2760499 chrome-devtools-mcp
+1795723131754 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723131754 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723131754 PS 2760500 2760499 chrome-devtools-mcp
+1795723131940 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723131940 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723131940 PS 2760500 2760499 chrome-devtools-mcp
+1795723132128 PS 2760393 2758952 npm exec chrome-devtools-mcp@latest --no-usage-statistics --no-performance-crux --autoConnect
+1795723132128 PS 2760499 2760393 sh -c "chrome-devtools-mcp" --no-usage-statistics --no-performance-crux --autoConnect
+1795723132128 PS 2760500 2760499 chrome-devtools-mcp
+1795723132316 PS 2760393 2758952 [npm exec chrome]

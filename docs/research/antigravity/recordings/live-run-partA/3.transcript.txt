@@ -1,0 +1,8 @@
+6 19:22:23.922 request.opened {"_tag": "request.opened", "request": {"requestId": "e6e30db9-46e9-49a3-9237-5f4581839793", "itemId": "call_8296175559654560268", "kind": "command_approval", "detail": {"command": "echo hello-denied-test"}, "decisions": ["allow", "deny", "cancel"]}}
+7 19:22:26.730 request.resolved {"_tag": "request.resolved", "requestId": "e6e30db9-46e9-49a3-9237-5f4581839793", "decision": "deny"}
+8 19:22:26.732 item.completed command_execution declined {"command": "echo hello-denied-test", "description": "Echo test command"}
+9 19:22:26.733 session.usage.updated {"usage": {"inputTokens": 10686, "outputTokens": 180, "cacheReadTokens": 0, "cacheWriteTokens": 0}}
+11 19:22:29.583 content.delta {"turnId": "f706519a-db76-406f-acb5-ee2f88c5ae5b", "itemId": "a9b3d729-467f-475f-8931-3ba8097f48f5", "streamKind": "assistant_text", "delta": "The command execution was denied and cancelled by the user before it could run."}
+12 19:22:29.604 item.completed assistant_message completed null
+13 19:22:29.604 session.usage.updated {"usage": {"inputTokens": 13027, "outputTokens": 310, "cacheReadTokens": 8635, "cacheWriteTokens": 0}}
+14 19:22:29.604 turn.completed {"_tag": "turn.completed", "turnId": "f706519a-db76-406f-acb5-ee2f88c5ae5b", "state": "completed", "usage": {"inputTokens": 13027, "outputTokens": 310, "cacheReadTokens": 8635, "cacheWriteTokens": 0}}

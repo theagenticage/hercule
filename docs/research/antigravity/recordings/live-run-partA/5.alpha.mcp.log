@@ -1,0 +1,8 @@
+{"t":1795720599980,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":null,"ua":"Bun/1.4.4","proto":"2026-07-28","rpc":"server/discover","id":1}
+{"t":1795720599985,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":null,"ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"initialize","id":1}
+{"t":1795720599986,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":"2b07ec25-6d8d-474a-b0c7-49cadac32481","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795720599988,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":"2b07ec25-6d8d-474a-b0c7-49cadac32481","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"tools/list","id":2}
+{"t":1795720599989,"server":"alpha","http":"DELETE","path":"/mcp","auth":null,"sid":"2b07ec25-6d8d-474a-b0c7-49cadac32481","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"(DELETE)"}
+{"t":1795720635535,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":null,"ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"initialize","id":1}
+{"t":1795720635537,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":"0c99a737-a46c-44a3-9001-1e0959931af0","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795720635538,"server":"alpha","http":"POST","path":"/mcp","auth":null,"sid":"0c99a737-a46c-44a3-9001-1e0959931af0","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":2}

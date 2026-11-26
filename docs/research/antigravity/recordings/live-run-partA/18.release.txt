@@ -1,0 +1,9 @@
+2 19:37:31.217 runtime.warning {"message": "Antigravity lists one skill per name, so it does not offer some skills to the model by itself: $skillrepo:release (same name as $release). Name a skill in a message to run it."}
+3 19:37:31.219 turn.started {"turnId": "ca59bd79-f788-4fa1-86d3-207df173eff6"}
+5 19:37:31.219 item.completed user_message completed {"text": "/release"}
+9 19:37:35.044 item.started file_read  {"path": "/tmp/hercule-1282/partA/home/runner/85b6cbad537630fe/session-skills/01a2195c-e895-76ca-863e-2b51db0c9079-bd514016-6a7e-45f4-b039-fd20c0bc6f23/.agents/skills/release/SKILL.md"}
+10 19:37:35.045 item.completed file_read completed {"path": "/tmp/hercule-1282/partA/home/runner/85b6cbad537630fe/session-skills/01a2195c-e895-76ca-863e-2b51db0c9079-bd514016-6a7e-45f4-b039-fd20c0bc6f23/.agents/skills/release/SKILL.md"}
+12 19:37:37.566 content.delta {"turnId": "ca59bd79-f788-4fa1-86d3-207df173eff6", "itemId": "9393de2a-fc6a-4d4f-9617-6cb96958720d", "streamKind": "assistant_text", "delta": "LIBWORD"}
+13 19:37:37.585 item.completed assistant_message completed null
+14 19:37:37.587 session.usage.updated {"usage": {"inputTokens": 14291, "outputTokens": 440, "cacheReadTokens": 9721, "cacheWriteTokens": 0}}
+15 19:37:37.587 turn.completed {"_tag": "turn.completed", "turnId": "ca59bd79-f788-4fa1-86d3-207df173eff6", "state": "completed", "usage": {"inputTokens": 14291, "outputTokens": 440, "cacheReadTokens": 9721, "cacheWriteTokens": 0}}

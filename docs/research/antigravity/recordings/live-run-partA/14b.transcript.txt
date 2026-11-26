@@ -1,0 +1,10 @@
+2 19:25:51.688 turn.started {"turnId": "32f1c669-1bee-4888-b3f4-fdbc9184d623"}
+4 19:25:51.688 item.completed user_message completed {"text": "Use your web search tool to find the latest stable version of the Bun JavaScript runtime. Answer in one sentence."}
+5 19:25:54.790 item.started web_search  {"query": "Bun JavaScript runtime latest release version"}
+6 19:25:55.986 item.completed web_search completed {"query": "Bun JavaScript runtime latest release version"}
+7 19:25:58.581 item.started web_search  {"query": "site:github.com/oven-sh/bun/releases latest"}
+8 19:26:01.002 item.completed web_search completed {"query": "site:github.com/oven-sh/bun/releases latest"}
+9 19:26:04.226 item.started command_execution  {"command": "curl -sI https://github.com/oven-sh/bun/releases/latest | grep -i location", "description": "Check latest Bun release redirect"}
+10 19:26:04.298 request.opened {"_tag": "request.opened", "request": {"requestId": "cdc5c43f-eb59-4300-908d-b0f0e2b459c4", "itemId": "call_9789940351000088185", "kind": "command_approval", "detail": {"command": "curl -sI https://github.com/oven-sh/bun/releases/latest | grep -i location"}, "decisions": ["allow", "deny", "cancel"]}}
+17 19:27:57.793 content.delta {"turnId": "32f1c669-1bee-4888-b3f4-fdbc9184d623", "itemId": "c973f255-6c9d-4deb-ad47-f1c49117ef0f", "streamKind": "assistant_text", "delta": "The latest stable version of the Bun JavaScript runtime is v1.4.5."}
+20 19:27:57.832 turn.completed {"_tag": "turn.completed", "turnId": "32f1c669-1bee-4888-b3f4-fdbc9184d623", "state": "completed", "usage": {"inputTokens": 20191, "outputTokens": 626, "cacheReadTokens": 39225, "cacheWriteTokens": 0}}

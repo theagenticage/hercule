@@ -1,0 +1,7 @@
+# SETUP: Run B variant 2: 'Delegate to the browser subagent (invoke_subagent, TypeName browser): open https://example.com in Chrome and report the page title. Do not use curl.' Subagent started.. Paths seen (first-level: /tmp/node-*, fakehome/.npm/_npx, tmp/*, fakehome/*) per tick; '<epoch ms> FILE path'
+1795723043237 FILE /tmp/node-compile-cache
+1795723043237 FILE /tmp/node-jiti
+1795723056717 FILE /var/tmp/hercule-1282-t13/fakehome/.cache
+1795723055547 FILE /var/tmp/hercule-1282-t13/fakehome/.npm
+1795723055547 FILE /var/tmp/hercule-1282-t13/fakehome/.npm/_npx
+1795723055547 FILE /var/tmp/hercule-1282-t13/tmp/node-compile-cache

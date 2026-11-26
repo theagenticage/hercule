@@ -1,0 +1,10 @@
+51 19:34:24.315 turn.started {"turnId": "1f721ab2-a65c-4c70-ad68-cec4abe3b96b"}
+53 19:34:24.315 item.completed user_message completed {"text": "/swarm"}
+57 19:34:28.737 item.started file_read  {"path": "/tmp/hercule-1282/partA/home/runner/85b6cbad537630fe/providers/homes/01a21949-ada3-7495-b652-90d7c2746788/antigravity/antigravity/antigravity-acp/builtin/skills/native_swarm/SKILL.md"}
+58 19:34:28.739 item.completed file_read completed {"path": "/tmp/hercule-1282/partA/home/runner/85b6cbad537630fe/providers/homes/01a21949-ada3-7495-b652-90d7c2746788/antigravity/antigravity/antigravity-acp/builtin/skills/native_swarm/SKILL.md"}
+59 19:34:31.159 item.started tool_call  {"name": "swarm", "kind": "native"}
+60 19:34:31.160 item.completed tool_call completed {"name": "swarm", "kind": "native"}
+65 19:34:46.001 content.delta {"turnId": "1f721ab2-a65c-4c70-ad68-cec4abe3b96b", "itemId": "643ac2e7-a6eb-4a42-ad39-1004c7c906a3", "streamKind": "assistant_text", "delta": "Swarm coordination is ready.\n\nA swarm allows multiple agents to work in parallel on independent parts of a task (e.g., separate files, components, investig
+66 19:34:47.334 item.completed assistant_message completed null
+67 19:34:47.339 session.usage.updated {"usage": {"inputTokens": 46722, "outputTokens": 6242, "cacheReadTokens": 171821, "cacheWriteTokens": 0}}
+68 19:34:47.339 turn.completed {"_tag": "turn.completed", "turnId": "1f721ab2-a65c-4c70-ad68-cec4abe3b96b", "state": "completed", "usage": {"inputTokens": 12624, "outputTokens": 841, "cacheReadTokens": 70937, "cacheWriteTokens": 0}}

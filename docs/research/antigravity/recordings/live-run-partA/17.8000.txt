@@ -1,0 +1,3 @@
+turn 1: stop=end_turn usage_used=[0,10685] replyInput=8879 cacheRead=0 other=["session_info_update"] compactMentions=0
+turn 2: stop=end_turn usage_used=[12713] replyInput=2090 cacheRead=8818 other=[] compactMentions=0
+turn 3: stop=end_turn usage_used=[14760] replyInput=4009 cacheRead=8940 other=[] compactMentions=0

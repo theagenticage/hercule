@@ -1,0 +1,17 @@
+# SETUP: Run B variant 1: 'Use the browser subagent to open ...'. Model used curl, no subagent.. agy --log-file.
+I1126 19:57:09.010933       1 options.go:469] Starting ACP front (pid 2754190, isJetski=false)
+I1126 19:57:09.011176       1 router.go:352] front: initialize
+I1126 19:57:09.011859       1 router.go:352] front: authenticate
+I1126 19:57:09.012366      84 router.go:1049] front: started worker 1 (pid 2754210)
+I1126 19:57:09.100123      84 router.go:690] front: worker 1 ready
+I1126 19:57:09.932582       1 router.go:352] front: session/new
+I1126 19:57:09.932972      85 router.go:1049] front: started worker 2 (pid 2754286)
+I1126 19:57:10.017281      85 router.go:690] front: worker 2 ready
+I1126 19:57:10.854538      30 router.go:937] front: session aa82b27b-eae5-4a27-9cbd-9d0828ef50d7 served by worker 2
+I1126 19:57:10.854851       1 router.go:352] front: session/set_config_option
+I1126 19:57:10.856060       1 router.go:352] front: session/prompt
+I1126 19:57:22.118101      83 serve.go:68] Received signal terminated, shutting down
+I1126 19:57:22.118207      83 router.go:967] front: retiring worker 1
+I1126 19:57:22.118259      83 router.go:967] front: retiring worker 2
+I1126 19:57:22.196980      30 router.go:773] front: worker 2 exited
+I1126 19:57:22.209425      29 router.go:773] front: worker 1 exited

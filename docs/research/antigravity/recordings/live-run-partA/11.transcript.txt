@@ -1,0 +1,6 @@
+19 19:32:03.241 turn.started {"turnId": "be6b2fc6-062a-488f-a296-dfbdcc4c9474"}
+21 19:32:03.241 item.completed user_message completed {"text": "Which colour did I pick earlier? Answer in one word."}
+23 19:32:05.939 content.delta {"turnId": "be6b2fc6-062a-488f-a296-dfbdcc4c9474", "itemId": "5a7e1848-4243-42cb-967e-443a60466926", "streamKind": "assistant_text", "delta": "Blue"}
+24 19:32:05.952 item.completed assistant_message completed null
+25 19:32:05.954 session.usage.updated {"usage": {"inputTokens": 11393, "outputTokens": 38, "cacheReadTokens": 0, "cacheWriteTokens": 0}}
+26 19:32:05.954 turn.completed {"_tag": "turn.completed", "turnId": "be6b2fc6-062a-488f-a296-dfbdcc4c9474", "state": "completed", "usage": {"inputTokens": 11393, "outputTokens": 38, "cacheReadTokens": 0, "cacheWriteTokens": 0}}

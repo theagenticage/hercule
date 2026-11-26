@@ -1,0 +1,12 @@
+2 19:48:51.161 turn.started {"turnId": "46489f75-eed3-4b24-8af8-6f9b6875c457"}
+4 19:48:51.161 item.completed user_message completed {"text": "Reply with exactly one word: ready"}
+6 19:48:54.383 content.delta {"turnId": "46489f75-eed3-4b24-8af8-6f9b6875c457", "itemId": "c8190fc3-e102-4657-978b-5ec5bb602255", "streamKind": "assistant_text", "delta": "ready"}
+7 19:48:54.599 item.completed assistant_message completed null
+8 19:48:54.603 session.usage.updated {"usage": {"inputTokens": 4408, "outputTokens": 25, "cacheReadTokens": 6626, "cacheWriteTokens": 0}}
+9 19:48:54.603 turn.completed {"_tag": "turn.completed", "turnId": "46489f75-eed3-4b24-8af8-6f9b6875c457", "state": "completed", "usage": {"inputTokens": 4408, "outputTokens": 25, "cacheReadTokens": 6626, "cacheWriteTokens": 0}}
+10 19:48:56.076 turn.started {"turnId": "487cc60e-21a3-40ec-b485-394d8e8c18ef"}
+12 19:48:56.076 item.completed user_message completed {"text": "Reply with exactly one word: switched"}
+14 19:48:58.596 content.delta {"turnId": "487cc60e-21a3-40ec-b485-394d8e8c18ef", "itemId": "407f8d96-a218-4ed6-9510-6f5abfad0bce", "streamKind": "assistant_text", "delta": "switched"}
+15 19:48:58.616 item.completed assistant_message completed null
+16 19:48:58.619 session.usage.updated {"usage": {"inputTokens": 15593, "outputTokens": 167, "cacheReadTokens": 6626, "cacheWriteTokens": 0}}
+17 19:48:58.619 turn.completed {"_tag": "turn.completed", "turnId": "487cc60e-21a3-40ec-b485-394d8e8c18ef", "state": "completed", "usage": {"inputTokens": 11185, "outputTokens": 142, "cacheReadTokens": 0, "cacheWriteTokens": 0}}

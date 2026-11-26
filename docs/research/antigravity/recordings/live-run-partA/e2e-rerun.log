@@ -1,0 +1,9 @@
+
+ RUN  v5.0.5 /home/<user>/.local/share/hercule/runner/9f6dd658f457452b/workspaces/01a215c7-f7c4-74a4-89ad-33ee2861d7ed
+
+
+ Test Files  3 passed (3)
+      Tests  6 passed | 24 skipped (30)
+   Start at  19:12:09
+   Duration  215.69s (tests 100%)
+

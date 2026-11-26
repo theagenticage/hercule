@@ -1,0 +1,2 @@
+{"t":1795720778742,"server":"longname","http":"POST","path":"/mcp","auth":null,"sid":"6769defb-91ad-4d7c-a3a0-889527a04e8c","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"tools/call","tool":"a_tool_with_a_long_name_for_the_limit_xxxx","args":{},"id":2}
+{"t":1795720805917,"server":"longname","http":"POST","path":"/mcp","auth":null,"sid":"6769defb-91ad-4d7c-a3a0-889527a04e8c","ua":"Bun/1.4.4","proto":"2025-11-25","rpc":"tools/call","tool":"search-pages","args":{},"id":3}

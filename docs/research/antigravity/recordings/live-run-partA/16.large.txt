@@ -1,0 +1,3 @@
+size=2048 RESULT gemini-3.8-flash setModel=ok reply=end_turn text="Red" usage={"inputTokens":10054,"outputTokens":226,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":225,"totalTokens":10280}
+size=6000 RESULT gemini-3.8-flash setModel=ok reply=end_turn text="Red" usage={"inputTokens":38383,"outputTokens":2542,"cachedReadTokens":131422,"cachedWriteTokens":0,"thoughtTokens":2059,"totalTokens":172347}
+RESULT gemini-3.8-flash setModel=ok reply=end_turn text="Red" usage={"inputTokens":10009,"outputTokens":77,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":76,"totalTokens":10086}

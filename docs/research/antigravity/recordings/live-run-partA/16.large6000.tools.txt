@@ -1,0 +1,8 @@
+File ../../partA/rec-home/skills/dup/SKILL.md
+git status || ls -la /tmp/hercule-1282/
+File ../../skill-frontmatter-research.md
+ls -la /tmp/hercule-1282/partA/rec-home/skills/
+grep -rn "PLAINSKILLSWORD" /tmp/hercule-1282/ 2>/dev/null
+File ../../partA/evidence/19.txt
+grep -rn "uploaded_media" /tmp/hercule-1282/ 2>/dev/null || grep -rn "What colour is this image" /tmp/hercule-1282/ 2>/dev/null
+grep -C 5 "MODEL" /tmp/hercule-1282/homes/neon/antigravity-acp/brain/20849bb9-4fd2-44a5-ac93-088e61de1aa1/.system_generated/logs/transcript.jsonl

@@ -1,0 +1,10 @@
+# SETUP: Extra run: /browser prompt as run A, but the hook DENIES invoke_subagent. Driver summary.
+set model ok
+PROMPT START 1795723136514
+prompt -> end_turn at 1795723158736
+ACP TOOL UPDATES:
+  tool_call call_733833192 title=Run invoke_subagent kind=other status=in_progress rawInput={"Prompt":"Open https://example.com and extract/tell me the title of the page.","Role":"Web Browser","TypeName":"browser"} rawOutput=null
+  tool_call_update call_733833192 title=Run invoke_subagent kind=other status=failed rawInput={"Prompt":"Open https://example.com and extract/tell me the title of the page.","Role":"Web Browser","TypeName":"browser"} rawOutput="tool call denied by pre-tool hook: t13 deny"
+REQUESTS: 0
+TEXT: The request to invoke the browser subagent was denied by a pre-tool hook (`t13 deny`).   Because this tool execution was blocked by the permission/access control policy, I cannot launch the browser to open https://example.com and retrieve its title.
+AGY PID 2763133

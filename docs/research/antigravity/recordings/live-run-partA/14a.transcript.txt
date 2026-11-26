@@ -1,0 +1,10 @@
+2 19:25:24.691 turn.started {"turnId": "8fd52ec6-2c50-4900-99b8-b082c5bda5bd"}
+4 19:25:24.691 item.completed user_message completed {"text": "Use your web search tool to find the latest stable version of the Bun JavaScript runtime. Answer in one sentence."}
+5 19:25:27.400 item.started web_search  {"query": "Bun JavaScript runtime latest release version"}
+6 19:25:27.469 item.completed web_search failed {"content": "tool call denied by pre-tool hook: Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.", "query": "Bun JavaScript runtime latest release version"}
+8 19:25:30.813 content.delta {"turnId": "8fd52ec6-2c50-4900-99b8-b082c5bda5bd", "itemId": "bc3638ca-98a8-4f26-9ead-cae684efbc0c", "streamKind": "reasoning_text", "delta": "External web search capability is restricted by policy. Re-evaluating available execution options without relying on external network requests.\n\nNetwork se
+9 19:25:36.523 item.completed reasoning completed null
+10 19:25:36.526 item.started command_execution  {"command": "hercule --help", "description": "Check Hercule CLI"}
+11 19:25:36.592 request.opened {"_tag": "request.opened", "request": {"requestId": "45d4895d-fc1d-4cbc-b230-9be37b62f353", "itemId": "call_7527676458949864746", "kind": "command_approval", "detail": {"command": "hercule --help"}, "decisions": ["allow", "deny", "cancel"]}}
+19 19:25:47.490 content.delta {"turnId": "8fd52ec6-2c50-4900-99b8-b082c5bda5bd", "itemId": "f5972de7-b20a-4ba6-abd8-4b74177e98c2", "streamKind": "assistant_text", "delta": "I cannot search the web because the web search tool is disabled in \"Approval required\" access mode; please switch the thread to another access mode to allo
+22 19:25:47.622 turn.completed {"_tag": "turn.completed", "turnId": "8fd52ec6-2c50-4900-99b8-b082c5bda5bd", "state": "completed", "usage": {"inputTokens": 16199, "outputTokens": 1329, "cacheReadTokens": 17484, "cacheWriteTokens": 0}}

@@ -1,0 +1,3 @@
+# SETUP: Run B attempt (runB4): plain prompt 'Use your browser agent to open https://example.com and tell me the page title.', Gemini 3.8 Flash, default mode, PATH with node. Model used curl, no subagent.. Paths seen (first-level: /tmp/node-*, fakehome/.npm/_npx, tmp/*, fakehome/*) per tick; '<epoch ms> FILE path'
+1795723007416 FILE /tmp/node-compile-cache
+1795723007416 FILE /tmp/node-jiti

@@ -1,0 +1,12 @@
+request bde47541-aade-4d1e-ad06-d2d9cbaa8876
+int exit 0
+allow exit 0
+idle 3 {'inputTokens': 30910, 'outputTokens': 1323, 'cacheReadTokens': 38556, 'cacheWriteTokens': 0}
+38 19:23:50.662 turn.started {"turnId": "bdb14d30-857f-43c6-97d7-c34185ce6ab3"}
+40 19:23:50.662 item.completed user_message completed {"text": "Run the shell command: sleep 20"}
+41 19:23:53.049 item.started command_execution  {"command": "sleep 20", "description": "Sleep 20 seconds"}
+42 19:23:53.122 request.opened {"_tag": "request.opened", "request": {"requestId": "bde47541-aade-4d1e-ad06-d2d9cbaa8876", "itemId": "call_12550174039009447626", "kind": "command_approval", "detail": {"command": "sleep 20"}, "decisions": ["allow", "deny", "cancel"]}}
+43 19:23:54.435 request.resolved {"_tag": "request.resolved", "requestId": "bde47541-aade-4d1e-ad06-d2d9cbaa8876", "decision": "allow"}
+44 19:23:54.438 item.completed command_execution failed {"command": "sleep 20", "description": "Sleep 20 seconds"}
+45 19:23:54.439 session.usage.updated {"usage": {"inputTokens": 30910, "outputTokens": 1323, "cacheReadTokens": 38556, "cacheWriteTokens": 0}}
+46 19:23:54.439 turn.completed {"_tag": "turn.completed", "turnId": "bdb14d30-857f-43c6-97d7-c34185ce6ab3", "state": "interrupted", "usage": {"inputTokens": 2260, "outputTokens": 73, "cacheReadTokens": 10487, "cacheWriteTokens": 0}}

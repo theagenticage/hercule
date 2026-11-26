@@ -1,0 +1,17 @@
+# SETUP: Run B attempt (runB2): plain prompt 'Use your browser agent to open https://example.com and tell me the page title.', Gemini 3.8 Flash, default mode, PATH with node. Model used curl, no subagent.. agy --log-file.
+I1126 19:56:18.039340       1 options.go:469] Starting ACP front (pid 2750582, isJetski=false)
+I1126 19:56:18.039565       1 router.go:352] front: initialize
+I1126 19:56:18.040234       1 router.go:352] front: authenticate
+I1126 19:56:18.040666      84 router.go:1049] front: started worker 1 (pid 2750603)
+I1126 19:56:18.126399      84 router.go:690] front: worker 1 ready
+I1126 19:56:19.006848       1 router.go:352] front: session/new
+I1126 19:56:19.007356      85 router.go:1049] front: started worker 2 (pid 2750673)
+I1126 19:56:19.091411      85 router.go:690] front: worker 2 ready
+I1126 19:56:20.094594      40 router.go:937] front: session 1e93ad52-0d0f-4932-b2d8-e0d0eed180f2 served by worker 2
+I1126 19:56:20.095094       1 router.go:352] front: session/set_config_option
+I1126 19:56:20.096419       1 router.go:352] front: session/prompt
+I1126 19:56:30.276953      83 serve.go:68] Received signal terminated, shutting down
+I1126 19:56:30.277043      83 router.go:967] front: retiring worker 1
+I1126 19:56:30.277110      83 router.go:967] front: retiring worker 2
+I1126 19:56:30.358184      26 router.go:773] front: worker 1 exited
+I1126 19:56:30.364100      40 router.go:773] front: worker 2 exited

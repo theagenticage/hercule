@@ -1,0 +1,2 @@
+16 19:29:43.909 session.usage.updated {"usageReport": {"status": "incomplete", "counts": {"inputTokens": 13267, "outputTokens": 2590, "cacheReadTokens": 10700, "cacheWriteTokens": 0}}}
+17 19:29:43.909 turn.completed {"_tag": "turn.completed", "turnId": "ebbd05eb-f9cb-4df2-8cb6-c5a3050f4479", "state": "interrupted", "usage": {"inputTokens": 13267, "outputTokens": 2590, "cacheReadTokens": 10700, "cacheWriteTokens": 0}}

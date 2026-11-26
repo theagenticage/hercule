@@ -1,0 +1,7 @@
+# SETUP: Extra run: /browser prompt as run A, but the hook sleeps 4 s on invoke_subagent (to order hook vs launcher). Paths seen (first-level: /tmp/node-*, fakehome/.npm/_npx, tmp/*, fakehome/*) per tick; '<epoch ms> FILE path'
+1795723096405 FILE /tmp/node-compile-cache
+1795723096405 FILE /tmp/node-jiti
+1795723112375 FILE /var/tmp/hercule-1282-t13/fakehome/.cache
+1795723111069 FILE /var/tmp/hercule-1282-t13/fakehome/.npm
+1795723111440 FILE /var/tmp/hercule-1282-t13/fakehome/.npm/_npx
+1795723111069 FILE /var/tmp/hercule-1282-t13/tmp/node-compile-cache

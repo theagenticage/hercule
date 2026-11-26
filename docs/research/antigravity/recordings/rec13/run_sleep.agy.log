@@ -1,0 +1,17 @@
+# SETUP: Extra run: /browser prompt as run A, but the hook sleeps 4 s on invoke_subagent (to order hook vs launcher). agy --log-file.
+I1126 19:58:17.567826       1 options.go:469] Starting ACP front (pid 2758826, isJetski=false)
+I1126 19:58:17.568107       1 router.go:352] front: initialize
+I1126 19:58:17.568810       1 router.go:352] front: authenticate
+I1126 19:58:17.569340      40 router.go:1049] front: started worker 1 (pid 2758861)
+I1126 19:58:17.657119      40 router.go:690] front: worker 1 ready
+I1126 19:58:18.466896       1 router.go:352] front: session/new
+I1126 19:58:18.467190      41 router.go:1049] front: started worker 2 (pid 2758952)
+I1126 19:58:18.551006      41 router.go:690] front: worker 2 ready
+I1126 19:58:19.524249      31 router.go:937] front: session 2149d4e4-a646-4590-9feb-d53403aa90c2 served by worker 2
+I1126 19:58:19.524758       1 router.go:352] front: session/set_config_option
+I1126 19:58:19.526298       1 router.go:352] front: session/prompt
+I1126 19:58:52.270024      39 serve.go:68] Received signal terminated, shutting down
+I1126 19:58:52.270127      39 router.go:967] front: retiring worker 1
+I1126 19:58:52.270186      39 router.go:967] front: retiring worker 2
+I1126 19:58:52.343203      30 router.go:773] front: worker 1 exited
+I1126 19:58:52.459291      31 router.go:773] front: worker 2 exited

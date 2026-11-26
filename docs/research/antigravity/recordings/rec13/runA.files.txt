@@ -1,0 +1,7 @@
+# SETUP: Run A: prompt '/browser open https://example.com and tell me its title', Gemini 3.8 Flash, mode default, PATH with node/npx, fresh scratch home (hook = logging only). Paths seen (first-level: /tmp/node-*, fakehome/.npm/_npx, tmp/*, fakehome/*) per tick; '<epoch ms> FILE path'
+1795722900169 FILE /tmp/node-compile-cache
+1795722900169 FILE /tmp/node-jiti
+1795722910121 FILE /var/tmp/hercule-1282-t13/fakehome/.cache
+1795722909534 FILE /var/tmp/hercule-1282-t13/fakehome/.npm
+1795722909534 FILE /var/tmp/hercule-1282-t13/fakehome/.npm/_npx
+1795722909534 FILE /var/tmp/hercule-1282-t13/tmp/node-compile-cache

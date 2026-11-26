@@ -1,0 +1,10 @@
+turn 1: stop=end_turn usage_used=[0,10342] replyInput=8873 cacheRead=0 other=["session_info_update"] compactMentions=0
+turn 2: stop=end_turn usage_used=[11950] replyInput=3618 cacheRead=6887 other=[] compactMentions=0
+turn 3: stop=end_turn usage_used=[13561] replyInput=3313 cacheRead=8829 other=[] compactMentions=0
+turn 4: stop=end_turn usage_used=[15999] replyInput=3607 cacheRead=10128 other=[] compactMentions=0
+turn 5: stop=end_turn usage_used=[17693] replyInput=2409 cacheRead=13842 other=[] compactMentions=0
+turn 1: stop=end_turn usage_used=[0,10342] replyInput=8873 cacheRead=0 other=["session_info_update"] compactMentions=0
+turn 2: stop=end_turn usage_used=[11950] replyInput=3618 cacheRead=6887 other=[] compactMentions=0
+turn 3: stop=end_turn usage_used=[13561] replyInput=3313 cacheRead=8829 other=[] compactMentions=0
+turn 4: stop=end_turn usage_used=[15999] replyInput=3607 cacheRead=10128 other=[] compactMentions=0
+turn 5: stop=end_turn usage_used=[17693] replyInput=2409 cacheRead=13842 other=[] compactMentions=0

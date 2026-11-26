@@ -1,0 +1,8 @@
+  "status": "busy",
+    "status": "incomplete",
+idle 5 None
+open:
+70 19:25:01.152 turn.started {"turnId": "5cdc19a2-eba0-4a55-83d2-bea261f6d79b"}
+72 19:25:01.152 item.completed user_message completed {"text": "Run the shell command: sleep 20"}
+73 19:25:03.413 session.usage.updated {"usageReport": {"status": "incomplete", "counts": {"inputTokens": 35393, "outputTokens": 1462, "cacheReadTokens": 60164, "cacheWriteTokens": 0}}}
+74 19:25:03.413 turn.completed {"_tag": "turn.completed", "turnId": "5cdc19a2-eba0-4a55-83d2-bea261f6d79b", "state": "interrupted"}

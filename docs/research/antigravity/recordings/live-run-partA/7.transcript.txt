@@ -1,0 +1,8 @@
+18 19:19:38.734 request.resolved {"_tag": "request.resolved", "requestId": "9ba392c4-4ec2-4d41-8d42-8531b1464ca7", "decision": "allow"}
+19 19:19:38.746 item.completed tool_call completed {"server": "longname", "name": "a_tool_with_a_long_name_for_the_limit_xxxx", "kind": "mcp"}
+20 19:19:38.746 item.started tool_call  {"server": "longname", "name": "search_pages_f33805", "kind": "mcp"}
+21 19:19:38.748 request.opened {"_tag": "request.opened", "request": {"requestId": "23110379-abcb-4359-9af3-6b8e224ca440", "itemId": "call_5832472056877267460", "kind": "tool_approval", "detail": {"toolName": "mcp_tools_longname__search_pages_f33805"}, "decisions": ["allow", "deny", "cancel"]}}
+22 19:20:05.912 request.resolved {"_tag": "request.resolved", "requestId": "23110379-abcb-4359-9af3-6b8e224ca440", "decision": "allow"}
+23 19:20:05.921 item.completed tool_call completed {"server": "longname", "name": "search_pages_f33805", "kind": "mcp"}
+25 19:20:09.546 content.delta {"turnId": "db51f445-a819-476d-8f16-8c049a7b7d19", "itemId": "cb7544d6-7aa4-4144-a870-121dc7a503bb", "streamKind": "reasoning_text", "delta": "Tool response confirms the server identity matches the user reference, resolving previous confusion regarding the naming. Inspection of the available tools r
+26 19:20:52.753 content.delta {"turnId": "db51f445-a819-476d-8f16-8c049a7b7d19", "itemId": "cb7544d6-7aa4-4144-a870-121dc7a503bb", "streamKind": "reasoning_text", "delta": "Server registration structures prepend multiple tiers of prefixes, combining namespace scopes and tool identifiers into unified strings. Tracing the declarat

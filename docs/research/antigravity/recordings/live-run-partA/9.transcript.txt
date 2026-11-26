@@ -1,0 +1,18 @@
+15 19:23:10.733 turn.started {"turnId": "d1cb8971-49b1-4636-954c-7af25c7cd61a"}
+17 19:23:10.732 item.completed user_message completed {"text": "Run the shell command: sleep 60"}
+19 19:23:16.688 content.delta {"turnId": "d1cb8971-49b1-4636-954c-7af25c7cd61a", "itemId": "2b80a11c-8b31-44c9-83cb-f904d6d7e12a", "streamKind": "reasoning_text", "delta": "User request invokes a shell sleep command directly. Initial inclination treats this as a prohibited timer implementation, but the instruction specifically t
+20 19:23:20.738 item.completed reasoning completed null
+21 19:23:20.740 item.started command_execution  {"command": "sleep 60", "description": "Sleep 60 seconds"}
+22 19:23:20.807 request.opened {"_tag": "request.opened", "request": {"requestId": "0fd4c013-b815-4858-a86d-ef1c7068e7b5", "itemId": "call_9870353216649973048", "kind": "command_approval", "detail": {"command": "sleep 60"}, "decisions": ["allow", "deny", "cancel"]}}
+23 19:23:24.055 request.resolved {"_tag": "request.resolved", "requestId": "0fd4c013-b815-4858-a86d-ef1c7068e7b5", "decision": "allow"}
+25 19:23:31.687 content.delta {"turnId": "d1cb8971-49b1-4636-954c-7af25c7cd61a", "itemId": "10428485-260b-4ea3-ae03-39969d48b7a2", "streamKind": "reasoning_text", "delta": "Background execution initiated. Awaiting task completion before proceeding with subsequent workflow steps.\n\n"}
+26 19:23:32.233 item.completed reasoning completed null
+27 19:23:32.233 item.completed command_execution failed {"command": "sleep 60", "description": "Sleep 60 seconds"}
+28 19:23:32.236 session.usage.updated {"usage": {"inputTokens": 26492, "outputTokens": 1227, "cacheReadTokens": 17573, "cacheWriteTokens": 0}}
+29 19:23:32.236 turn.completed {"_tag": "turn.completed", "turnId": "d1cb8971-49b1-4636-954c-7af25c7cd61a", "state": "interrupted", "usage": {"inputTokens": 13465, "outputTokens": 917, "cacheReadTokens": 8938, "cacheWriteTokens": 0}}
+30 19:23:43.462 turn.started {"turnId": "e6642645-8ff6-4ef1-a477-fbf311979bc6"}
+32 19:23:43.462 item.completed user_message completed {"text": "Reply with exactly the word: pong"}
+34 19:23:45.619 content.delta {"turnId": "e6642645-8ff6-4ef1-a477-fbf311979bc6", "itemId": "e3fff406-9e59-4311-a3e0-ad1a46fb19be", "streamKind": "assistant_text", "delta": "pong"}
+35 19:23:45.639 item.completed assistant_message completed null
+36 19:23:45.642 session.usage.updated {"usage": {"inputTokens": 28650, "outputTokens": 1250, "cacheReadTokens": 28069, "cacheWriteTokens": 0}}
+37 19:23:45.642 turn.completed {"_tag": "turn.completed", "turnId": "e6642645-8ff6-4ef1-a477-fbf311979bc6", "state": "completed", "usage": {"inputTokens": 2158, "outputTokens": 23, "cacheReadTokens": 10496, "cacheWriteTokens": 0}}

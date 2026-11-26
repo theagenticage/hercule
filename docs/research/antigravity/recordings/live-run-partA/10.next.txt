@@ -1,0 +1,2 @@
+79 19:25:17.274 content.delta {"turnId": "8a87ae68-0edb-44a9-ae2d-b93f5dfddefc", "itemId": "373fa30b-5fc6-469c-a9ae-8317943d46c1", "streamKind": "assistant_text", "delta": "pong2"}
+82 19:25:17.297 turn.completed {"_tag": "turn.completed", "turnId": "8a87ae68-0edb-44a9-ae2d-b93f5dfddefc", "state": "completed", "usage": {"inputTokens": 2085, "outputTokens": 179, "cacheReadTokens": 11470, "cacheWriteTokens": 0}}

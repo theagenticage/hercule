@@ -1,0 +1,10 @@
+6 19:22:40.188 content.delta {"turnId": "18457032-3530-411b-adf8-234da6a61cd5", "itemId": "bc60d98c-bf40-46d4-aa79-3392498c673b", "streamKind": "reasoning_text", "delta": "Request requires utilizing an interactive prompt to capture a color preference between red and blue. Formulating the query structure to present the options c
+7 19:22:41.537 item.completed reasoning completed null
+8 19:22:41.539 item.started tool_call  {"name": "ask_question", "kind": "native"}
+9 19:22:41.543 request.opened {"_tag": "request.opened", "request": {"requestId": "ec7345df-9cfe-4e5f-8c5e-46ae7f84b134", "itemId": "call_6279650225024064074", "kind": "question", "detail": {"questions": [{"question": "Which colour do you pick?", "header": "Question", "options": [{"label": "(Recommended) Red"}, {"label": "Blue"}], "multiSelect": false}]}}}
+10 19:22:45.313 request.resolved {"_tag": "request.resolved", "requestId": "ec7345df-9cfe-4e5f-8c5e-46ae7f84b134", "answers": {"Question": "Blue"}}
+11 19:22:45.315 item.completed tool_call completed {"name": "ask_question", "kind": "native"}
+13 19:22:47.877 content.delta {"turnId": "18457032-3530-411b-adf8-234da6a61cd5", "itemId": "291307f4-dc38-41f8-97f3-7b03b8d93384", "streamKind": "assistant_text", "delta": "You picked the colour blue."}
+14 19:22:47.900 item.completed assistant_message completed null
+15 19:22:47.902 session.usage.updated {"usage": {"inputTokens": 13163, "outputTokens": 423, "cacheReadTokens": 8653, "cacheWriteTokens": 0}}
+16 19:22:47.902 turn.completed {"_tag": "turn.completed", "turnId": "18457032-3530-411b-adf8-234da6a61cd5", "state": "completed", "usage": {"inputTokens": 13163, "outputTokens": 423, "cacheReadTokens": 8653, "cacheWriteTokens": 0}}

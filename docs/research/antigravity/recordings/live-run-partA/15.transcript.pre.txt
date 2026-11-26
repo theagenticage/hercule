@@ -1,0 +1,2 @@
+2 19:29:12.682 turn.started {"turnId": "ebbd05eb-f9cb-4df2-8cb6-c5a3050f4479"}
+4 19:29:12.682 item.completed user_message completed {"text": "Use a subagent (your subagent tool) to run the shell command: sleep 100. Wait for the subagent to finish."}
