@@ -1295,7 +1295,7 @@ describe("a steer", () => {
       }),
     ));
 
-  it("is refused by an interrupt that comes before its prompt was written", () =>
+  it("is not refused by an interrupt that comes while its write is open, and is decided by the write's outcome", () =>
     run((h) =>
       Effect.gen(function* () {
         const gate = h.holdNextWrite();
@@ -1305,14 +1305,15 @@ describe("a steer", () => {
         const interrupting = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(0, "cancelled");
+        yield* letTurnRead;
+        expect(steering.pollUnsafe(), "not refused: agy may have the message").toBeUndefined();
 
-        const outcome = yield* Fiber.join(steering);
-        expect(outcome).toMatchObject({ kind: "refused" });
-        expect(outcome).toHaveProperty("message", expect.stringContaining("stays queued"));
+        yield* Deferred.succeed(gate, undefined);
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        yield* h.reply(1, "cancelled");
         expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.completed()).toMatchObject({ state: "interrupted" });
-        expect(steeredMessages(h)).toHaveLength(0);
-        yield* Deferred.succeed(gate, undefined);
+        expect(steeredMessages(h)).toHaveLength(1);
       }),
     ));
 

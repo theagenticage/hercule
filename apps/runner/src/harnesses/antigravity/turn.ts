@@ -334,8 +334,8 @@ interface OpenSteer {
   readonly supersededPrompt: Prompt;
   readonly prepared: PreparedInput;
   readonly decision: Deferred.Deferred<SteerOutcome>;
-  /** Whether the write of the steer's prompt has finished: `agy` may then have the message, so only its own reply decides the steer. */
-  isWritten: boolean;
+  /** Whether the write of the steer's prompt has started: `agy` may then have the message, so an interrupt does not refuse the steer. */
+  isWriteStarted: boolean;
 }
 
 /**
@@ -947,13 +947,14 @@ export const startTurn = (
     };
 
     /**
-     * Refuses the open steer when its prompt is not written yet, because an
-     * interrupt or a stop ends the Turn and `agy` never got the message. A
-     * written steer is left to its own reply, because `agy` may have the
-     * message, and refusing it would let the controller send it twice.
+     * Refuses the open steer when the write of its prompt has not started,
+     * because an interrupt or a stop ends the Turn and `agy` never got the
+     * message. A steer whose write started is left to its outcome, because
+     * `agy` may have the message, and refusing it would let the controller
+     * send it twice.
      */
     const refuseOpenSteer = (): void => {
-      if (openSteer === undefined || openSteer.isWritten) return;
+      if (openSteer === undefined || openSteer.isWriteStarted) return;
       decideSteer(openSteer.steerPrompt, {
         kind: "refused",
         message: `The turn was stopped before Antigravity took the message. ${STAYS_QUEUED}`,
@@ -1025,7 +1026,7 @@ export const startTurn = (
           supersededPrompt,
           prepared,
           decision,
-          isWritten: false,
+          isWriteStarted: false,
         };
         openSteer = current;
         const notTakenInTime: SteerOutcome = {
@@ -1033,6 +1034,8 @@ export const startTurn = (
           message: `${CANNOT_TELL}, because it did not answer in time.`,
         };
         const decideAlone = Effect.gen(function* () {
+          // Marked before the write starts: from the moment the line is handed to the pipe, `agy` may have the message.
+          current.isWriteStarted = true;
           const written = yield* Effect.result(
             connection.sendPrompt(nativeSessionId, prepared.prompt),
           );
@@ -1040,7 +1043,6 @@ export const startTurn = (
             decideSteer(steerPrompt, decideFailedWrite(written.failure));
             return;
           }
-          current.isWritten = true;
           const steerReply = yield* watchReply(steerPrompt, written.success);
           const supersededReply = waitingReplies.get(supersededPrompt);
           const outcome = yield* Effect.raceFirst(
