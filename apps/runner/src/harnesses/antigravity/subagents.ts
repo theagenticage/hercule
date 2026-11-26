@@ -25,8 +25,13 @@ import type { HarnessEvent, ItemStatus, SubagentId, Usage } from "@hercule/proto
 import { buildEnvelope } from "../normalize";
 import { buildUserMessage } from "../events";
 import { truncateFact, truncateMessage } from "../text";
-import { LAUNCH_TOOL_NAMES, type AgyStep, type AgySubagentLink } from "./session-files";
-import { buildFailedToolItem, buildToolItem, type ToolCallFields } from "./tool-items";
+import { readStepErrorText, type AgyStep, type AgySubagentLink } from "./session-files";
+import {
+  buildFailedToolItem,
+  buildToolItem,
+  LAUNCH_TOOL_NAME,
+  type ToolCallFields,
+} from "./tool-items";
 
 /** The token counts of one scope (a turn, or the process), added up. */
 interface Totals {
@@ -70,6 +75,11 @@ interface Subagent {
   /** The item of each `invoke_subagent` call, by the step that holds its result. */
   readonly launchItems: Map<number, string>;
   readonly processUsage: Totals;
+  /**
+   * Whether some count of this subagent is missing or invalid, or its files
+   * could not be read. Its usage is then reported in the incomplete form.
+   */
+  hasIncompleteUsage: boolean;
 }
 
 /**
@@ -104,6 +114,7 @@ const buildSubagent = (input: {
   pending: [],
   launchItems: new Map(),
   processUsage: buildZeroTotals(),
+  hasIncompleteUsage: false,
 });
 
 /**
@@ -188,7 +199,9 @@ const buildTextItem = (
 const buildUsageUpdated = (state: SubagentsState, agent: Subagent): HarnessEvent => ({
   _tag: "session.usage.updated",
   ...buildBase(state, agent),
-  usage: buildUsage(agent.processUsage),
+  ...(agent.hasIncompleteUsage
+    ? { usageReport: { status: "incomplete" as const, counts: buildUsage(agent.processUsage) } }
+    : { usage: buildUsage(agent.processUsage) }),
 });
 
 // ---- Turns ----
@@ -237,25 +250,27 @@ const ensureTurn = (state: SubagentsState, agent: Subagent, model?: string) =>
 
 /**
  * Closes the turn `agent` has open and returns `turn.completed` with the
- * turn's usage, or nothing when no turn is open. An `interrupted` end first
- * fails every tool item that has no result (see the comment in the body). A
- * `completed` end leaves such items running: nothing in the files completes
- * them later.
+ * turn's usage, or nothing when no turn is open. The turn carries no usage
+ * when some count of the subagent is incomplete. An `interrupted` or `failed`
+ * end first fails every tool item that has no result (see the comment in the
+ * body). A `completed` end leaves such items running: nothing in the files
+ * completes them later.
  */
 const closeTurn = (
   state: SubagentsState,
   agent: Subagent,
-  endState: "completed" | "interrupted",
+  endState: "completed" | "interrupted" | "failed",
 ): HarnessEvent[] => {
   const turn = agent.turn;
   if (turn === undefined) return [];
   agent.turn = undefined;
-  // `agy` stops the subagent's commands when it is interrupted, so a call
-  // without a result will never get one. It fails now, as the items of the
+  // `agy` stops the subagent's commands when it is interrupted, and nothing
+  // more is read from a subagent that failed, so a call without a result will
+  // never get one. It fails now, as the items of the
   // session's own agent do when the process ends. A call that left `pending`
   // with a `RUNNING` result is not tracked any more, so it stays as it is.
   const failedItems: HarnessEvent[] =
-    endState === "interrupted"
+    endState !== "completed"
       ? agent.pending.map(({ itemId, call }) => ({
           _tag: "item.completed",
           ...buildBase(state, agent),
@@ -273,7 +288,7 @@ const closeTurn = (
       ...buildBase(state, agent),
       turnId: turn.id,
       state: endState,
-      ...(turn.hasUsage ? { usage: buildUsage(turn.usage) } : {}),
+      ...(turn.hasUsage && !agent.hasIncompleteUsage ? { usage: buildUsage(turn.usage) } : {}),
     },
   ];
 };
@@ -305,9 +320,9 @@ const isAutomaticSender = (sender: string): boolean =>
 /**
  * Returns the events of a `SYSTEM_MESSAGE` step. A message from another agent
  * is a steered `user_message` when a turn is open and the input of the next
- * turn otherwise. A message from `agy` or a task needs no `user_message`: it
- * only continues the turn, or the next model step opens one. Any other system
- * message is ignored.
+ * turn otherwise. A message from `agy` or a task has no `user_message`: it
+ * opens a turn when none is open and continues the open one (spec 06 section
+ * 13.6). Any other system message is ignored.
  */
 const normalizeSystemMessage = (
   state: SubagentsState,
@@ -315,7 +330,8 @@ const normalizeSystemMessage = (
   step: AgyStep,
 ): HarnessEvent[] => {
   const message = parseMessage(step.content);
-  if (message === undefined || isAutomaticSender(message.sender)) return [];
+  if (message === undefined) return [];
+  if (isAutomaticSender(message.sender)) return ensureTurn(state, agent).events;
   if (agent.turn === undefined) {
     // The launch message is the first message from a conversation, and it
     // comes before any turn. The link's brief is the unwrapped text of it.
@@ -379,6 +395,9 @@ const normalizeModelStep = (state: SubagentsState, agent: Subagent, step: AgySte
       totals.cacheReadTokens += step.usage.cacheReadTokens;
     }
     turn.hasUsage = true;
+  }
+  if (step.hasInvalidUsage === true) agent.hasIncompleteUsage = true;
+  if (step.usage !== undefined || step.hasInvalidUsage === true) {
     events.push(buildUsageUpdated(state, agent));
   }
   if (step.toolCalls.length === 0) events.push(...closeTurn(state, agent, "completed"));
@@ -405,8 +424,7 @@ const readExitCode = (resultText: string | undefined): number | undefined => {
 const normalizeResultStep = (state: SubagentsState, agent: Subagent, step: AgyStep) => {
   const pending = agent.pending.shift();
   if (pending === undefined || agent.turn === undefined) return [];
-  if (LAUNCH_TOOL_NAMES.includes(pending.call.name ?? ""))
-    agent.launchItems.set(step.index, pending.itemId);
+  if (pending.call.name === LAUNCH_TOOL_NAME) agent.launchItems.set(step.index, pending.itemId);
   if (step.status !== "DONE" && step.status !== "ERROR") return [];
 
   const exitCode = readExitCode(step.content);
@@ -442,7 +460,7 @@ const normalizeErrorStep = (state: SubagentsState, agent: Subagent, step: AgySte
   const { turn, events } = ensureTurn(state, agent);
   if (turn.warned) return events;
   turn.warned = true;
-  const reason = [step.error, step.content].find((text) => text !== undefined && text !== "");
+  const reason = readStepErrorText(step);
   events.push({
     _tag: "runtime.warning",
     ...buildBase(state, agent),
@@ -457,17 +475,34 @@ const normalizeErrorStep = (state: SubagentsState, agent: Subagent, step: AgySte
 // ---- Public ----
 
 /**
+ * Returns the item of the `invoke_subagent` call of `parent` whose result is
+ * the step `resultStepIndex`, or `undefined` when that step was not read or is
+ * no such result.
+ */
+const findSubagentLaunchItem = (
+  state: SubagentsState,
+  parent: string,
+  resultStepIndex: number,
+): string | undefined => state.agents.get(parent)?.launchItems.get(resultStepIndex);
+
+/**
  * Returns `subagent.started` for the subagent `link` names, with `itemId` the
- * `subagent` item of the parent's call that launched it when the caller knows
- * it. Returns nothing when the subagent was already introduced in this
+ * `subagent` item of the parent's call that launched it when that item is
+ * known. Returns nothing when the subagent was already introduced in this
  * process. A subagent known from an earlier process is introduced the same
  * way, because the controller fills what its record lacks and never overwrites
  * (spec 06 section 13.2).
+ *
+ * The launching item is found by the parent:
+ *
+ * - The session's own agent: `findRootLaunchItem` is asked for the item of
+ *   the call id `agy` wrote in the launch message.
+ * - A subagent: the item whose result is the step the launch message names.
  */
 export const introduceSubagent = (
   state: SubagentsState,
   link: AgySubagentLink,
-  itemId: string | undefined,
+  findRootLaunchItem: (toolCallId: string) => string | undefined,
 ): HarnessEvent[] => {
   let agent = state.agents.get(link.conversationId);
   if (agent === undefined) {
@@ -482,9 +517,28 @@ export const introduceSubagent = (
   }
   if (agent.introduced) return [];
   agent.introduced = true;
+  const itemId =
+    link.parentConversationId === state.nativeSessionId
+      ? link.launchToolCallId === undefined
+        ? undefined
+        : findRootLaunchItem(link.launchToolCallId)
+      : link.launchStepIndex === undefined
+        ? undefined
+        : findSubagentLaunchItem(state, link.parentConversationId, link.launchStepIndex);
   return [
     buildSubagentStarted(state, agent, { link, ...(itemId === undefined ? {} : { itemId }) }),
   ];
+};
+
+/** Returns `events` with `subagent.started` in front when `agent` was not introduced yet. */
+const introduceBefore = (
+  state: SubagentsState,
+  agent: Subagent,
+  events: HarnessEvent[],
+): HarnessEvent[] => {
+  if (events.length === 0 || agent.introduced) return events;
+  agent.introduced = true;
+  return [buildSubagentStarted(state, agent, {}), ...events];
 };
 
 /**
@@ -515,9 +569,29 @@ export const normalizeSubagentStep = (
         return [];
     }
   })();
-  if (events.length === 0 || agent.introduced) return events;
-  agent.introduced = true;
-  return [buildSubagentStarted(state, agent, {}), ...events];
+  return introduceBefore(state, agent, events);
+};
+
+/**
+ * Returns the events that end the subagent `conversationId` after its files
+ * could not be read: its open turn ends `failed` with its pending tool items
+ * failed, and its usage is reported in the incomplete form, because the steps
+ * that were never read hold tokens. Returns nothing for a conversation that is
+ * no known subagent, and for a subagent that was already ended this way.
+ */
+export const endUnreadableSubagent = (
+  state: SubagentsState,
+  conversationId: string,
+): HarnessEvent[] => {
+  const agent = state.agents.get(conversationId);
+  if (agent === undefined) return [];
+  const events: HarnessEvent[] = [];
+  if (!agent.hasIncompleteUsage) {
+    agent.hasIncompleteUsage = true;
+    events.push(buildUsageUpdated(state, agent));
+  }
+  events.push(...closeTurn(state, agent, "failed"));
+  return introduceBefore(state, agent, events);
 };
 
 /**
@@ -533,24 +607,20 @@ export const hasOpenSubagentTurn = (state: SubagentsState): boolean =>
   [...state.agents.values()].some((agent) => agent.turn !== undefined);
 
 /**
- * Returns the item of the `invoke_subagent` call of the subagent `conversationId`
- * whose result is the step `resultStepIndex`, or `undefined` when that step
- * was not read or is no such result. It names the item that a grandchild's
- * `subagent.started` points at.
+ * Returns the token counts of every subagent since the process started, added
+ * up, and whether the count of any subagent is incomplete (see
+ * `Subagent.hasIncompleteUsage`).
  */
-export const findSubagentLaunchItem = (
+export const sumSubagentUsage = (
   state: SubagentsState,
-  conversationId: string,
-  resultStepIndex: number,
-): string | undefined => state.agents.get(conversationId)?.launchItems.get(resultStepIndex);
-
-/** Returns the token counts of every subagent since the process started, added up. */
-export const readSubagentUsage = (state: SubagentsState): Usage => {
+): { readonly usage: Usage; readonly hasIncompleteCount: boolean } => {
   const sum = buildZeroTotals();
-  for (const { processUsage } of state.agents.values()) {
+  let hasIncompleteCount = false;
+  for (const { processUsage, hasIncompleteUsage } of state.agents.values()) {
     sum.inputTokens += processUsage.inputTokens;
     sum.outputTokens += processUsage.outputTokens;
     sum.cacheReadTokens += processUsage.cacheReadTokens;
+    if (hasIncompleteUsage) hasIncompleteCount = true;
   }
-  return buildUsage(sum);
+  return { usage: buildUsage(sum), hasIncompleteCount };
 };

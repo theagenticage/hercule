@@ -15,12 +15,12 @@ import { APP_DATA_DIR } from "./harness-home";
 import { openSessionFiles, type AgyStep } from "./session-files";
 import {
   buildSubagentsState,
-  findSubagentLaunchItem,
+  endUnreadableSubagent,
   hasOpenSubagentTurn,
   interruptSubagentTurns,
   introduceSubagent,
   normalizeSubagentStep,
-  readSubagentUsage,
+  sumSubagentUsage,
   type SubagentsState,
 } from "./subagents";
 
@@ -52,7 +52,7 @@ const playFixture = async (
   const events: HarnessEvent[] = [];
   for (const observation of observations) {
     if (observation.kind === "subagent") {
-      events.push(...introduceSubagent(state, observation.link, undefined));
+      events.push(...introduceSubagent(state, observation.link, findNothing));
     }
     if (observation.kind === "step" && observation.conversationId !== root) {
       events.push(...normalizeSubagentStep(state, observation.conversationId, observation.step));
@@ -60,6 +60,9 @@ const playFixture = async (
   }
   return { state, events };
 };
+
+/** Stands in for the session's lookup of a launch item when the test has none. */
+const findNothing = () => undefined;
 
 const step = (index: number, type: string, extra: Partial<AgyStep> = {}): AgyStep => ({
   index,
@@ -90,7 +93,7 @@ const buildStateWithChild = () => {
   introduceSubagent(
     state,
     { conversationId: "A", parentConversationId: "root", brief: "Do it" },
-    undefined,
+    findNothing,
   );
   return state;
 };
@@ -156,7 +159,7 @@ describe("a recorded child that finishes", () => {
       usage: expected,
     });
     expect(find(events, "session.usage.updated").at(-1)).toMatchObject({ usage: expected });
-    expect(readSubagentUsage(state)).toEqual(expected);
+    expect(sumSubagentUsage(state)).toEqual({ usage: expected, hasIncompleteCount: false });
     expect(hasOpenSubagentTurn(state)).toBe(false);
   });
 });
@@ -274,18 +277,32 @@ describe("messages to a subagent", () => {
     expect(userMessages(events)).toEqual([{ text: "also this", steered: true }]);
   });
 
-  it("opens a turn without a user_message for a message from a task or from the system", () => {
+  it("opens a turn at once, with no user_message, for a message from a task or from the system", () => {
     const state = buildStateWithChild();
     finishTurn(state);
-    normalizeSubagentStep(state, "A", message("root/task-2", "finished"));
-    normalizeSubagentStep(state, "A", message("system", "[Notice]"));
+    const fromTask = normalizeSubagentStep(state, "A", message("root/task-2", "finished"));
+    expect(tags(fromTask)).toEqual(["turn.started"]);
+    expect(hasOpenSubagentTurn(state)).toBe(true);
+    // The open turn is continued, not replaced.
+    expect(normalizeSubagentStep(state, "A", message("system", "[Notice]"))).toEqual([]);
     const events = normalizeSubagentStep(
       state,
       "A",
       step(3, "PLANNER_RESPONSE", { content: "ok" }),
     );
-    expect(tags(events)[0]).toBe("turn.started");
-    expect(userMessages(events)).toEqual([]);
+    expect(tags(events)).not.toContain("turn.started");
+    expect(tags(events).at(-1)).toBe("turn.completed");
+    expect(userMessages([...fromTask, ...events])).toEqual([]);
+  });
+
+  it("introduces a subagent before the turn that a system message opens", () => {
+    const state = buildSubagentsState({
+      sessionId: SESSION,
+      nativeSessionId: "root",
+      known: [{ subagentId: "A" }],
+    });
+    const events = normalizeSubagentStep(state, "A", message("system", "[Notice]"));
+    expect(tags(events)).toEqual(["subagent.started", "turn.started"]);
   });
 
   it("ignores a hook's reminder: it opens no turn and adds no input", () => {
@@ -310,21 +327,13 @@ describe("which subagent a step belongs to", () => {
       }),
     );
     normalizeSubagentStep(state, "A", step(2, "GENERIC"));
-    normalizeSubagentStep(
-      state,
-      "A",
-      step(3, "PLANNER_RESPONSE", { toolCalls: [{ name: "swarm", args: {} }] }),
-    );
-    normalizeSubagentStep(state, "A", step(4, "GENERIC"));
-    expect(findSubagentLaunchItem(state, "A", 4)).toBeDefined();
-    const itemId = findSubagentLaunchItem(state, "A", 2);
-    expect(itemId).toBe(find(calls, "item.started").find((e) => e.kind === "subagent")?.itemId);
-    expect(findSubagentLaunchItem(state, "A", 9)).toBeUndefined();
+    const itemId = find(calls, "item.started").find((e) => e.kind === "subagent")?.itemId;
+    expect(itemId).toBeDefined();
 
     const started = introduceSubagent(
       state,
-      { conversationId: "B", parentConversationId: "A", role: "Helper" },
-      itemId,
+      { conversationId: "B", parentConversationId: "A", role: "Helper", launchStepIndex: 2 },
+      findNothing,
     );
     expect(started[0]).toMatchObject({
       _tag: "subagent.started",
@@ -334,6 +343,26 @@ describe("which subagent a step belongs to", () => {
     });
   });
 
+  it("points a grandchild at nothing when the step of its launch is unknown", () => {
+    const state = buildStateWithChild();
+    const started = introduceSubagent(
+      state,
+      { conversationId: "B", parentConversationId: "A", launchStepIndex: 9 },
+      findNothing,
+    );
+    expect(started[0]).not.toHaveProperty("itemId");
+  });
+
+  it("asks the session's lookup for the launching item of a child of the session's own agent", () => {
+    const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
+    const started = introduceSubagent(
+      state,
+      { conversationId: "A", parentConversationId: "root", launchToolCallId: "call_1" },
+      (toolCallId) => (toolCallId === "call_1" ? "item-1" : undefined),
+    );
+    expect(started[0]).toMatchObject({ _tag: "subagent.started", itemId: "item-1" });
+  });
+
   it("introduces a resumed subagent once, keeps its parent, and shows no old brief", () => {
     const state = buildSubagentsState({
       sessionId: SESSION,
@@ -341,12 +370,12 @@ describe("which subagent a step belongs to", () => {
       known: [{ subagentId: "A", parentSubagentId: "P" }],
     });
     const link = { conversationId: "A", parentConversationId: "root", brief: "old brief" };
-    expect(introduceSubagent(state, link, undefined)[0]).toMatchObject({
+    expect(introduceSubagent(state, link, findNothing)[0]).toMatchObject({
       _tag: "subagent.started",
       subagentId: "A",
       parentSubagentId: "P",
     });
-    expect(introduceSubagent(state, link, undefined)).toEqual([]);
+    expect(introduceSubagent(state, link, findNothing)).toEqual([]);
     const events = normalizeSubagentStep(
       state,
       "A",
@@ -377,6 +406,65 @@ describe("which subagent a step belongs to", () => {
     });
     expect(normalizeSubagentStep(state, "unknown", stray)).toEqual([]);
     expect(hasOpenSubagentTurn(state)).toBe(false);
-    expect(readSubagentUsage(state)).toMatchObject({ inputTokens: 0 });
+    expect(sumSubagentUsage(state).usage).toMatchObject({ inputTokens: 0 });
+  });
+});
+
+describe("incomplete usage", () => {
+  const counts = { inputTokens: 5, cacheReadTokens: 0, outputTokens: 1 };
+
+  it("reports the incomplete form and no turn usage once a step has invalid counts", () => {
+    const state = buildStateWithChild();
+    const first = normalizeSubagentStep(
+      state,
+      "A",
+      step(1, "PLANNER_RESPONSE", { toolCalls: [command()], usage: counts }),
+    );
+    expect(find(first, "session.usage.updated")[0]).toMatchObject({ usage: { inputTokens: 5 } });
+    const invalid = normalizeSubagentStep(
+      state,
+      "A",
+      step(3, "PLANNER_RESPONSE", { content: "done", hasInvalidUsage: true }),
+    );
+    const updated = find(invalid, "session.usage.updated");
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({
+      usageReport: { status: "incomplete", counts: { inputTokens: 5, outputTokens: 1 } },
+    });
+    expect(updated[0]).not.toHaveProperty("usage");
+    const completed = find(invalid, "turn.completed")[0];
+    expect(completed).toMatchObject({ state: "completed" });
+    expect(completed).not.toHaveProperty("usage");
+    expect(sumSubagentUsage(state)).toMatchObject({
+      usage: { inputTokens: 5 },
+      hasIncompleteCount: true,
+    });
+  });
+});
+
+describe("an unreadable subagent", () => {
+  it("fails its open turn and its pending items, and reports its usage incomplete", () => {
+    const state = buildStateWithChild();
+    normalizeSubagentStep(
+      state,
+      "A",
+      step(1, "PLANNER_RESPONSE", {
+        toolCalls: [command()],
+        usage: { inputTokens: 5, cacheReadTokens: 0, outputTokens: 1 },
+      }),
+    );
+    const events = endUnreadableSubagent(state, "A");
+    expect(tags(events)).toEqual(["session.usage.updated", "item.completed", "turn.completed"]);
+    expect(events[0]).toMatchObject({
+      usageReport: { status: "incomplete", counts: { inputTokens: 5 } },
+    });
+    expect(events[1]).toMatchObject({ status: "failed", kind: "command_execution" });
+    const ended = find(events, "turn.completed")[0];
+    expect(ended).toMatchObject({ state: "failed", subagentId: "A" });
+    expect(ended).not.toHaveProperty("usage");
+    expect(hasOpenSubagentTurn(state)).toBe(false);
+    expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
+    expect(endUnreadableSubagent(state, "A")).toEqual([]);
+    expect(endUnreadableSubagent(state, "unknown")).toEqual([]);
   });
 });
