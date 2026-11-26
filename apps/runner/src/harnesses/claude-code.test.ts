@@ -592,7 +592,7 @@ const WORKING: SessionStartContext = { ...CONTEXT, cwd: "/var/hercule/runner/scr
  * empty: the runner links the material into the Harness Home instead, and
  * the field being present is what marks the session.
  */
-const THREAD: SessionStartContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
+const THREAD: SessionStartContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL };
 
 /** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {

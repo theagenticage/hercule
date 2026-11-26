@@ -22,7 +22,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
-import type { AcpConnection, AcpHandlers, PromptContent } from "@hercule/acp";
+import type { AcpConnection, AcpHandlers, NewSessionRequest, PromptContent } from "@hercule/acp";
 import { SteerRefused } from "@hercule/protocol";
 import type {
   AccessMode,
@@ -55,7 +55,6 @@ import { joinInstructions } from "../prompt";
 import { escapeControlCharacters } from "../../report";
 import type { ResolvedSkillReference } from "../../skills";
 import { truncateFact, truncateMessage } from "../text";
-import { readUserInstructions } from "../user-instructions";
 import { ANTIGRAVITY_NAME, checkAccountUsable, chooseAgyMode, openSignedInAgy } from "./agy";
 import type { AgySeam } from "./agy";
 import { buildAgyPrompt } from "./skill-prompt";
@@ -573,31 +572,27 @@ export const startAgySession = (
       // Staged before the process exists, so a failure here spawns nothing. A
       // resume stages again: every start has a fresh session skills folder.
       const skillsFolder = yield* stageAgySkills(ctx);
-      // Read on every start, so a resume gets the current text of the files.
-      const userInstructions = yield* readUserInstructions(
-        ctx.userMaterial?.instructionsFiles ?? [],
-      );
-      const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
+      const instructions = buildInstructions(ctx, spec, ctx.userMaterial?.instructions);
+      // Built before `agy` opens, because `openSignedInAgy` checks that `agy`
+      // takes what the request uses. A field that needs `agy` to announce
+      // support for it gets its check there.
+      const request: NewSessionRequest = {
         cwd,
-        handlers,
-        purpose: {
-          kind: "session",
-          accessMode,
-          hasSkillsFolder: skillsFolder !== undefined,
-        },
-      }).pipe(Scope.provide(processScope));
-      const connection: AcpConnection = agy.connection;
-
-      const instructions = buildInstructions(ctx, spec, userInstructions);
-      const request = {
-        cwd,
-        additionalDirectories: skillsFolder === undefined ? [] : [skillsFolder],
-        // The MCP Gateway is handed to `agy` by a later change.
+        ...(skillsFolder === undefined ? {} : { additionalDirectories: [skillsFolder] }),
+        // The MCP Gateway is handed to `agy` here by a later change, together
+        // with its capability check in `openSignedInAgy`.
         mcpServers: [],
         ...(instructions === undefined
           ? {}
           : { meta: { antigravity: { systemPrompt: { append: instructions } } } }),
       };
+      const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
+        cwd,
+        handlers,
+        purpose: { kind: "session", accessMode, request },
+      }).pipe(Scope.provide(processScope));
+      const connection: AcpConnection = agy.connection;
+
       // From the reply on, updates are the session's own. Before it, they are a resume's replay.
       const startReading = (id: string) =>
         Effect.sync(() => {
@@ -614,11 +609,8 @@ export const startAgySession = (
         });
       const conversation = yield* (
         spec.continue === undefined
-          ? agy.newConversation(request, startReading)
-          : agy.resumeConversation(
-              { ...request, nativeSessionId: spec.continue.nativeSessionId },
-              startReading,
-            )
+          ? agy.newConversation(startReading)
+          : agy.resumeConversation(spec.continue.nativeSessionId, startReading)
       ).pipe(
         Effect.mapError((error) =>
           error._tag === "AcpError" ? buildStartFailure(ANTIGRAVITY_NAME, error.message) : error,
@@ -732,8 +724,9 @@ export const startAgySession = (
      * Reads the images, sets the model and builds the prompt, and returns the
      * prompt for `agy`, the Skill References its text translated, the names of
      * the ones that got no pointer line, and the part of `PREPARATION_BUDGET`
-     * that is left for the handoff of the prompt. Building the prompt counts
-     * against the budget, because it reads the skill files. Fails with
+     * that is left for the handoff of the prompt. Building the prompt reads the
+     * skill files with synchronous calls, so the budget cannot interrupt them:
+     * they only count toward the time spent. Fails with
      * `InputNotDelivered` when an interrupt or a stop voids the input, with the
      * failures of the model change, and with `AdapterFailed` when an image cannot
      * be read or the budget runs out.

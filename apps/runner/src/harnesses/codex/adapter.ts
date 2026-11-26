@@ -60,7 +60,6 @@ import { resolveSkillFiles, type FoundSkillFile } from "../../skills";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
-import { readUserInstructions } from "../user-instructions";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
@@ -1704,7 +1703,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   const buildThreadParams = (
     spec: SessionSpec,
     ctx: SessionStartContext,
-    userInstructions: string | undefined,
     mcpConfig: Record<string, JsonValue> | undefined,
   ): Pick<
     ThreadStartParams,
@@ -1721,7 +1719,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     return {
       cwd: ctx.cwd,
       model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
-      developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
+      developerInstructions: buildDeveloperInstructions(
+        spec,
+        ctx.userMaterial?.instructions,
+        ctx.herculeTool,
+      ),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
       // Left out when the thread gets no MCP server.
@@ -1797,9 +1799,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
-        const userInstructions = yield* readUserInstructions(
-          ctx.userMaterial?.instructionsFiles ?? [],
-        );
         const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
         const method =
@@ -1814,7 +1813,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           servers: ctx.mcpServers,
           accessMode: spec.accessMode,
         });
-        const threadParams = buildThreadParams(spec, ctx, userInstructions, mcp.config);
+        const threadParams = buildThreadParams(spec, ctx, mcp.config);
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined

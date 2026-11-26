@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -73,6 +74,18 @@ describe("stageAgySkills", () => {
     expect(await stage(ctx)).toBe(ctx.sessionSkillsFolder);
     expect(listLinked(ctx)).toEqual(["release", "review"]);
     expect(readLinkedSkill(ctx, "review")).toBe("library review\n");
+  });
+
+  it("returns the folder with its links resolved, and writes everything under it, when the folder is reached through a link", async () => {
+    const real = createSession({ library: ["review"] });
+    const linked = join(createScratchHome("antigravity-skills-link"), "linked");
+    symlinkSync(real.sessionSkillsFolder!, linked);
+    const ctx = { sessionSkillsFolder: linked, librarySkillsFolder: linked };
+
+    expect(await stage(ctx)).toBe(realpathSync(real.sessionSkillsFolder!));
+    expect(listLinked(real)).toEqual(["review"]);
+    expect(readLinkedSkill(real, "review")).toBe("library review\n");
+    expect(lstatSync(join(real.sessionSkillsFolder!, ".git")).isFile()).toBe(true);
   });
 
   it("puts an empty .git file in the folder, so agy does not walk up into a parent repository", async () => {

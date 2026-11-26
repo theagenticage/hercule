@@ -6,7 +6,7 @@
  * recording's handshake only and writes the messages itself. Time runs on a
  * `TestClock`.
  */
-import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,6 +24,7 @@ import {
   cleanupHomes,
   createScratchHome,
   CWD,
+  NO_USER_MATERIAL,
   settle,
   waitUntil,
   writeTestImage,
@@ -449,6 +450,58 @@ describe("the skills folder of a session", () => {
     );
   });
 
+  it("is passed resolved when it is reached through a link, as the pointer lines name resolved paths", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    const link = join(createScratchHome("agy-session-link"), "linked");
+    symlinkSync(skills.sessionSkillsFolder, link);
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.received("session/new")[0]?.params).toMatchObject({
+            additionalDirectories: [realpathSync(skills.sessionSkillsFolder)],
+          });
+        }),
+      { context: () => ({ sessionSkillsFolder: link, librarySkillsFolder: link }) },
+    );
+  });
+
+  it("fails the start, and spawns nothing, when agy does not take additional directories", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("additionalDirectories");
+          expect(h.received("session/new")).toHaveLength(0);
+          expect(h.tags("session.started")).toHaveLength(0);
+        }),
+      {
+        fake: { withoutAdditionalDirectoriesCapability: true },
+        context: () => skills.context,
+      },
+    );
+  });
+
+  it("fails the start with the staging error, and spawns nothing, when the .git file cannot be written", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    writeFileSync(join(skills.sessionSkillsFolder, ".git"), "");
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("could not prepare the session's skills folder");
+          expect(h.fake.spawns).toHaveLength(0);
+        }),
+      { context: () => skills.context },
+    );
+  });
+
   it("is left out of a start with no skills, which needs no additional directories capability", () =>
     run(
       (h) =>
@@ -474,39 +527,42 @@ describe("the instructions of a session", () => {
 
   it.each(["new", "resume"] as const)(
     "hold the orientation, persona, user's instructions, skill, coordination and memory, in that order, on a %s start",
-    (kind) => {
-      const file = join(createScratchHome("agy-user-instructions"), "AGENTS.md");
-      writeFileSync(file, "User.");
-      return run(
+    (kind) =>
+      run(
         (h) =>
           Effect.gen(function* () {
-            if (kind === "resume") {
-              yield* h.start(PARTS);
-              yield* h.adapter.stopSession(SESSION, "stopped");
-              // A resume reads the files again, so it carries the new text.
-              writeFileSync(file, "User, edited.");
-            }
             yield* h.start(kind === "resume" ? { ...PARTS, ...RESUME } : PARTS);
 
             const method = kind === "resume" ? "session/resume" : "session/new";
-            const params = h.fake.spawns
-              .at(-1)
-              ?.harness.received.find((message) => message.method === method)?.params;
-            expect(params).toMatchObject({
-              _meta: expectedMeta(ALL_PARTS(kind === "resume" ? "User, edited." : "User.")),
+            expect(h.received(method)[0]?.params).toMatchObject({
+              _meta: expectedMeta(ALL_PARTS("User.")),
             });
           }),
         {
           orientation: "Orientation.",
           skill: "Skill.",
           fake: withConversation,
-          context: () => ({
-            userMaterial: { promptTemplateDirs: [], instructionsFiles: [file] },
-          }),
+          context: () => ({ userMaterial: { ...NO_USER_MATERIAL, instructions: "User." } }),
         },
-      );
-    },
+      ),
   );
+
+  it("hold nothing of the user's own files when the session has no User Material", () => {
+    const userHome = createScratchHome("agy-user-home");
+    mkdirSync(join(userHome, ".gemini"));
+    writeFileSync(join(userHome, ".gemini", "GEMINI.md"), "The user's marker.");
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(PARTS);
+
+          const params = JSON.stringify(h.received("session/new")[0]?.params);
+          expect(params).toContain("Persona.");
+          expect(params).not.toContain("The user's marker.");
+        }),
+      { context: (home) => ({ env: { ...buildContext(home).env, HOME: userHome } }) },
+    );
+  });
 });
 
 describe("an input with Skill References", () => {

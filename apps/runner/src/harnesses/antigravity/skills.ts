@@ -3,7 +3,7 @@
  * library skills of the start and the skills of the workspace's checkouts,
  * in the one place `agy` reads skills from for a single session.
  */
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import * as Effect from "effect/Effect";
 import type { AdapterFailed } from "@hercule/protocol";
@@ -14,9 +14,15 @@ import { describeFileFailure, readFolderNames } from "../session-files";
 
 /**
  * Links every skill of the session into `<sessionSkillsFolder>/.agents/skills`
- * and returns the session skills folder, to pass to `agy` as an additional
- * directory. Returns undefined when the session has no skill, and then nothing
- * was written.
+ * and returns the session skills folder with its symbolic links resolved, to
+ * pass to `agy` as an additional directory. Returns undefined when the session
+ * has no skill, and then nothing was written.
+ *
+ * The folder is resolved because the pointer line of a Skill Reference names
+ * the real path of a `SKILL.md` (`resolveSkillFile`). Where the runner's
+ * storage lies behind a link (macOS's `/var`, a `/home` that links elsewhere),
+ * `agy` would otherwise see that path as outside the additional directory and
+ * ask for approval to read it.
  *
  * Each skill is one relative symbolic link, named after the skill, to its
  * folder in the library skills folder or in a repository skills folder (which
@@ -71,14 +77,20 @@ export const stageAgySkills = (
         }
       }
       if (links.length === 0) return undefined;
+      // The targets are relative to the folder as it is named here. The folders
+      // are made by the runner inside the session skills folder, so the same
+      // relative path leads to the skill from the resolved one.
+      const root = await realpath(sessionSkillsFolder);
       // Not recursive, so an existing `.agents` fails the start instead of
       // being merged into.
-      await mkdir(join(sessionSkillsFolder, ".agents"));
-      await mkdir(linkFolder);
+      await mkdir(join(root, ".agents"));
+      await mkdir(join(root, ".agents", "skills"));
       // `wx` fails when anything is at the path: the folder is fresh, so nothing should be.
-      await writeFile(join(sessionSkillsFolder, ".git"), "", { flag: "wx" });
-      for (const { name, target } of links) await symlink(target, join(linkFolder, name), "dir");
-      return sessionSkillsFolder;
+      await writeFile(join(root, ".git"), "", { flag: "wx" });
+      for (const { name, target } of links) {
+        await symlink(target, join(root, ".agents", "skills", name), "dir");
+      }
+      return root;
     },
     catch: (error) => buildAdapterFailed(describeFolderFailure(describeFileFailure(error))),
   });

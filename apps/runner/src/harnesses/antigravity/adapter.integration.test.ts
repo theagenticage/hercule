@@ -281,7 +281,7 @@ const leaveConversation = (account: Account): Promise<string> =>
           binary,
           { cwd, handlers: ignoringHandlers, purpose: { kind: "probe" } },
         );
-        const { id } = yield* newConversation({ cwd, mcpServers: [] });
+        const { id } = yield* newConversation();
         yield* connection.closeSession(id);
         return id;
       }),
@@ -413,7 +413,7 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
             handlers: ignoringHandlers,
             purpose: { kind: "probe" },
           });
-          yield* newConversation({ cwd, mcpServers: [] });
+          yield* newConversation();
           // The log folder is removed with the scope, so it is read here.
           return readWorkerLogs(readLogFolder(spawned[0]!.command));
         }),

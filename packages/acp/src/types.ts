@@ -262,7 +262,8 @@ export interface NewSessionRequest {
   readonly mcpServers: ReadonlyArray<McpServer>;
   /**
    * Absolute paths of folders the harness adds to the workspace of this
-   * session only. Sent only when the list is not empty. Check
+   * session only. Sent whenever the field is present, even as an empty list:
+   * leave it out when there are no folders. Check
    * `HarnessDescription.acceptsAdditionalDirectories` before naming any.
    */
   readonly additionalDirectories?: ReadonlyArray<string>;

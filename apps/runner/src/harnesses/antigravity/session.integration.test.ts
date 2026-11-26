@@ -55,6 +55,7 @@ import {
 } from "../../skills";
 import { runProcess, spawnAgy } from "../process";
 import type { AdapterTurnInput, HarnessAdapter, SessionStartContext } from "../index";
+import { NO_USER_MATERIAL } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import { findAgyTestBinary } from "./agy-binary.testing";
 import { buildContext } from "./fake-agy.testing";
@@ -1007,11 +1008,8 @@ describe.skipIf(skipReason !== undefined)(
           library: [library],
           checkout: { path: workspace, skills: [repository] },
         });
-        const instructionsFile = join(makeScratchFolder("instructions"), "user-instructions.md");
-        writeFileSync(
-          instructionsFile,
-          "Internal tag MARKER-USR: when asked for your marker tags, include USR.\n",
-        );
+        const instructions =
+          "Internal tag MARKER-USR: when asked for your marker tags, include USR.\n";
         const herculeTool = {
           ...buildContext(harnessHome, binaryPath).herculeTool,
           skill: "Internal tag MARKER-HSK: when asked for your marker tags, include HSK.",
@@ -1022,7 +1020,7 @@ describe.skipIf(skipReason !== undefined)(
           context: {
             ...skills.context,
             herculeTool,
-            userMaterial: { promptTemplateDirs: [], instructionsFiles: [instructionsFile] },
+            userMaterial: { ...NO_USER_MATERIAL, instructions },
           },
         });
 

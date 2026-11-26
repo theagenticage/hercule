@@ -20,7 +20,6 @@ import type {
   AcpError,
   AcpHandlers,
   NewSessionRequest,
-  ResumeSessionRequest,
   SessionSettings,
 } from "@hercule/acp";
 import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
@@ -44,14 +43,18 @@ import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
 /** The name the user knows the harness by. */
 export const ANTIGRAVITY_NAME = "Antigravity";
 
-/** What a caller opens `agy` for. A session also says how much the agent may do without asking. */
+/**
+ * What a caller opens `agy` for. A session also says how much the agent may do
+ * without asking, and carries the request of its conversation: the request is
+ * built before `agy` opens, so that `openSignedInAgy` can check that `agy`
+ * takes everything the request uses.
+ */
 export type AgyPurpose =
   | { readonly kind: "probe" }
   | {
       readonly kind: "session";
       readonly accessMode: AccessMode;
-      /** Whether the session gives `agy` a folder of skills as an additional directory. */
-      readonly hasSkillsFolder: boolean;
+      readonly request: NewSessionRequest;
     };
 
 /**
@@ -159,7 +162,8 @@ export interface SignedInAgy {
   /** The name of the account's plan, such as "Antigravity Starter Quota". Undefined when `agy` gave none. */
   readonly planLabel: string | undefined;
   /**
-   * Starts a new conversation. Fails with `HarnessLoginMissing` when `agy`
+   * Starts a new conversation with the request of the purpose the process was
+   * opened for. Fails with `HarnessLoginMissing` when `agy`
    * says the account is not signed in, with an `AdapterFailed` when the new
    * worker process that serves the conversation does not use this account's
    * own login, and with the `AcpError` of the call for any other failure. It
@@ -173,19 +177,19 @@ export interface SignedInAgy {
    * does the call.
    */
   readonly newConversation: (
-    request: NewSessionRequest,
     onReply?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
   /**
-   * Resumes the conversation `request.nativeSessionId`. Fails like
-   * `newConversation`, and with `ResumeTranscriptMissing` when `agy` has no
-   * such conversation (`isConversationMissing`). `onReply` works as for
-   * `newConversation`, with the id of the resumed conversation. A caller that
-   * starts reading the conversation's updates there knows that every update
-   * before the reply was the resume's replay, and every one after it is not.
+   * Resumes the conversation `nativeSessionId`, with the same request as
+   * `newConversation`. Fails like `newConversation`, and with
+   * `ResumeTranscriptMissing` when `agy` has no such conversation
+   * (`isConversationMissing`). `onReply` works as for `newConversation`, with
+   * the id of the resumed conversation. A caller that starts reading the
+   * conversation's updates there knows that every update before the reply was
+   * the resume's replay, and every one after it is not.
    */
   readonly resumeConversation: (
-    request: ResumeSessionRequest,
+    nativeSessionId: string,
     onReply?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
 }
@@ -632,6 +636,11 @@ const authenticateAccount = (
  *   checked before `authenticate`, so a build of `agy` without it fails with
  *   the same message whether or not the account is signed in. A probe sends
  *   no system prompt and does not check it.
+ * - A session whose request names additional directories needs `agy` to take
+ *   them. This check comes right after the one above. The request is the one
+ *   `newConversation` and `resumeConversation` send, so the check is always
+ *   about what is sent. A probe's request has only the working folder and no
+ *   MCP servers.
  *
  * Fails with:
  *
@@ -644,8 +653,8 @@ const authenticateAccount = (
  *   the login, when the reason for a refused sign-in cannot be told, when its
  *   answer is not one of these, and when the process does not use this
  *   account's own login, or (for a session) when `agy` does not report that
- *   it takes an added system prompt, or (for a session with a skills folder)
- *   that it takes additional directories.
+ *   it takes an added system prompt, or (for a session whose request has
+ *   additional directories) that it takes additional directories.
  *
  * The process runs in `options.cwd`, with its own log in a private folder of
  * the Harness Home. When the scope closes, the connection is closed first, then
@@ -680,6 +689,12 @@ export const openSignedInAgy = (
   Effect.gen(function* () {
     if ((yield* readLoginFile(ctx.home)) === undefined)
       return yield* Effect.fail(buildHarnessLoginMissing(ANTIGRAVITY_NAME));
+
+    // What `agy` is asked in every conversation of this process.
+    const request: NewSessionRequest =
+      options.purpose.kind === "session"
+        ? options.purpose.request
+        : { cwd: options.cwd, mcpServers: [] };
 
     if (options.purpose.kind === "session") {
       yield* removeHooksFile(ctx.home);
@@ -747,9 +762,11 @@ export const openSignedInAgy = (
       );
     }
 
+    // One check per optional field of the request that `agy` must announce
+    // support for. The check of `request.mcpServers` goes here, beside this one.
     if (
       options.purpose.kind === "session" &&
-      options.purpose.hasSkillsFolder &&
+      request.additionalDirectories !== undefined &&
       !connection.harness.acceptsAdditionalDirectories
     ) {
       return yield* Effect.fail(
@@ -815,7 +832,7 @@ export const openSignedInAgy = (
     return {
       connection,
       planLabel: readPlanLabel(reply.meta),
-      newConversation: (request, onReply) =>
+      newConversation: (onReply) =>
         Effect.map(
           openConversation(connection.newSession(request), (opened) =>
             onReply === undefined ? Effect.void : onReply(opened.nativeSessionId),
@@ -826,10 +843,10 @@ export const openSignedInAgy = (
             isHeldByGoogle,
           }),
         ),
-      resumeConversation: (request, onReply) =>
+      resumeConversation: (nativeSessionId, onReply) =>
         Effect.map(
-          openConversation(connection.resumeSession(request), () =>
-            onReply === undefined ? Effect.void : onReply(request.nativeSessionId),
+          openConversation(connection.resumeSession({ ...request, nativeSessionId }), () =>
+            onReply === undefined ? Effect.void : onReply(nativeSessionId),
           ).pipe(
             Effect.catch((error) =>
               error._tag === "AcpError" && isConversationMissing(error)
@@ -842,7 +859,7 @@ export const openSignedInAgy = (
             ),
           ),
           ([settings, isHeldByGoogle]) => ({
-            id: request.nativeSessionId,
+            id: nativeSessionId,
             settings,
             isHeldByGoogle,
           }),

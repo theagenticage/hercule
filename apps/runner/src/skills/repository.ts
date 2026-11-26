@@ -42,7 +42,7 @@ import {
   type RepositorySkillFolder,
   type SkippedRepositorySkill,
 } from "@hercule/protocol";
-import { MAX_FRONTMATTER_BYTES, readFrontmatter } from "../frontmatter";
+import { MAX_FRONTMATTER_BYTES, parseFrontmatter } from "../frontmatter";
 import { describeError, escapeControlCharacters } from "../report";
 import type { RegisteredCheckout } from "../workspaces/registry";
 import {
@@ -195,7 +195,7 @@ export const parseSkillFrontmatter = (
   folderName: string,
   textWasCut = false,
 ): { description: string } | { problem: string } => {
-  const parsed = readFrontmatter(text);
+  const parsed = parseFrontmatter(text);
   if (parsed.status === "missing") {
     return { problem: "its SKILL.md has no frontmatter between two `---` lines" };
   }

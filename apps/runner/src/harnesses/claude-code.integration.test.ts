@@ -46,7 +46,7 @@ import { claudeCode, makeClaudeCodeAdapter } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
 import type { SessionStartContext } from "./index";
-import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "./testing";
+import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL } from "./testing";
 import { ensureRootBoundary } from "../workspaces";
 
 const binary = Bun.which("claude") ?? undefined;
@@ -857,7 +857,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       modelArgument: "{model}",
       credentialVariables: [],
       herculeTool: prepareTool(),
-      ...(session.thread ? { userMaterial: NO_USER_MATERIAL_PATHS, librarySkillsFolder } : {}),
+      ...(session.thread ? { userMaterial: NO_USER_MATERIAL, librarySkillsFolder } : {}),
       ...(repository === undefined
         ? {}
         : {

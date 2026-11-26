@@ -116,7 +116,7 @@ it.effect(
 );
 
 it.effect(
-  "writes additionalDirectories in session/new and session/resume, and leaves the key out when there are none",
+  "writes additionalDirectories in session/new and session/resume when the request has them, and leaves the key out otherwise",
   () =>
     Effect.gen(function* () {
       const harness = createTestHarness();
@@ -127,7 +127,6 @@ it.effect(
         harness.fake.received.filter(isMethod(method)).map(({ params }) => params);
 
       yield* connection.newSession({ ...request, additionalDirectories });
-      yield* connection.newSession({ ...request, additionalDirectories: [] });
       yield* connection.newSession(request);
       yield* connection.resumeSession({
         ...request,
@@ -138,10 +137,8 @@ it.effect(
 
       const [withDirectories, ...withoutDirectories] = writtenParams("session/new");
       expect(withDirectories).toHaveProperty("additionalDirectories", additionalDirectories);
-      expect(withoutDirectories).toHaveLength(2);
-      for (const params of withoutDirectories) {
-        expect(params).not.toHaveProperty("additionalDirectories");
-      }
+      expect(withoutDirectories).toHaveLength(1);
+      expect(withoutDirectories[0]).not.toHaveProperty("additionalDirectories");
       const [resumedWithDirectories, resumedWithout] = writtenParams("session/resume");
       expect(resumedWithDirectories).toHaveProperty("additionalDirectories", additionalDirectories);
       expect(resumedWithout).not.toHaveProperty("additionalDirectories");

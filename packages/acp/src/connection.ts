@@ -238,8 +238,8 @@ const hasToolCall = (params: unknown): boolean =>
 /**
  * Returns the MCP servers, `_meta` and additional directories of a session
  * request in the format of `session/new`. The directories are left out when
- * there are none, because a harness that does not announce support for them
- * may refuse a request that names the field.
+ * the request has none, because a harness that does not announce support for
+ * them may refuse a request that names the field.
  */
 const buildSessionParams = (request: NewSessionRequest) => ({
   cwd: request.cwd,
@@ -249,7 +249,7 @@ const buildSessionParams = (request: NewSessionRequest) => ({
     url,
     headers,
   })),
-  ...(request.additionalDirectories === undefined || request.additionalDirectories.length === 0
+  ...(request.additionalDirectories === undefined
     ? {}
     : { additionalDirectories: request.additionalDirectories }),
   ...(request.meta === undefined ? {} : { _meta: request.meta }),

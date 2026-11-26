@@ -201,11 +201,8 @@ describe("how the process is started", () => {
 
 describe("what the process is opened for", () => {
   const SKIP_FLAG = "--dangerously-skip-permissions";
-  const FULL_ACCESS: AgyPurpose = {
-    kind: "session",
-    accessMode: "full-access",
-    hasSkillsFolder: false,
-  };
+  const REQUEST = { cwd: "/work", mcpServers: [] };
+  const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access", request: REQUEST };
 
   it("adds the skip-permissions flag for a session in full-access only", async () => {
     const modes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
@@ -214,7 +211,7 @@ describe("what the process is opened for", () => {
       const { home, fake } = setUp();
       await Effect.runPromise(
         Effect.scoped(
-          open(fake, home, { purpose: { kind: "session", accessMode, hasSkillsFolder: false } }),
+          open(fake, home, { purpose: { kind: "session", accessMode, request: REQUEST } }),
         ),
       );
       commands.push(fake.spawns[0]!.command);
@@ -243,11 +240,13 @@ describe("what the process is opened for", () => {
     expect(methods).not.toContain("authenticate");
   });
 
-  it("fails a session start with a skills folder before authenticate when agy does not take additional directories", async () => {
+  it("fails a session start whose request has additional directories before authenticate when agy does not take them", async () => {
     const { home, fake } = setUp({ withoutAdditionalDirectoriesCapability: true });
 
     const error = await runAndReadFailure(
-      open(fake, home, { purpose: { ...FULL_ACCESS, hasSkillsFolder: true } }),
+      open(fake, home, {
+        purpose: { ...FULL_ACCESS, request: { ...REQUEST, additionalDirectories: ["/skills"] } },
+      }),
     );
 
     expect(error).toBeInstanceOf(AdapterFailed);
@@ -257,7 +256,7 @@ describe("what the process is opened for", () => {
     expect(methods).not.toContain("authenticate");
   });
 
-  it("opens a session without a skills folder when agy does not take additional directories", async () => {
+  it("opens a session whose request has no additional directories when agy does not take them", async () => {
     const { home, fake } = setUp({ withoutAdditionalDirectoriesCapability: true });
 
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: FULL_ACCESS })));
@@ -539,7 +538,6 @@ describe("the sign that a process uses the account's own login", () => {
 });
 
 describe("opening a conversation", () => {
-  const REQUEST = { cwd: "/work", mcpServers: [] };
   const keepNothing = () => Effect.void;
 
   /** Opens `agy`, runs `use` on it, and returns what `use` returned or failed with. */
@@ -560,7 +558,7 @@ describe("opening a conversation", () => {
     const { home, fake } = setUp();
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.newConversation(REQUEST, keepNothing),
+      signedIn.newConversation(keepNothing),
     );
 
     expect(Result.isSuccess(result) && result.success.id).toBe(CONVERSATION);
@@ -572,11 +570,62 @@ describe("opening a conversation", () => {
     createConversationFiles(home, CONVERSATION);
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+      signedIn.resumeConversation(CONVERSATION),
     );
 
     expect(Result.isSuccess(result) && result.success.id).toBe(CONVERSATION);
     expect(Result.isSuccess(result) && result.success.settings.configOptions).not.toEqual([]);
+  });
+
+  it("sends the request of the session's purpose to session/new, and the same request with the id to session/resume", async () => {
+    const { home, fake } = setUp();
+    createConversationFiles(home, CONVERSATION);
+    const request = {
+      cwd: "/work",
+      additionalDirectories: ["/skills"],
+      mcpServers: [],
+      meta: { antigravity: { systemPrompt: { append: "Be brief." } } },
+    };
+    const purpose: AgyPurpose = { kind: "session", accessMode: "full-access", request };
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const signedIn = yield* open(fake, home, { purpose });
+          yield* signedIn.newConversation();
+          yield* signedIn.resumeConversation(CONVERSATION);
+        }),
+      ),
+    );
+
+    const sent = fake.spawns[0]!.harness.received;
+    const params = (method: string) => sent.find((message) => message.method === method)?.params;
+    const sentRequest = {
+      cwd: "/work",
+      mcpServers: [],
+      additionalDirectories: ["/skills"],
+      _meta: request.meta,
+    };
+    expect(params("session/new")).toEqual(sentRequest);
+    expect(params("session/resume")).toEqual({ ...sentRequest, sessionId: CONVERSATION });
+  });
+
+  it("sends only the working folder and no MCP server for a probe", async () => {
+    const { home, fake } = setUp();
+    const cwd = createScratchHome("agy-probe-work");
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const signedIn = yield* open(fake, home, { cwd });
+          yield* signedIn.newConversation();
+        }),
+      ),
+    );
+
+    expect(
+      fake.spawns[0]!.harness.received.find((message) => message.method === "session/new")?.params,
+    ).toEqual({ cwd, mcpServers: [] });
   });
 
   it("says whether Google holds the account, and does not fail for it", async () => {
@@ -591,7 +640,7 @@ describe("opening a conversation", () => {
     });
     const isHeld = async ({ home, fake }: typeof plain) => {
       const result = await withSignedIn(fake, home, (signedIn) =>
-        signedIn.newConversation(REQUEST, keepNothing),
+        signedIn.newConversation(keepNothing),
       );
       return Result.isSuccess(result) && result.success.isHeldByGoogle;
     };
@@ -605,7 +654,7 @@ describe("opening a conversation", () => {
     const { home, fake } = setUp();
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+      signedIn.resumeConversation(CONVERSATION),
     );
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(ResumeTranscriptMissing);
@@ -617,7 +666,7 @@ describe("opening a conversation", () => {
     });
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.newConversation(REQUEST, keepNothing),
+      signedIn.newConversation(keepNothing),
     );
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(HarnessLoginMissing);
@@ -629,7 +678,7 @@ describe("opening a conversation", () => {
     });
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+      signedIn.resumeConversation(CONVERSATION),
     );
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AcpError);
@@ -646,8 +695,8 @@ describe("opening a conversation", () => {
 
       const result = await withSignedIn(fake, home, (signedIn) =>
         open_ === "newConversation"
-          ? signedIn.newConversation(REQUEST, keepNothing)
-          : signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+          ? signedIn.newConversation(keepNothing)
+          : signedIn.resumeConversation(CONVERSATION),
       );
 
       expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AdapterFailed);
@@ -660,7 +709,7 @@ describe("opening a conversation", () => {
     const kept: Array<string> = [];
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.newConversation(REQUEST, (id) =>
+      signedIn.newConversation((id) =>
         Effect.sync(() => {
           kept.push(id);
         }),
@@ -677,7 +726,7 @@ describe("opening a conversation", () => {
     const kept: Array<string> = [];
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }, (id) =>
+      signedIn.resumeConversation(CONVERSATION, (id) =>
         Effect.sync(() => {
           kept.push(id);
         }),
@@ -692,7 +741,7 @@ describe("opening a conversation", () => {
     const { home, fake } = setUp();
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.newConversation(REQUEST, () => Effect.fail(buildAdapterFailed("No room."))),
+      signedIn.newConversation(() => Effect.fail(buildAdapterFailed("No room."))),
     );
 
     expect(Result.isFailure(result) && result.failure.message).toBe("No room.");
@@ -704,10 +753,8 @@ describe("opening a conversation", () => {
 
     const result = await withSignedIn(fake, home, (signedIn) =>
       Effect.gen(function* () {
-        yield* Effect.ignore(
-          signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
-        );
-        return yield* signedIn.newConversation(REQUEST, keepNothing);
+        yield* Effect.ignore(signedIn.resumeConversation(CONVERSATION));
+        return yield* signedIn.newConversation(keepNothing);
       }),
     );
 
@@ -718,7 +765,7 @@ describe("opening a conversation", () => {
     const { home, fake } = setUp({ workerLogs: { "session/new": KEYRING_LINE } });
 
     const result = await withSignedIn(fake, home, (signedIn) =>
-      signedIn.newConversation(REQUEST, keepNothing),
+      signedIn.newConversation(keepNothing),
     );
 
     expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
@@ -881,7 +928,7 @@ describe("the hooks file of the Harness Home", () => {
   const SESSION: AgyPurpose = {
     kind: "session",
     accessMode: "approval-required",
-    hasSkillsFolder: false,
+    request: { cwd: "/work", mcpServers: [] },
   };
   const HOOKS = (home: string) => join(home, "config", "hooks.json");
 

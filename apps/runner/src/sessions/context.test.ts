@@ -28,7 +28,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
-import { NO_USER_MATERIAL_PATHS } from "../harnesses/testing";
+import { CODEX } from "../harnesses";
+import { NO_USER_MATERIAL } from "../harnesses/testing";
 
 import {
   addBranch,
@@ -717,11 +718,40 @@ describe("the user's own material", () => {
 
     expect(outcome._tag).toBe("Success");
     expect(outcome._tag === "Success" ? outcome.success.ctx.userMaterial : undefined).toEqual(
-      NO_USER_MATERIAL_PATHS,
+      NO_USER_MATERIAL,
     );
     const link = join(machine.storageDir, HARNESS_HOME, "CLAUDE.md");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(readFileSync(link, "utf8")).toBe("the user's instructions");
+  });
+});
+
+describe("the user's instructions across a start and a resume", () => {
+  it("are read again for every start frame, so a resumed session gets the text as it is then", () => {
+    const userHome = createRoot();
+    mkdirSync(join(userHome, ".codex"));
+    const instructions = join(userHome, ".codex", "AGENTS.md");
+    const machine = buildMachine({ baseEnv: { PATH: "/usr/bin", HOME: userHome } });
+    // A resume reaches the runner as one more start frame for the same session.
+    const start = buildSessionStart({ harnessId: CODEX, userMaterial: true });
+    const resume = buildSessionStart({
+      harnessId: CODEX,
+      userMaterial: true,
+      spec: {
+        ...start.spec,
+        continue: { nativeSessionId: "native-session", mode: "resume" },
+      },
+    });
+    const readInstructions = (frame: SessionStart): string | undefined => {
+      const outcome = resolveSync(frame, machine);
+      return outcome._tag === "Success" ? outcome.success.ctx.userMaterial?.instructions : "failed";
+    };
+
+    writeFileSync(instructions, "The old text.");
+    expect(readInstructions(start)).toBe("The old text.");
+
+    writeFileSync(instructions, "The new text.");
+    expect(readInstructions(resume)).toBe("The new text.");
   });
 });
 

@@ -102,7 +102,7 @@ export interface HarnessRunnerContext {
     readonly claudePluginDir: string;
   };
   /**
-   * The paths of the user's own material this session's harness is given.
+   * The user's own material this session's harness is given.
    * The field being present is what marks the session as one that sees User
    * Material: a Thread on the controller's local runner, whose start frame
    * has the `userMaterial` flag set (spec 06 section 9.1). The field is
@@ -261,9 +261,9 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
 };
 
 /**
- * The paths of the user's own material that an adapter passes to its harness
- * for one process. Each path existed on this machine when the runner looked
- * for it; a source that does not exist is left out.
+ * The user's own material that an adapter gives its harness for one process.
+ * A path existed on this machine when the runner looked for it; a source that
+ * does not exist is left out.
  *
  * Every field is empty for a harness that reads the material through links
  * in its Harness Home instead. Claude Code is that harness: it reads the
@@ -277,10 +277,17 @@ export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
   /**
-   * The user's personal instruction files, in the order the harness's
-   * instructions take them. Empty when the user has none.
+   * The text of the user's instruction files, joined by a blank line, for the
+   * harnesses that take their instructions as text (Codex and Antigravity).
+   * Read when the runner provisions the material, so it is as current as the
+   * files at each start, resume and fork. Undefined when the user has none.
    */
-  readonly instructionsFiles: ReadonlyArray<string>;
+  readonly instructions: string | undefined;
+  /**
+   * The path of the user's instructions file, for the harness that reads the
+   * file itself (pi). Undefined when the user has none.
+   */
+  readonly instructionsFile: string | undefined;
 }
 
 /**

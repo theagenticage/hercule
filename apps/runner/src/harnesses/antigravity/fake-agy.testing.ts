@@ -262,9 +262,9 @@ export interface FakeAgyOptions {
    * scripts it by hand.
    */
   readonly recording?: RecordingName | ReadonlyArray<RecordedMessage>;
-  /** Leaves `antigravity.systemPrompt.append` out of the reply to `initialize`, as an older `agy` does. */
+  /** Leaves `antigravity.systemPrompt.append` out of the reply to `initialize`. */
   readonly withoutSystemPromptCapability?: boolean;
-  /** Leaves `sessionCapabilities.additionalDirectories` out of the reply to `initialize`, as an older `agy` does. */
+  /** Leaves `sessionCapabilities.additionalDirectories` out of the reply to `initialize`. */
   readonly withoutAdditionalDirectoriesCapability?: boolean;
 }
 

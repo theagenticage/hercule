@@ -47,7 +47,7 @@ import {
   MAX_PENDING_BYTES,
   MAX_PENDING_THREADS,
 } from "./threads";
-import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
+import { NO_USER_MATERIAL, PNG_BYTES, writeTestImage } from "../testing";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -628,7 +628,7 @@ describe("the home directories a session's app-server gets", () => {
     const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, HOME: "/Users/someone" },
-      userMaterial: NO_USER_MATERIAL_PATHS,
+      userMaterial: NO_USER_MATERIAL,
     };
 
     await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
@@ -660,7 +660,7 @@ describe("the home directories a session's app-server gets", () => {
     };
 
     // The quotes in the path are escaped, so the value still parses as TOML.
-    expect((await startWith(NO_USER_MATERIAL_PATHS)).slice(-2)).toEqual([
+    expect((await startWith(NO_USER_MATERIAL)).slice(-2)).toEqual([
       "-c",
       'shell_environment_policy.set.HOME="/Users/some \\"one\\""',
     ]);
@@ -2154,21 +2154,14 @@ describe("hercule-as-a-tool on a Codex thread", () => {
 describe("the user's own instructions on a Codex Thread", () => {
   const USER_INSTRUCTIONS = "Always answer in English.\nKeep commits small.";
 
-  /** Writes the user's instructions file into a scratch directory and returns its path. */
-  const writeInstructions = (text: string): string => {
-    const file = join(createCodexHome(), "AGENTS.md");
-    writeFileSync(file, text);
-    return file;
-  };
-
-  /** Returns a context for a Thread whose user's instructions file is `instructionsFile`. */
+  /** Returns a context for a Thread whose user's instructions text is `instructions`. */
   const buildThreadContext = (
     ctx: SessionStartContext,
-    instructionsFile: string,
+    instructions: string,
   ): SessionStartContext => ({
     ...ctx,
     herculeTool: TOOL,
-    userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFiles: [instructionsFile] },
+    userMaterial: { ...NO_USER_MATERIAL, instructions },
   });
 
   const RESUME: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "resume" };
@@ -2204,42 +2197,19 @@ describe("the user's own instructions on a Codex Thread", () => {
   ];
 
   it.each(OPENINGS)(
-    "sends the file's text between the system prompt and the skill on %s",
+    "sends the user's instructions between the system prompt and the skill on %s",
     async (method, spec, instructions) => {
       const { adapter, ctx, requests } = createDriving();
-      const file = writeInstructions(USER_INSTRUCTIONS);
 
-      await Effect.runPromise(adapter.startSession(SESSION, spec, buildThreadContext(ctx, file)));
+      await Effect.runPromise(
+        adapter.startSession(SESSION, spec, buildThreadContext(ctx, USER_INSTRUCTIONS)),
+      );
 
       expect(listSentParams(requests, method)).toEqual([
         expect.objectContaining({ developerInstructions: instructions }),
       ]);
     },
   );
-
-  it("reads the file again for each thread it opens, so a resumed thread gets the current text", async () => {
-    const file = writeInstructions("The old text.");
-    const first = createDriving();
-    await Effect.runPromise(
-      first.adapter.startSession(SESSION, SPEC, buildThreadContext(first.ctx, file)),
-    );
-    writeFileSync(file, "The new text.");
-    const second = createDriving();
-
-    await Effect.runPromise(
-      second.adapter.startSession(
-        SESSION,
-        { ...SPEC, continue: RESUME },
-        buildThreadContext(second.ctx, file),
-      ),
-    );
-
-    expect(listSentParams(second.requests, "thread/resume")).toEqual([
-      expect.objectContaining({
-        developerInstructions: `${TOOL.orientation}\n\nThe new text.\n\n${TOOL.skill}`,
-      }),
-    ]);
-  });
 });
 
 /** Builds an agent message item. A Codex answer is read from the turn's final agent message. */
