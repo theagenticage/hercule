@@ -7,11 +7,12 @@ Layout:
 - `recordings/<scenario>.jsonl`: the ACP recording. The first line is a setup note, then one `{ t, direction, message }` object per JSON-RPC message, and the recorder's own notes (`message.note`, direction `out`). `t` is milliseconds since the recorder started. The copies in `packages/acp/src/recordings/` have a first line in the shape of the earlier recordings; here it is as the recorder wrote it.
 - `recordings/<scenario>.files.jsonl`: the file watch, on the same clock. The recorder polled the `.system_generated` folder of the conversation, and of every subagent found in `subagents/*.json`, every 100 ms, and wrote one line per change: `{ t, path, event: created | grew | rewritten | deleted, size, newLines? }`. So a `t` here has up to 100 ms of delay compared with the moment `agy` wrote the file.
 - `recordings/<scenario>.brain/<conversation id>/`: the final `.system_generated` tree of every conversation of the scenario (`logs/`, `messages/`, `steps/`, `subagents/`, `tasks/`). Strings of 200+ characters without spaces were replaced with `<long>` by the recorder.
-- `recordings/subagent-approval-watch.hook.log`: what the logging pre-tool hook received (epoch ms, then the raw hook input). Recording `t` = epoch ms - 1795727553786.
-- `recorder/`: the scripts. `lib1283.ts` and `scenarios/s1` to `s5` are the 2026-11-26 additions to the recorder of #1282 (`research/antigravity-sessions-1282`, `docs/research/antigravity/sessions-recorder/`), which holds `agy-session.ts`, `proxy.ts` and the rest. `timeline.ts` prints a recording, `files.ts` prints a file watch, `tok.ts` runs the token check, `steps.ts` and `payload.ts` read a conversation database (read-only, on a copy), `bin-grep.ts` and `bin-ctx.ts` search the `agy` binary, `hook.sh` is the logging hook.
+- `recordings/<scenario>.hook.log` (`subagent-approval-watch`, `subagent-read-outside`, `subagent-mcp-accept-edits`): what the logging pre-tool hook received (epoch ms, then the raw hook input). Recording `t` = epoch ms - the "recorder started at epoch ms" of the recorder's own note (`subagent-approval-watch` 1795727553786, `subagent-read-outside` 1795732142309, `subagent-mcp-accept-edits` 1795732259353).
+- `recordings/subagent-mcp-accept-edits.mcp.jsonl`: what the MCP stand-in server (`recorder/mcp-lib.ts`) received, one line per HTTP request, with its epoch ms in `t`.
+- `recorder/`: the scripts. `lib1283.ts`, `mcp-lib.ts` and `scenarios/s1` to `s7` are the 2026-11-26 additions to the recorder of #1282 (`research/antigravity-sessions-1282`, `docs/research/antigravity/sessions-recorder/`), which holds `agy-session.ts`, `proxy.ts` and the rest. `timeline.ts` prints a recording, `files.ts` prints a file watch, `tok.ts` runs the token check, `steps.ts` and `payload.ts` read a conversation database (read-only, on a copy), `bin-grep.ts`, `bin-ctx.ts` and `bin-bytes.ts` search the `agy` binary, `hook.sh`, `hook-ro.sh` and `hook-mcp.sh` are the logging hooks of `s5`, `s6` and `s7`.
 - Reading a path like `/tmp/hercule-1283/...` in a file: that was the scratch folder of the run. `agy` workspaces were under `/var/tmp/hercule-1283-work/` (not under `/tmp`, where `agy` writes without asking).
 
-Scrubbed before publishing: the machine's user name (`<user>`), host name (`<host>`) and non-loopback IP addresses (`<ip>`); nothing needed replacing in these files, a search for them found none. No OAuth token or email address is present. The `oauth-personal` and `api-key` words are names of sign-in methods in the `initialize` reply.
+Scrubbed before publishing: the machine's user name (`<user>`), host name (`<host>`) and non-loopback IP addresses (`<ip>`); nothing needed replacing in these files (the two scenarios added later included), a search for them found none. No string of 80 or more characters without spaces is left except file paths. No `ya29.` token is present. No OAuth token or email address is present. The `oauth-personal` and `api-key` words are names of sign-in methods in the `initialize` reply.
 
 In the `recordings/` copies the conversation ids are the real ones. `<id8>` below means the first eight characters.
 
@@ -24,6 +25,8 @@ In the `recordings/` copies the conversation ids are the real ones. `<id8>` belo
 | `steer-during-request` | approval required | Prompt 1: "Run `echo REQMARK > req.txt`." The permission request is left open; prompt 2 ("Also reply with the word BRAVO.") is sent while it is open; 3 s later the request is allowed. | `a34a3bc9` |
 | `failed-turn-network-watch` | full access, behind the recorder's proxy | Read `one.txt`, `two.txt`, `three.txt` one by one and summarise. The proxy is cut at the first tool call. The recorder then kept `agy` running (60 s) with the watch on. | `477ee040` |
 | `subagent-approval-watch` | approval required, logging pre-tool hook | "Use a subagent for this: the subagent must run `echo hi > sub.txt` with its command tool, and then write `sub2.txt` containing hi with its file tool. Say DONE when finished." `session/cancel` is sent 70 s after the child's last transcript line. | `d88dcaa6`; `53814e0e` |
+| `subagent-read-outside` | approval required, logging pre-tool hook | "Use invoke_subagent to start one subagent with the Role 'Reader'. Its task: read the file /var/tmp/hercule-1283-outside/note.txt with its read_file tool and report the file's content back to you. When it has reported, reply with that content." The file is outside the workspace. No cancel. | `ac0e56eb`; `c0c1ec17` |
+| `subagent-mcp-accept-edits` | accept-edits (set with `session/set_mode`), logging pre-tool hook, one MCP server `tools` (a stand-in at 127.0.0.1) | "Use invoke_subagent to start one subagent with the Role 'Caller'. Its task: call the MCP tool whoami once and report what it returned. When it has reported, reply with that." `session/cancel` is sent 90 s after the child's last transcript line. | `f45f3f94`; `6244eb0f` |
 
 ## Questions
 
@@ -35,6 +38,9 @@ In the `recordings/` copies the conversation ids are the real ones. `<id8>` belo
 6. What does `agy` do with a prompt sent while a permission request is open?
 7. How does a turn that ends on a provider error look, over ACP and in the files?
 8. What happens in a subagent whose command needs an approval, and what does the hook see?
+9. What happens when a subagent reads a file outside the workspace, in a mode that asks?
+10. What happens when a subagent calls an MCP tool in accept-edits mode?
+11. How does `agy` write the notice of a failed turn?
 
 ## Findings
 
@@ -106,12 +112,39 @@ Seven prompts, seven exact matches, steering and a cancel included. A child's to
 - During the hang no file changed: the last change before the cancel is the parent's step 3 at 15607; the child's transcript ends with its `PLANNER_RESPONSE` that calls `run_command` (12384) and never gets the result. Nothing changed up to the cancel at 82811.
 - `session/cancel` at 82811 is answered at 82819 with `stopReason` `cancelled` (usage in 4401, out 437), 8 ms later. Then, at 82823, the parent gets `messages/2fe6fcb0....json` (sender `system`, `hideFromUser` true): "[Notice] All your subagents and background tasks have been stopped due to user force cancellation. If you want a subagent to continue working, it needs to be revived by sending it a new message." The child's transcript got no new line.
 
+### 9. A subagent's `read_file` outside the workspace waits for an approval that never reaches the client, and `agy` fails it after 60 s (`subagent-read-outside`)
+
+- t=22946 (hook log, epoch 1795732165255): the hook sees the child's `read_file` (`conversationId` c0c1ec17, `Path` `/var/tmp/hercule-1283-outside/note.txt`, `stepIdx` 2). The mode is "approval required" and the file is outside the workspace.
+- No `session/request_permission` reached the client in the whole recording (0 messages).
+- t=82981 (60.0 s later): the child's transcript gets step 2 (`GENERIC`) with `status` `ERROR` and the error "permission check failed for read_file \"/var/tmp/hercule-1283-outside/note.txt\": Permission prompt for action 'read_file' on target '/var/tmp/hercule-1283-outside/note.txt' timed out waiting for user response after 60s; the user did not respond, which is not an explicit denial. Do not attempt to circumvent this ...". So `agy` ends the wait by itself; the client was never asked.
+- The child then reports the failure to its parent with `send_message` (step 3, t=87508; hook line at t=87455). The parent's turn ends with `end_turn` at 94883, after the text "... the permission check failed: > Permission prompt for action `read_file` on target `/var/tmp/hercule-1283-outside/note.txt` timed out waiting for user response after 60s ...".
+- The hook sees this call first (as in finding 8), so a hook can deny it at once. Without a hook, the call fails after 60 s, by `agy` itself, with this text.
+
+### 10. A subagent's MCP call in accept-edits waits and never reaches the server (`subagent-mcp-accept-edits`)
+
+- The recorder started `agy` with one MCP server `tools` and set accept-edits with `session/set_mode` (the reply is `{}`).
+- The server saw `server/discover`, `initialize`, `notifications/initialized`, `tools/list` and `notifications/roots/list_changed` (twice), and at the end a `DELETE` of its session. It saw no `tools/call` (`subagent-mcp-accept-edits.mcp.jsonl`, 9 lines).
+- t=11697 (hook log): the hook sees the child's call `mcp_tools_whoami` (`conversationId` 6244eb0f, `stepIdx` 2). The child's `PLANNER_RESPONSE` for it is at 11782 (file watch). The child's transcript never gets step 2 or any later line: the child's last line is at 11782, and the recorder waited 90 s after it.
+- No `session/request_permission` reached the client (0 messages). There was no timeout and no error: at t=102609 the recorder sent `session/cancel`; the reply is `cancelled` at 102621.
+- The hook fired for the parent's `invoke_subagent` (t=7700) and for the child's MCP call.
+- So a subagent's MCP call in this mode hangs with no answer and no end; a hook that denies it is the way to end it.
+
 ### Surprises
 
 - The transcript is written 0 to 100 ms after the ACP update (finding 1), and a child can write its last line after the parent's reply (finding 2). A reader that stops at the reply can miss a step.
 - A steer reaches the transcript as a `USER_INPUT` about 8 s after it was accepted (finding 5).
 - A failed turn leaves no mark in the transcript (finding 7).
 - The recorder's `session/cancel` of `failed-turn-network-watch` came 1 ms after the reply, not after 90 s (finding 7).
+- A subagent's file read outside the workspace never reaches the client either, but `agy` fails it by itself after 60 s (finding 9); a subagent's MCP call just hangs (finding 10).
+
+## The error notice format
+
+Finding 7 shows the notice `\n⚠ agent executor error: ...\n` in an `agent_message_chunk`. Its frame is a format string of the binary. Run on the `agy` 1.5.15 binary with `bin-bytes.ts <binary> <text>`, which prints 40 bytes before and 60 bytes after every hit:
+
+- the text `end_turn` + line feed + `⚠`: one hit, `...unixgramend_turn\n⚠ %s\nlocationprotocol...`;
+- the text line feed + `⚠ %s` + line feed: one hit, at the same place.
+
+So the binary holds the format `"\n⚠ %s\n"` once, right next to `end_turn`: a line feed, the sign, a space, the text, a line feed. That matches finding 7 (`\n⚠ agent executor error: ... Service Unavailable\n`). `STOP_REASON_QUOTA_EXHAUSTED` is a string of the binary (`bin-grep.ts <binary> STOP_REASON_QUOTA_EXHAUSTED`: 2 hits, one next to `STOP_REASON_MAX_TOTAL_TOKENS_EXCEEDED`, one next to a `TrajectoryUsageEntry` type). No recording shows it on the wire, so what an ACP reply carries for a quota failure is not measured.
 
 ## agy's own reader of these files
 

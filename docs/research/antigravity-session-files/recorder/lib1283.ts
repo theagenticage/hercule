@@ -113,7 +113,7 @@ export interface Ctx { cwd: string; sessionId: string; out: string; watcher: Wat
 
 export const run1283 = async (
   name: string,
-  o: { files?: Record<string, string>; flags?: string[]; proxy?: { url: string }; mode?: string; hookLog?: string },
+  o: { files?: Record<string, string>; flags?: string[]; proxy?: { url: string }; mode?: string; hookLog?: string; mcpServers?: unknown[] },
   body: (agy: Agy, ctx: Ctx) => Promise<string>,
 ) => {
   process.env.TMPDIR = `${WORK}/tmp-${name}`;
@@ -131,7 +131,7 @@ export const run1283 = async (
   let watcher: Watcher | undefined;
   const timer = setTimeout(() => { console.log(`${name}: HARD TIMEOUT 600s`); watcher?.stop(); void agy.close().then(() => process.exit(1)); }, 600_000);
   try {
-    const { sessionId } = await openSession(agy, { cwd });
+    const { sessionId } = await openSession(agy, { cwd, mcpServers: o.mcpServers });
     agy.note(`conversation id (sessionId) = ${sessionId}`);
     watcher = startWatcher(agy, sessionId, `${REC}/${name}.files.jsonl`);
     console.log(await body(agy, { cwd, sessionId, out, watcher, home: HOME, name }));
