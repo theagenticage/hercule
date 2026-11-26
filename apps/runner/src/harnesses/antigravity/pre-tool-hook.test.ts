@@ -372,6 +372,25 @@ describe("the guard of the approval files", () => {
     expect(isDenied(decide(folder, path))).toBe(true);
   });
 
+  const HFS_IGNORED = [
+    ...[0x200c, 0x200d, 0x200e, 0x200f],
+    ...[0x202a, 0x202b, 0x202c, 0x202d, 0x202e],
+    ...[0x206a, 0x206b, 0x206c, 0x206d, 0x206e, 0x206f],
+    0xfeff,
+  ];
+
+  it.each(HFS_IGNORED.map((code) => [`U+${code.toString(16).toUpperCase()}`, code] as const))(
+    "denies a guarded name with %s inside it, which an HFS+ volume ignores",
+    (_label, code) => {
+      const folder = realpathSync(createScratchHome("hook-hfs"));
+      const ignored = String.fromCodePoint(code);
+
+      expect(isDenied(decide(folder, `.agents/hooks${ignored}.json`))).toBe(true);
+      expect(isDenied(decide(folder, `.agents${ignored}/plugins/p.json`))).toBe(true);
+      expect(decide(folder, ".agents/notes.json")).toBe("");
+    },
+  );
+
   it("denies another Unicode normalization form and other case folding of a read-only folder", () => {
     const folder = realpathSync(createScratchHome("hook-unicode"));
     const readOnly = join(folder, "r\u00E9sum\u00E9s");

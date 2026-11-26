@@ -513,15 +513,30 @@ const buildGuardedPlaces = (cwd: string, rules: HookRules): ReadonlyArray<Guarde
 };
 
 /**
+ * The characters an HFS+ volume ignores when it compares names, so
+ * `hooks\u200C.json` opens `hooks.json` there: U+200C to U+200F, U+202A to
+ * U+202E, U+206A to U+206F and U+FEFF. The list is Apple's, from the case
+ * folding of TN1150 (HFS Plus Volume Format); the table itself was not
+ * reachable, so the list is the one the format is known by.
+ */
+const HFS_IGNORED_CHARACTERS = /[\u200C-\u200F\u202A-\u202E\u206A-\u206F\uFEFF]/g;
+
+/**
  * Returns `path` in a form that is equal for every spelling a filesystem may
  * treat as the same name: Unicode case-insensitive (upper then lower case, so
- * `ß` and `ı` fold too) and in one normalization form. A file that does not
- * exist has no file identity to compare, so a case-insensitive filesystem
- * (macOS) could otherwise take `.agents/Hooks.json` as another name. The fold
- * runs on every platform: guarding more on Linux does no harm.
+ * `ß` and `ı` fold too), in one normalization form, and without the
+ * characters an HFS+ volume ignores. A file that does not exist has no file
+ * identity to compare, so a case-insensitive filesystem (macOS) could
+ * otherwise take `.agents/Hooks.json` as another name. The fold runs on every
+ * platform: guarding more on Linux does no harm.
  */
 const foldSpelling = (path: string): string =>
-  path.normalize("NFD").toUpperCase().toLowerCase().normalize("NFD");
+  path
+    .replace(HFS_IGNORED_CHARACTERS, "")
+    .normalize("NFD")
+    .toUpperCase()
+    .toLowerCase()
+    .normalize("NFD");
 
 /** Returns whether `path` is `folder` or a path below it, as folded text. */
 const isInsideFolder = (path: string, folder: string): boolean => {
