@@ -1102,15 +1102,34 @@ describe("makeEventSecretHider", () => {
       .map((event) => (event._tag === "content.delta" ? event.delta : `<${event._tag}>`))
       .join("");
 
-  it("hides the token however it is split over two deltas", () => {
-    for (let at = 1; at < SECRET.length; at += 1) {
+  /** Fails when the text holds 8 consecutive characters of the token. */
+  const expectNoRunOfEight = (text: string) => {
+    for (let at = 0; at + 8 <= SECRET.length; at += 1) {
+      expect(text).not.toContain(SECRET.slice(at, at + 8));
+    }
+  };
+
+  it("leaves no 8 consecutive characters of the token at any split over 2 and 3 deltas of one stream", () => {
+    const publish = (parts: ReadonlyArray<string>): string => {
       const hide = makeEventSecretHider(SECRET);
       const events = [
-        ...hide([delta(`before ${SECRET.slice(0, at)}`)]),
-        ...hide([delta(`${SECRET.slice(at)} after`)]),
+        ...parts.flatMap((part) => hide([delta(part)])),
         ...hide([closing("item.completed")]),
       ];
-      expect(joinEventText(events)).toBe("before [hidden] after<item.completed>");
+      return joinEventText(events);
+    };
+    for (let first = 1; first < SECRET.length; first += 1) {
+      const two = publish([`before ${SECRET.slice(0, first)}`, `${SECRET.slice(first)} after`]);
+      expect(two).toBe("before [hidden] after<item.completed>");
+      for (let second = first + 1; second < SECRET.length; second += 1) {
+        const three = publish([
+          `before ${SECRET.slice(0, first)}`,
+          SECRET.slice(first, second),
+          `${SECRET.slice(second)} after`,
+        ]);
+        expectNoRunOfEight(three);
+        expect(three).toBe("before [hidden] after<item.completed>");
+      }
     }
   });
 
@@ -1123,30 +1142,30 @@ describe("makeEventSecretHider", () => {
     expect(joinEventText(events)).toBe("[hidden]<item.completed>");
   });
 
-  it("hides the held start of a token when its item ends, and never publishes it", () => {
-    const hide = makeEventSecretHider(SECRET);
-    const first = hide([delta(`ends with ${SECRET.slice(0, 5)}`)]);
-    expect(joinEventText(first)).toBe("ends with ");
-    expect(joinEventText(hide([closing("item.completed")]))).toBe("[hidden]<item.completed>");
-  });
-
-  it.each(["turn.completed", "session.exited"] as const)(
-    "hides every held start before %s",
+  it.each(["item.completed", "turn.completed", "session.exited"] as const)(
+    "delivers text that ends in 1 to 7 characters of the token's start whole, and hides 8 or more, at %s",
     (tag) => {
-      const hide = makeEventSecretHider(SECRET);
-      hide([delta(SECRET.slice(0, 3), "i1"), delta(SECRET.slice(0, 4), "i2")]);
-      expect(joinEventText(hide([closing(tag)]))).toBe(`[hidden][hidden]<${tag}>`);
+      for (let length = 1; length < SECRET.length; length += 1) {
+        const hide = makeEventSecretHider(SECRET);
+        const events = [
+          ...hide([delta(`The answer is ${SECRET.slice(0, length)}`)]),
+          ...hide([closing(tag)]),
+        ];
+        const shown = length < 8 ? SECRET.slice(0, length) : "[hidden]";
+        expect(joinEventText(events)).toBe(`The answer is ${shown}<${tag}>`);
+      }
     },
   );
 
-  it("never publishes a turn that ends in the middle of the token", () => {
+  it("treats every held stream's end the same way at the end of the turn", () => {
     const hide = makeEventSecretHider(SECRET);
-    const events = [...hide([delta(SECRET.slice(0, -1))]), ...hide([closing("turn.completed")])];
-    expect(joinEventText(events)).toBe("[hidden]<turn.completed>");
-    expect(JSON.stringify(events)).not.toContain(SECRET.slice(0, 5));
+    hide([delta(SECRET.slice(0, 3), "i1"), delta(SECRET.slice(0, 9), "i2")]);
+    expect(joinEventText(hide([closing("turn.completed")]))).toBe(
+      `${SECRET.slice(0, 3)}[hidden]<turn.completed>`,
+    );
   });
 
-  it("never publishes the start of the token that a reasoning chunk separates from its end", () => {
+  it("does not cover a token that another item interrupts: the end of it is published", () => {
     const hide = makeEventSecretHider(SECRET);
     const state = freshState();
     openTurn(state, "t");
@@ -1156,8 +1175,10 @@ describe("makeEventSecretHider", () => {
       buildChunk(SECRET.slice(10)),
     ].flatMap((chunk) => normalizeUpdate(state, chunk).flatMap((event) => hide([event])));
     events.push(...hide(buildProcessEndEvents(state)));
-    expect(JSON.stringify(events)).not.toContain(SECRET.slice(0, 5));
-    expect(JSON.stringify(events)).toContain("[hidden]");
+    const text = JSON.stringify(events);
+    // The held start was 10 characters, so it is hidden; the rest follows as it is.
+    expect(text).not.toContain(SECRET.slice(0, 8));
+    expect(text).toContain(SECRET.slice(10));
   });
 
   it("keeps the held start of one item when another item closes", () => {

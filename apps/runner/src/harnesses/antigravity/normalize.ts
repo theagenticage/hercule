@@ -227,6 +227,9 @@ export const hideSecret = <T>(value: T, secret: string): T => {
   return hide(value) as T;
 };
 
+/** The length from which a released end of a split secret is hidden. Shorter ends are published. */
+const MIN_HIDDEN_END = 8;
+
 /**
  * Makes a function that applies `hideSecret` to a sequence of events, and also
  * hides a `secret` that `agy` split across several `content.delta` events of
@@ -238,10 +241,12 @@ export const hideSecret = <T>(value: T, secret: string): T => {
  * released as its own delta before the event that closes its item
  * (`item.completed`), and before `turn.completed` and `session.exited`. An
  * interrupt, a stop and a lost connection all end in one of these, so no held
- * end stays behind. A released end is published as `[hidden]`, never as it
- * is: it is the start of the secret, and the rest of the secret may follow in
- * another item. The cost is that ordinary text that ends like the start of
- * the secret loses that end.
+ * end stays behind. A released end of `MIN_HIDDEN_END` characters or more is
+ * published as `[hidden]`; a shorter one is published as it is, so ordinary
+ * text that happens to end like the start of the secret is never cut, and a
+ * text that ends in the middle of the secret shows at most
+ * `MIN_HIDDEN_END - 1` of its characters. It does not cover a secret that
+ * another item interrupts: the part before the interruption is the held end.
  *
  * Only the `delta` of a `content.delta` changes (a delta left empty is
  * dropped). Ids and every other field pass through `hideSecret` as before.
@@ -267,7 +272,7 @@ export const makeEventSecretHider = (secret: string) => {
     for (const [key, delta] of held) {
       if (!isReleased(delta)) continue;
       held.delete(key);
-      released.push({ ...delta, delta: "[hidden]" });
+      released.push(delta.delta.length < MIN_HIDDEN_END ? delta : { ...delta, delta: "[hidden]" });
     }
     return released;
   };
