@@ -1099,7 +1099,7 @@ export const openSignedInAgy = (
     ) {
       return yield* Effect.fail(
         buildAdapterFailed(
-          `${ANTIGRAVITY_NAME} did not confirm that it takes MCP servers over HTTP (\`acceptsHttpMcpServers\`), so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+          `${ANTIGRAVITY_NAME} did not confirm that it takes MCP servers over HTTP, so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
         ),
       );
     }

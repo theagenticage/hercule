@@ -38,8 +38,20 @@ export const EDIT_TOOL_NAMES: ReadonlyArray<string> = ["edit_file", "write_file"
 /** The name of the tool that searches the web. */
 export const WEB_SEARCH_TOOL_NAME = "search_web";
 
-/** The names of the folders `agy` reads its configuration from, in the session's folder and every folder above it. */
-export const CONFIG_FOLDER_NAMES: ReadonlyArray<string> = [".agents"];
+/**
+ * The names of the folders `agy` reads configuration from, in the session's
+ * folder and every folder above it. Measured on `agy` 1.5.15: all four load a
+ * `hooks.json` (which can auto-approve a command) and start the servers of an
+ * `mcp_config.json`. Only those two files were measured under the names other
+ * than `.agents`. Guarding the plugins file and folder under every name is the
+ * safe superset.
+ */
+export const CONFIG_FOLDER_NAMES: ReadonlyArray<string> = [
+  ".agents",
+  ".agent",
+  "_agents",
+  "_agent",
+];
 
 /** The files in a configuration folder that `agy` loads approval rules or programs from. */
 export const GUARDED_CONFIG_FILES: ReadonlyArray<string> = [

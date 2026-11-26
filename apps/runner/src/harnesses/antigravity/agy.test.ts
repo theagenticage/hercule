@@ -283,7 +283,7 @@ describe("what the process is opened for", () => {
     const error = await runAndReadFailure(open(fake, home, { purpose: withServers }));
 
     expect(error).toBeInstanceOf(AdapterFailed);
-    expect(error.message).toContain("acceptsHttpMcpServers");
+    expect(error.message).toContain("MCP servers over HTTP");
     const methods = fake.spawns[0]!.harness.received.map((message) => message.method);
     expect(methods).toContain("initialize");
     expect(methods).not.toContain("authenticate");

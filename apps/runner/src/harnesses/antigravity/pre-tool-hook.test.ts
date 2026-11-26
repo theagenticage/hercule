@@ -199,6 +199,24 @@ describe("the guard of the approval files", () => {
     });
   });
 
+  it.each([".agents", ".agent", "_agents", "_agent"])(
+    "guards the same files and the plugins folder under %s",
+    (name) => {
+      const { cwd } = setUpRepo();
+
+      for (const path of [
+        `${name}/hooks.json`,
+        `${name}/plugins.json`,
+        `${name}/mcp_config.json`,
+        `${name}/plugins/p/plugin.json`,
+        `../${name}/hooks.json`,
+      ]) {
+        expect(isDenied(decide(cwd, path))).toBe(true);
+      }
+      expect(decide(cwd, `${name}/rules/x.md`)).toBe("");
+    },
+  );
+
   it("denies a file that is another name for a guarded file (a hard link), by file identity", () => {
     const { root, cwd } = setUpRepo();
     linkSync(join(root, ".agents", "hooks.json"), join(cwd, "hardlink.json"));

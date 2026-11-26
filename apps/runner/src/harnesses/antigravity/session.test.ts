@@ -745,7 +745,7 @@ describe("the MCP servers of a session", () => {
           const failure = yield* Effect.flip(h.start());
 
           expect(failure._tag).toBe("AdapterFailed");
-          expect(failure.message).toContain("acceptsHttpMcpServers");
+          expect(failure.message).toContain("MCP servers over HTTP");
           expect(h.received("authenticate")).toHaveLength(0);
         }),
       { ...withGateway, fake: { withoutHttpMcpCapability: true } },
