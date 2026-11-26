@@ -16,6 +16,7 @@ import {
   startFakeHarness,
   type FakeHarness,
   type HarnessScript,
+  type RecordedMessage,
 } from "@hercule/acp/testing";
 import type { HarnessRunnerContext } from "../index";
 import type { Run } from "../process";
@@ -213,7 +214,33 @@ export interface FakeAgyOptions {
   readonly version?: string | null;
   /** Makes `agy --version` never end. */
   readonly hangVersion?: boolean;
+  /** Leaves `antigravity.systemPrompt.append` out of the reply to `initialize`, as an older `agy` does. */
+  readonly withoutSystemPromptCapability?: boolean;
 }
+
+/** Returns the recording without `antigravity.systemPrompt` in the capabilities of the reply to `initialize`. */
+const removeSystemPromptCapability = (
+  recording: ReadonlyArray<RecordedMessage>,
+): ReadonlyArray<RecordedMessage> =>
+  recording.map((entry) => {
+    const result = entry.message.result as
+      | { agentCapabilities?: { _meta?: { antigravity?: object } } }
+      | undefined;
+    const meta = result?.agentCapabilities?._meta;
+    if (entry.direction !== "in" || meta?.antigravity === undefined) return entry;
+    const antigravity = { ...(meta.antigravity as Record<string, unknown>) };
+    delete antigravity["systemPrompt"];
+    return {
+      ...entry,
+      message: {
+        ...entry.message,
+        result: {
+          ...result,
+          agentCapabilities: { ...result!.agentCapabilities, _meta: { ...meta, antigravity } },
+        },
+      },
+    };
+  });
 
 /**
  * Builds a fake `agy` for the Harness Home `home`. Its process answers from
@@ -254,7 +281,10 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
     for (const line of stderrLines) stderr.push(line);
     if (options.holdStderrOpen !== true) stderr.end();
     const harness = startFakeHarness({
-      recording: readRecording("cancel"),
+      recording:
+        options.withoutSystemPromptCapability === true
+          ? removeSystemPromptCapability(readRecording("cancel"))
+          : readRecording("cancel"),
       scripts: harnessScripts,
     });
     const signals: Array<string | undefined> = [];

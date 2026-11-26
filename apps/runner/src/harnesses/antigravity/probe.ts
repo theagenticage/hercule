@@ -40,15 +40,6 @@ import {
 import { readLoginFile, readRegularFile } from "./harness-home";
 import { buildModelCatalog } from "./model-catalog";
 
-/**
- * The answer `agy` gives to `session/resume` for a conversation it has no
- * files for: the error -32603 with text that starts "Failed to read session"
- * (measured on a real `agy`). The probe replaces its conversation only for
- * this answer. It is a dependency on the wording of `agy`.
- */
-const MISSING_CONVERSATION_CODE = -32603;
-const MISSING_CONVERSATION_TEXT = "Failed to read session";
-
 /** How long `session/close` may take. `agy` keeps the conversation either way, and the process ends next. */
 const CLOSE_DEADLINE = Duration.seconds(2);
 
@@ -166,10 +157,9 @@ const buildDecliningHandlers = Effect.map(Effect.context<never>(), (services): A
 }));
 
 /**
- * Resumes the conversation `storedId`. Returns undefined when `agy` says it has
- * no such conversation (`MISSING_CONVERSATION_CODE` with
- * `MISSING_CONVERSATION_TEXT`), for example because its files are gone, and
- * logs that: the caller makes a new conversation. Fails with the error for
+ * Resumes the conversation `storedId`. Returns undefined when `agy` has no such
+ * conversation (the adapter's `ResumeTranscriptMissing`), for example because
+ * its files are gone, and logs that: the caller makes a new conversation. Fails with the error for
  * every other failure, so an `agy` that refuses `session/resume` for another
  * reason costs no conversation per probe, and the probe reports the words of
  * `agy`. A missing sign-in fails with `HarnessLoginMissing`, so it can never
@@ -187,10 +177,7 @@ const resumeConversation = (
     .resumeConversation({ nativeSessionId: storedId, cwd: folder, mcpServers: [] })
     .pipe(
       Effect.catch((error) =>
-        error._tag === "AcpError" &&
-        error.reason === "refused" &&
-        error.code === MISSING_CONVERSATION_CODE &&
-        (error.harnessMessage ?? "").includes(MISSING_CONVERSATION_TEXT)
+        error._tag === "ResumeTranscriptMissing"
           ? Effect.as(
               Effect.logWarning(
                 `${ANTIGRAVITY_NAME} has no conversation to resume for its check, so a new one is made: ${error.message}`,
@@ -257,7 +244,11 @@ const openProbeConversation = (
     const storedId = yield* readConversationId(ctx.home);
     const folder = yield* makeProbeFolder(ctx.home);
     const handlers = yield* buildDecliningHandlers;
-    const agy = yield* openSignedInAgy(spawn, ctx, binary, { cwd: folder, handlers });
+    const agy = yield* openSignedInAgy(spawn, ctx, binary, {
+      cwd: folder,
+      handlers,
+      purpose: { kind: "probe" },
+    });
     const resumed =
       storedId === undefined ? undefined : yield* resumeConversation(agy, storedId, folder);
     const conversation = resumed ?? (yield* makeConversation(agy, ctx.home, folder));

@@ -23,7 +23,8 @@ import type {
   SessionSettings,
 } from "@hercule/acp";
 import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
-import type { AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
+import { ResumeTranscriptMissing } from "@hercule/protocol";
+import type { AccessMode, AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
@@ -41,6 +42,30 @@ import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
 
 /** The name the user knows the harness by. */
 export const ANTIGRAVITY_NAME = "Antigravity";
+
+/** What a caller opens `agy` for. A session also says how much the agent may do without asking. */
+export type AgyPurpose =
+  | { readonly kind: "probe" }
+  | { readonly kind: "session"; readonly accessMode: AccessMode };
+
+/**
+ * Returns the id of the `agy` mode that matches a Hercule Access Mode, or
+ * undefined for `full-access`, which `agy` has no mode for: a session in it
+ * starts `agy` with `--dangerously-skip-permissions` instead (see
+ * `openSignedInAgy`) and keeps the default mode.
+ */
+export const readAgyModeId = (accessMode: AccessMode): string | undefined => {
+  switch (accessMode) {
+    case "approval-required":
+      return "default";
+    case "auto-accept-edits":
+      return "accept-edits";
+    case "auto":
+      return "auto";
+    case "full-access":
+      return undefined;
+  }
+};
 
 /** Spawns an `agy` process in the folder `cwd`. */
 export type AgySpawn = (
@@ -90,7 +115,11 @@ export interface SignedInAgy {
     request: NewSessionRequest,
     keepId?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
-  /** Resumes the conversation `request.nativeSessionId`. Fails like `newConversation`. */
+  /**
+   * Resumes the conversation `request.nativeSessionId`. Fails like
+   * `newConversation`, and with `ResumeTranscriptMissing` when `agy` has no
+   * such conversation (`isConversationMissing`).
+   */
   readonly resumeConversation: (
     request: ResumeSessionRequest,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
@@ -283,6 +312,17 @@ const isSignInRequired = (error: AcpError): boolean =>
   (error.harnessMessage ?? "").includes("Authentication required");
 
 /**
+ * Checks whether `session/resume` was refused because `agy` has no such
+ * conversation, for example because its files are gone: the error -32603 with
+ * text that starts "Failed to read session" (measured on a real `agy`). This
+ * is a dependency on the wording of `agy`.
+ */
+const isConversationMissing = (error: AcpError): boolean =>
+  error.reason === "refused" &&
+  error.code === -32603 &&
+  (error.harnessMessage ?? "").includes("Failed to read session");
+
+/**
  * Messages for an account that lists models but has no plan. Google holds an
  * account for verification when its reply says so (`HELD_BY_GOOGLE_PHRASE`).
  * Then `authenticate` gives no plan, `agy` lists the free models, and every
@@ -344,6 +384,20 @@ const readPlanLabel = (meta: unknown): string | undefined => {
   const label = truncateFact(plan.value.antigravity.tier.name.trim());
   return label === "" ? undefined : label;
 };
+
+const decodeSystemPromptCapability = Schema.decodeUnknownOption(
+  Schema.Struct({
+    antigravity: Schema.Struct({ systemPrompt: Schema.Struct({ append: Schema.Literal(true) }) }),
+  }),
+);
+
+/**
+ * Checks that the `_meta` of the reply to `initialize` says `agy` takes a
+ * system prompt that is added to its own (`antigravity.systemPrompt.append` is
+ * true). Anything else, including no `_meta`, is no.
+ */
+const acceptsAddedSystemPrompt = (meta: unknown): boolean =>
+  Option.isSome(decodeSystemPromptCapability(meta));
 
 /** What the worker logs of one `agy` process show. See `readWorkerLogSignals`. */
 interface WorkerLogSignals {
@@ -468,7 +522,18 @@ const authenticateAccount = (
 /**
  * Starts the `agy` process of an account and signs it in over ACP. Returns the
  * open connection, the account's plan name and the two ways to open a
- * conversation (`SignedInAgy`). Fails with:
+ * conversation (`SignedInAgy`). `options.purpose` says what the process is for,
+ * so that the caller never passes a flag of `agy` itself:
+ *
+ * - A session in `full-access` starts `agy` with `--dangerously-skip-permissions`.
+ *   No other Access Mode does.
+ * - A session needs `agy` to take the system prompt as an addition to its own
+ *   (`antigravity.systemPrompt.append` in the reply to `initialize`). That is
+ *   checked before `authenticate`, so a build of `agy` without it fails with
+ *   the same message whether or not the account is signed in. A probe sends
+ *   no system prompt and does not check it.
+ *
+ * Fails with:
  *
  * - `HarnessLoginMissing` when the Harness Home has no login file (nothing is
  *   spawned), or when `agy` says there is no usable login, or Google refused
@@ -478,7 +543,8 @@ const authenticateAccount = (
  *   cannot be run, cannot be reached over ACP, or cannot reach Google to check
  *   the login, when the reason for a refused sign-in cannot be told, when its
  *   answer is not one of these, and when the process does not use this
- *   account's own login.
+ *   account's own login, or (for a session) when `agy` does not report that
+ *   it takes an added system prompt.
  *
  * The process runs in `options.cwd`, with its own log in a private folder of
  * the Harness Home. When the scope closes, the connection is closed first, then
@@ -501,7 +567,11 @@ export const openSignedInAgy = (
   spawn: AgySpawn,
   ctx: HarnessRunnerContext,
   binary: string,
-  options: { readonly cwd: string; readonly handlers: AcpHandlers },
+  options: {
+    readonly cwd: string;
+    readonly handlers: AcpHandlers;
+    readonly purpose: AgyPurpose;
+  },
 ): Effect.Effect<SignedInAgy, AdapterError, Scope.Scope> =>
   Effect.gen(function* () {
     if ((yield* readLoginFile(ctx.home)) === undefined)
@@ -512,6 +582,9 @@ export const openSignedInAgy = (
       binary,
       "acp",
       "--process-per-session",
+      ...(options.purpose.kind === "session" && options.purpose.accessMode === "full-access"
+        ? ["--dangerously-skip-permissions"]
+        : []),
       ...buildAccountFlags(ctx.home, folder),
     ];
     const env = buildAgyEnv(ctx);
@@ -555,6 +628,14 @@ export const openSignedInAgy = (
       clientVersion: VERSION,
       handlers: options.handlers,
     }).pipe(Effect.catch(failOpening));
+
+    if (options.purpose.kind === "session" && !acceptsAddedSystemPrompt(connection.harness.meta)) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} did not confirm that it takes the instructions of a Hercule session, so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+        ),
+      );
+    }
 
     const reply = yield* authenticateAccount(connection, folder, failOpening);
 
@@ -625,7 +706,17 @@ export const openSignedInAgy = (
         ),
       resumeConversation: (request) =>
         Effect.map(
-          openConversation(connection.resumeSession(request), () => Effect.void),
+          openConversation(connection.resumeSession(request), () => Effect.void).pipe(
+            Effect.catch((error) =>
+              error._tag === "AcpError" && isConversationMissing(error)
+                ? Effect.fail(
+                    new ResumeTranscriptMissing({
+                      message: `The conversation of this session is gone from this runner, so ${ANTIGRAVITY_NAME} cannot resume it. Start a new thread to continue the work.`,
+                    }),
+                  )
+                : Effect.fail(error),
+            ),
+          ),
           ([settings, isHeldByGoogle]) => ({
             id: request.nativeSessionId,
             settings,

@@ -1,0 +1,229 @@
+/**
+ * Tests the translation between Hercule's decisions and answers and the ACP
+ * replies `agy` expects. The form and the options are the ones recorded from
+ * agy 1.5.15; the other forms are small and made by hand.
+ */
+import * as Effect from "effect/Effect";
+import { describe, expect, it } from "vitest";
+import type { ElicitationField, ElicitationRequest } from "@hercule/acp";
+import { MAX_FACT_LENGTH, type QuestionAnswers } from "@hercule/protocol";
+import {
+  buildApprovalOutcome,
+  buildElicitationReply,
+  readApprovalDecisions,
+  type QuestionForm,
+  readQuestionForm,
+} from "./requests";
+
+const RECORDED_OPTIONS = [
+  { optionId: "allow", name: "Allow", kind: "allow_once" },
+  { optionId: "deny", name: "Deny", kind: "reject_once" },
+];
+
+describe("approvals", () => {
+  it("offers allow, deny and cancel when the request has an allow_once option", () => {
+    expect(readApprovalDecisions(RECORDED_OPTIONS)).toEqual(["allow", "deny", "cancel"]);
+  });
+
+  it("offers no allow, and never allow_always, without an allow_once option", () => {
+    const options = [{ optionId: "always", name: "Always", kind: "allow_always" }];
+    expect(readApprovalDecisions(options)).toEqual(["deny", "cancel"]);
+    expect(readApprovalDecisions(RECORDED_OPTIONS)).not.toContain("allow_always");
+  });
+
+  it("selects options by kind, the first of that kind, whatever their id or label", () => {
+    const options = [
+      { optionId: "deny", name: "Allow", kind: "allow_always" },
+      { optionId: "first-allow", name: "Deny", kind: "allow_once" },
+      { optionId: "second-allow", name: "Allow", kind: "allow_once" },
+      { optionId: "allow", name: "No", kind: "reject_once" },
+    ];
+    expect(buildApprovalOutcome(options, "allow")).toEqual({
+      outcome: "selected",
+      optionId: "first-allow",
+    });
+    expect(buildApprovalOutcome(options, "deny")).toEqual({
+      outcome: "selected",
+      optionId: "allow",
+    });
+  });
+
+  it("answers deny with cancelled when the request has no reject_once option", () => {
+    const options = [{ optionId: "allow", name: "Allow", kind: "allow_once" }];
+    expect(buildApprovalOutcome(options, "deny")).toEqual({ outcome: "cancelled" });
+  });
+
+  it("answers cancel with cancelled even when options exist", () => {
+    expect(buildApprovalOutcome(RECORDED_OPTIONS, "cancel")).toEqual({ outcome: "cancelled" });
+  });
+});
+
+/** Returns a form request holding `properties`. */
+const buildRequest = (
+  properties: Record<string, ElicitationField>,
+  required?: ReadonlyArray<string>,
+): ElicitationRequest => ({
+  requestId: "req-1",
+  message: "The agent has a question.",
+  requestedSchema: { properties, ...(required === undefined ? {} : { required }) },
+  raw: {},
+  replyWritten: Effect.void,
+});
+
+/** Returns a single-select field with a choice per title, with consts "1", "2", ... */
+const buildSelect = (title: string, ...titles: ReadonlyArray<string>): ElicitationField => ({
+  type: "string",
+  title,
+  oneOf: titles.map((choiceTitle, index) => ({ const: String(index + 1), title: choiceTitle })),
+});
+
+const OTHER: ElicitationField = { type: "string", title: "Other" };
+
+/** Returns the reply for answers that must be accepted. */
+const answerOk = (form: QuestionForm, answers: QuestionAnswers) => {
+  const result = buildElicitationReply(form, answers);
+  if (result.kind === "refused") throw new Error(`expected a reply, refused: ${result.message}`);
+  return result.reply;
+};
+
+/** Reads a form that must be readable. */
+const readForm = (
+  properties: Record<string, ElicitationField>,
+  required?: ReadonlyArray<string>,
+) => {
+  const form = readQuestionForm(buildRequest(properties, required));
+  if (form === undefined) throw new Error("expected a readable form");
+  return form;
+};
+
+describe("a recorded single-choice question", () => {
+  const properties = {
+    q1: buildSelect("Which colour should the banner be?", "Red", "Green", "Blue"),
+    q1_other: {
+      type: "string",
+      title: "Other",
+      description: "Optional free-form answer to: Which colour should the banner be?",
+    },
+  };
+
+  it("becomes one question whose options are the titles, without descriptions", () => {
+    expect(readForm(properties).questions).toEqual([
+      {
+        question: "Which colour should the banner be?",
+        header: "Question",
+        options: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }],
+        multiSelect: false,
+      },
+    ]);
+  });
+
+  it("answers a chosen option with its const alone", () => {
+    expect(answerOk(readForm(properties), { Question: "Green" })).toEqual({
+      action: "accept",
+      content: { q1: "2" },
+    });
+  });
+
+  it("answers typed text in q1_other alone", () => {
+    expect(answerOk(readForm(properties), { Question: "Purple" })).toEqual({
+      action: "accept",
+      content: { q1_other: "Purple" },
+    });
+  });
+
+  it("refuses typed text, telling the user to pick, when there is no q1_other to carry it", () => {
+    const form = readForm({ q1: properties.q1 });
+    expect(buildElicitationReply(form, { Question: "Purple" })).toEqual({
+      kind: "refused",
+      message: "Question takes one of its options only. Pick one of them.",
+    });
+  });
+
+  it("refuses a list of several answers and accepts a list of one", () => {
+    const form = readForm(properties);
+    expect(buildElicitationReply(form, { Question: ["Red", "Blue"] }).kind).toBe("refused");
+    expect(answerOk(form, { Question: ["Red"] })).toEqual({
+      action: "accept",
+      content: { q1: "1" },
+    });
+  });
+});
+
+describe("several questions", () => {
+  const form = readForm({
+    q1: buildSelect("First?", "A", "B"),
+    q2: buildSelect("Second?", "C", "D"),
+    q2_other: OTHER,
+  });
+
+  it("numbers the headers in order", () => {
+    expect(form.questions.map((question) => question.header)).toEqual(["Question 1", "Question 2"]);
+  });
+
+  it("answers each question in its own field, an option for one and text for another", () => {
+    expect(answerOk(form, { "Question 1": "B", "Question 2": "something else" })).toEqual({
+      action: "accept",
+      content: { q1: "2", q2_other: "something else" },
+    });
+  });
+
+  it("leaves out an unanswered question that is not required", () => {
+    expect(answerOk(form, { "Question 2": "C" })).toEqual({
+      action: "accept",
+      content: { q2: "1" },
+    });
+  });
+
+  it("refuses an unanswered question the form requires", () => {
+    const required = readForm({ q1: buildSelect("First?", "A"), q2: buildSelect("Second?", "C") }, [
+      "q2",
+    ]);
+    expect(buildElicitationReply(required, { "Question 1": "A" })).toEqual({
+      kind: "refused",
+      message: "Question 2 needs an answer. Answer it.",
+    });
+  });
+
+  it("refuses an answer under a header the form does not have", () => {
+    expect(buildElicitationReply(form, { "Question 1": "A", "Question 9": "B" }).kind).toBe(
+      "refused",
+    );
+  });
+});
+
+describe("option labels that are equal", () => {
+  it("keeps each option and maps each back to its own const after truncation", () => {
+    const long = "x".repeat(MAX_FACT_LENGTH + 10);
+    const form = readForm({ q1: buildSelect("Pick?", `${long}a`, `${long}b`, "Same", "Same") });
+    const labels = form.questions[0].options.map((option) => option.label);
+    expect(new Set(labels).size).toBe(4);
+    for (const label of labels) expect(label.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
+    const consts = labels.map((label) => {
+      const reply = answerOk(form, { Question: label });
+      return reply.action === "accept" ? reply.content["q1"] : undefined;
+    });
+    expect(consts).toEqual(["1", "2", "3", "4"]);
+  });
+});
+
+describe("a form that cannot be read", () => {
+  const cases: Record<string, Record<string, ElicitationField>> = {
+    "a multi-select": { q1: { type: "array", title: "Pick?", items: { enum: ["a", "b"] } } },
+    "a field of another type": { q1: { type: "boolean", title: "Sure?" } },
+    "a field with no choices": { q1: { type: "string", title: "Name?" } },
+    "a field with no title": {
+      q1: { type: "string", oneOf: [{ const: "1", title: "A" }] },
+    },
+    "an unknown property": { q1: buildSelect("Pick?", "A"), extra: OTHER },
+    "a question beside a bad one": {
+      q1: buildSelect("Pick?", "A"),
+      q2: { type: "array", title: "Many?" },
+    },
+    "no question at all": { q1_other: OTHER },
+  };
+  for (const [name, properties] of Object.entries(cases)) {
+    it(`is undefined for ${name}`, () => {
+      expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+    });
+  }
+});

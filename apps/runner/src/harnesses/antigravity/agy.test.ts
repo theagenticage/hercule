@@ -20,7 +20,12 @@ import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
 import { answerWith } from "@hercule/acp/testing";
 import { buildAdapterFailed } from "../adapter-error-builders";
-import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  HarnessLoginMissing,
+  HarnessNotInstalled,
+  ResumeTranscriptMissing,
+} from "@hercule/protocol";
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
@@ -29,7 +34,9 @@ import {
   buildLoginCommand,
   checkAccountUsable,
   openSignedInAgy,
+  readAgyModeId,
   readAgyVersion,
+  type AgyPurpose,
   type SignedInAgy,
 } from "./agy";
 import {
@@ -77,11 +84,16 @@ const runAndReadFailure = (
 const open = (
   fake: FakeAgy,
   home: string,
-  options: { readonly env?: Record<string, string>; readonly cwd?: string } = {},
+  options: {
+    readonly env?: Record<string, string>;
+    readonly cwd?: string;
+    readonly purpose?: AgyPurpose;
+  } = {},
 ) =>
   openSignedInAgy(fake.spawn, buildContext(home, BINARY, options.env), BINARY, {
     cwd: options.cwd ?? createScratchHome("agy-work"),
     handlers: NO_HANDLERS,
+    purpose: options.purpose ?? { kind: "probe" },
   });
 
 /** Opens `agy` and returns the plan, closing the scope at the end. */
@@ -165,6 +177,7 @@ describe("how the process is started", () => {
         openSignedInAgy(fake.spawn, ctx, BINARY, {
           cwd: createScratchHome("agy-work"),
           handlers: NO_HANDLERS,
+          purpose: { kind: "probe" },
         }),
       ),
     );
@@ -174,6 +187,70 @@ describe("how the process is started", () => {
     expect(fake.spawns[0]!.env).toEqual(AGY_ENV);
     expect(versionEnvs).toEqual([AGY_ENV]);
     expect(login.env).toEqual(AGY_ENV);
+  });
+});
+
+describe("what the process is opened for", () => {
+  const SKIP_FLAG = "--dangerously-skip-permissions";
+  const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access" };
+
+  it("adds the skip-permissions flag for a session in full-access only", async () => {
+    const modes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
+    const commands: Array<ReadonlyArray<string>> = [];
+    for (const accessMode of modes) {
+      const { home, fake } = setUp();
+      await Effect.runPromise(
+        Effect.scoped(open(fake, home, { purpose: { kind: "session", accessMode } })),
+      );
+      commands.push(fake.spawns[0]!.command);
+    }
+    const { home, fake } = setUp();
+    await Effect.runPromise(Effect.scoped(open(fake, home)));
+
+    expect(commands.map((command) => command.includes(SKIP_FLAG))).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(fake.spawns[0]!.command).not.toContain(SKIP_FLAG);
+  });
+
+  it("fails a session start before authenticate when agy does not take an added system prompt", async () => {
+    const { home, fake } = setUp({ withoutSystemPromptCapability: true });
+
+    const error = await runAndReadFailure(open(fake, home, { purpose: FULL_ACCESS }));
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain(`agy ${ANTIGRAVITY_VERSION}`);
+    const methods = fake.spawns[0]!.harness.received.map((message) => message.method);
+    expect(methods).toContain("initialize");
+    expect(methods).not.toContain("authenticate");
+  });
+
+  it("still reads a signed-out home as not signed in when the capability is there", async () => {
+    const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN } });
+
+    const error = await runAndReadFailure(open(fake, home, { purpose: FULL_ACCESS }));
+
+    expect(error).toBeInstanceOf(HarnessLoginMissing);
+  });
+
+  it("does not need the capability for a probe", async () => {
+    const { home, fake } = setUp({ withoutSystemPromptCapability: true });
+
+    expect(await openAndReadPlan(fake, home)).toBe(PLAN_LABEL);
+  });
+});
+
+describe("readAgyModeId", () => {
+  it("maps each Access Mode to the mode of agy, and full-access to none", () => {
+    expect([
+      readAgyModeId("approval-required"),
+      readAgyModeId("auto-accept-edits"),
+      readAgyModeId("auto"),
+      readAgyModeId("full-access"),
+    ]).toEqual(["default", "accept-edits", "auto", undefined]);
   });
 });
 
@@ -496,6 +573,16 @@ describe("opening a conversation", () => {
     expect(await isHeld(lookalike)).toBe(false);
   });
 
+  it("resuming a conversation agy has no files for fails as a missing transcript", async () => {
+    const { home, fake } = setUp();
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+    );
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(ResumeTranscriptMissing);
+  });
+
   it("is not signed in when agy says authentication is required", async () => {
     const { home, fake } = setUp({
       scripts: { "session/new": refuse(-32000, "Authentication required") },
@@ -510,7 +597,7 @@ describe("opening a conversation", () => {
 
   it("passes any other refusal on as the call's own error", async () => {
     const { home, fake } = setUp({
-      scripts: { "session/resume": refuse(-32603, "Failed to read session") },
+      scripts: { "session/resume": refuse(-32603, "Internal error") },
     });
 
     const result = await withSignedIn(fake, home, (signedIn) =>
