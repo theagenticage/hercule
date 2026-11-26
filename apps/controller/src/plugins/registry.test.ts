@@ -587,7 +587,7 @@ describe("the Antigravity and Google plugins", () => {
             accessModes: {
               "approval-required": "native",
               "auto-accept-edits": "native",
-              auto: "native",
+              auto: "unsupported",
               "full-access": "native",
             },
             mcpPassthrough: "unsupported",

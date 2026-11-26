@@ -182,7 +182,7 @@ Not design questions. The constraint is stated where one exists.
   - 06 §3.3: images. 06 §4: a missing native session; the token in no file.
   - 06 §6.2: a provider failure in the middle of a turn; output with no prompt open. 06 §6.3: searches, listings, fetches, deletes.
   - 06 §6.5: the follow-up after a deny; `allow_always`; interrupts, a Request that arrives during one, and several Requests; every reply to a question, one choice with no other text included. 06 §6.6: a subagent's tokens. 06 §6.7: what a resume replays; whether a slash command such as `/plan` changes the mode.
-  - 06 §8.1: the modes, an irreversible command in `auto`, permission rules, the mode on a resume, and anything that runs before the mode is checked. 06 §10.5: the sandbox, and whether `hercule` reaches the controller.
+  - 06 §8.1: the modes, ~~an irreversible command in `auto`,~~ *(Resolved 2026-11-26, [#1282](https://github.com/theagenticage/hercule/issues/1282), for `auto` only: `agy` 1.5.15 offers no `auto` on any account tried, so the plugin declares it `unsupported` and 06 §8.4 applies. The other modes stay open.)* permission rules, the mode on a resume, and anything that runs before the mode is checked. 06 §10.5: the sandbox, and whether `hercule` reaches the controller.
   - 06 §9.1: what `agy` reads and writes outside the Harness Home. 06 §9.2, 12 §5.1: compaction, and the instructions, on a resume too.
   - 06 §10.5: model changes; the MCP checks; commands that fail or go to the background; subagents' approvals; interrupts; resume. 06 §13.6, §13.7: stopping and limits of subagents.
   - 21 §3.4, §3.7, §3.11: the gateway's names, a changed list, the wire path, a 404. 19 §4.1: the hook as a gate.
