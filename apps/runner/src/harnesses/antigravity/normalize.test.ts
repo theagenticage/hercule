@@ -1336,6 +1336,24 @@ describe("the held error notice", () => {
     }
   });
 
+  it("is held by a late update of a tool call that already has an item, and released by a new call", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildToolStart({ toolCallId: "c1", name: "search_web" }));
+    normalizeUpdate(state, buildChunk(NOTICE));
+
+    const late = normalizeUpdate(
+      state,
+      buildToolUpdate({ toolCallId: "c1", name: "search_web", status: "completed" }),
+    );
+    expect(only(late, "content.delta"), "the late update shows no notice").toEqual([]);
+    expect(takeErrorNotice(state)).toBe("agent executor error: Service Unavailable");
+
+    normalizeUpdate(state, buildChunk(NOTICE));
+    const next = normalizeUpdate(state, buildToolStart({ toolCallId: "c2", name: "search_web" }));
+    expect(only(next, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+  });
+
   it("is ordinary text inside an open assistant text item", () => {
     const state = freshState();
     openTurn(state, "t");

@@ -229,7 +229,7 @@ const HELD_BY_GOOGLE_PHRASE = /"reason":\s*"VALIDATION_REQUIRED"/;
  * model's own text. A later `agy` that words its errors differently gives an
  * ordinary message and a turn that ends `completed`.
  */
-export const readAgyErrorNotice = (text: string): string | undefined => {
+export const parseAgyErrorNotice = (text: string): string | undefined => {
   if (!text.startsWith("\n⚠ ") || !text.endsWith("\n")) return undefined;
   const notice = text.slice("\n⚠ ".length, -1);
   return notice === "" || notice.includes("\n") ? undefined : notice;

@@ -21,7 +21,7 @@
  * - text items: one starts at its first chunk and completes at the next
  *   message of another kind, at `usage_update`, or when the turn closes;
  * - the held error notice: a message chunk that is agy's own error (see
- *   `readAgyErrorNotice`) waits one step, because agy replies `end_turn` right
+ *   `parseAgyErrorNotice`) waits one step, because agy replies `end_turn` right
  *   after it and only then is it known to be the end of the turn and not text
  *   in the middle of one. The Turn takes it (`takeErrorNotice`) when the reply
  *   comes; an update that draws something, the end of the turn and the end of
@@ -54,7 +54,7 @@ import {
 import type * as Schema from "effect/Schema";
 import { ensureId } from "../events";
 import { buildEnvelope, buildRaw, clampCount } from "../normalize";
-import { readAgyErrorNotice } from "./agy";
+import { parseAgyErrorNotice } from "./agy";
 import { LAUNCH_TOOL_NAMES } from "./session-files";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
@@ -74,7 +74,7 @@ const ANTIGRAVITY_MESSAGE = "antigravity.acp.message";
 const LABEL_PREFIX = "antigravity";
 
 /** The token counts of one scope (a turn, or the whole process), added up. */
-interface Totals {
+export interface Totals {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -223,7 +223,8 @@ export const buildNormalizerState = (input: {
   subagentUsageIsIncomplete: false,
 });
 
-const buildZeroTotals = (): Totals => ({
+/** Returns token totals that are all zero. */
+export const buildZeroTotals = (): Totals => ({
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
@@ -401,7 +402,8 @@ const buildRuntimeWarning = (
   message: truncateMessage(message),
 });
 
-const buildUsage = (totals: Totals): Usage => ({
+/** Returns the protocol `Usage` that holds `totals`. */
+export const buildUsage = (totals: Totals): Usage => ({
   inputTokens: totals.inputTokens,
   outputTokens: totals.outputTokens,
   cacheReadTokens: totals.cacheReadTokens,
@@ -948,33 +950,61 @@ export const normalizeUpdate = (
     state.buffered.push({ type: "update", notification });
     return [];
   }
-  // `usage_update` follows the message chunks of every model call, so it must not
-  // release the notice before the reply. The updates the session drops draw
+  const name = readUpdateName(notification.update);
+  const decision = decideUpdate(name);
+  // Only an update that starts new output releases the notice. `usage_update`
+  // follows the message chunks of every model call, and a late update of an
+  // item that already exists arrives after `agy` wrote its notice, so neither
+  // may release it before the reply. The updates the session drops draw
   // nothing either (available commands, session info, mode, config option and
-  // the echo of the user's message), so they keep the hold too.
-  const decision = decideUpdate(readUpdateName(notification.update));
-  const drawsNothing = decision === "closeText" || decision === "drop";
+  // the echo of the user's message).
   return [
-    ...(drawsNothing ? [] : releaseErrorNotice(state)),
-    ...routeUpdate(state, notification),
+    ...(startsNewOutput(state, decision, notification.update) ? releaseErrorNotice(state) : []),
+    ...routeUpdate(state, notification, name, decision),
     ...closeIdleSyntheticTurn(state),
   ];
+};
+
+/**
+ * Returns true when an update with this `decision` starts output that was not
+ * on screen before: a message or thought chunk, a tool call that begins, an
+ * update of a tool call this adapter has no item for, or an `unknown` item.
+ */
+const startsNewOutput = (
+  state: NormalizerState,
+  decision: UpdateDecision,
+  update: SessionUpdate,
+): boolean => {
+  switch (decision) {
+    case "message":
+    case "thought":
+    case "toolStart":
+    case "unknown":
+      return true;
+    case "toolUpdate": {
+      const call = readToolCall(update);
+      return call === undefined || !state.tools.has(call.toolCallId);
+    }
+    case "closeText":
+    case "drop":
+      return false;
+  }
 };
 
 const routeUpdate = (
   state: NormalizerState,
   notification: SessionUpdateNotification,
+  name: string,
+  decision: UpdateDecision,
 ): HarnessEvent[] => {
   const { update } = notification;
-  const name = readUpdateName(update);
-  const decision = decideUpdate(name);
   switch (decision) {
     case "message":
     case "thought": {
       const text = readChunkText(update);
       const notice =
         decision === "message" && state.text?.kind !== "assistant_message" && text !== undefined
-          ? readAgyErrorNotice(text)
+          ? parseAgyErrorNotice(text)
           : undefined;
       if (notice !== undefined) {
         state.errorNotice = notice;

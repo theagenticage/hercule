@@ -109,6 +109,8 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
     let deliveryUnknown = 0;
     /** Makes the write of the next prompt fail, as the test says. */
     let nextWriteFailure: AcpError | undefined;
+    /** Makes the next `session/cancel` fail to be written. */
+    let isCancelFailing = false;
     // The session holds the output from the admission of the input on.
     holdTurn(normalizing);
     const turn = yield* startTurn(
@@ -135,9 +137,13 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
               return Deferred.await(reply);
             }),
           cancel: (id) =>
-            Effect.sync(() => {
-              cancels.push(id);
-            }),
+            isCancelFailing
+              ? Effect.fail(
+                  new AcpError({ reason: "closed", message: "The connection is closed." }),
+                )
+              : Effect.sync(() => {
+                  cancels.push(id);
+                }),
         },
       },
       {
@@ -216,6 +222,9 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
       openQuestion,
       announceCall,
       deliveryUnknown: () => deliveryUnknown,
+      failCancels: (): void => {
+        isCancelFailing = true;
+      },
       failNextWrite: (error: AcpError): void => {
         nextWriteFailure = error;
       },
@@ -299,7 +308,7 @@ describe("the handoff of the first prompt", () => {
           yield* h.until(() => h.cancels.length === 1);
           yield* h.reply(0, "cancelled");
 
-          expect(yield* Fiber.join(interrupting)).toBe("stopped");
+          expect(yield* Fiber.join(interrupting)).toBe("cancelled");
           expect(h.completed()).toMatchObject({ state: "interrupted" });
         }),
       written,
@@ -583,7 +592,7 @@ describe("the follow-up after a deny", () => {
         // `agy` answers end_turn to a prompt whose Request was cancelled.
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(0, "end_turn");
-        expect(yield* Fiber.join(result)).toBe("stopped");
+        expect(yield* Fiber.join(result)).toBe("cancelled");
         expect(h.prompts).toHaveLength(1);
         expect(h.completed()).toMatchObject({ state: "interrupted" });
       }),
@@ -603,7 +612,7 @@ describe("interrupt", () => {
         yield* h.until(() => h.cancels.length === 1);
         yield* h.turn.decide(h.findRequestId("request-call-1"), "allow");
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(interrupting)).toBe("stopped");
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.tags("request.resolved")).toMatchObject([{ decision: "cancel" }]);
         expect(h.completed()).toMatchObject({ state: "interrupted" });
         expect(h.cancels).toHaveLength(1);
@@ -615,10 +624,37 @@ describe("interrupt", () => {
       Effect.gen(function* () {
         yield* h.reply(0, "end_turn");
         yield* h.turn.ended;
-        expect(yield* h.turn.interrupt).toBe("stopped");
+        expect(yield* h.turn.interrupt).toBe("not-cancelled");
         expect(h.cancels).toHaveLength(0);
       }),
     ));
+
+  it("returns not-cancelled at once when session/cancel could not be written", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.failCancels();
+        expect(yield* h.turn.interrupt).toBe("not-cancelled");
+        expect(h.completed(), "the prompt is still running").toBeUndefined();
+      }),
+    ));
+
+  it("returns not-cancelled when the first prompt is refused while the interrupt waits for the handoff", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+          yield* Effect.yieldNow;
+          yield* Deferred.fail(
+            written,
+            new AcpError({ reason: "not-sent", message: "stdin is closed" }),
+          );
+          expect(yield* Fiber.join(interrupting)).toBe("not-cancelled");
+          expect(h.cancels).toEqual([]);
+        }),
+      written,
+    );
+  });
 
   it("is unresponsive after 5 seconds, and the turn ends only when the prompt fails", () =>
     run((h) =>
@@ -664,7 +700,7 @@ describe("interrupt", () => {
         const second = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 2);
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(second)).toBe("stopped");
+        expect(yield* Fiber.join(second)).toBe("cancelled");
       }),
     ));
 
@@ -675,8 +711,8 @@ describe("interrupt", () => {
         const second = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(first)).toBe("stopped");
-        expect(yield* Fiber.join(second)).toBe("stopped");
+        expect(yield* Fiber.join(first)).toBe("cancelled");
+        expect(yield* Fiber.join(second)).toBe("cancelled");
         expect(h.cancels).toHaveLength(1);
       }),
     ));
@@ -1245,8 +1281,48 @@ describe("a steer", () => {
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(1, "cancelled");
 
-        expect(yield* Fiber.join(interrupting)).toBe("stopped");
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.completed()).toMatchObject({ state: "interrupted" });
+      }),
+    ));
+
+  it("ends by the old reply and warns with the message when agy refuses the newest prompt after it confirmed the steer", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        yield* h.reply(0, "end_turn", 5);
+        yield* waitOutGrace;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        yield* h.turn.ended;
+
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 5 } });
+        expect(h.tags("runtime.error")).toHaveLength(0);
+        expect(h.tags("runtime.warning")).toMatchObject([
+          {
+            message: expect.stringContaining(
+              'refused a message after it had confirmed it, so the message did not reach the agent. Send it again: "more"',
+            ) as unknown,
+          },
+        ]);
+      }),
+    ));
+
+  it("counts the late reply of the old prompt after the steer's own reply ended the turn", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.until(() => h.tags("session.usage.updated").length === 2);
+
+        expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+          usage: { inputTokens: 8 },
+        });
       }),
     ));
 
@@ -1425,9 +1501,37 @@ describe("a provider error in the transcript", () => {
     toolCalls: [],
   });
 
+  const userInputStep: AgyStep = { index: 1, type: "USER_INPUT", toolCalls: [], content: "go" };
+
+  it("ignores every step until the Turn is published, and an error until it saw a user input", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          h.turn.observeRootStep(userInputStep);
+          h.turn.observeRootStep(errorStep("error of the Turn before"));
+          yield* Deferred.succeed(written, undefined);
+          yield* h.until(() => h.tags("turn.started").length === 1);
+
+          h.turn.observeRootStep(errorStep("error before the input"));
+          expect(h.tags("runtime.warning"), "no USER_INPUT since the Turn was published").toEqual(
+            [],
+          );
+
+          h.turn.observeRootStep(userInputStep);
+          h.turn.observeRootStep(errorStep("503 no capacity"));
+          expect(h.tags("runtime.warning")).toMatchObject([
+            { message: expect.stringContaining("may try again: 503 no capacity") as unknown },
+          ]);
+        }),
+      written,
+    );
+  });
+
   it("warns once with the provider's words, and ends nothing", () =>
     run((h) =>
       Effect.gen(function* () {
+        h.turn.observeRootStep(userInputStep);
         h.turn.observeRootStep(errorStep("503 no capacity"));
         h.turn.observeRootStep(errorStep("503 again"));
         h.turn.observeRootStep({ index: 4, type: "GENERIC", toolCalls: [], content: "x" });

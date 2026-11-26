@@ -46,7 +46,7 @@ import {
   checkAccountUsable,
   isQuotaError,
   openSignedInAgy,
-  readAgyErrorNotice,
+  parseAgyErrorNotice,
   readAgyVersion,
   type AgyPurpose,
   type SignedInAgy,
@@ -1295,12 +1295,12 @@ describe("the error notices of agy", () => {
       .map((params) => params?.update?.content?.text)
       .find((text) => text?.includes("\u26a0"));
     expect(chunk).toBeDefined();
-    expect(readAgyErrorNotice(chunk!)).toBe(NETWORK_NOTICE);
+    expect(parseAgyErrorNotice(chunk!)).toBe(NETWORK_NOTICE);
     expect(isQuotaError(NETWORK_NOTICE)).toBe(false);
   });
 
   it("reads the quota error, and tells it from other errors", () => {
-    expect(readAgyErrorNotice(`\n\u26a0 ${QUOTA_NOTICE}\n`)).toBe(QUOTA_NOTICE);
+    expect(parseAgyErrorNotice(`\n\u26a0 ${QUOTA_NOTICE}\n`)).toBe(QUOTA_NOTICE);
     expect(isQuotaError(QUOTA_NOTICE)).toBe(true);
     expect(isQuotaError("rpc error: code = 429")).toBe(true);
   });
@@ -1314,6 +1314,6 @@ describe("the error notices of agy", () => {
     ["more text after it", `\n\u26a0 ${QUOTA_NOTICE}\nAnd here is more.\n`],
     ["no words", "\n\u26a0 \n"],
   ])("is not a notice: %s", (_name, text) => {
-    expect(readAgyErrorNotice(text)).toBeUndefined();
+    expect(parseAgyErrorNotice(text)).toBeUndefined();
   });
 });
