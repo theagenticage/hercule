@@ -274,7 +274,9 @@ const startThread = async (
         ...(prepared.model === undefined ? [] : ["--model", prepared.model]),
         "--workspace",
         JSON.stringify(options.workspace),
-        ...(options.accessMode === undefined ? [] : ["--access-mode", options.accessMode]),
+        ...((options.accessMode ?? prepared.accessMode) === undefined
+          ? []
+          : ["--access-mode", (options.accessMode ?? prepared.accessMode)!]),
         ...(options.images ?? []).flatMap((path) => ["--image", path]),
         "--json",
       ],
