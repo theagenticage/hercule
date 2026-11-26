@@ -428,6 +428,58 @@ describe("the deny2 recording", () => {
   });
 });
 
+describe("a call the pre-tool hook denied", () => {
+  const reason =
+    "tool call denied by pre-tool hook: Hercule does not let the agent change .agents/hooks.json";
+  const buildDeniedUpdate = (call: ToolCall): SessionUpdateNotification =>
+    buildToolUpdate({
+      ...call,
+      status: "failed",
+      rawOutput: reason,
+      content: [{ type: "content", content: { type: "text", text: reason } }],
+    });
+  const complete = (call: ToolCall) => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildToolStart(call));
+    return normalizeUpdate(state, buildDeniedUpdate(call));
+  };
+
+  it("shows the reason in the detail of a failed file_change", () => {
+    const events = complete({
+      toolCallId: "w1",
+      name: "write_file",
+      kind: "edit",
+      rawInput: { Content: "hi", Path: "/w/hello.txt" },
+    });
+    expect(events).toMatchObject([
+      {
+        _tag: "item.completed",
+        kind: "file_change",
+        status: "failed",
+        detail: { content: reason },
+      },
+    ]);
+  });
+
+  it("shows the reason in the detail of a failed command_execution", () => {
+    const events = complete({
+      toolCallId: "r1",
+      name: "run_command",
+      kind: "execute",
+      rawInput: { CommandLine: "echo hi" },
+    });
+    expect(events).toMatchObject([
+      {
+        _tag: "item.completed",
+        kind: "command_execution",
+        status: "failed",
+        detail: { command: "echo hi", content: reason },
+      },
+    ]);
+  });
+});
+
 describe("tool items", () => {
   const openState = () => {
     const state = freshState();

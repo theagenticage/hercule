@@ -220,6 +220,27 @@ export const buildToolItem = (call: ToolCallFields): ToolItem => {
 };
 
 /**
+ * Returns the item kind and detail for a call that failed. It is
+ * `buildToolItem(call)` plus `detail.content`, the reason the call failed:
+ * Antigravity sends it as the `rawOutput` text, repeated in the first text
+ * entry of `content`, for example "tool call denied by pre-tool hook: <reason>".
+ * Without it the user would see a failed item and no cause. Claude Code puts a
+ * failed tool's result text in `detail.content` the same way. An output the
+ * call already has (a command's own output) is kept, and the reason is left out.
+ * A call with no text gets the same item as `buildToolItem`.
+ */
+export const buildFailedToolItem = (call: ToolCallFields): ToolItem => {
+  const item = buildToolItem(call);
+  const first = call.content?.find((entry) => entry.content?.type === "text")?.content;
+  const reason = typeof call.rawOutput === "string" ? call.rawOutput : first?.text;
+  if (reason == null || reason === "") return item;
+  return {
+    kind: item.kind,
+    detail: { content: truncateMessage(reason), ...readRecord(item.detail) },
+  };
+};
+
+/**
  * Returns the kind and detail of the approval Request for `call`. The Request's
  * kind follows the item's kind, so the transcript and the approval card never
  * disagree: a command asks `command_approval`, a file write

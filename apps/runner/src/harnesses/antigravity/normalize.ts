@@ -52,6 +52,7 @@ import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
 import {
   buildApprovalDescription,
+  buildFailedToolItem,
   buildToolItem,
   type ApprovalDescription,
   type ToolCallFields,
@@ -746,7 +747,8 @@ const normalizeToolCall = (
     call.status === "completed" ? "completed" : wasDeclined ? "declined" : "failed";
   state.tools.set(call.toolCallId, ENDED_TOOL);
   if (state.turn?.id === record.turnId) state.turn.running.delete(record.itemId);
-  const { kind, detail } = buildToolItem(record.call);
+  const { kind, detail } =
+    status === "failed" ? buildFailedToolItem(record.call) : buildToolItem(record.call);
   events.push(
     buildItemCompleted(
       state,
