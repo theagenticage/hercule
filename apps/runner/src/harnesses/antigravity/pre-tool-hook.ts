@@ -11,9 +11,13 @@
  * reads the rules from `HOOK_RULES_VARIABLE` and decides what each Access
  * Mode denies:
  * - Full access: nothing.
- * - Approval required: web search, the browser agent, and every change to a
- *   guarded place.
- * - Auto-accept edits: the browser agent, and every change to a guarded place.
+ * - Approval required: web search, the browser agent, every change to a
+ *   guarded place, and every command and file change of a subagent.
+ * - Auto-accept edits: the browser agent, every change to a guarded place, and
+ *   every command and file change of a subagent.
+ * A subagent's command or file change is denied in these two modes because
+ * `agy` never passes a subagent's approval request on, so the call would wait
+ * for an answer that cannot come. The reads of a subagent run.
  * A rules value that is missing or does not decode is Hercule's own setup
  * being wrong, so the hook denies every edit, every web search and every
  * browser call, and says so.
@@ -45,6 +49,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  readFileSync,
   readlinkSync,
   readSync,
   realpathSync,
@@ -77,6 +82,12 @@ export interface HookRules {
   readonly readOnlyFolders: ReadonlyArray<string>;
   /** Absolute paths of the files and folders Hercule owns in the Harness Home. */
   readonly harnessHomePaths: ReadonlyArray<string>;
+  /**
+   * Absolute path of the file that holds the session's own conversation id,
+   * which the adapter writes when `agy` returns the id. A call from any other
+   * conversation is a subagent's. The file does not exist before then.
+   */
+  readonly conversationIdFile: string;
 }
 
 /** Returns whether `value` is an object that is not an array, so its fields can be read. */
@@ -106,7 +117,8 @@ export const decodeHookRules = (text: string): HookRules | undefined => {
     !isRecord(json) ||
     !ACCESS_MODES.some((mode) => mode === json["accessMode"]) ||
     !isStringArray(json["readOnlyFolders"]) ||
-    !isStringArray(json["harnessHomePaths"])
+    !isStringArray(json["harnessHomePaths"]) ||
+    typeof json["conversationIdFile"] !== "string"
   ) {
     return undefined;
   }
@@ -116,8 +128,8 @@ export const decodeHookRules = (text: string): HookRules | undefined => {
 /**
  * What the hook does with each tool it runs for. The one table the hooks
  * file's matcher, the marks and the decision all read.
- * - `shell`: runs a command. Marked, and never denied: `agy` asks about it.
- * - `edit`: changes the file at `Path`. Marked, and denied in a guarded place.
+ * - `shell`: runs a command. Marked, and denied only for a subagent: `agy` asks about the session's own.
+ * - `edit`: changes the file at `Path`. Marked, and denied in a guarded place and for a subagent.
  * - `search`: searches the web. Not marked.
  * - `subagent`: starts a subagent. Not marked. Denied only for the browser
  *   agent (`TypeName` "browser"); every other subagent runs.
@@ -229,6 +241,8 @@ interface DecodedCall {
   readonly id: string;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
+  /** The conversation the call belongs to, or undefined when `agy` gave none. */
+  readonly conversationId: string | undefined;
 }
 
 /** Stands for an input of more than `MAX_INPUT_BYTES`. */
@@ -252,6 +266,16 @@ const CHECK_FAILED_REASON =
 /** Returns the reason for a browser call denied in `mode`, spelled as the app spells it. */
 const buildBrowserReason = (mode: "approval-required" | "auto-accept-edits"): string =>
   `The browser agent is off in ${mode === "approval-required" ? "Approval required" : "Auto-accept edits"}: it acts in your own Chrome, with your logins, and Hercule cannot ask you first. Switch the thread to Full access to use it.`;
+
+/**
+ * Returns the reason for a subagent's command or file change denied in
+ * `mode`, spelled as the app spells it.
+ */
+const buildSubagentReason = (
+  kind: "shell" | "edit",
+  mode: "approval-required" | "auto-accept-edits",
+): string =>
+  `Hercule refused this subagent's ${kind === "shell" ? "command" : "file change"}: in ${mode === "approval-required" ? "Approval required" : "Auto-accept edits"} a subagent cannot ask you for approval, because Antigravity does not pass its requests on. Do this step in the main agent, or switch the thread to Full access.`;
 
 const WEB_SEARCH_REASON =
   "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.";
@@ -288,7 +312,14 @@ const decodeCall = (input: RawInput): DecodedCall | undefined => {
   const { id, name, args } = json["toolCall"];
   if (typeof id !== "string" || typeof name !== "string") return undefined;
   if (args !== undefined && !isRecord(args)) return undefined;
-  return { cwd: json["cwd"], id, name, args: args ?? {} };
+  const conversationId = json["conversationId"];
+  return {
+    cwd: json["cwd"],
+    id,
+    name,
+    args: args ?? {},
+    conversationId: typeof conversationId === "string" ? conversationId : undefined,
+  };
 };
 
 /**
@@ -651,6 +682,24 @@ const isBrowserCall = (call: DecodedCall): boolean => {
 };
 
 /**
+ * Returns whether the call belongs to a subagent: its conversation id is not
+ * the session's own, which the adapter wrote to `rules.conversationIdFile`.
+ * Reads the file once. Returns false whenever that cannot be told (the call
+ * has no conversation id, or the file is missing, unreadable or empty), so a
+ * call of the session itself is never taken for a subagent's.
+ */
+const isSubagentCall = (call: DecodedCall, rules: HookRules): boolean => {
+  if (call.conversationId === undefined) return false;
+  let own: string;
+  try {
+    own = readFileSync(rules.conversationIdFile, "utf8").trim();
+  } catch {
+    return false;
+  }
+  return SAFE_ID.test(own) && own !== call.conversationId;
+};
+
+/**
  * Decides what the hook answers for an edit tool call in a guarded session: a
  * denial, or undefined to let it run. Denies when the call has no text `Path`
  * and when the guarded places cannot be listed. Throws on any other failure.
@@ -684,8 +733,9 @@ const decideEdit = (
  * decode (`rules` undefined) deny every edit tool call (guarded place or not),
  * every web search, every browser agent call and every call that could not be
  * decoded, with a reason that says the setup is wrong. A shell command runs,
- * because `agy` asks about it. In Approval required and Auto-accept edits the
- * browser agent is denied.
+ * because `agy` asks about it, unless a subagent runs it. In Approval required
+ * and Auto-accept edits the browser agent is denied, and so are a subagent's
+ * shell commands and edits.
  */
 const decide = (
   call: DecodedCall | undefined,
@@ -707,7 +757,11 @@ const decide = (
   if (kind === "search") {
     return rules.accessMode === "approval-required" ? deny(WEB_SEARCH_REASON) : undefined;
   }
-  return kind === "edit" ? decideEdit(call, rules, env) : undefined;
+  const guardDenial = kind === "edit" ? decideEdit(call, rules, env) : undefined;
+  if (guardDenial !== undefined) return guardDenial;
+  return (kind === "shell" || kind === "edit") && isSubagentCall(call, rules)
+    ? deny(buildSubagentReason(kind, rules.accessMode))
+    : undefined;
 };
 
 /**

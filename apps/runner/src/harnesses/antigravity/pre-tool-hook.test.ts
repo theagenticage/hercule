@@ -26,6 +26,7 @@ const rulesEnv = (
     accessMode,
     readOnlyFolders: [],
     harnessHomePaths: [],
+    conversationIdFile: "/nowhere/conversation-id",
     ...rules,
   }),
 });
@@ -300,6 +301,113 @@ describe("the policy inputs", () => {
     });
 
     expect(answerPreToolCall(input, GUARDED)).toBe("");
+  });
+});
+
+describe("a subagent's call", () => {
+  const OWN = "11111111-1111-1111-1111-111111111111";
+  const CHILD = "22222222-2222-2222-2222-222222222222";
+  const callIn = (conversationId: unknown, toolCall: Record<string, unknown>): string =>
+    JSON.stringify({ conversationId, cwd: "/work", toolCall });
+  const command = (conversationId: unknown) =>
+    callIn(conversationId, { args: { CommandLine: "ls" }, id: "call_1", name: "run_command" });
+  const edit = (conversationId: unknown) =>
+    callIn(conversationId, {
+      args: { Content: "x", Path: "/work/a.txt" },
+      id: "call_2",
+      name: "write_file",
+    });
+  const read = (conversationId: unknown) =>
+    callIn(conversationId, {
+      args: { AbsolutePath: "/work/a.txt" },
+      id: "call_3",
+      name: "view_file",
+    });
+
+  /** The environment of a session whose own conversation id is `ownId`, or whose file is missing for undefined. */
+  const sessionEnv = (mode: HookRules["accessMode"], ownId: string | undefined) => {
+    const file = join(createScratchHome("hook-conversation"), "conversation-id");
+    if (ownId !== undefined) writeFileSync(file, ownId);
+    return rulesEnv(mode, { conversationIdFile: file });
+  };
+
+  it.each([
+    ["Approval required", "approval-required", "command", command],
+    ["Approval required", "approval-required", "file change", edit],
+    ["Auto-accept edits", "auto-accept-edits", "command", command],
+    ["Auto-accept edits", "auto-accept-edits", "file change", edit],
+  ] as const)(
+    "is denied in %s for a %s, with a reason that says what to do",
+    (name, mode, what, build) => {
+      const reason = readReason(answerPreToolCall(build(CHILD), sessionEnv(mode, OWN)));
+
+      expect(reason).toBe(
+        `Hercule refused this subagent's ${what}: in ${name} a subagent cannot ask you for approval, because Antigravity does not pass its requests on. Do this step in the main agent, or switch the thread to Full access.`,
+      );
+    },
+  );
+
+  it.each(["approval-required", "auto-accept-edits"] as const)(
+    "lets the session's own command and file change run in %s",
+    (mode) => {
+      const env = sessionEnv(mode, OWN);
+
+      expect(answerPreToolCall(command(OWN), env)).toBe("");
+      expect(answerPreToolCall(edit(OWN), env)).toBe("");
+    },
+  );
+
+  it("lets a subagent's read run", () => {
+    expect(answerPreToolCall(read(CHILD), sessionEnv("approval-required", OWN))).toBe("");
+  });
+
+  it("denies nothing in Full access", () => {
+    const env = sessionEnv("full-access", OWN);
+
+    expect(answerPreToolCall(command(CHILD), env)).toBe("");
+    expect(answerPreToolCall(edit(CHILD), env)).toBe("");
+  });
+
+  it.each([
+    ["the file is missing", undefined],
+    ["the file is empty", ""],
+    ["the file holds more than an id", "not an id\n../x"],
+  ])("does not apply when %s", (_name, own) => {
+    const env = sessionEnv("approval-required", own);
+
+    expect(answerPreToolCall(command(CHILD), env)).toBe("");
+    expect(answerPreToolCall(edit(CHILD), env)).toBe("");
+  });
+
+  it("does not apply when the path cannot be read as a file", () => {
+    const folder = createScratchHome("hook-conversation");
+    const env = rulesEnv("approval-required", { conversationIdFile: folder });
+
+    expect(answerPreToolCall(command(CHILD), env)).toBe("");
+  });
+
+  it("does not apply to a call with no conversation id", () => {
+    const env = sessionEnv("approval-required", OWN);
+
+    expect(answerPreToolCall(command(undefined), env)).toBe("");
+    expect(answerPreToolCall(command(5), env)).toBe("");
+  });
+
+  it("gives a guarded path its own reason first", () => {
+    const { cwd } = setUpRepo();
+    const input = JSON.stringify({
+      conversationId: CHILD,
+      cwd,
+      toolCall: {
+        args: { Content: "x", Path: ".agents/hooks.json" },
+        id: "call_4",
+        name: "write_file",
+      },
+    });
+
+    expect(readReason(answerPreToolCall(input, sessionEnv("approval-required", OWN)))).toContain(
+      "decides what the agent may do without asking",
+    );
   });
 });
 

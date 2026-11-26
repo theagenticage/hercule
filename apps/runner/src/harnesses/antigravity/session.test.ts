@@ -6,7 +6,14 @@
  * recording's handshake only and writes the messages itself. Time runs on a
  * `TestClock`.
  */
-import { lstatSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -530,6 +537,22 @@ describe("the skills folder of a session", () => {
       ),
     );
   });
+
+  it.each(["new", "resume"] as const)(
+    "records the conversation id for the hook before the first prompt, on a %s session",
+    (kind) =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            const binding = yield* h.start(kind === "resume" ? RESUME : undefined);
+
+            const rules = decodeHookRules(h.fake.spawns[0]!.env["HERCULE_AGY_HOOK_RULES"] ?? "");
+            expect(h.received("session/prompt")).toHaveLength(0);
+            expect(readFileSync(rules!.conversationIdFile, "utf8")).toBe(binding.nativeSessionId);
+          }),
+        kind === "resume" ? { fake: withConversation } : {},
+      ),
+  );
 
   it("is passed resolved when it is reached through a link, as the pointer lines name resolved paths", () => {
     const skills = createSessionSkills({ library: ["review"] });
