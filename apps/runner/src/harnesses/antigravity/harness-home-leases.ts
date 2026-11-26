@@ -21,27 +21,11 @@
  * refuses to start while another daemon listens on the folder's
  * `daemon.sock` (`credentials/socket.ts`, `serveCredentialSocket`).
  *
- * A sign-in that succeeded does not free the home at once. Its lease becomes
- * a "verifying" state: a best-effort exclusion of session starts while the
- * first probe after the sign-in runs. It is not a check that the new login
- * belongs to the right person. The controller does that judging, from the
- * probe's result, after the probe has finished. While a home verifies:
- *
- * - a session start is refused;
- * - a probe is allowed, and is how the controller reads the new login;
- * - a new sign-in replaces the state.
- *
- * Verifying ends when the first probe that started after the sign-in has
- * finished, whatever its outcome, or after `VERIFYING_BOUND_MS`. A sign-in that
- * fails, is cancelled, times out or is stopped frees the home at once, and so
- * does a login whose process the runner killed, even if it exited with 0.
- *
- * A race remains, and not only for Antigravity: a session start that reached
- * the runner before the sign-in and waited in workspace preparation can read
- * the new login before the controller has judged it. Every harness that reads
- * its login when it starts has this. The fix binds a start to the credential
- * generation the controller accepted. It needs the start frame, the controller
- * and every adapter, so it is tracked in #1306.
+ * The leases only stop a sign-in from overwriting a login that a running
+ * process uses. They do not check that a new login belongs to the right
+ * person, and a session start that waited through a sign-in can still use the
+ * new login before the controller has judged it. Every harness that reads its
+ * login when it starts has that race; #1306 owns it.
  *
  * Homes are keyed by their resolved path, not by account id: the path is the
  * resource that is shared.
@@ -58,20 +42,7 @@ export interface LeaseRefused {
 export interface LeaseHeld {
   readonly acquired: true;
   readonly release: () => void;
-  /**
-   * Only on the exclusive lease. Ends it and starts the verifying state of the
-   * home (see the module comment). Does nothing after `release`.
-   */
-  readonly startVerifying?: () => void;
 }
-
-/**
- * The longest the verifying state lasts. The controller checks a new sign-in
- * with at most two probes, each cut off after 20 seconds
- * (`PROBE_DEADLINE` in the controller's `provider-accounts/probing.ts`); two
- * minutes covers both and the time the frames take.
- */
-export const VERIFYING_BOUND_MS = 120_000;
 
 export type LeaseResult = LeaseHeld | LeaseRefused;
 
@@ -85,19 +56,11 @@ export interface HarnessHomeLeases {
   readonly acquireExclusive: (home: string) => LeaseResult;
 }
 
-/** Returns the current time in milliseconds. Tests pass their own. */
-type Now = () => number;
-
 interface HomeState {
   exclusive: boolean;
   sessions: number;
   probes: number;
-  /** When the verifying state ends at the latest, or undefined when the home does not verify. */
-  verifyingUntil: number | undefined;
 }
-
-const VERIFYING =
-  "A sign-in of this account is being checked on this runner. Try again in a moment.";
 
 const SIGN_IN_RUNNING =
   "A sign-in of this account is in progress on this runner. Finish or cancel it, then try again.";
@@ -130,31 +93,22 @@ const buildSignInRefusal = (state: HomeState): string => {
 };
 
 /** Makes an empty registry. */
-export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases => {
+export const makeHarnessHomeLeases = (): HarnessHomeLeases => {
   const homes = new Map<string, HomeState>();
 
   const readOrCreateHomeState = (home: string): { key: string; state: HomeState } => {
     const key = resolve(home);
     let state = homes.get(key);
     if (state === undefined) {
-      state = { exclusive: false, sessions: 0, probes: 0, verifyingUntil: undefined };
+      state = { exclusive: false, sessions: 0, probes: 0 };
       homes.set(key, state);
-    }
-    // The bound is checked when the home is next asked for, so no timer runs.
-    if (state.verifyingUntil !== undefined && now() >= state.verifyingUntil) {
-      state.verifyingUntil = undefined;
     }
     return { key, state };
   };
 
   /** Forgets a home no lease holds any more, so the map does not grow with every account. */
   const forgetIdleHome = (key: string, state: HomeState): void => {
-    if (
-      !state.exclusive &&
-      state.sessions === 0 &&
-      state.probes === 0 &&
-      state.verifyingUntil === undefined
-    ) {
+    if (!state.exclusive && state.sessions === 0 && state.probes === 0) {
       homes.delete(key);
     }
   };
@@ -172,13 +126,10 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
   return {
     acquireRead: (home, kind) => {
       const { key, state } = readOrCreateHomeState(home);
-      if (state.exclusive || (kind === "session" && state.verifyingUntil !== undefined)) {
-        const message = state.exclusive ? SIGN_IN_RUNNING : VERIFYING;
+      if (state.exclusive) {
         forgetIdleHome(key, state);
-        return { acquired: false, message };
+        return { acquired: false, message: SIGN_IN_RUNNING };
       }
-      // The first probe that starts while the home verifies ends the state when it finishes.
-      const endsVerifying = kind === "probe" && state.verifyingUntil !== undefined;
       if (kind === "session") state.sessions += 1;
       else state.probes += 1;
       return {
@@ -186,7 +137,6 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
         release: makeRunOnce(() => {
           if (kind === "session") state.sessions -= 1;
           else state.probes -= 1;
-          if (endsVerifying) state.verifyingUntil = undefined;
           forgetIdleHome(key, state);
         }),
       };
@@ -200,18 +150,14 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
         forgetIdleHome(key, state);
         return { acquired: false, message };
       }
-      // A new sign-in replaces the verifying state of the one before it.
-      state.verifyingUntil = undefined;
       state.exclusive = true;
-      let ended = false;
-      const end = (verify: boolean): void => {
-        if (ended) return;
-        ended = true;
-        state.exclusive = false;
-        if (verify) state.verifyingUntil = now() + VERIFYING_BOUND_MS;
-        forgetIdleHome(key, state);
+      return {
+        acquired: true,
+        release: makeRunOnce(() => {
+          state.exclusive = false;
+          forgetIdleHome(key, state);
+        }),
       };
-      return { acquired: true, release: () => end(false), startVerifying: () => end(true) };
     },
   };
 };

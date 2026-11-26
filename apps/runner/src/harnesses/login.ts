@@ -26,8 +26,7 @@
  * lease is taken before the login command is built and released when the login
  * process has exited, whatever ended it. The runner stops a login with SIGTERM
  * and, after a grace period, SIGKILL, and a stop returns only once the process
- * has exited. A login that exits with 0 on its own leaves the home verifying
- * instead of free; a login the runner stopped does not. A new login for the
+ * has exited. A new login for the
  * same account stops the one it replaces before it takes the lease.
  */
 import { rmSync } from "node:fs";
@@ -57,8 +56,6 @@ export type LoginLeaseResult =
       readonly acquired: true;
       /** Gives the lease back. Safe to call more than once. */
       readonly release: () => void;
-      /** Ends the lease and leaves the home verifying (see `antigravity/harness-home-leases.ts`). */
-      readonly startVerifying?: () => void;
     };
 
 export interface LoginChild {
@@ -271,8 +268,6 @@ interface Held {
   readonly address: () => string | undefined;
   /** Resolves `printed` with `undefined`, for a child that was killed before it printed. */
   readonly abandon: () => void;
-  /** Records that the runner stopped this login, so a later exit of 0 does not count as a sign-in. */
-  readonly markStopped: () => void;
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
   /** What the child showed, ending with the latest. A token the command printed is removed. */
@@ -366,7 +361,6 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       Effect.gen(function* () {
         login.stopping ??= yield* Effect.forkDetach(
           Effect.gen(function* () {
-            login.markStopped();
             // A killed child's pipes do not always close, so the stdout reader
             // cannot be relied on to resolve `printed`.
             login.abandon();
@@ -434,18 +428,13 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           }),
         ),
       );
-      let stopped = false;
       // Remove the folder and release the lease only once the child is gone: a
       // child that is still running could write into either again.
-      const cleanUp = (exit: number | undefined): void => {
+      const cleanUp = (): void => {
         removeScratchFolder();
-        // A login that succeeded leaves the home verifying until the
-        // controller has probed the new login (see `antigravity/harness-home-leases.ts`).
-        // A login the runner stopped is no sign-in, whatever its exit code.
-        if (exit === 0 && !stopped && lease?.startVerifying !== undefined) lease.startVerifying();
-        else lease?.release();
+        lease?.release();
       };
-      const cleanedUp = child.exited.then(cleanUp, () => cleanUp(undefined));
+      const cleanedUp = child.exited.then(cleanUp, cleanUp);
       const pattern = command.userCode;
       const refusal = command.refusal;
       const screen =
@@ -523,9 +512,6 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         address: () => url,
         abandon: () => {
           settle(undefined);
-        },
-        markStopped: () => {
-          stopped = true;
         },
         printed,
         nextComplaint: () =>

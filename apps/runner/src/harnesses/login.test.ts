@@ -1082,7 +1082,6 @@ describe("the lease of a login on the Harness Home", () => {
       acquireLoginLease: () => ({
         acquired: true,
         release: () => calls.push("release"),
-        startVerifying: () => calls.push("verify"),
       }),
     };
     return { adapter, calls };
@@ -1186,13 +1185,7 @@ describe("the lease of a login on the Harness Home", () => {
     expect(calls).toEqual(["release"]);
   });
 
-  it("does not start the verifying state for a stopped login that exits with 0", async () => {
-    const result = await startThenStop({ exitCode: 0 }, Duration.zero);
-
-    expect(result.calls).toEqual(["release"]);
-  });
-
-  it("starts the verifying state when the login exits with 0 on its own", async () => {
+  it("releases the lease when the login exits with 0 on its own", async () => {
     const { spawn, children } = createMachine();
     const { adapter, calls } = buildLeasedAdapter();
     const driver = makeLogins(spawn);
@@ -1210,6 +1203,6 @@ describe("the lease of a login on the Harness Home", () => {
       }),
     );
 
-    expect(calls).toEqual(["verify"]);
+    expect(calls).toEqual(["release"]);
   });
 });

@@ -1,6 +1,6 @@
 /** Tests the registry that keeps a sign-in and running processes apart on one Harness Home. */
 import { describe, expect, it } from "vitest";
-import { makeHarnessHomeLeases, VERIFYING_BOUND_MS, type LeaseResult } from "./harness-home-leases";
+import { makeHarnessHomeLeases, type LeaseResult } from "./harness-home-leases";
 
 const HOME = "/runner/providers/homes/account-one/antigravity";
 const OTHER_HOME = "/runner/providers/homes/account-two/antigravity";
@@ -115,54 +115,5 @@ describe("two homes", () => {
 
     expectHeld(leases.acquireExclusive(OTHER_HOME));
     expectRefused(leases.acquireExclusive(`${HOME}/../antigravity`));
-  });
-});
-
-const verifyAfterSignIn = (leases: ReturnType<typeof makeHarnessHomeLeases>): void => {
-  const lease = leases.acquireExclusive(HOME);
-  if (!lease.acquired) throw new Error("refused");
-  lease.startVerifying?.();
-};
-
-describe("a home whose sign-in succeeded", () => {
-  it("refuses a session but allows a probe, and the first probe's end frees the home", () => {
-    const leases = makeHarnessHomeLeases();
-    verifyAfterSignIn(leases);
-
-    expect(expectRefused(leases.acquireRead(HOME, "session"))).toContain("being checked");
-    const endProbe = expectHeld(leases.acquireRead(HOME, "probe"));
-    expectRefused(leases.acquireRead(HOME, "session"));
-    endProbe();
-
-    expectHeld(leases.acquireRead(HOME, "session"));
-  });
-
-  it("frees itself after the bound, and not before", () => {
-    let now = 1_000;
-    const leases = makeHarnessHomeLeases(() => now);
-    verifyAfterSignIn(leases);
-
-    now += VERIFYING_BOUND_MS - 1;
-    expectRefused(leases.acquireRead(HOME, "session"));
-    now += 1;
-
-    expectHeld(leases.acquireRead(HOME, "session"));
-  });
-
-  it("is replaced by a new sign-in", () => {
-    const leases = makeHarnessHomeLeases();
-    verifyAfterSignIn(leases);
-
-    const second = expectHeld(leases.acquireExclusive(HOME));
-    second();
-
-    expectHeld(leases.acquireRead(HOME, "session"));
-  });
-
-  it("is not entered by a sign-in that is released instead of verified", () => {
-    const leases = makeHarnessHomeLeases();
-    expectHeld(leases.acquireExclusive(HOME))();
-
-    expectHeld(leases.acquireRead(HOME, "session"));
   });
 });

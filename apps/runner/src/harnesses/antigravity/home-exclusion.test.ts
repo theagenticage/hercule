@@ -179,7 +179,7 @@ describe("a session start and a probe during a sign-in", () => {
 });
 
 describe("a sign-in that succeeded", () => {
-  it("refuses a session start until the first probe after it has finished", async () => {
+  it("frees the home at once, for a session start and a probe", async () => {
     const home = createSignedInHome();
     const adapter = makeAntigravityAdapter(buildFakeAgy(home));
     const logins = makeLogins(buildLoginMachine(0).spawn);
@@ -187,13 +187,11 @@ describe("a sign-in that succeeded", () => {
     await run(logins.start(REQUEST, ACCOUNT, adapter, ctx, "sign-in"));
 
     const answer = await run(logins.submit(ACCOUNT, "right"));
-    const refused = await run(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
-    const probe = await run(adapter.probe(ctx, { readUsage: false }));
     await run(adapter.startSession(SESSION, SPEC, ctx));
     await run(adapter.stopSession(SESSION, "stopped"));
+    const probe = await run(adapter.probe(ctx, { readUsage: false }));
 
     expect(answer).toEqual({ _tag: "loginResult", ok: true });
-    expect(refused.message).toContain("being checked");
     expect(probe.auth.status).toBe("ok");
   });
 });
