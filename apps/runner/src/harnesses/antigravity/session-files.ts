@@ -25,6 +25,7 @@
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describeFileFailure, isMissingPath, UUID_PATTERN } from "../session-files";
@@ -208,7 +209,7 @@ interface Conversation {
   isCounted: boolean;
   /** Steps read but not yet returned, because the child is not announced. */
   held: Array<AgyStep>;
-  /** When the child first had a step that waited for its launch message, in milliseconds since the epoch. */
+  /** When the child first had a step that waited for its launch message, on Effect's clock, in milliseconds. */
   waitingSince: number | undefined;
   /** How many calls to the launch tool the steps of this conversation hold. */
   launchCallCount: number;
@@ -508,11 +509,13 @@ export const openSessionFiles = (input: {
    * parent is not announced, and while its launch message is missing. Fails
    * when the parent can never be announced, or when the launch message is
    * still missing `LAUNCH_MESSAGE_WAIT_MS` after the child's first step.
+   * `now` is the time of this read on Effect's clock, in milliseconds.
    */
   const releaseSteps = async (
     base: string,
     conversation: Conversation,
     out: Array<SessionFileObservation>,
+    now: number,
   ): Promise<void> => {
     const parentId = conversation.parentId;
     if (parentId !== undefined && !conversation.isAnnounced) {
@@ -528,8 +531,8 @@ export const openSessionFiles = (input: {
       const launch = conversation.launch;
       if (launch === undefined) {
         if (!hasSteps) return;
-        conversation.waitingSince ??= Date.now();
-        if (Date.now() - conversation.waitingSince >= LAUNCH_MESSAGE_WAIT_MS) {
+        conversation.waitingSince ??= now;
+        if (now - conversation.waitingSince >= LAUNCH_MESSAGE_WAIT_MS) {
           throw new Error("agy wrote no launch message for this subagent");
         }
         return;
@@ -605,7 +608,7 @@ export const openSessionFiles = (input: {
     }
   };
 
-  const readAll = async (): Promise<ReadonlyArray<SessionFileObservation>> => {
+  const readAll = async (now: number): Promise<ReadonlyArray<SessionFileObservation>> => {
     const out: Array<SessionFileObservation> = [];
     let base: string;
     try {
@@ -649,7 +652,7 @@ export const openSessionFiles = (input: {
           conversation.isCounted = true;
           countedChildren += 1;
         }
-        await releaseSteps(base, conversation, out);
+        await releaseSteps(base, conversation, out, now);
         if (failure === undefined) await discoverSubagents(base, conversation);
       } catch (error) {
         failure = failure ?? error;
@@ -675,6 +678,11 @@ export const openSessionFiles = (input: {
         // The Harness Home does not exist yet, so nothing exists to skip.
       }
     }
-    return { read: Effect.promise(readAll) };
+    return {
+      read: Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        return yield* Effect.promise(() => readAll(now));
+      }),
+    };
   });
 };

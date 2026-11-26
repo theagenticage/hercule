@@ -6,8 +6,10 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, cpSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import { TestClock } from "effect/testing";
 import { cleanupHomes, createScratchHome } from "../testing";
 import { APP_DATA_DIR } from "./harness-home";
 import { openSessionFiles, readStepErrorText } from "./session-files";
@@ -15,7 +17,6 @@ import type { AgyStep } from "./session-files";
 import type { SessionFileObservation, SessionFiles } from "./session-files";
 
 afterEach(() => {
-  vi.useRealTimers();
   cleanupHomes();
 });
 
@@ -49,6 +50,26 @@ const launchLine = (index: number, count = 1): string =>
   line(index, {
     tool_calls: Array.from({ length: count }, () => ({ name: "invoke_subagent", args: {} })),
   });
+
+/**
+ * Reads four times on a `TestClock`, moving it by `advances[i]` milliseconds
+ * before read `i`. Returns the second read as `early`, the third as `late`
+ * and the fourth as `after`; the first read finds the child's first step.
+ */
+const readOnTestClock = (files: SessionFiles, advances: ReadonlyArray<number>) =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const results: Array<ReadonlyArray<SessionFileObservation>> = [];
+        for (const advance of advances) {
+          yield* TestClock.adjust(Duration.millis(advance));
+          results.push(yield* files.read);
+        }
+        return { early: results[1]!, late: results[2]!, after: results[3]! };
+      }),
+      TestClock.layer(),
+    ),
+  );
 
 const open = (home: string, conversationId: string, skipExisting = false): Promise<SessionFiles> =>
   Effect.runPromise(openSessionFiles({ home, conversationId, skipExisting }));
@@ -438,7 +459,6 @@ describe("subagents", () => {
   });
 
   it("reports a child that has had steps for 2 seconds without a launch message once, and never links it", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
     const home = createScratchHome("session-files");
     const root = randomUUID();
     const child = randomUUID();
@@ -452,25 +472,21 @@ describe("subagents", () => {
       JSON.stringify({ sender: `${root}/task-2`, content: "finished" }),
     );
     const files = await open(home, root);
-    await read(files);
 
-    vi.setSystemTime(Date.now() + 1900);
-    expect(await read(files)).toEqual([]);
+    const { early, late, after } = await readOnTestClock(files, [0, 1900, 200, 0]);
 
-    vi.setSystemTime(Date.now() + 200);
-    const observations = await read(files);
-    expect(observations).toEqual([
+    expect(early).toEqual([]);
+    expect(late).toEqual([
       {
         kind: "unreadable",
         conversationId: child,
         reason: "agy wrote no launch message for this subagent",
       },
     ]);
-    expect(await read(files)).toEqual([]);
+    expect(after).toEqual([]);
   });
 
   it("does not link a child from a launch message sent by another conversation or for another tool", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
     const home = createScratchHome("session-files");
     const root = randomUUID();
     const child = randomUUID();
@@ -491,11 +507,10 @@ describe("subagents", () => {
       toolMessage(root, "swarm"),
     );
     const files = await open(home, root);
-    await read(files);
 
-    vi.setSystemTime(Date.now() + 2100);
+    const { late } = await readOnTestClock(files, [0, 0, 2100, 0]);
 
-    expect(describeAll(await read(files))).toEqual([`unreadable ${child.slice(0, 4)}`]);
+    expect(describeAll(late)).toEqual([`unreadable ${child.slice(0, 4)}`]);
   });
 
   it("announces a grandchild only after its parent, and holds its steps until then", async () => {
