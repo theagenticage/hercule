@@ -6,9 +6,9 @@
  *
  * The session owns what must never overlap:
  *
- * - at most one input is prepared or running at a time, because `agy` takes one
- *   prompt at a time and cannot steer (the controller queues what arrives
- *   meanwhile);
+ * - at most one input is prepared at a time, and an input that arrives while a
+ *   Turn runs steers it through the Turn, which is the one writer of prompts
+ *   (spec 06 section 5);
  * - the exit happens exactly once, with the first reason that asks for it.
  *
  * Time is measured on Effect's clock, so tests run the deadlines on a `TestClock`.
@@ -123,22 +123,26 @@ const ACCESS_MODE_NAMES: Readonly<Record<AccessMode, string>> = {
 export interface AgySession {
   readonly binding: SessionBinding;
   /**
-   * Runs the input as a new Turn and returns once the handoff of its prompt is proven, not when `agy`
-   * replied. Fails with:
+   * Runs the input as a new Turn, or steers the running one, and returns once
+   * `agy` is known to have the prompt, not when it replied. The result says
+   * which happened (`opened` or `steered`). Fails with:
    *
    * - `SessionNotRunning` when the session is stopping or has exited;
-   * - `SteerRefused` while a Turn runs or another input is being prepared,
-   *   because `agy` cannot steer: the controller queues the input. Nothing
-   *   changes before this failure;
+   * - `SteerRefused` when another input is being prepared, or when the input
+   *   arrives while a Turn runs and `agy` certainly did not take it into that
+   *   Turn: the Turn is starting or ending, a Request is open (the user answers
+   *   it first), the input asks for another model or level (that waits for the
+   *   end of the turn), or `agy` refused it. The controller keeps the input
+   *   queued. Nothing changes before this failure;
    * - `ModelChangeRefused` when `agy` refuses the model or level of the input,
    *   and `HarnessProtocolError` when it is not known whether it took them;
    * - `InputNotDelivered` when an interrupt or a stop came during the
    *   preparation, or when writing the prompt to `agy` failed. No Turn is
    *   opened then;
-   * - `HarnessProtocolError` when it is not known whether `agy` got the prompt:
-   *   the budget ran out while it was written, the connection ended meanwhile,
-   *   or the caller was interrupted meanwhile. Only one prompt may be on the
-   *   wire, so the session then ends its process (`runtime.error`, exit
+   * - `HarnessProtocolError` when it is not known whether `agy` got the prompt
+   *   (a first prompt or a steer): the budget ran out while it was written or
+   *   confirmed, the connection ended meanwhile, or the caller was interrupted
+   *   meanwhile. The session then ends its process (`runtime.error`, exit
    *   `crash`) and the next input resumes it;
    * - `AdapterFailed` when an image cannot be read or the preparation takes
    *   longer than its budget.
@@ -834,18 +838,61 @@ export const startAgySession = (
         })),
       );
 
+    /**
+     * Steers the running Turn with `input` and returns `steered` when `agy`
+     * took it. Fails with `SteerRefused` when it certainly did not (the
+     * controller keeps the input queued), with `HarnessProtocolError` when it is
+     * not known and the process was ended, and with the failures of preparing
+     * the input. The model and level of the input are not applied: `agy` keeps
+     * the turn's model until the turn ends, so an input that asks for another
+     * one waits.
+     */
+    const steerTurn = (
+      turn: Turn,
+      input: AdapterTurnInput,
+    ): Effect.Effect<SendResult, AdapterError> =>
+      Effect.gen(function* () {
+        if (input.modelSelection !== undefined && configChange.isChange(input.modelSelection)) {
+          return yield* Effect.fail(
+            new SteerRefused({
+              message: `${ANTIGRAVITY_NAME} cannot change its model or thinking level in the middle of a turn. The input stays queued and is sent when the turn ends.`,
+            }),
+          );
+        }
+        // Reserved before the first wait, so a second input is refused while this one is prepared.
+        const inputGeneration = generation;
+        preparing = true;
+        const prepared = yield* prepareInput(input, inputGeneration).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              preparing = false;
+            }),
+          ),
+        );
+        const outcome = yield* turn.steer({ input, ...prepared });
+        if (outcome.kind === "accepted")
+          return { turnId: turn.id, delivery: "steered" } satisfies SendResult;
+        if (outcome.kind === "unknown") {
+          endForUnknownDelivery();
+          return yield* Effect.fail(buildHarnessProtocolError(outcome.message));
+        }
+        return yield* Effect.fail(new SteerRefused({ message: outcome.message }));
+      });
+
     const send: AgySession["send"] = (input) =>
       Effect.gen(function* () {
         if (stopping) {
           return yield* Effect.fail(isExited() ? buildSessionNotRunning() : buildSessionStopping());
         }
-        if (readRunningTurn() !== undefined || preparing) {
+        if (preparing) {
           return yield* Effect.fail(
             new SteerRefused({
-              message: `${ANTIGRAVITY_NAME} cannot take input in the middle of a turn. The input stays queued and runs when this turn ends.`,
+              message: `${ANTIGRAVITY_NAME} is still preparing another input. This input stays queued and is sent when the turn ends.`,
             }),
           );
         }
+        const runningTurn = readRunningTurn();
+        if (runningTurn !== undefined) return yield* steerTurn(runningTurn, input);
         // Admission is reserved here, before the first wait, so a second input is refused while this one is prepared.
         // The output of `agy` is held from the same moment: until the handoff of the prompt is proven, new output may belong to this input, so no synthetic turn may open for it.
         const inputGeneration = generation;

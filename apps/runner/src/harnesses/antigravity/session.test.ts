@@ -1517,22 +1517,184 @@ describe("a turn", () => {
       { fake: { recording: "bad-model" } },
     ));
 
-  it("refuses an input while a turn runs with SteerRefused, and prompts nothing for it", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* h.adapter.sendInput(SESSION, buildInput());
-          yield* h.untilReceived("session/prompt");
+  describe("an input that arrives while a turn runs", () => {
+    /** The reply of `agy` to a prompt, as the `steer-visible` recording shows it. */
+    const buildPromptReply = (id: unknown, inputTokens: number): JsonRpcMessage => ({
+      jsonrpc: "2.0",
+      id: id as number,
+      result: {
+        stopReason: "end_turn",
+        usage: {
+          inputTokens,
+          outputTokens: 0,
+          cachedReadTokens: 0,
+          cachedWriteTokens: 0,
+          totalTokens: inputTokens,
+        },
+      },
+    });
 
-          const refused = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("More.")));
+    /** The second prompt reaches the fake as a prompt the recording does not hold, so a script decides what happens to it. */
+    const steerFake = (second: HarnessScript): FakeAgyOptions => ({
+      recording: "cancel",
+      scripts: { "session/prompt": second },
+    });
 
-          expect(refused._tag).toBe("SteerRefused");
-          expect(h.received("session/prompt")).toHaveLength(1);
-          expect(h.tags("turn.started")).toHaveLength(1);
-        }),
-      { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
-    ));
+    /** Lets the session read what `agy` sent, then runs out the wait for a refusal that follows the old reply. */
+    const waitOutRefusalGrace = (h: Harness) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust(Duration.millis(500));
+        yield* Effect.promise(settle);
+        expect(h.tags("turn.completed")).toHaveLength(0);
+      });
+
+    it("steers it into the turn: agy answers the first prompt, the input is shown as steered, and the second prompt's reply ends the turn", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+            const firstId = h.received("session/prompt")[0]?.id;
+
+            const sending = yield* Effect.forkChild(
+              h.adapter.sendInput(SESSION, buildInput("Also this.")),
+            );
+            yield* h.untilReceived("session/prompt", 2);
+            const secondId = h.received("session/prompt")[1]?.id;
+            h.harness().sendLine(JSON.stringify(buildPromptReply(firstId, 5)));
+            yield* h.until(
+              "the first reply was counted",
+              () => h.tags("session.usage.updated").length > 0,
+            );
+            yield* waitOutRefusalGrace(h);
+
+            const result = yield* Fiber.join(sending);
+            expect(result).toMatchObject({ delivery: "steered" });
+            expect(result.turnId).toBe(h.tags("turn.started")[0]?.turnId);
+            const messages = h
+              .tags("item.completed")
+              .filter((event) => event.kind === "user_message");
+            expect(messages.map((event) => event.detail)).toMatchObject([
+              { text: "Go." },
+              { text: "Also this.", steered: true },
+            ]);
+
+            h.harness().sendLine(JSON.stringify(buildPromptReply(secondId, 7)));
+            yield* h.until("the turn completed", () => h.tags("turn.completed").length === 1);
+            expect(h.tags("turn.completed")).toMatchObject([
+              { state: "completed", usage: { inputTokens: 12 } },
+            ]);
+            expect(h.tags("turn.started")).toHaveLength(1);
+          }),
+        {
+          fake: steerFake(() => []),
+          spec: { accessMode: "full-access" },
+        },
+      ));
+
+    it("refuses it with SteerRefused when agy refuses the prompt, and the turn goes on without it", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+            const firstId = h.received("session/prompt")[0]?.id;
+
+            const refused = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("More.")));
+
+            expect(refused._tag).toBe("SteerRefused");
+            expect(refused.message).toContain("Can't add this prompt");
+            expect(
+              h.tags("item.completed").filter((event) => event.kind === "user_message"),
+            ).toHaveLength(1);
+
+            h.harness().sendLine(JSON.stringify(buildPromptReply(firstId, 5)));
+            yield* h.until("the turn completed", () => h.tags("turn.completed").length === 1);
+            expect(h.tags("turn.completed")).toMatchObject([{ state: "completed" }]);
+          }),
+        {
+          fake: steerFake(
+            refuse(-32603, "Can't add this prompt to session abc: a permission is open."),
+          ),
+          spec: { accessMode: "full-access" },
+        },
+      ));
+
+    it("refuses it before any write when it asks for another model, because the model changes only when a turn starts", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+
+            const refused = yield* Effect.flip(
+              h.adapter.sendInput(
+                SESSION,
+                buildInput("More.", {
+                  modelSelection: { model: "gemini-4-carbon", options: { effort: "low" } },
+                }),
+              ),
+            );
+
+            expect(refused._tag).toBe("SteerRefused");
+            expect(refused.message).toContain("model");
+            expect(h.received("session/prompt")).toHaveLength(1);
+            expect(h.received("session/set_config_option")).toHaveLength(0);
+          }),
+        { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
+      ));
+
+    it("takes the model of the session in a steer without changing anything", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+
+            const sending = yield* Effect.forkChild(
+              h.adapter.sendInput(
+                SESSION,
+                buildInput("More.", { modelSelection: SPEC.modelSelection }),
+              ),
+            );
+            yield* h.untilReceived("session/prompt", 2);
+            h.harness().sendLine(
+              JSON.stringify(buildPromptReply(h.received("session/prompt")[1]?.id, 1)),
+            );
+
+            expect(yield* Fiber.join(sending)).toMatchObject({ delivery: "steered" });
+            expect(h.received("session/set_config_option")).toHaveLength(0);
+          }),
+        { fake: steerFake(() => []), spec: { accessMode: "full-access" } },
+      ));
+
+    it("fails with HarnessProtocolError and ends the process when agy does not confirm within the budget", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+
+            const sending = yield* Effect.forkChild(
+              Effect.flip(h.adapter.sendInput(SESSION, buildInput("More."))),
+            );
+            yield* h.untilReceived("session/prompt", 2);
+            yield* TestClock.adjust(Duration.seconds(8));
+
+            expect((yield* Fiber.join(sending))._tag).toBe("HarnessProtocolError");
+            yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+            expect(h.tags("runtime.error")).toMatchObject([{ class: "delivery_unknown" }]);
+            expect(h.tags("session.exited")).toMatchObject([{ reason: "crash" }]);
+          }),
+        { fake: steerFake(noAnswer), spec: { accessMode: "full-access" } },
+      ));
+  });
 
   it("is interrupted with session/cancel and ends interrupted, and the session goes on", () =>
     run(
@@ -2066,6 +2228,10 @@ describe("a Request and the end of its turn", () => {
               const refused = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("More.")));
               expect(refused._tag).toBe("SteerRefused");
               expect(h.tags("turn.started")).toHaveLength(1);
+              expect(
+                h.received("session/prompt"),
+                "nothing was written for the refused input",
+              ).toHaveLength(1);
 
               gate.resolve();
               yield* Fiber.join(answering);

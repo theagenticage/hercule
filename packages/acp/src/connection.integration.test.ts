@@ -428,9 +428,14 @@ const replayRecording = (name: RecordingName) =>
  * - `stop-bg` ends with the recorder stopping the harness process while a
  *   prompt was open, so the prompt's error reply comes from the recorder.
  * - `steer-during-request` sends a second prompt while a permission request is
- *   open, and `agy` refuses it before the request is answered. The replay
- *   answers every request the moment it arrives, so the refusal never meets an
- *   open request.
+ *   open, and `agy` refuses it before the request is answered. The fake harness
+ *   plays the recording in order and waits at each client message, and in this
+ *   recording the second prompt comes before the answer to the request. The
+ *   replay answers every request the moment it arrives, so its answer reaches
+ *   the fake while the fake still waits for the second prompt, and is dropped.
+ *   The fake then waits for an answer that never comes again, and the replay
+ *   stalls. The session recording test plays it with the second prompt left
+ *   out, and `turn.test.ts` covers the refusal with the recorded error text.
  * - `stop-cancel` sends `session/cancel` twice, once as a request and once as a
  *   notification, to measure what the harness answers; no single script
  *   reproduces that.

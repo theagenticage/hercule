@@ -1,12 +1,16 @@
 /**
  * Runs one Turn of an Antigravity session. ACP has no turn, so a Turn is built
  * here from one `session/prompt` and its reply, plus one more prompt for each
- * round of denied calls (spec 06 section 6.5). The Turn owns:
+ * round of denied calls (spec 06 section 6.5) and one for each input that
+ * steers it (spec 06 section 5). The Turn owns:
  *
  * - the handoff of its first prompt: the Turn writes the prompt itself, stays
  *   unpublished until `agy` is known to have it, and only then emits
  *   `turn.started`, the `user_message` and the output `agy` sent meanwhile;
- * - the prompt in flight, so two prompts are never in flight at once;
+ * - every prompt written to `agy`: the first, the steers and the follow-ups
+ *   for denied calls. The reply of the newest prompt ends the Turn. When `agy`
+ *   takes a steer it answers the prompt before it at once and goes on with the
+ *   work, so a reply of an older prompt only adds its usage;
  * - the Requests `agy` opens while the prompt runs, from the moment they open
  *   until their reply is written, and the Turn does not end before every one
  *   of them was resolved;
@@ -20,6 +24,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
 import type {
@@ -74,6 +79,18 @@ const INTERRUPT_DEADLINE = Duration.seconds(5);
 /** How long a reply may take to be written to `agy` before it counts as not written. */
 const REPLY_WRITE_DEADLINE = Duration.seconds(5);
 
+/**
+ * How long a steer waits for `agy` to refuse it after the prompt it supersedes
+ * has replied. `agy` refuses a steer within about 1 ms, so a refusal that
+ * follows the reply of the old prompt comes well within this time. Without the
+ * wait, a turn that ended by itself just as the steer was written would let the
+ * Turn acknowledge a steer that `agy` then refuses.
+ */
+const STEER_REFUSAL_GRACE = Duration.millis(500);
+
+/** What happens to an input a Turn refused, said at the end of every refusal. */
+const STAYS_QUEUED = "The input stays queued and is sent when the turn ends.";
+
 /** A tool name that may appear in the follow-up prompt. Anything else could carry text meant for the model. */
 const SAFE_TOOL_NAME = /^[A-Za-z0-9_]{1,64}$/;
 
@@ -89,6 +106,18 @@ const STOP_REASON_FAILURES: Readonly<Record<string, string | undefined>> = {
   max_turn_requests: "Antigravity reached its limit of model requests for one turn.",
   refusal: "The model refused to go on, so Antigravity ended the turn.",
 };
+
+/** An input made ready for `agy`: what the first prompt of a Turn and a steer both take. */
+export interface PreparedInput {
+  readonly input: AdapterTurnInput;
+  readonly prompt: ReadonlyArray<PromptContent>;
+  /** The Skill References the prompt got a pointer line for, recorded on the `user_message`. */
+  readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
+  /** The names of the skills the prompt got no line for, told to the user right after the `user_message`. */
+  readonly skippedSkills: ReadonlyArray<string>;
+  /** How long writing the prompt and waiting for `agy` to take it may last. */
+  readonly handoffBudget: Duration.Duration;
+}
 
 /** What a Turn needs from its session. */
 export interface TurnContext {
@@ -124,6 +153,22 @@ export type Handoff =
   | { readonly kind: "not-sent"; readonly message: string }
   | { readonly kind: "unknown"; readonly message: string };
 
+/**
+ * How a steer ended.
+ *
+ * - `accepted`: `agy` took the input into this Turn, which now shows it as a
+ *   steered `user_message`.
+ * - `refused`: `agy` certainly did not take the input, or the Turn could not
+ *   ask it. The controller keeps the input queued.
+ * - `unknown`: `agy` may have the input. The session must end the process.
+ *
+ * `message` says what went wrong, for the user.
+ */
+export type SteerOutcome =
+  | { readonly kind: "accepted" }
+  | { readonly kind: "refused"; readonly message: string }
+  | { readonly kind: "unknown"; readonly message: string };
+
 export interface Turn {
   readonly id: string;
   /**
@@ -133,6 +178,28 @@ export interface Turn {
    * meanwhile is applied when the handoff is proven.
    */
   readonly handoff: Deferred.Deferred<Handoff>;
+  /**
+   * Hands `prepared` to `agy` as a prompt that steers the running Turn, and
+   * returns how that ended once it is known whether `agy` took it, which
+   * takes at most `prepared.handoffBudget`. Never fails.
+   *
+   * Refuses at once, writing nothing, when the Turn is not running (it is in
+   * its handoff, between two prompts, or ending), was interrupted, has a
+   * Request open (the user answers it first), or is already taking another
+   * steer. Otherwise the steer is reserved before the write, so a second one
+   * is refused while this one is open.
+   *
+   * `agy` has taken the steer when its own prompt replies, or when the prompt
+   * it supersedes replies and no refusal follows within a short time. It
+   * refuses at once with a JSON-RPC error while a Request is open. The steer
+   * is `unknown` when the budget runs out or the connection closes. A steer
+   * that `agy` takes after the old prompt ended by itself starts a fresh run
+   * in `agy`, and the Turn still shows it as one Turn that the newest prompt's
+   * reply ends: the user's words reach the agent either way.
+   *
+   * The `user_message` of the input is emitted only on acceptance.
+   */
+  readonly steer: (prepared: PreparedInput) => Effect.Effect<SteerOutcome>;
   /**
    * Opens an approval Request and waits for its decision. Returns the ACP
    * outcome to send to `agy`: the user's decision, or `cancelled` when the
@@ -223,6 +290,34 @@ type PromptResult =
   | { readonly kind: "replied"; readonly reply: PromptReply }
   | { readonly kind: "failed"; readonly error: AcpError };
 
+/** One `session/prompt` written to `agy`. Prompts are told apart by identity. */
+interface Prompt {
+  /** The order the prompts were made in, for reading a failing test. */
+  readonly index: number;
+}
+
+/** What the loop of a Turn reacts to. It reads them one at a time, in the order they happened. */
+type TurnEvent =
+  | { readonly kind: "prompt-settled"; readonly prompt: Prompt; readonly result: PromptResult }
+  | { readonly kind: "steer-written"; readonly own: Prompt }
+  | { readonly kind: "steer-not-written"; readonly own: Prompt; readonly error: AcpError }
+  | { readonly kind: "steer-given-up"; readonly own: Prompt }
+  | { readonly kind: "steer-grace-over"; readonly own: Prompt };
+
+/** The steer a Turn is taking: reserved before the write, until it is decided. */
+interface Steering {
+  /** The steer's own prompt. */
+  readonly own: Prompt;
+  /** The newest prompt when the steer was reserved: the one `agy` answers when it takes the steer. */
+  readonly superseded: Prompt;
+  readonly prepared: PreparedInput;
+  readonly decision: Deferred.Deferred<SteerOutcome>;
+  /** Whether the write of the steer's prompt has finished. */
+  isWritten: boolean;
+  /** The reply of the superseded prompt, when it came before the steer was decided. */
+  supersededResult: PromptResult | undefined;
+}
+
 /**
  * Returns the follow-up prompt that tells the model its calls were denied. It
  * names the calls by their tool names only, because the text reaches the model
@@ -293,8 +388,8 @@ export const cancelOrphanQuestion = (
  * The session has held the output of `agy` since it admitted the input
  * (`holdTurn`), and the Turn releases or replays it. A fiber of the current scope
  * writes the first prompt (`prompt`) to `agy`, which must take at most
- * `handoffBudget`, and then runs the Turn. Follow-up prompts are sent by the
- * Turn itself. The Turn ends by emitting `turn.completed`, and closing the
+ * `handoffBudget`, and then runs the Turn. Follow-up prompts and steers are
+ * written by the Turn itself. The Turn ends by emitting `turn.completed`, and closing the
  * scope interrupts it.
  *
  * The Turn is published only when the handoff is proven: it emits
@@ -306,15 +401,7 @@ export const cancelOrphanQuestion = (
  */
 export const startTurn = (
   context: TurnContext,
-  input: {
-    readonly input: AdapterTurnInput;
-    readonly prompt: ReadonlyArray<PromptContent>;
-    /** The Skill References the prompt got a pointer line for, recorded on the `user_message`. */
-    readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
-    /** The names of the skills the prompt got no line for, told to the user right after the `user_message`. */
-    readonly skippedSkills: ReadonlyArray<string>;
-    readonly handoffBudget: Duration.Duration;
-  },
+  input: PreparedInput,
 ): Effect.Effect<Turn, never, Scope.Scope> =>
   Effect.gen(function* () {
     const { sessionId, nativeSessionId, connection, normalizing, emit, onDeliveryUnknown } =
@@ -326,6 +413,7 @@ export const startTurn = (
 
     /** The Requests that wait for a reply, by the id Hercule gave them. A Request leaves the map when it settles, so it settles once. */
     const open = new Map<string, ApprovalPark | QuestionPark>();
+    /** Whether a prompt is in flight, which is from the proven handoff until the newest prompt's reply is read. */
     let promptInFlight = false;
     /** Whether the Turn must end `interrupted`: the user or the session stopped it. */
     let interrupted = false;
@@ -340,10 +428,19 @@ export const startTurn = (
     let isStopped = false;
     /** The interrupt that was sent and waits for its result, shared with a second caller. */
     let pendingInterrupt: Deferred.Deferred<InterruptResult> | undefined;
-    /** The tool names of the Denies the current prompt got, counted once their reply was written. */
+    /**
+     * The tool names of the Denies not yet told to the model, counted once their
+     * reply was written. They carry over a steer: the follow-up goes out only
+     * when the newest prompt replies.
+     */
     let deniedToolNames: Array<string | null | undefined> = [];
-    /** The fibers that resolve the Requests of the current prompt, so the prompt's end waits for them. */
+    /** The fibers that resolve the Requests since the last follow-up, so the end of a prompt waits for them. */
     let pendingResolutions: Array<Fiber.Fiber<unknown>> = [];
+    const events = yield* Queue.unbounded<TurnEvent>();
+    /** The prompt whose reply ends the Turn. Undefined until the first prompt is written. */
+    let newest: Prompt | undefined;
+    let steering: Steering | undefined;
+    let promptCount = 0;
 
     const buildEvent = (toolCallId?: string, acpRequestId?: string) =>
       buildEnvelope(sessionId, {
@@ -734,14 +831,268 @@ export const startTurn = (
       return written.value.success;
     });
 
+    const post = (event: TurnEvent): void => {
+      Queue.offerUnsafe(events, event);
+    };
+
+    const buildPrompt = (): Prompt => ({ index: promptCount++ });
+
+    /** Forks a fiber of the scope that waits for the reply of `prompt` and posts what it came to. */
+    const watchReply = (
+      prompt: Prompt,
+      waiting: Effect.Effect<PromptReply, AcpError>,
+    ): Effect.Effect<void> =>
+      Effect.forkIn(
+        Effect.map(awaitReply(waiting), (result) => {
+          post({ kind: "prompt-settled", prompt, result });
+        }),
+        scope,
+      ).pipe(Effect.asVoid);
+
+    /** Starts the wait after which the steer `own` counts as taken, unless a refusal came first. */
+    const startGrace = (own: Prompt): Effect.Effect<void> =>
+      Effect.forkIn(
+        Effect.sleep(STEER_REFUSAL_GRACE).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              post({ kind: "steer-grace-over", own });
+            }),
+          ),
+        ),
+        scope,
+      ).pipe(Effect.asVoid);
+
+    /** Ends the steer as `outcome` and returns the reply of the prompt it superseded, when that came earlier. */
+    const endSteer = (outcome: Exclude<SteerOutcome, { readonly kind: "accepted" }>) => {
+      const current = steering;
+      steering = undefined;
+      if (current === undefined) return undefined;
+      Deferred.doneUnsafe(current.decision, Effect.succeed(outcome));
+      return current.supersededResult;
+    };
+
+    /**
+     * Accepts the steer: its prompt becomes the newest, and the input is shown
+     * as a steered `user_message`.
+     */
+    const acceptSteer = (): void => {
+      const current = steering;
+      if (current === undefined) return;
+      steering = undefined;
+      newest = current.own;
+      const { input, skillReferences, skippedSkills } = current.prepared;
+      emit(
+        buildUserMessage({
+          sessionId,
+          turnId,
+          text: input.text,
+          attachments: input.attachments,
+          skillReferences,
+          skippedSkills: { harnessName: ANTIGRAVITY_NAME, names: skippedSkills },
+          senderSessionId: input.senderSessionId,
+          steered: true,
+          harnessRefs: { nativeSessionId },
+        }),
+      );
+      Deferred.doneUnsafe(current.decision, Effect.succeed({ kind: "accepted" }));
+    };
+
+    /** Returns why the Turn cannot take a steer now, or undefined when it can. */
+    const readLocalSteerRefusal = (): string | undefined => {
+      if (phase !== "running" || !promptInFlight) {
+        return `Antigravity cannot take a message at this point of the turn, because it is starting, between two prompts or ending. ${STAYS_QUEUED}`;
+      }
+      if (interrupted) {
+        return `The turn is being stopped, so the message was not sent to Antigravity. ${STAYS_QUEUED}`;
+      }
+      if (open.size > 0) {
+        return `Antigravity is waiting for your answer to a request, and takes no message before it. Answer the request first. ${STAYS_QUEUED}`;
+      }
+      if (steering !== undefined) {
+        return `Antigravity is still taking another message. ${STAYS_QUEUED}`;
+      }
+      return undefined;
+    };
+
+    const steer: Turn["steer"] = (prepared) =>
+      Effect.suspend(() => {
+        const refusal = readLocalSteerRefusal();
+        if (refusal !== undefined || newest === undefined) {
+          return Effect.succeed<SteerOutcome>({
+            kind: "refused",
+            message: refusal ?? "Antigravity has no prompt to steer.",
+          });
+        }
+        // Reserved before the write, so a second steer is refused and a reply of the old prompt cannot end the Turn meanwhile.
+        const own = buildPrompt();
+        const decision = Deferred.makeUnsafe<SteerOutcome>();
+        steering = {
+          own,
+          superseded: newest,
+          prepared,
+          decision,
+          isWritten: false,
+          supersededResult: undefined,
+        };
+        const handOver = Effect.gen(function* () {
+          const written = yield* Effect.result(
+            connection.sendPrompt(nativeSessionId, prepared.prompt),
+          );
+          if (Result.isFailure(written)) {
+            post({ kind: "steer-not-written", own, error: written.failure });
+          } else {
+            // Posted before the reply can be, so the loop sees the write first.
+            post({ kind: "steer-written", own });
+            yield* watchReply(own, written.success);
+          }
+          return yield* Deferred.await(decision);
+        });
+        return handOver.pipe(
+          Effect.timeoutOption(prepared.handoffBudget),
+          Effect.flatMap((outcome) =>
+            Option.isSome(outcome)
+              ? Effect.succeed(outcome.value)
+              : Effect.suspend(() => {
+                  // The loop may have decided in the moment the budget ran out.
+                  if (Deferred.isDoneUnsafe(decision)) return Deferred.await(decision);
+                  post({ kind: "steer-given-up", own });
+                  return Effect.succeed<SteerOutcome>({
+                    kind: "unknown",
+                    message:
+                      "Antigravity did not take the message in time, so it may or may not have arrived.",
+                  });
+                }),
+          ),
+          // A caller that is gone while `agy` may be reading the prompt leaves the same doubt as a timeout.
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              if (Deferred.isDoneUnsafe(decision)) return;
+              post({ kind: "steer-given-up", own });
+              onDeliveryUnknown();
+            }),
+          ),
+        );
+      });
+
+    /** The reply that ends the Turn, and whether its usage was counted already. */
+    type EndingReply = { readonly result: PromptResult; readonly usageIsAdded: boolean };
+
+    /**
+     * Reads one event of `events` while a steer is open and returns the reply
+     * that now ends the Turn, or undefined when the Turn goes on. The rules:
+     *
+     * - the steer's own reply means `agy` took it;
+     * - the reply of the superseded prompt means `agy` took it too, once no
+     *   refusal follows within `STEER_REFUSAL_GRACE`;
+     * - a refusal or a failed write ends the steer, and a reply of the old
+     *   prompt that came meanwhile then ends the Turn by its own rules.
+     */
+    const readSteerEvent = (event: TurnEvent): Effect.Effect<EndingReply | undefined> =>
+      Effect.gen(function* () {
+        const current = steering;
+        if (current === undefined) return undefined;
+        const resumeOldPrompt = (held: PromptResult | undefined): EndingReply | undefined =>
+          held === undefined ? undefined : { result: held, usageIsAdded: held.kind === "replied" };
+        switch (event.kind) {
+          case "steer-written":
+            if (event.own !== current.own) return undefined;
+            current.isWritten = true;
+            if (current.supersededResult !== undefined) yield* startGrace(current.own);
+            return undefined;
+          case "steer-not-written":
+            if (event.own !== current.own) return undefined;
+            return resumeOldPrompt(
+              endSteer(
+                event.error.reason === "not-sent"
+                  ? {
+                      kind: "refused",
+                      message: `Antigravity did not get the message: ${event.error.message} ${STAYS_QUEUED}`,
+                    }
+                  : {
+                      kind: "unknown",
+                      message: `Antigravity lost its connection while the message was handed over, so it may or may not have arrived: ${event.error.message}`,
+                    },
+              ),
+            );
+          case "steer-given-up":
+            if (event.own !== current.own) return undefined;
+            return resumeOldPrompt(
+              endSteer({
+                kind: "unknown",
+                message:
+                  "Antigravity did not take the message in time, so it may or may not have arrived.",
+              }),
+            );
+          case "steer-grace-over":
+            if (event.own === current.own) acceptSteer();
+            return undefined;
+          case "prompt-settled": {
+            const { prompt, result } = event;
+            if (prompt === current.own) {
+              if (result.kind === "replied") {
+                acceptSteer();
+                return { result, usageIsAdded: false };
+              }
+              const { error } = result;
+              return resumeOldPrompt(
+                endSteer(
+                  error.reason === "refused"
+                    ? {
+                        kind: "refused",
+                        message: `Antigravity did not take the message: ${truncateFact(error.harnessMessage ?? error.message)} ${STAYS_QUEUED}`,
+                      }
+                    : {
+                        kind: "unknown",
+                        message: `Antigravity could not tell whether it took the message: ${error.message}`,
+                      },
+                ),
+              );
+            }
+            if (prompt !== current.superseded) {
+              // An even older prompt: ends nothing.
+              if (result.kind === "replied") emit(addPromptUsage(normalizing, result.reply.usage));
+              return undefined;
+            }
+            // The superseded prompt is still the newest, so what its reply means depends on the steer.
+            if (result.kind === "replied") emit(addPromptUsage(normalizing, result.reply.usage));
+            current.supersededResult = result;
+            if (result.kind === "failed") {
+              // A prompt that failed means the connection is gone, and the steer is lost with it.
+              return resumeOldPrompt(
+                endSteer({
+                  kind: "unknown",
+                  message:
+                    "Antigravity's connection ended while the message was handed over, so it may or may not have arrived.",
+                }),
+              );
+            }
+            if (current.isWritten) yield* startGrace(current.own);
+            return undefined;
+          }
+        }
+      });
+
     const runTurn = Effect.gen(function* () {
-      let waiting = yield* writeFirstPrompt;
+      const waiting = yield* writeFirstPrompt;
       if (waiting === undefined) return;
+      newest = buildPrompt();
+      promptInFlight = true;
+      yield* watchReply(newest, waiting);
       for (;;) {
-        deniedToolNames = [];
-        pendingResolutions = [];
-        promptInFlight = true;
-        const result = yield* awaitReply(waiting);
+        const event = yield* Queue.take(events);
+        let ending: EndingReply | undefined;
+        if (steering !== undefined) {
+          ending = yield* readSteerEvent(event);
+        } else if (event.kind === "prompt-settled") {
+          if (event.prompt === newest) {
+            ending = { result: event.result, usageIsAdded: false };
+          } else if (event.result.kind === "replied") {
+            // A reply of an older prompt ends nothing and adds its usage: only the newest prompt's reply ends the Turn.
+            emit(addPromptUsage(normalizing, event.result.reply.usage));
+          }
+        }
+        if (ending === undefined) continue;
+        const { result, usageIsAdded } = ending;
         promptInFlight = false;
 
         if (result.kind === "failed") {
@@ -762,8 +1113,8 @@ export const startTurn = (
           });
         }
 
-        emit(addPromptUsage(normalizing, result.reply.usage));
-        // A Deny counts only once its reply was written, so wait for the writes of this prompt.
+        if (!usageIsAdded) emit(addPromptUsage(normalizing, result.reply.usage));
+        // A Deny counts only once its reply was written, so wait for the writes so far.
         yield* Effect.forEach(pendingResolutions, Fiber.await, { discard: true });
 
         const { stopReason } = result.reply;
@@ -778,7 +1129,14 @@ export const startTurn = (
           yield* Effect.forEach(pendingResolutions, Fiber.await, { discard: true });
           // An interrupt that came while the Requests were cancelled ends the Turn, with no follow-up sent.
           if (interrupted) return yield* finish("interrupted");
-          waiting = Effect.flatten(connection.sendPrompt(nativeSessionId, followUp));
+          deniedToolNames = [];
+          pendingResolutions = [];
+          newest = buildPrompt();
+          promptInFlight = true;
+          yield* watchReply(
+            newest,
+            Effect.flatten(connection.sendPrompt(nativeSessionId, followUp)),
+          );
           continue;
         }
         if (stopReason === "cancelled") return yield* finish("interrupted");
@@ -801,6 +1159,12 @@ export const startTurn = (
             kind: "unknown",
             message:
               "Antigravity was stopped while the input was handed over, so it may or may not have arrived.",
+          });
+          // A steer still open when the Turn is over is not decided: `agy` may have it.
+          endSteer({
+            kind: "unknown",
+            message:
+              "The turn ended before Antigravity confirmed that it took the message, so it may or may not have arrived.",
           });
           Deferred.doneUnsafe(ended, Effect.void);
         }),
@@ -831,6 +1195,7 @@ export const startTurn = (
     return {
       id: turnId,
       handoff,
+      steer,
       openApproval,
       openQuestion,
       decide,

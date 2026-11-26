@@ -18,10 +18,12 @@ const definition: HarnessDefinition = {
   // `agy` is published as GitHub releases, not on npm.
   releaseSource: { kind: "github-releases", repository: "google-antigravity/antigravity-cli" },
   declared: {
-    // A prompt sent during a turn makes the first prompt return while its work
-    // goes on, so nothing says when the turn is over. The controller interrupts
-    // the turn instead and sends the message as the next one.
-    steering: "unsupported",
+    // A prompt sent during a turn makes `agy` answer the earlier prompt at once
+    // and go on with the work, and the new prompt's reply comes when the work
+    // is done. So the newest prompt's reply ends the turn. A prompt sent while
+    // a permission request or a question is open is refused at once, and the
+    // controller keeps that message queued until the turn ends.
+    steering: "native",
     // `agy` speaks ACP, which has no fork.
     fork: "unsupported",
     modelSwitch: "in-session",

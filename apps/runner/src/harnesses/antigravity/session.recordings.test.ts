@@ -22,6 +22,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { readRecording, type JsonRpcMessage, type RecordingName } from "@hercule/acp/testing";
@@ -30,7 +31,12 @@ import type { ApprovalDecision } from "@hercule/protocol";
 import { cleanupHomes, CWD, settle, waitUntil } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import { expectEventStreamToHoldTogether } from "./event-stream.testing";
-import { buildFakeAgy, buildStartContext, createSignedInHome } from "./fake-agy.testing";
+import {
+  buildFakeAgy,
+  buildStartContext,
+  createSignedInHome,
+  type FakeAgyOptions,
+} from "./fake-agy.testing";
 
 afterEach(cleanupHomes);
 
@@ -199,11 +205,18 @@ const readRecordedClientReplies = (name: RecordingName): ReadonlyArray<JsonRpcMe
     .map(({ message }) => message);
 };
 
-/** Plays one scenario and returns what the session emitted and what it wrote to `agy`. */
-const play = (scenario: Scenario) =>
+/**
+ * Starts a session over a fake `agy` that plays `recording`, and returns it
+ * with what a test needs to drive it and read what it emitted.
+ */
+const openSession = (
+  recording: RecordingName,
+  accessMode: SessionSpec["accessMode"] = SPEC.accessMode,
+  fakeOptions: Omit<FakeAgyOptions, "recording"> = {},
+) =>
   Effect.gen(function* () {
     const home = createSignedInHome();
-    const fake = buildFakeAgy(home, { recording: scenario.recording });
+    const fake = buildFakeAgy(home, { ...fakeOptions, recording });
     const adapter = makeAntigravityAdapter(fake);
     const events: HarnessEvent[] = [];
     yield* Effect.forkScoped(
@@ -216,17 +229,23 @@ const play = (scenario: Scenario) =>
     yield* Effect.promise(settle);
     yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
     const context = buildStartContext(home, CWD);
-    yield* adapter.startSession(
-      SESSION,
-      { ...SPEC, accessMode: scenario.accessMode ?? SPEC.accessMode },
-      context,
-    );
-
-    const prompts = readRecordedPrompts(scenario.recording);
+    yield* adapter.startSession(SESSION, { ...SPEC, accessMode }, context);
     const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
       events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
     const until = (what: string, ready: () => boolean) =>
       Effect.promise(() => waitUntil(what, ready));
+    return { adapter, events, tags, until, received: () => fake.spawns[0]!.harness.received };
+  });
+
+/** Plays one scenario and returns what the session emitted and what it wrote to `agy`. */
+const play = (scenario: Scenario) =>
+  Effect.gen(function* () {
+    const { adapter, events, tags, until, received } = yield* openSession(
+      scenario.recording,
+      scenario.accessMode,
+    );
+
+    const prompts = readRecordedPrompts(scenario.recording);
     let opened = 0;
     let finished = 0;
     for (const input of scenario.inputs) {
@@ -250,7 +269,7 @@ const play = (scenario: Scenario) =>
       finished += 1;
       yield* until("completed the turn", () => tags("turn.completed").length === finished);
     }
-    return { events, tags, received: fake.spawns[0]!.harness.received };
+    return { events, tags, received: received() };
   });
 
 describe("recordings of agy through an Antigravity session", () => {
@@ -328,4 +347,84 @@ describe("recordings of agy through an Antigravity session", () => {
         ),
       ));
   }
+});
+
+describe("steering, as recorded", () => {
+  it("steer-visible: the second prompt is accepted by the reply to the first, and its own reply ends the turn", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { adapter, events, tags, until, received } = yield* openSession(
+          "steer-visible",
+          "full-access",
+        );
+        const [first, second] = readRecordedPrompts("steer-visible");
+        yield* adapter.sendInput(SESSION, { text: first! });
+        yield* until("a call started", () => toolStarted(events));
+
+        const sending = yield* Effect.forkChild(adapter.sendInput(SESSION, { text: second! }));
+        // The reply to the first prompt comes 3 ms after the second is written. The wait for a refusal then runs out.
+        yield* until("the first reply was counted", () => tags("session.usage.updated").length > 0);
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust("500 millis");
+        const result = yield* Fiber.join(sending);
+        expect(result.delivery).toBe("steered");
+
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+        expectEventStreamToHoldTogether(events);
+        expect(
+          received()
+            .filter(isPrompt)
+            .map(
+              (message) => (message.params as { prompt: Array<{ text: string }> }).prompt[0]!.text,
+            ),
+        ).toEqual([first, second]);
+        expect(tags("turn.started"), "the steer joins the turn").toHaveLength(1);
+        expect(
+          tags("item.completed")
+            .filter((event) => event.kind === "user_message")
+            .map((event) => event.detail),
+        ).toMatchObject([{ text: first }, { text: second, steered: true }]);
+        expect(tags("turn.completed")[0]?.usage, "both replies count").toEqual(
+          sumUsage([readRecordedUsage("steer-visible", 0), readRecordedUsage("steer-visible", 1)]),
+        );
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+
+  it("steer-during-request: the session refuses the steer itself while the request is open, and the first prompt goes on", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        // The recorded second prompt and its refusal are left out, because the session never writes it: the fake would wait for it for ever.
+        const { adapter, events, tags, until, received } = yield* openSession(
+          "steer-during-request",
+          "approval-required",
+          {
+            editRecording: (recording) => {
+              const second = recording.findIndex(
+                ({ direction, message }) => direction === "out" && message.id === 5,
+              );
+              return recording.filter((_entry, index) => index !== second && index !== second + 1);
+            },
+          },
+        );
+        const [first, second] = readRecordedPrompts("steer-during-request");
+        yield* adapter.sendInput(SESSION, { text: first! });
+        yield* until("a request opened", () => tags("request.opened").length === 1);
+
+        const refused = yield* Effect.flip(adapter.sendInput(SESSION, { text: second! }));
+        expect(refused._tag).toBe("SteerRefused");
+        expect(refused.message).toContain("Answer the request first");
+        expect(received().filter(isPrompt)).toHaveLength(1);
+
+        yield* adapter.respondToApprovalRequest(
+          SESSION,
+          tags("request.opened")[0]!.request.requestId,
+          "allow",
+        );
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+        expectEventStreamToHoldTogether(events);
+        expect(tags("turn.completed")).toMatchObject([
+          { state: "completed", usage: readRecordedUsage("steer-during-request", 0) },
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
 });

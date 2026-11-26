@@ -84,6 +84,11 @@ export interface ConfigChange {
     isCancelled: () => boolean,
   ) => Effect.Effect<ApplyOutcome>;
   /**
+   * Returns whether `apply` would ask `agy` to change anything for `selection`.
+   * True also when what `agy` holds is unknown, because `apply` would ask again.
+   */
+  readonly isChange: (selection: ModelSelection) => boolean;
+  /**
    * Takes in the options of an update `agy` sent by itself. An update that names
    * another model or level than the one held makes what is held unknown. An
    * update proves no change that was asked for: it can lag behind, and only the
@@ -210,6 +215,14 @@ export const createConfigChange = (
       return { kind: "applied" } as const;
     });
 
+  const isChange: ConfigChange["isChange"] = (selection) => {
+    const effort = readEffort(selection);
+    return (
+      held.model !== formatModelArgument(modelArgument, selection.model) ||
+      (effort !== undefined && held.effort !== effort)
+    );
+  };
+
   const observe: ConfigChange["observe"] = (options) => {
     const model = readHeld(options, "model");
     const effort = readHeld(options, "thought_level");
@@ -221,5 +234,5 @@ export const createConfigChange = (
     }
   };
 
-  return { apply, observe };
+  return { apply, isChange, observe };
 };
