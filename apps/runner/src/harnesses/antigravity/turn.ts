@@ -203,10 +203,10 @@ export interface Turn {
    * `agy` has taken the steer when its own prompt replies, or when the prompt
    * it supersedes replies and no refusal follows within a short time. It
    * refuses at once with a JSON-RPC error while a Request is open. The steer
-   * is `unknown` when the budget runs out or the connection closes. A steer
-   * that `agy` takes after the old prompt ended by itself starts a fresh run
-   * in `agy`, and the Turn still shows it as one Turn that the newest prompt's
-   * reply ends: the user's words reach the agent either way.
+   * is `unknown` when the budget runs out or the connection closes. What `agy`
+   * does with a steer written after the old prompt ended by itself is not
+   * measured. The Turn shows such a steer like any other, as one Turn that
+   * the newest prompt's reply ends.
    *
    * The `user_message` of the input is emitted only on acceptance.
    */
