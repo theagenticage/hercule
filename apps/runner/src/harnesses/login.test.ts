@@ -476,7 +476,7 @@ describe("more than one login at a time", () => {
 describe("a plain-pipe login that ends at its exit", () => {
   const AGY_URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=agy";
   const FAILURE_MESSAGE =
-    "The sign-in did not finish: the code may be wrong or expired. This sign-in cannot take another code; start it again for a new link.";
+    "The sign-in did not finish: the code may be wrong or expired, or the runner could not reach the vendor. This sign-in cannot take another code; start it again for a new link.";
 
   const adapterWith = (endsAtExit: boolean): HarnessAdapter => ({
     ...claudeCode,

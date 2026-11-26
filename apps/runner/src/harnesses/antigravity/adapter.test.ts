@@ -10,14 +10,7 @@ import { antigravity as antigravityPlugin } from "@hercule/plugin-antigravity";
 import type { SessionSpec } from "@hercule/protocol";
 import { cleanupHomes } from "../testing";
 import { ANTIGRAVITY, makeAntigravityAdapter } from "./adapter";
-import {
-  AGY_VERSION,
-  BINARY,
-  SIGNED_IN_EMAIL,
-  buildContext,
-  buildFakeAgy,
-  createSignedInHome,
-} from "./fake-agy.testing";
+import { BINARY, buildContext, buildFakeAgy, createSignedInHome } from "./fake-agy.testing";
 
 afterEach(() => {
   cleanupHomes();
@@ -62,19 +55,7 @@ describe("the names of the adapter", () => {
   });
 });
 
-describe("the probe", () => {
-  it("reports the account through the fake agy", async () => {
-    const home = createSignedInHome();
-
-    const result = await Effect.runPromise(
-      buildAdapter(home).probe(buildContext(home), { readUsage: true }),
-    );
-
-    expect(result.harnessVersion).toBe(AGY_VERSION);
-    expect(result.auth).toMatchObject({ status: "ok", identity: SIGNED_IN_EMAIL });
-    expect(result.usage).toBeNull();
-  });
-
+describe("the probe without a binary", () => {
   it("is an error on a machine with no agy, and starts nothing", async () => {
     const home = createSignedInHome();
     const fake = buildFakeAgy(home);

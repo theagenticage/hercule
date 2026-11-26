@@ -1,32 +1,39 @@
 /**
- * Tests the probe of an Antigravity account through `makeProbe`: what it
- * reports for a signed-in account, a signed-out one, an account the probe
- * cannot trust and every failure, and that it keeps one conversation per
- * Harness Home and resumes it instead of making a new one each time. How the
- * `agy` process is opened and when its failures count as signed out is tested
- * with `agy.ts`. A fake `agy` answers from the recording of a signed-in account
- * and writes the files a real one writes. The real `agy` is never started.
+ * Tests the probe of an Antigravity account through the Harness Adapter: what
+ * it reports for a signed-in account, a signed-out one, an account it cannot
+ * trust and every failure, and that it keeps one conversation per Harness Home
+ * and resumes it instead of making a new one each time. The messages of the
+ * account checks, how the `agy` process is opened and the rest of the
+ * sign-in are tested with `agy.ts`. A fake `agy` answers from the recording of
+ * a signed-in account and writes the files and worker logs a real one writes.
+ * The real `agy` is never started.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
-import * as Option from "effect/Option";
-import * as Result from "effect/Result";
 import { TestClock } from "effect/testing";
 import { answerWith, type HarnessScript } from "@hercule/acp/testing";
-import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
+import type { ProbeResult } from "@hercule/protocol";
 import { PROBE_DEADLINE } from "../probe";
 import { cleanupHomes, createScratchHome, waitUntil } from "../testing";
-import { checkAccountUsable } from "./agy";
+import { makeAntigravityAdapter } from "./adapter";
 import { APP_DATA_DIR } from "./harness-home";
 import {
   AGY_VERSION,
-  BINARY,
   CONVERSATION,
+  HELD_BY_GOOGLE_LINE,
+  FILE_STORAGE_LINE,
   KEYRING_LINE,
   PLAN_LABEL,
   SIGNED_IN_EMAIL,
@@ -41,7 +48,6 @@ import {
   type FakeAgy,
   type FakeAgyOptions,
 } from "./fake-agy.testing";
-import { makeProbe } from "./probe";
 
 afterEach(() => {
   cleanupHomes();
@@ -49,8 +55,13 @@ afterEach(() => {
 
 const OTHER_CONVERSATION = "11111111-2222-4333-8444-555555555555";
 
+const probeWith = (home: string, fake: FakeAgy): Effect.Effect<ProbeResult> =>
+  makeAntigravityAdapter(fake).probe(buildContext(home), { readUsage: false });
+
 const probeAccount = (home: string, fake: FakeAgy): Promise<ProbeResult> =>
-  Effect.runPromise(makeProbe(fake)(buildContext(home), BINARY));
+  Effect.runPromise(probeWith(home, fake));
+
+const isRoot = process.getuid?.() === 0;
 
 /**
  * Runs the probe on the test clock. Starts it, waits until the fake `agy` has
@@ -64,7 +75,7 @@ const probeUntilWaiting = (
 ): Promise<ProbeResult> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const probing = yield* Effect.forkChild(makeProbe(fake)(buildContext(home), BINARY));
+      const probing = yield* Effect.forkChild(probeWith(home, fake));
       yield* Effect.promise(() =>
         waitUntil(`received ${method}`, () => receivedMethods(fake).includes(method)),
       );
@@ -80,13 +91,6 @@ const receivedMethods = (fake: FakeAgy): ReadonlyArray<string | undefined> =>
 const storedIdPath = (home: string): string => join(home, "hercule-probe-conversation");
 
 const readStoredId = (home: string): string => readFileSync(storedIdPath(home), "utf8");
-
-/** Returns the message of the failure `checkAccountUsable` gives, so a test never repeats its words. */
-const unusableMessage = (
-  plan: string | undefined,
-  models: ReadonlyArray<ModelDescriptor>,
-): string | undefined =>
-  Option.getOrUndefined(Result.getFailure(checkAccountUsable(plan, models)))?.message;
 
 /** Makes a fake `agy` for a new signed-in Harness Home, and returns the home too. */
 const setUp = (options: FakeAgyOptions = {}): { readonly home: string; readonly fake: FakeAgy } => {
@@ -191,7 +195,6 @@ describe("a signed-in account", () => {
 
     expect(result.harnessVersion).toBeNull();
     expect(result.auth.status).toBe("ok");
-    expect(result.models).toHaveLength(5);
   });
 
   it("declines what agy asks while the account is checked, and logs it without the message's raw text", async () => {
@@ -223,7 +226,7 @@ describe("a signed-in account", () => {
     });
 
     const result = await Effect.runPromise(
-      makeProbe(fake)(buildContext(home), BINARY).pipe(Effect.provide(Logger.layer([collecting]))),
+      probeWith(home, fake).pipe(Effect.provide(Logger.layer([collecting]))),
     );
     await waitUntil(
       "answered the request and logged the message",
@@ -343,16 +346,29 @@ describe("a signed-out account, and the failures that only look like one", () =>
 });
 
 describe("an account the probe cannot trust", () => {
-  const MODEL: ModelDescriptor = { slug: "m", name: "M", imageInput: null, options: [] };
+  it("is an error that says Google holds the account when there is no plan and the session's worker log shows it, and keeps the conversation", async () => {
+    const { home, fake } = setUp({
+      scripts: { authenticate: answerWith({}) },
+      workerLogs: { "session/new": `${FILE_STORAGE_LINE}\n${HELD_BY_GOOGLE_LINE}` },
+    });
 
-  it("is an error when Google gives no plan but agy lists models", async () => {
+    const result = await probeAccount(home, fake);
+
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toContain("Google is holding this account until it is verified");
+    expect(result.models).toEqual([]);
+    // Stored before the check, so a held account does not cost a conversation per probe.
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+  });
+
+  it("is an error that says only what is known when there is no plan and no sign that Google holds the account", async () => {
     const { home, fake } = setUp({ scripts: { authenticate: answerWith({}) } });
 
     const result = await probeAccount(home, fake);
 
-    expect(result.auth).toEqual({ status: "error", message: unusableMessage(undefined, [MODEL]) });
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toContain("reported no plan for this account");
     expect(result.models).toEqual([]);
-    expect(result.harnessVersion).toBe(AGY_VERSION);
   });
 
   it.each([
@@ -376,7 +392,8 @@ describe("an account the probe cannot trust", () => {
 
     const result = await probeAccount(home, fake);
 
-    expect(result.auth).toEqual({ status: "error", message: unusableMessage(PLAN_LABEL, []) });
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toContain("listed no models");
     expect(result.models).toEqual([]);
   });
 
@@ -388,7 +405,7 @@ describe("an account the probe cannot trust", () => {
 
     expect(result.auth).toEqual({
       status: "error",
-      message: "Could not read who is signed in to Antigravity.",
+      message: "Could not read who is signed in to Antigravity. Sign in again on this runner.",
     });
     expect(result.models).toEqual([]);
   });
@@ -412,46 +429,68 @@ describe("an account the probe cannot trust", () => {
     expect(result.models).toEqual([]);
   });
 
-  it("is an error when a worker that session/new started does not use this account's login", async () => {
-    const home = createSignedInHome();
-    const fake: FakeAgy = buildFakeAgy(home, {
-      scripts: {
-        "session/new": (call, harness) => {
-          writeFileSync(`${fake.spawns[0]!.command.at(-1)!}.4001`, KEYRING_LINE);
-          return answerNewSession(home)(call, harness);
-        },
-      },
-    });
+  it("is an error when the worker that session/new started does not use this account's login", async () => {
+    const { home, fake } = setUp({ workerLogs: { "session/new": KEYRING_LINE } });
 
     const result = await probeAccount(home, fake);
 
-    expect(result.auth).toEqual({
-      status: "error",
-      message: "Antigravity is signed in, but not with a login of this account.",
-    });
+    expect(result.auth.status).toBe("error");
+    expect(result.models).toEqual([]);
   });
 });
 
 describe("a probe that cannot keep its conversation", () => {
-  it("is an error that says why when the id cannot be stored, and stores nothing", async () => {
-    const { home, fake } = setUp();
-    // A folder in the place of the file: the rename onto it fails.
-    mkdirSync(join(storedIdPath(home), "inside"), { recursive: true });
-
-    const result = await probeAccount(home, fake);
-
+  const expectFailedBeforeOpening = (result: ProbeResult, fake: FakeAgy, message: RegExp) => {
     expect(result.auth.status).toBe("error");
-    expect(result.auth.message).toMatch(/^Could not (read|remember) the conversation of the/);
-  });
-
-  it("fails before it opens a conversation when the stored file cannot be read", async () => {
-    const { home, fake } = setUp();
-    mkdirSync(storedIdPath(home));
-
-    const result = await probeAccount(home, fake);
-
-    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toMatch(message);
     expect(fake.spawns).toHaveLength(0);
+  };
+
+  it.each([
+    ["a folder", (path: string) => mkdirSync(path)],
+    ["a link", (path: string) => symlinkSync(join(path, "..", "elsewhere"), path)],
+  ])(
+    "fails before it opens a conversation when %s is in the stored file's place",
+    async (_what, prepare) => {
+      const { home, fake } = setUp();
+      writeFileSync(join(home, "elsewhere"), `${CONVERSATION}\n`);
+      prepare(storedIdPath(home));
+
+      const result = await probeAccount(home, fake);
+
+      expectFailedBeforeOpening(
+        result,
+        fake,
+        /^Could not read the conversation of the Antigravity check/,
+      );
+    },
+  );
+
+  it.skipIf(isRoot)(
+    "fails before it opens a conversation when nobody may read the stored file",
+    async () => {
+      const { home, fake } = setUp();
+      writeFileSync(storedIdPath(home), `${CONVERSATION}\n`);
+      chmodSync(storedIdPath(home), 0o000);
+
+      const result = await probeAccount(home, fake);
+
+      chmodSync(storedIdPath(home), 0o600);
+      expectFailedBeforeOpening(result, fake, /permission denied\.$/);
+    },
+  );
+
+  it("fails before it opens a conversation when the working folder is a link", async () => {
+    const { home, fake } = setUp();
+    symlinkSync(createScratchHome("agy-elsewhere"), join(home, "hercule-probe"));
+
+    const result = await probeAccount(home, fake);
+
+    expectFailedBeforeOpening(
+      result,
+      fake,
+      /^Could not make the working folder for the Antigravity check/,
+    );
   });
 
   it("is an error, and stores nothing, when agy gives an id that is not a UUID", async () => {
@@ -462,6 +501,7 @@ describe("a probe that cannot keep its conversation", () => {
     const result = await probeAccount(home, fake);
 
     expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toContain("not a UUID");
     expect(existsSync(storedIdPath(home))).toBe(false);
   });
 });

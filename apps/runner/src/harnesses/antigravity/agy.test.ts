@@ -6,7 +6,7 @@
  * (`fake-agy.testing.ts`) answers over the pipes behind a spawn, and it writes
  * the worker logs the way `agy` does. The real `agy` is never started.
  */
-import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
@@ -23,16 +23,25 @@ import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercul
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
 import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
-import { buildLoginCommand, checkAccountUsable, openSignedInAgy, readAgyVersion } from "./agy";
+import {
+  buildLoginCommand,
+  checkAccountUsable,
+  openSignedInAgy,
+  readAgyVersion,
+  type SignedInAgy,
+} from "./agy";
 import {
   BINARY,
+  CONVERSATION,
   FILE_STORAGE_LINE,
+  HELD_BY_GOOGLE_LINE,
   KEYRING_LINE,
   NETWORK_ERROR_LINE,
   NO_HANDLERS,
   PLAN_LABEL,
   buildContext,
   buildFakeAgy,
+  createConversationFiles,
   createSignedInHome,
   refuse,
   type FakeAgy,
@@ -187,6 +196,7 @@ describe("the login command", () => {
       "--log-file",
       join(folder, "agy.log"),
     ]);
+    expect(login.endsAtExit).toBe(true);
     expect(login.terminal).toBeUndefined();
   });
 });
@@ -242,15 +252,18 @@ describe("checkAccountUsable", () => {
     imageInput: null,
     options: [],
   };
-  const failureOf = (plan: string | undefined, models: ReadonlyArray<ModelDescriptor>) =>
-    Option.getOrUndefined(Result.getFailure(checkAccountUsable(plan, models)));
+  const failureOf = (
+    plan: string | undefined,
+    models: ReadonlyArray<ModelDescriptor>,
+    isHeldByGoogle = false,
+  ) => Option.getOrUndefined(Result.getFailure(checkAccountUsable(plan, models, isHeldByGoogle)));
 
   it("returns the plan of an account that has a plan and models", () => {
-    expect(checkAccountUsable(PLAN_LABEL, [model])).toEqual(Result.succeed(PLAN_LABEL));
+    expect(checkAccountUsable(PLAN_LABEL, [model], false)).toEqual(Result.succeed(PLAN_LABEL));
   });
 
-  it("says Google holds an account that lists models but has no plan, and that signing in again does not help", () => {
-    const failure = failureOf(undefined, [model]);
+  it("says Google holds the account when there is no plan and a worker log shows it", () => {
+    const failure = failureOf(undefined, [model], true);
 
     expect(failure).toBeInstanceOf(AdapterFailed);
     expect(failure?.message).toBe(
@@ -258,12 +271,18 @@ describe("checkAccountUsable", () => {
     );
   });
 
-  it("says the runner may be offline when no model is listed, plan or not", () => {
+  it("says only what is known when there is no plan and no sign that Google holds the account", () => {
+    expect(failureOf(undefined, [model], false)?.message).toBe(
+      "Antigravity reported no plan for this account, so it cannot be used. Check this runner's network, then sign in to this Google account in a browser to see whether Google asks for anything.",
+    );
+  });
+
+  it("says the runner may be offline when no model is listed, whatever else is known", () => {
     const message =
       "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.";
 
     expect(failureOf(PLAN_LABEL, [])?.message).toBe(message);
-    expect(failureOf(undefined, [])?.message).toBe(message);
+    expect(failureOf(undefined, [], true)?.message).toBe(message);
   });
 });
 
@@ -280,7 +299,7 @@ describe("a refused authenticate", () => {
   it("is a network failure when a worker's log holds the network error", async () => {
     const { home, fake } = setUp({
       scripts: { authenticate: RUN_LOGIN },
-      workerLogs: [`${FILE_STORAGE_LINE}\n${NETWORK_ERROR_LINE}\n`],
+      workerLogs: { authenticate: `${FILE_STORAGE_LINE}\n${NETWORK_ERROR_LINE}\n` },
     });
 
     const error = await failureOf(open(fake, home));
@@ -289,6 +308,17 @@ describe("a refused authenticate", () => {
     expect(error.message).toBe(
       "Antigravity could not reach Google to check the sign-in of this account. Check the network of this runner.",
     );
+  });
+
+  it("does not take a path that holds the network phrase for the network error", async () => {
+    const { home, fake } = setUp({
+      scripts: { authenticate: RUN_LOGIN },
+      workerLogs: {
+        authenticate: `${FILE_STORAGE_LINE}\nI1126 10:00:00.000000 4000 files.go:9] read /tmp/token validation failed due to network error/x`,
+      },
+    });
+
+    expect(await failureOf(open(fake, home))).toBeInstanceOf(HarnessLoginMissing);
   });
 
   it("does not read the network error from the log of the front process", async () => {
@@ -301,13 +331,16 @@ describe("a refused authenticate", () => {
   });
 
   it("cannot tell why when there is no worker log at all, and does not call it signed out", async () => {
-    const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN }, workerLogs: [] });
+    const { home, fake } = setUp({
+      scripts: { authenticate: RUN_LOGIN },
+      workerLogs: { authenticate: [] },
+    });
 
     const error = await failureOf(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(
-      "Could not tell why Antigravity refused the sign-in of this account.",
+      "Could not tell why Antigravity refused the sign-in of this account. Sign in again on this runner. If this keeps happening, check the runner's log.",
     );
   });
 
@@ -324,27 +357,50 @@ describe("a refused authenticate", () => {
   });
 });
 
-describe("the sign that the process uses the account's own login", () => {
-  const NOT_THIS_ACCOUNT = "Antigravity is signed in, but not with a login of this account.";
+const NOT_THIS_ACCOUNT = "Antigravity is signed in, but not with a login of this account.";
 
+describe("the sign that a process uses the account's own login", () => {
   it("passes when every worker log has it", async () => {
     const { home, fake } = setUp({
-      workerLogs: [FILE_STORAGE_LINE, `${FILE_STORAGE_LINE}\nmore`],
+      workerLogs: { authenticate: [FILE_STORAGE_LINE, `${FILE_STORAGE_LINE}\nmore`] },
     });
 
     expect(await openAndReadPlan(fake, home)).toBe(PLAN_LABEL);
   });
 
   it.each([
-    ["there is no worker log", { workerLogs: [] }],
-    ["the only worker log lacks it", { workerLogs: [KEYRING_LINE] }],
-    ["one of two worker logs lacks it", { workerLogs: [FILE_STORAGE_LINE, KEYRING_LINE] }],
-    ["only the log of the front process has it", { workerLogs: [], frontLog: FILE_STORAGE_LINE }],
+    ["there is no worker log", { workerLogs: { authenticate: [] } }],
+    ["the only worker log lacks it", { workerLogs: { authenticate: KEYRING_LINE } }],
+    [
+      "one of two worker logs lacks it",
+      { workerLogs: { authenticate: [FILE_STORAGE_LINE, KEYRING_LINE] } },
+    ],
+    [
+      "only the log of the front process has it",
+      { workerLogs: { authenticate: [] }, frontLog: FILE_STORAGE_LINE },
+    ],
+    [
+      "the phrase is only inside a longer line, such as a path",
+      {
+        workerLogs: {
+          authenticate:
+            "I1126 10:00:00.000000    4000 files.go:9] opened /tmp/Using file-based token storage because SSH session detected/x",
+        },
+      },
+    ],
+    [
+      "the phrase is followed by more text on its line",
+      {
+        workerLogs: {
+          authenticate: `${FILE_STORAGE_LINE} (not really)`,
+        },
+      },
+    ],
     [
       "the front process has it and the only worker does not",
-      { workerLogs: [KEYRING_LINE], frontLog: FILE_STORAGE_LINE },
+      { workerLogs: { authenticate: KEYRING_LINE }, frontLog: FILE_STORAGE_LINE },
     ],
-  ])("fails when %s", async (_what, logs) => {
+  ])("fails the sign-in when %s", async (_what, logs) => {
     const { home, fake } = setUp(logs);
 
     const error = await failureOf(open(fake, home));
@@ -352,24 +408,116 @@ describe("the sign that the process uses the account's own login", () => {
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(NOT_THIS_ACCOUNT);
   });
+});
 
-  it("can be checked again later, and fails when a worker started since then lacks it", async () => {
-    const { home, fake } = setUp();
+describe("opening a conversation", () => {
+  const REQUEST = { cwd: "/work", mcpServers: [] };
 
-    const failure = await Effect.runPromise(
+  /** Opens `agy`, runs `use` on it, and returns what `use` returned or failed with. */
+  const withSignedIn = <A, E>(
+    fake: FakeAgy,
+    home: string,
+    use: (signedIn: SignedInAgy) => Effect.Effect<A, E>,
+  ) =>
+    Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const signedIn = yield* open(fake, home);
-          yield* signedIn.confirmOwnLogin;
-          // A worker started by session/new that kept looking for the keychain.
-          writeFileSync(`${fake.spawns[0]!.command.at(-1)!}.4001`, KEYRING_LINE);
-          return yield* Effect.flip(signedIn.confirmOwnLogin);
+          return yield* Effect.result(use(yield* open(fake, home)));
         }),
       ),
     );
 
-    expect(failure).toBeInstanceOf(AdapterFailed);
-    expect(failure.message).toBe(NOT_THIS_ACCOUNT);
+  it("starts a new conversation and returns its id and settings", async () => {
+    const { home, fake } = setUp();
+
+    const result = await withSignedIn(fake, home, (signedIn) => signedIn.newConversation(REQUEST));
+
+    expect(Result.isSuccess(result) && result.success.id).toBe(CONVERSATION);
+    expect(Result.isSuccess(result) && result.success.settings.configOptions).not.toEqual([]);
+  });
+
+  it("resumes the conversation asked for and returns its id and settings", async () => {
+    const { home, fake } = setUp();
+    createConversationFiles(home, CONVERSATION);
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+    );
+
+    expect(Result.isSuccess(result) && result.success.id).toBe(CONVERSATION);
+    expect(Result.isSuccess(result) && result.success.settings.configOptions).not.toEqual([]);
+  });
+
+  it("says whether Google holds the account, and does not fail for it", async () => {
+    const plain = setUp();
+    const held = setUp({
+      workerLogs: { "session/new": [`${FILE_STORAGE_LINE}\n${HELD_BY_GOOGLE_LINE}`] },
+    });
+    const lookalike = setUp({
+      workerLogs: {
+        "session/new": [`${FILE_STORAGE_LINE}\nread /tmp/"reason": "VALIDATION_REQUIREDX"`],
+      },
+    });
+    const isHeld = async ({ home, fake }: typeof plain) => {
+      const result = await withSignedIn(fake, home, (signedIn) =>
+        signedIn.newConversation(REQUEST),
+      );
+      return Result.isSuccess(result) && result.success.isHeldByGoogle;
+    };
+
+    expect(await isHeld(plain)).toBe(false);
+    expect(await isHeld(held)).toBe(true);
+    expect(await isHeld(lookalike)).toBe(false);
+  });
+
+  it("is not signed in when agy says authentication is required", async () => {
+    const { home, fake } = setUp({
+      scripts: { "session/new": refuse(-32000, "Authentication required") },
+    });
+
+    const result = await withSignedIn(fake, home, (signedIn) => signedIn.newConversation(REQUEST));
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(HarnessLoginMissing);
+  });
+
+  it("passes any other refusal on as the call's own error", async () => {
+    const { home, fake } = setUp({
+      scripts: { "session/resume": refuse(-32603, "Failed to read session") },
+    });
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+    );
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AcpError);
+  });
+
+  it.each([
+    ["session/new", "newConversation"],
+    ["session/resume", "resumeConversation"],
+  ] as const)(
+    "fails when the worker that %s started has no log, though the first worker logged its own login",
+    async (method, open_) => {
+      const { home, fake } = setUp({ workerLogs: { [method]: [] } });
+      createConversationFiles(home, CONVERSATION);
+
+      const result = await withSignedIn(fake, home, (signedIn) =>
+        open_ === "newConversation"
+          ? signedIn.newConversation(REQUEST)
+          : signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+      );
+
+      expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AdapterFailed);
+      expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
+    },
+  );
+
+  it("fails when the worker it started does not use the account's own login", async () => {
+    const { home, fake } = setUp({ workerLogs: { "session/new": KEYRING_LINE } });
+
+    const result = await withSignedIn(fake, home, (signedIn) => signedIn.newConversation(REQUEST));
+
+    expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
   });
 });
 
@@ -479,7 +627,7 @@ describe("closing the scope", () => {
   });
 
   it("does the same when the start fails", async () => {
-    const { home, fake } = setUp({ workerLogs: [] });
+    const { home, fake } = setUp({ workerLogs: { authenticate: [] } });
 
     await failureOf(open(fake, home));
 

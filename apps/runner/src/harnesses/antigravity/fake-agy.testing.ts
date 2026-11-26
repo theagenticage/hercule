@@ -41,15 +41,19 @@ const tokenPath = (home: string): string => join(home, APP_DATA_DIR, "antigravit
 
 /** What a worker of a process that uses the account's own login writes in its log. */
 export const FILE_STORAGE_LINE =
-  'level=info msg="Using file-based token storage because SSH session detected"';
+  "I1126 10:00:00.000000    4000 token_store.go:41] Using file-based token storage because SSH session detected";
 
 /** What a worker writes when it kept looking for the login in the keychain. */
 export const KEYRING_LINE =
-  'level=warn msg="Failed to load stored token from keyring, falling back to file"';
+  "W1126 10:00:00.000000    4000 token_store.go:38] Failed to load stored token from keyring, falling back to file";
 
 /** What a worker writes when it could not reach Google to check an expired login. */
 export const NETWORK_ERROR_LINE =
-  'level=warn msg="token validation failed due to network error (token may still be valid)"';
+  "W1126 10:00:00.000000    4000 token_store.go:77] token validation failed due to network error (token may still be valid)";
+
+/** What a worker writes when Google's reply says it holds the account for verification. */
+export const HELD_BY_GOOGLE_LINE =
+  'W1126 10:00:00.000000    4000 api.go:90] googleapi: Error 403: {"error": {"reason": "VALIDATION_REQUIRED"}}';
 
 /** Handlers for a connection in a test that expects nothing from `agy` but answers. */
 export const NO_HANDLERS: AcpHandlers = {
@@ -118,6 +122,15 @@ export const refuse =
 /** A script for a call the process never answers. */
 export const noAnswer: HarnessScript = () => [];
 
+/** The recording's reply to the call `method`, which a signed-in account got. */
+const readRecordedResult = (method: string): unknown => {
+  const recording = readRecording("cancel");
+  const asked = recording.findIndex(
+    ({ direction, message }) => direction === "out" && message.method === method,
+  );
+  return recording.slice(asked + 1).find(({ direction }) => direction === "in")!.message.result;
+};
+
 /** The recording's reply to `session/new`, with the conversation's own id. */
 const readRecordedNewSession = (id: string): Record<string, unknown> => {
   const reply = readRecording("cancel").find(
@@ -176,11 +189,18 @@ export interface FakeAgy {
   readonly run: Run;
 }
 
+/** The calls that make `agy` start a worker process, which writes a log. */
+export type WorkerStartingMethod = "authenticate" | "session/new" | "session/resume";
+
 export interface FakeAgyOptions {
   /** Scripts for methods of the process. They win over the defaults. */
   readonly scripts?: Readonly<Record<string, HarnessScript>>;
-  /** The text of each worker's log. The default is one worker that uses file storage. */
-  readonly workerLogs?: ReadonlyArray<string>;
+  /**
+   * What the worker started by each call writes in its log, one text per
+   * worker. The default for every call is one worker that uses file storage.
+   * An empty list is a call that starts no worker.
+   */
+  readonly workerLogs?: Partial<Record<WorkerStartingMethod, string | ReadonlyArray<string>>>;
   /** The text of the log of the front process. */
   readonly frontLog?: string;
   /** What the process writes on stderr. */
@@ -196,13 +216,15 @@ export interface FakeAgyOptions {
 /**
  * Builds a fake `agy` for the Harness Home `home`. Its process answers from
  * the recording, with `session/new`, `session/resume` and `session/close`
- * answered as `agy` does unless `scripts` says otherwise. A spawn writes the
- * logs of a real `agy` next to the path of `--log-file`: the front process's
- * own log and one log per worker.
+ * answered as `agy` does unless `scripts` says otherwise. A call that starts a
+ * worker (`authenticate`, `session/new`, `session/resume`) writes the worker's
+ * log next to the path of `--log-file` before it answers, as `agy` does, so
+ * no test writes a log by hand.
  */
 export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAgy => {
-  const { workerLogs = [FILE_STORAGE_LINE], frontLog = "", stderrLines = [] } = options;
-  const scripts = {
+  const { frontLog = "", stderrLines = [] } = options;
+  const scripts: Record<string, HarnessScript> = {
+    authenticate: answerWith(readRecordedResult("authenticate")),
     "session/new": answerNewSession(home),
     "session/resume": answerResume(home),
     "session/close": answerWith({}),
@@ -214,13 +236,25 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
     if (options.throws !== undefined) throw options.throws;
     const logFile = command[command.indexOf("--log-file") + 1]!;
     writeFileSync(logFile, frontLog);
-    workerLogs.forEach((text, index) => {
-      writeFileSync(`${logFile}.${4000 + index}`, text);
-    });
+    let nextPid = 4000;
+    const harnessScripts: Record<string, HarnessScript> = { ...scripts };
+    for (const method of ["authenticate", "session/new", "session/resume"] as const) {
+      const answer = scripts[method]!;
+      const texts = options.workerLogs?.[method] ?? FILE_STORAGE_LINE;
+      harnessScripts[method] = (call, harness) => {
+        for (const text of typeof texts === "string" ? [texts] : texts) {
+          writeFileSync(`${logFile}.${nextPid++}`, text);
+        }
+        return answer(call, harness);
+      };
+    }
     const stderr = createLines();
     for (const line of stderrLines) stderr.push(line);
     if (options.holdStderrOpen !== true) stderr.end();
-    const harness = startFakeHarness({ recording: readRecording("cancel"), scripts });
+    const harness = startFakeHarness({
+      recording: readRecording("cancel"),
+      scripts: harnessScripts,
+    });
     const signals: Array<string | undefined> = [];
     const spawned: Spawned = { command, env, cwd, harness, signals, hasExited: false };
     void harness.exited.then(() => {

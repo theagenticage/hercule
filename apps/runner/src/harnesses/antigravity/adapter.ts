@@ -14,9 +14,8 @@ import {
 import type { HarnessAdapter } from "../index";
 import { buildFailedProbe } from "../probe";
 import { runProcess, spawnAgy } from "../process";
-import { buildLoginCommand, type AgySeam } from "./agy";
+import { ANTIGRAVITY_NAME, buildLoginCommand, type AgySeam } from "./agy";
 import { deleteSessionFiles } from "./harness-home";
-import { ANTIGRAVITY_NAME } from "./harness-name";
 import { makeAntigravityInstall } from "./install";
 import { makeProbe } from "./probe";
 

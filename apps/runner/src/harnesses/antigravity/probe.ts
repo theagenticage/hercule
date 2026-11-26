@@ -12,32 +12,32 @@
  * Harness Home, in one fixed working folder, and resumes it. A resume adds
  * nothing.
  */
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
 import type { AcpConnection, AcpError, AcpHandlers, SessionSettings } from "@hercule/acp";
-import type { AdapterError, ProbeResult } from "@hercule/protocol";
+import type { AdapterError, AdapterFailed, ProbeResult } from "@hercule/protocol";
 import { buildAdapterFailed } from "../adapter-error-builders";
+import { writeFileAtomically } from "../atomic-file";
 import type { HarnessRunnerContext } from "../index";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
+import { describeFileFailure, isMissingPath, isRealFolder, UUID_PATTERN } from "../session-files";
 import { truncateFact } from "../text";
 import {
+  ANTIGRAVITY_NAME,
   checkAccountUsable,
-  isSignInRequired,
   openSignedInAgy,
   readAgyVersion,
   type AgySeam,
   type AgySpawn,
+  type OpenedConversation,
+  type SignedInAgy,
 } from "./agy";
-import { ANTIGRAVITY_NAME } from "./harness-name";
-import {
-  makeProbeFolder,
-  readProbeConversationId,
-  readSignedInEmail,
-  writeProbeConversationId,
-} from "./harness-home";
+import { readLoginFile, readRegularFile } from "./harness-home";
 import { buildModelCatalog } from "./model-catalog";
 
 /** How long `session/close` may take. `agy` keeps the conversation either way, and the process ends next. */
@@ -46,11 +46,93 @@ const CLOSE_DEADLINE = Duration.seconds(2);
 /** What a probe finds out about a signed-in account. */
 type AccountFindings = Pick<ProbeResult, "auth" | "models">;
 
-/** The conversation the probe used and the settings `agy` returned for it. */
-interface ProbeConversation {
-  readonly id: string;
-  readonly settings: SessionSettings;
-}
+/** The working folder of the probe's conversation, directly in the Harness Home. */
+const PROBE_FOLDER = "hercule-probe";
+
+/** The file in the Harness Home that holds the id of the probe's conversation, as one line. */
+const PROBE_CONVERSATION_FILE = "hercule-probe-conversation";
+
+/** The most bytes of the conversation file that are read. A UUID line is 37. */
+const PROBE_CONVERSATION_FILE_LIMIT = 128;
+
+/**
+ * Makes the working folder of the probe's conversation, `<home>/hercule-probe`,
+ * with mode 0700 when it is missing, and returns its path. Fails with an
+ * `AdapterFailed` when the folder cannot be made, or when something that is not
+ * a real folder, such as a link or a file, is in its place.
+ *
+ * The folder is fixed, not new for each probe, because `agy` adds a file below
+ * `implicit/` for every new working folder it sees, and nothing removes it.
+ */
+const makeProbeFolder = (home: string): Effect.Effect<string, AdapterFailed> =>
+  Effect.tryPromise({
+    try: async () => {
+      const folder = join(home, PROBE_FOLDER);
+      try {
+        await mkdir(folder, { mode: 0o700 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      if (!(await isRealFolder(folder))) throw new Error("it is not a folder");
+      return folder;
+    },
+    catch: (error) =>
+      buildAdapterFailed(
+        `Could not make the working folder for the ${ANTIGRAVITY_NAME} check on this runner: ${describeFileFailure(error)}`,
+      ),
+  });
+
+/**
+ * Returns the id of the probe's conversation, or undefined when there is none
+ * to use. A missing file, and a regular file whose text is not exactly one
+ * UUID (empty, too long, anything else), mean none: the probe then makes a new
+ * conversation and its id replaces the file. Fails with an `AdapterFailed` for
+ * everything else: a folder, a link or a FIFO in the file's place, and any I/O
+ * error such as permission denied. The probe could not store a new id over
+ * those either, and would make a conversation every time it runs.
+ */
+const readConversationId = (home: string): Effect.Effect<string | undefined, AdapterFailed> =>
+  Effect.tryPromise({
+    try: async () => {
+      try {
+        const { text, isTruncated } = await readRegularFile(
+          join(home, PROBE_CONVERSATION_FILE),
+          PROBE_CONVERSATION_FILE_LIMIT,
+        );
+        const id = text.trim();
+        return isTruncated || !UUID_PATTERN.test(id) ? undefined : id;
+      } catch (error) {
+        if (isMissingPath(error)) return undefined;
+        throw error;
+      }
+    },
+    catch: (error) =>
+      buildAdapterFailed(
+        `Could not read the conversation of the ${ANTIGRAVITY_NAME} check on this runner: ${describeFileFailure(error)}`,
+      ),
+  });
+
+/**
+ * Stores `id` as the id of the probe's conversation, replacing the one there.
+ * The file is written to a temporary file in the Harness Home and then
+ * renamed, so a reader never sees half of it. Fails with an `AdapterFailed`
+ * when `id` is not a UUID, before anything is written, or when the file cannot
+ * be written.
+ */
+const writeConversationId = (home: string, id: string): Effect.Effect<void, AdapterFailed> =>
+  UUID_PATTERN.test(id)
+    ? Effect.try({
+        try: () => writeFileAtomically(join(home, PROBE_CONVERSATION_FILE), `${id}\n`),
+        catch: (error) =>
+          buildAdapterFailed(
+            `Could not remember the conversation of the ${ANTIGRAVITY_NAME} check on this runner: ${describeFileFailure(error)}`,
+          ),
+      })
+    : Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} gave a conversation id that is not a UUID, so the check cannot keep that conversation`,
+        ),
+      );
 
 /**
  * The handlers of a probe's connection. A probe sends no prompt, so `agy`
@@ -78,47 +160,55 @@ const buildDecliningHandlers = Effect.map(Effect.context<never>(), (services): A
  * Resumes the conversation `storedId`. Returns undefined when `agy` refuses to
  * resume it, for example because its files are gone, and logs that: the caller
  * makes a new conversation. Fails with the error for every other failure. A
- * refusal that means the account is not signed in must not make a signed-in
- * account look signed out, and a resume that is unreadable, times out or ends
- * with the connection is not known to have failed for good, so none of them
- * replaces the stored conversation.
+ * missing sign-in fails with `HarnessLoginMissing`, so it can never make a
+ * signed-in account look signed out by replacing the conversation. A resume
+ * that is unreadable, times out or ends with the connection is not known to
+ * have failed for good, so none of them replaces the stored conversation.
  */
 const resumeConversation = (
-  connection: AcpConnection,
+  agy: SignedInAgy,
   storedId: string,
   folder: string,
-): Effect.Effect<ProbeConversation | undefined, AcpError> =>
-  connection.resumeSession({ nativeSessionId: storedId, cwd: folder, mcpServers: [] }).pipe(
-    Effect.map((settings) => ({ id: storedId, settings })),
-    Effect.catch((error) =>
-      error.reason === "refused" && !isSignInRequired(error)
-        ? Effect.as(
-            Effect.logWarning(
-              `${ANTIGRAVITY_NAME} refused to resume the conversation of its check, so a new one is made: ${error.message}`,
-            ),
-            undefined,
-          )
-        : Effect.fail(error),
-    ),
-  );
+): Effect.Effect<OpenedConversation | undefined, AcpError | AdapterError> =>
+  agy
+    .resumeConversation({ nativeSessionId: storedId, cwd: folder, mcpServers: [] })
+    .pipe(
+      Effect.catch((error) =>
+        error._tag === "AcpError" && error.reason === "refused"
+          ? Effect.as(
+              Effect.logWarning(
+                `${ANTIGRAVITY_NAME} refused to resume the conversation of its check, so a new one is made: ${error.message}`,
+              ),
+              undefined,
+            )
+          : Effect.fail(error),
+      ),
+    );
 
 /**
  * Makes a new conversation and stores its id in the Harness Home, replacing
- * the id there. The reply and the store are one step that cannot be
- * interrupted, so an interruption never leaves a conversation whose id is
- * lost. Fails with the error of `session/new`, or with an `AdapterFailed` when
- * the id is not a UUID or cannot be stored: a probe that forgot its
- * conversation would make a new one every time.
+ * the id there. Once `agy`'s reply has arrived, the store cannot be
+ * interrupted, so the id is not lost after that. An interruption while
+ * `session/new` is waiting, such as the probe's deadline, stops `agy` before
+ * its reply: the conversation may exist, but nobody knows its id, and the next
+ * probe makes another. That costs one conversation per probe only for as long
+ * as `session/new` keeps timing out. Fails with the error of
+ * `newConversation`, or with an `AdapterFailed` when the id is not a UUID or
+ * cannot be stored: a probe that forgot its conversation would make a new one
+ * every time.
+ *
+ * When the check of the new worker's login fails, the conversation exists but
+ * its id is not stored. That is accepted: the failure repeats at every probe
+ * and is loud, so one forgotten conversation does not pile up.
  */
 const makeConversation = (
-  connection: AcpConnection,
+  agy: SignedInAgy,
   home: string,
   folder: string,
-): Effect.Effect<ProbeConversation, AcpError | AdapterError> =>
+): Effect.Effect<OpenedConversation, AcpError | AdapterError> =>
   Effect.uninterruptibleMask((restore) =>
-    restore(connection.newSession({ cwd: folder, mcpServers: [] })).pipe(
-      Effect.tap((reply) => writeProbeConversationId(home, reply.nativeSessionId)),
-      Effect.map((reply) => ({ id: reply.nativeSessionId, settings: reply })),
+    restore(agy.newConversation({ cwd: folder, mcpServers: [] })).pipe(
+      Effect.tap((conversation) => writeConversationId(home, conversation.id)),
     ),
   );
 
@@ -127,40 +217,44 @@ const closeConversation = (connection: AcpConnection, id: string): Effect.Effect
   connection.closeSession(id).pipe(Effect.timeoutOption(CLOSE_DEADLINE), Effect.ignore);
 
 /**
- * Returns the plan and the settings `agy` gives for the account, from the
- * probe's own conversation: the stored one when `agy` resumes it, else a new
- * one. Two probes that find no stored id at the same time may each make a
- * conversation. The last id written wins, and the other conversation stays in
- * `agy`'s files. There is no locking, because it costs one conversation, once.
+ * Opens the probe's own conversation and returns the plan and the settings
+ * `agy` gives for the account: the stored conversation when `agy` resumes it,
+ * else a new one. Two probes that find no stored id at the same time may each
+ * make a conversation. The last id written wins, and the other conversation
+ * stays in `agy`'s files. There is no locking, because it costs one
+ * conversation, once.
  *
  * The stored id is read before `agy` starts, so a stored file that cannot be
  * read fails the probe before it can make a conversation. The scope owns the
  * `agy` process, and closing it stops the process.
  */
-const readSettings = (
+const openProbeConversation = (
   spawn: AgySpawn,
   ctx: HarnessRunnerContext,
   binary: string,
 ): Effect.Effect<
-  { readonly settings: SessionSettings; readonly planLabel: string | undefined },
+  {
+    readonly settings: SessionSettings;
+    readonly planLabel: string | undefined;
+    readonly isHeldByGoogle: boolean;
+  },
   AdapterError | AcpError,
   Scope.Scope
 > =>
   Effect.gen(function* () {
-    const storedId = yield* readProbeConversationId(ctx.home);
+    const storedId = yield* readConversationId(ctx.home);
     const folder = yield* makeProbeFolder(ctx.home);
     const handlers = yield* buildDecliningHandlers;
-    const { connection, planLabel, confirmOwnLogin } = yield* openSignedInAgy(spawn, ctx, binary, {
-      cwd: folder,
-      handlers,
-    });
+    const agy = yield* openSignedInAgy(spawn, ctx, binary, { cwd: folder, handlers });
     const resumed =
-      storedId === undefined ? undefined : yield* resumeConversation(connection, storedId, folder);
-    const conversation = resumed ?? (yield* makeConversation(connection, ctx.home, folder));
-    // `session/new` and `session/resume` start a new worker process.
-    yield* confirmOwnLogin;
-    yield* closeConversation(connection, conversation.id);
-    return { settings: conversation.settings, planLabel };
+      storedId === undefined ? undefined : yield* resumeConversation(agy, storedId, folder);
+    const conversation = resumed ?? (yield* makeConversation(agy, ctx.home, folder));
+    yield* closeConversation(agy.connection, conversation.id);
+    return {
+      settings: conversation.settings,
+      planLabel: agy.planLabel,
+      isHeldByGoogle: conversation.isHeldByGoogle,
+    };
   });
 
 /**
@@ -180,15 +274,19 @@ const readAccount = (
   binary: string,
 ): Effect.Effect<AccountFindings, AdapterError | AcpError> =>
   Effect.gen(function* () {
-    const emailBefore = yield* readSignedInEmail(ctx.home);
-    const { settings, planLabel } = yield* Effect.scoped(readSettings(spawn, ctx, binary));
+    const emailBefore = (yield* readLoginFile(ctx.home))?.email;
+    const { settings, planLabel, isHeldByGoogle } = yield* Effect.scoped(
+      openProbeConversation(spawn, ctx, binary),
+    );
     const models = buildModelCatalog(settings);
-    const usable = checkAccountUsable(planLabel, models);
+    const usable = checkAccountUsable(planLabel, models, isHeldByGoogle);
     if (Result.isFailure(usable)) return yield* Effect.fail(usable.failure);
-    const emailAfter = yield* readSignedInEmail(ctx.home);
+    const emailAfter = (yield* readLoginFile(ctx.home))?.email;
     if (emailAfter === undefined) {
       return yield* Effect.fail(
-        buildAdapterFailed(`Could not read who is signed in to ${ANTIGRAVITY_NAME}.`),
+        buildAdapterFailed(
+          `Could not read who is signed in to ${ANTIGRAVITY_NAME}. Sign in again on this runner.`,
+        ),
       );
     }
     if (emailAfter !== emailBefore) {
@@ -223,10 +321,9 @@ const readAccount = (
   );
 
 /**
- * Returns the probe result for what the account check found. A missing login,
- * and the `-32000` "Authentication required" of `session/new` or
- * `session/resume`, mean the account is signed out. Any other failure is an
- * `error`, so that being offline never reads as signed out.
+ * Returns the probe result for what the account check found. A missing login
+ * (`HarnessLoginMissing`) means the account is signed out. Any other failure
+ * is an `error`, so that being offline never reads as signed out.
  */
 const buildProbeResult = (
   version: string | null,
@@ -235,8 +332,7 @@ const buildProbeResult = (
   if (Result.isSuccess(account))
     return { harnessVersion: version, ...account.success, usage: null };
   const error = account.failure;
-  return error._tag === "HarnessLoginMissing" ||
-    (error._tag === "AcpError" && isSignInRequired(error))
+  return error._tag === "HarnessLoginMissing"
     ? { harnessVersion: version, auth: { status: "unauthenticated" }, models: [], usage: null }
     : buildFailedProbe(version, error.message);
 };

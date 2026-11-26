@@ -169,7 +169,7 @@ const buildRefusalMessage = (vendorLine: string): string => {
 };
 
 /** The failure message of a login that ends at its exit. It never quotes the vendor. */
-const EXIT_FAILURE_MESSAGE = `The sign-in did not finish: the code may be wrong or expired. ${START_AGAIN}`;
+const EXIT_FAILURE_MESSAGE = `The sign-in did not finish: the code may be wrong or expired, or the runner could not reach the vendor. ${START_AGAIN}`;
 
 const buildLoginFailed = (message: string): LoginAnswer => ({
   _tag: "loginFailed",
