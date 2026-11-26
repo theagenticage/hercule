@@ -340,6 +340,9 @@ export const closeTurn = (
   return events;
 };
 
+/** Returns true when a synthetic turn is open: output came with no input, and no input's turn is open. */
+export const hasOpenSyntheticTurn = (state: Normalizing): boolean => state.turn?.synthetic === true;
+
 /** Returns the events that close the synthetic turn when its last item has completed, else nothing. */
 const closeIdleSyntheticTurn = (state: Normalizing): HarnessEvent[] =>
   state.turn?.synthetic === true && state.turn.running.size === 0

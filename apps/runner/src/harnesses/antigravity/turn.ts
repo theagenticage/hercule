@@ -144,6 +144,12 @@ export interface Turn {
    * nothing to `agy`.
    */
   readonly stop: Effect.Effect<void>;
+  /**
+   * Returns true from the moment the Turn starts to end, before it emits
+   * anything for its end. A caller that asks it after `turn.completed` was
+   * published always gets true.
+   */
+  readonly hasEnded: () => boolean;
   /** Waits until the Turn has ended, which is after it emitted `turn.completed`. */
   readonly ended: Effect.Effect<void>;
 }
@@ -203,6 +209,7 @@ export const startTurn = (
     let interrupted = false;
     /** Whether a Request was answered `cancel`. `agy` then replies `end_turn`, so the reply alone does not show it. */
     let answeredCancel = false;
+    let isEnding = false;
     let interruption: Deferred.Deferred<InterruptResult> | undefined;
     /** The tool names of the Denies the current prompt got, counted once their reply was written. */
     let deniedToolNames: Array<string | null | undefined> = [];
@@ -435,6 +442,7 @@ export const startTurn = (
     /** Emits what ends the Turn: an error, when there is one, and `turn.completed`. */
     const finish = (state: TurnState, error?: TurnError): Effect.Effect<void> =>
       Effect.gen(function* () {
+        isEnding = true;
         // A Request still open here belongs to a prompt that is over.
         yield* cancelOpenRequests;
         if (error !== undefined) {
@@ -527,6 +535,7 @@ export const startTurn = (
       answer,
       interrupt,
       stop,
+      hasEnded: () => isEnding,
       ended: Deferred.await(ended),
     };
   });

@@ -1281,7 +1281,7 @@ it.effect.each([
 
       expect(yield* Effect.flip(harness.approvalRequests[0]!.replyWritten)).toMatchObject({
         reason: "closed",
-        message: expect.stringContaining("Could not write to the harness"),
+        message: expect.stringContaining("Could not write to the harness") as unknown,
       });
       expect(harness.fake.received.some(isReplyTo("p1"))).toBe(false);
     }),

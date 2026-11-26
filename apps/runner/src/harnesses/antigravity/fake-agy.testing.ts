@@ -17,6 +17,7 @@ import {
   type FakeHarness,
   type HarnessScript,
   type RecordedMessage,
+  type RecordingName,
 } from "@hercule/acp/testing";
 import type { HarnessRunnerContext } from "../index";
 import type { Run } from "../process";
@@ -132,17 +133,42 @@ const readRecordedResult = (method: string): unknown => {
   return recording.slice(asked + 1).find(({ direction }) => direction === "in")!.message.result;
 };
 
-/** The recording's reply to `session/new`, with the conversation's own id. */
-const readRecordedNewSession = (id: string): Record<string, unknown> => {
-  const reply = readRecording("cancel").find(
+/** The recording's reply to `session/new`. It holds the conversation's own id, models, modes and config options. */
+const readRecordedNewSession = (name: RecordingName): Record<string, unknown> =>
+  readRecording(name).find(
     ({ direction, message }) =>
       direction === "in" &&
       typeof message.result === "object" &&
       message.result !== null &&
       "sessionId" in message.result,
+  )!.message.result as Record<string, unknown>;
+
+/**
+ * Returns the id of the conversation a recording ran. The updates and requests
+ * of the recording name it, so a session over that recording must be given
+ * the same id.
+ */
+export const readRecordedConversation = (name: RecordingName): string =>
+  readRecordedNewSession(name)["sessionId"] as string;
+
+/**
+ * Returns the messages of a recording before its first prompt: the handshake
+ * and the opening of the conversation. A fake over them answers a prompt only
+ * with the script a test gives it, so the test decides how a turn goes.
+ */
+export const readRecordedSetup = (name: RecordingName): ReadonlyArray<RecordedMessage> => {
+  const recording = readRecording(name);
+  const firstPrompt = recording.findIndex(
+    ({ direction, message }) => direction === "out" && message.method === "session/prompt",
   );
-  return { ...(reply!.message.result as Record<string, unknown>), sessionId: id };
+  return recording.slice(0, firstPrompt);
 };
+
+/** A reply to `session/new` with the recording's models, modes and options for the conversation `id`. */
+const buildNewSessionReply = (name: RecordingName, id: string): Record<string, unknown> => ({
+  ...readRecordedNewSession(name),
+  sessionId: id,
+});
 
 /**
  * Returns a script for `session/resume`. Like `agy`, it answers with the
@@ -150,11 +176,11 @@ const readRecordedNewSession = (id: string): Record<string, unknown> => {
  * otherwise refuses with the error `agy` gives for an id it does not know.
  */
 export const answerResume =
-  (home: string): HarnessScript =>
+  (home: string, name: RecordingName = "cancel"): HarnessScript =>
   (call, harness) => {
     const id = (call.params as { sessionId: string }).sessionId;
     return existsSync(join(home, APP_DATA_DIR, "conversations", `${id}.db`))
-      ? answerWith(readRecordedNewSession(id))(call, harness)
+      ? answerWith(buildNewSessionReply(name, id))(call, harness)
       : refuse(-32603, `Failed to read session ${id}; retry, or load it with session/load`)(
           call,
           harness,
@@ -166,10 +192,25 @@ export const answerResume =
  * `home` first, as `agy` does, and then answers with the recording's models.
  */
 export const answerNewSession =
-  (home: string, id: string = CONVERSATION): HarnessScript =>
+  (home: string, id: string = CONVERSATION, name: RecordingName = "cancel"): HarnessScript =>
   (call, harness) => {
     createConversationFiles(home, id);
-    return answerWith(readRecordedNewSession(id))(call, harness);
+    return answerWith(buildNewSessionReply(name, id))(call, harness);
+  };
+
+/**
+ * Returns a script for `session/set_config_option` that accepts the change and
+ * answers with the recording's config options, the changed one holding its new
+ * value, as `agy` does.
+ */
+export const answerConfigChange =
+  (name: RecordingName): HarnessScript =>
+  ({ id, params }) => {
+    const { configId, value } = params as { configId: string; value: string };
+    const configOptions = (
+      readRecordedNewSession(name)["configOptions"] as Array<{ id: string }>
+    ).map((option) => (option.id === configId ? { ...option, currentValue: value } : option));
+    return [{ jsonrpc: "2.0", id, result: { configOptions } }];
   };
 
 export interface Spawned {
@@ -214,6 +255,13 @@ export interface FakeAgyOptions {
   readonly version?: string | null;
   /** Makes `agy --version` never end. */
   readonly hangVersion?: boolean;
+  /**
+   * The recording the process plays. The default is `cancel`. A name also
+   * decides the conversation's id (`readRecordedConversation`). Pass
+   * `readRecordedSetup(name)` for a process that plays no turn, so that a test
+   * scripts it by hand.
+   */
+  readonly recording?: RecordingName | ReadonlyArray<RecordedMessage>;
   /** Leaves `antigravity.systemPrompt.append` out of the reply to `initialize`, as an older `agy` does. */
   readonly withoutSystemPromptCapability?: boolean;
 }
@@ -252,11 +300,18 @@ const removeSystemPromptCapability = (
  */
 export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAgy => {
   const { frontLog = "", stderrLines = [] } = options;
+  const recordingName: RecordingName =
+    options.recording === undefined || typeof options.recording !== "string"
+      ? "cancel"
+      : options.recording;
+  const conversation = readRecordedConversation(recordingName);
   const scripts: Record<string, HarnessScript> = {
     authenticate: answerWith(readRecordedResult("authenticate")),
-    "session/new": answerNewSession(home),
-    "session/resume": answerResume(home),
+    "session/new": answerNewSession(home, conversation, recordingName),
+    "session/resume": answerResume(home, recordingName),
     "session/close": answerWith({}),
+    "session/set_config_option": answerConfigChange(recordingName),
+    "session/set_mode": answerWith({}),
     ...options.scripts,
   };
   const spawns: Array<Spawned> = [];
@@ -280,11 +335,15 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
     const stderr = createLines();
     for (const line of stderrLines) stderr.push(line);
     if (options.holdStderrOpen !== true) stderr.end();
+    const recording =
+      options.recording === undefined || typeof options.recording === "string"
+        ? readRecording(recordingName)
+        : options.recording;
     const harness = startFakeHarness({
       recording:
         options.withoutSystemPromptCapability === true
-          ? removeSystemPromptCapability(readRecording("cancel"))
-          : readRecording("cancel"),
+          ? removeSystemPromptCapability(recording)
+          : recording,
       scripts: harnessScripts,
     });
     const signals: Array<string | undefined> = [];
@@ -295,6 +354,7 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
     spawns.push(spawned);
     return {
       // A checked write returns a promise, like the real one.
+      // oxlint-disable-next-line typescript/require-await
       write: async (text) => harness.write(text),
       stdout: harness.stdout,
       stderr: stderr.iterable,

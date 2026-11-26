@@ -643,6 +643,23 @@ describe("opening a conversation", () => {
     expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
   });
 
+  it("hands the id of a resumed conversation over before it checks the worker", async () => {
+    const { home, fake } = setUp({ workerLogs: { "session/resume": KEYRING_LINE } });
+    createConversationFiles(home, CONVERSATION);
+    const kept: Array<string> = [];
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }, (id) =>
+        Effect.sync(() => {
+          kept.push(id);
+        }),
+      ),
+    );
+
+    expect(kept).toEqual([CONVERSATION]);
+    expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
+  });
+
   it("fails when the id cannot be kept", async () => {
     const { home, fake } = setUp();
 

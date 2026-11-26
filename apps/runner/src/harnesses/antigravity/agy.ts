@@ -105,23 +105,27 @@ export interface SignedInAgy {
    * does not fail for an account that cannot be used (see
    * `OpenedConversation.isHeldByGoogle` and `checkAccountUsable`).
    *
-   * `keepId`, when given, is called with the id of the new conversation as
+   * `onReply`, when given, is called with the id of the new conversation as
    * soon as `agy` replies, in the same step that cannot be interrupted, and
    * before the check of the worker's login. A caller that keeps the id there
-   * never loses a conversation to a failed check. When `keepId` fails, so does
-   * the call.
+   * never loses a conversation to a failed check. When `onReply` fails, so
+   * does the call.
    */
   readonly newConversation: (
     request: NewSessionRequest,
-    keepId?: (id: string) => Effect.Effect<void, AdapterError>,
+    onReply?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
   /**
    * Resumes the conversation `request.nativeSessionId`. Fails like
    * `newConversation`, and with `ResumeTranscriptMissing` when `agy` has no
-   * such conversation (`isConversationMissing`).
+   * such conversation (`isConversationMissing`). `onReply` works as for
+   * `newConversation`, with the id of the resumed conversation. A caller that
+   * starts reading the conversation's updates there knows that every update
+   * before the reply was the resume's replay, and every one after it is not.
    */
   readonly resumeConversation: (
     request: ResumeSessionRequest,
+    onReply?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
 }
 
@@ -693,10 +697,10 @@ export const openSignedInAgy = (
     return {
       connection,
       planLabel: readPlanLabel(reply.meta),
-      newConversation: (request, keepId) =>
+      newConversation: (request, onReply) =>
         Effect.map(
           openConversation(connection.newSession(request), (opened) =>
-            keepId === undefined ? Effect.void : keepId(opened.nativeSessionId),
+            onReply === undefined ? Effect.void : onReply(opened.nativeSessionId),
           ),
           ([opened, isHeldByGoogle]) => ({
             id: opened.nativeSessionId,
@@ -704,9 +708,11 @@ export const openSignedInAgy = (
             isHeldByGoogle,
           }),
         ),
-      resumeConversation: (request) =>
+      resumeConversation: (request, onReply) =>
         Effect.map(
-          openConversation(connection.resumeSession(request), () => Effect.void).pipe(
+          openConversation(connection.resumeSession(request), () =>
+            onReply === undefined ? Effect.void : onReply(request.nativeSessionId),
+          ).pipe(
             Effect.catch((error) =>
               error._tag === "AcpError" && isConversationMissing(error)
                 ? Effect.fail(

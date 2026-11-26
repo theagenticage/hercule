@@ -293,7 +293,7 @@ describe("the subagent recording", () => {
     expect(itemsOf(events, "subagent")).toMatchObject([
       {
         status: "completed",
-        detail: { description: expect.stringContaining("Notes"), subagentIds: [] },
+        detail: { description: expect.stringContaining("Notes") as unknown, subagentIds: [] },
       },
     ]);
   });
@@ -863,7 +863,7 @@ describe("the files of the plan", () => {
     expect(outline(events)).toEqual(["item.completed file_change", "runtime.warning"]);
     expect(events[1]).toMatchObject({
       turnId: "t",
-      message: expect.stringContaining(String(MAX_TODO_STEPS + 1)),
+      message: expect.stringContaining(String(MAX_TODO_STEPS + 1)) as unknown,
     });
     expect(outline(closeTurn(state, { state: "completed" }))).toEqual([
       "item.completed todo_list",

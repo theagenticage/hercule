@@ -587,7 +587,7 @@ describe("how a turn fails", () => {
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "failed" });
         expect(h.tags("runtime.error")).toMatchObject([
-          { turnId: TURN, message: expect.stringContaining("refused the prompt") },
+          { turnId: TURN, message: expect.stringContaining("refused the prompt") as unknown },
         ]);
       }),
     ));
@@ -603,7 +603,7 @@ describe("how a turn fails", () => {
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "failed" });
         expect(h.tags("runtime.error")).toMatchObject([
-          { class: stopReason, message: expect.stringContaining(words) },
+          { class: stopReason, message: expect.stringContaining(words) as unknown },
         ]);
       }),
     ),
@@ -616,7 +616,7 @@ describe("how a turn fails", () => {
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "failed" });
         expect(h.tags("runtime.error")).toMatchObject([
-          { class: "unknown", message: expect.stringContaining("something_new") },
+          { class: "unknown", message: expect.stringContaining("something_new") as unknown },
         ]);
       }),
     ));
@@ -628,7 +628,7 @@ describe("how a turn fails", () => {
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "failed" });
         expect(h.tags("runtime.error")).toMatchObject([
-          { message: expect.stringContaining("Your next message resumes") },
+          { message: expect.stringContaining("Your next message resumes") as unknown },
         ]);
       }),
     ));

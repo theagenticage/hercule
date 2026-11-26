@@ -1,7 +1,8 @@
 /**
  * Tests the Antigravity adapter as the runner sees it: that its names are the
  * ones its plugin declares, that it probes and signs in through `agy`, and what
- * it refuses while it runs no sessions. A fake `agy` stands in for the real
+ * it does for a session it does not host. Running sessions are tested in
+ * `session.test.ts`. A fake `agy` stands in for the real
  * one, which is never started.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -118,27 +119,21 @@ describe("a text generation", () => {
   });
 });
 
-describe("the sessions of the adapter", () => {
-  it("lists none, and stopping a session it does not hold does nothing", async () => {
+describe("a session the adapter does not host", () => {
+  it("lists none, refuses an input and an answer, and ignores stops, interrupts and decisions", async () => {
     const adapter = buildAdapter(createSignedInHome());
 
     expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
-    await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
-    expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
-  });
-});
-
-describe("a session", () => {
-  it("cannot start yet, and says so", async () => {
-    const home = createSignedInHome();
-
-    const failure = await Effect.runPromise(
+    const input = await Effect.runPromise(Effect.flip(adapter.sendInput(SESSION, { text: "Hi." })));
+    expect(input._tag).toBe("SessionNotRunning");
+    const answer = await Effect.runPromise(
       Effect.flip(
-        buildAdapter(home).startSession(SESSION, SPEC, { ...buildContext(home), mcpServers: [] }),
+        adapter.respondToQuestion(SESSION, "request", { Question: "Green" }, SPEC.modelSelection),
       ),
     );
-
-    expect(failure._tag).toBe("AdapterFailed");
-    expect(failure.message).toBe("This version of Hercule cannot run Antigravity sessions yet.");
+    expect(answer._tag).toBe("AnswerNotDelivered");
+    await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
+    await Effect.runPromise(adapter.interrupt(SESSION));
+    await Effect.runPromise(adapter.respondToApprovalRequest(SESSION, "request", "allow"));
   });
 });
