@@ -429,54 +429,65 @@ describe("the deny2 recording", () => {
 });
 
 describe("a call the pre-tool hook denied", () => {
-  const reason =
-    "tool call denied by pre-tool hook: Hercule does not let the agent change .agents/hooks.json";
-  const buildDeniedUpdate = (call: ToolCall): SessionUpdateNotification =>
+  // The updates of recordings/rec12/c4-default.jsonl (lines 19 and 28), with
+  // the reason Hercule's hook gives where the recording has an empty one.
+  const buildDeniedUpdate = (call: ToolCall, reason: string): SessionUpdateNotification =>
     buildToolUpdate({
       ...call,
       status: "failed",
       rawOutput: reason,
       content: [{ type: "content", content: { type: "text", text: reason } }],
     });
-  const complete = (call: ToolCall) => {
+  const WRITE = {
+    toolCallId: "call_4241516389100288659",
+    name: "write_file",
+    kind: "edit",
+    title: "File hello.txt",
+    locations: [{ path: "/w/hello.txt" }],
+    rawInput: { Content: "hi", Path: "/w/hello.txt" },
+  };
+  const RUN = {
+    toolCallId: "call_980776587974295514",
+    name: "run_command",
+    kind: "execute",
+    title: "echo hi",
+    rawInput: { CommandLine: "echo hi", WaitMsBeforeAsync: 5000, toolSummary: "Echo hi" },
+  };
+  const REASON = "tool call denied by pre-tool hook: Web search is off in Approval required.";
+  const complete = (call: ToolCall, reason = REASON) => {
     const state = freshState();
     openTurn(state, "t");
     normalizeUpdate(state, buildToolStart(call));
-    return normalizeUpdate(state, buildDeniedUpdate(call));
+    return normalizeUpdate(state, buildDeniedUpdate(call, reason));
   };
 
   it("shows the reason in the detail of a failed file_change", () => {
-    const events = complete({
-      toolCallId: "w1",
-      name: "write_file",
-      kind: "edit",
-      rawInput: { Content: "hi", Path: "/w/hello.txt" },
-    });
-    expect(events).toMatchObject([
+    expect(complete(WRITE)).toMatchObject([
       {
         _tag: "item.completed",
         kind: "file_change",
         status: "failed",
-        detail: { content: reason },
+        detail: { content: REASON },
       },
     ]);
   });
 
   it("shows the reason in the detail of a failed command_execution", () => {
-    const events = complete({
-      toolCallId: "r1",
-      name: "run_command",
-      kind: "execute",
-      rawInput: { CommandLine: "echo hi" },
-    });
-    expect(events).toMatchObject([
+    expect(complete(RUN)).toMatchObject([
       {
         _tag: "item.completed",
         kind: "command_execution",
         status: "failed",
-        detail: { command: "echo hi", content: reason },
+        detail: { command: "echo hi", content: REASON },
       },
     ]);
+  });
+
+  it("hides the session token when it is in the reason", () => {
+    const secret = "sess-tok-7f3a91c2e8";
+    const hide = makeEventSecretHider(secret);
+    const events = hide(complete(WRITE, `tool call denied by pre-tool hook: ${secret}`));
+    expect(JSON.stringify(events)).not.toContain(secret);
   });
 });
 
