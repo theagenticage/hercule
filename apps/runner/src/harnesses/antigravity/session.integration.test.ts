@@ -45,6 +45,8 @@ import type {
   ModelDescriptor,
   SessionSpec,
 } from "@hercule/protocol";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import {
   buildLoadedSkills,
   listWorkspaceRepositorySkills,
@@ -58,7 +60,7 @@ import type { AdapterTurnInput, HarnessAdapter, SessionStartContext } from "../i
 import { NO_USER_MATERIAL } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import { findAgyTestBinary } from "./agy-binary.testing";
-import { buildContext } from "./fake-agy.testing";
+import { buildContext, TEST_SESSION_TOKEN } from "./fake-agy.testing";
 import { APP_DATA_DIR } from "./harness-home";
 
 const pinnedBinary = findAgyTestBinary();
@@ -272,9 +274,15 @@ const buildStartContext = (
   cwd: string,
   overrides: Partial<SessionStartContext> = {},
 ): SessionStartContext => ({
-  ...buildContext(harnessHome, binaryPath, buildProbeEnvironment()),
+  ...buildContext(harnessHome, binaryPath, {
+    ...buildProbeEnvironment(),
+    [SESSION_TOKEN_VARIABLE]: TEST_SESSION_TOKEN,
+  }),
   cwd,
-  mcpServers: [],
+  // A session always gets the gateway entry. Nothing listens at this address (the
+  // discard port), so `agy` finds the server unreachable at once, and these tests
+  // use no Hercule tool. The gateway itself is tested in `mcp-antigravity.integration.test.ts`.
+  mcpServers: [{ name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:9/mcp" }],
   ...overrides,
 });
 
