@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import type { AgySpawn } from "./antigravity";
 import type { AppServerSpawn } from "./codex";
 import type { LoginChild, LoginSpawn, LoginSpawnOptions } from "./login";
 import type { PiSpawn } from "./pi";
@@ -341,7 +342,7 @@ export const stopChild = (
 
 const noop = (): void => undefined;
 
-/** Spawns a line-framed harness. Shared by the Codex and pi adapters. */
+/** Spawns a line-framed harness. Shared by the Codex, pi and Antigravity adapters. */
 const spawnFramed = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
@@ -383,3 +384,5 @@ const spawnFramed = (
 export const spawnAppServer: AppServerSpawn = spawnFramed;
 
 export const spawnPi: PiSpawn = spawnFramed;
+
+export const spawnAgy: AgySpawn = spawnFramed;

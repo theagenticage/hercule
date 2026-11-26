@@ -1,5 +1,5 @@
 /**
- * What the three adapters share in `deleteSessionFiles`: reading a folder that
+ * What the adapters share in `deleteSessionFiles`: reading a folder that
  * may not exist, and removing the files found, turning a failure into an
  * `AdapterFailed` whose message is the reason the operating system gave.
  */
@@ -9,13 +9,21 @@ import * as Effect from "effect/Effect";
 import type { AdapterFailed } from "@hercule/protocol";
 import { buildAdapterFailed } from "./adapter-error-builders";
 
+/**
+ * Checks whether `error` is a Node error for a path that does not exist, or
+ * that goes through a file as if it were a folder.
+ */
+export const isMissingPath = (error: unknown): boolean => {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
 /** Returns the names in `folder`, or none when it does not exist or is not a folder. */
 export const readFolderNames = async (folder: string): Promise<ReadonlyArray<string>> => {
   try {
     return await readdir(folder);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    if (isMissingPath(error)) return [];
     throw error;
   }
 };
@@ -29,8 +37,7 @@ export const isRealFolder = async (path: string): Promise<boolean> => {
   try {
     return (await lstat(path)).isDirectory();
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    if (isMissingPath(error)) return false;
     throw error;
   }
 };

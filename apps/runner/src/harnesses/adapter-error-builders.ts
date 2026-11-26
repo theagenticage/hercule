@@ -5,13 +5,14 @@
  * runs the session.
  *
  * `harnessName` is the name the user knows the harness by: "Claude Code",
- * "Codex" or "pi". A `reason` is text from the harness or the operating
+ * "Codex", "pi" or "Antigravity". A `reason` is text from the harness or the operating
  * system. It ends the message, after a lead-in that describes what happened,
  * and the builders cut the message to the protocol's limit because a longer
  * one cannot be put in an error.
  */
 import {
   AnswerNotDelivered,
+  HarnessLoginMissing,
   HarnessNotInstalled,
   HarnessProtocolError,
   InputNotDelivered,
@@ -54,6 +55,10 @@ export const buildAnswerNotDelivered = (text: string): AnswerNotDelivered =>
 /** Builds the failure of `startSession` for a runner that has no binary of the harness. */
 export const buildHarnessNotInstalled = (harnessName: string): HarnessNotInstalled =>
   new HarnessNotInstalled({ message: `${harnessName} is not installed on this runner.` });
+
+/** Builds the failure of `startSession` for a harness that needs an account and has none on this runner. */
+export const buildHarnessLoginMissing = (harnessName: string): HarnessLoginMissing =>
+  new HarnessLoginMissing({ message: `${harnessName} is not signed in on this runner.` });
 
 /**
  * Returns the sentence for a harness that could not be started. Used by

@@ -17,6 +17,10 @@
  * draws a text UI that prints nothing on plain pipes. The runner reads the
  * screen that UI draws (see `TerminalScreen`), not its raw output. A login
  * that makes a token returns the token in its success result.
+ *
+ * A terminal login that shows a refusal of the pasted code ends. A plain-pipe
+ * login whose command sets `endsAtExit` is decided by the process exit alone.
+ * Either way the user must start the login again, because the link is spent.
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
@@ -99,6 +103,15 @@ export interface LoginCommand {
    */
   readonly refusal?: RegExp;
   /**
+   * Set by a plain-pipe login whose vendor reads one code and then exits,
+   * whatever the code was. The process exit alone decides the outcome: 0 is
+   * success, and any other exit after the code is a failure that ends the
+   * login, because the vendor will not read a second code. stderr is not read
+   * as a complaint, since a vendor may warn there and still save the login.
+   * The failure message is fixed, since a vendor error can echo what was pasted.
+   */
+  readonly endsAtExit?: boolean;
+  /**
    * Set by a login that makes a token. Matches the token as it appears on the
    * screen; the first match is returned in the success result. Matches are
    * also removed from every message the login reports, so a token never
@@ -142,6 +155,21 @@ const NO_LOGIN = "no login in progress";
  */
 const readTail = (value: string, whenSilent: string): string =>
   value.trim() === "" ? whenSilent : value.trim().slice(-MAX_FACT_LENGTH);
+
+/** What the user must do after a refused code: the link is spent, so a second code cannot work. */
+const START_AGAIN = "This sign-in cannot take another code; start it again for a new link.";
+
+/**
+ * Returns the message for a terminal login whose vendor refused the pasted
+ * code: the vendor's own words, then what the user must do.
+ */
+const buildRefusalMessage = (vendorLine: string): string => {
+  const reason = truncateFact(vendorLine.trim()).replace(/[.\s]+$/, "");
+  return `${reason}. ${START_AGAIN}`;
+};
+
+/** The failure message of a login that ends at its exit. It never quotes the vendor. */
+const EXIT_FAILURE_MESSAGE = `The sign-in did not finish: the code may be wrong or expired, or the runner could not reach the vendor. ${START_AGAIN}`;
 
 const buildLoginFailed = (message: string): LoginAnswer => ({
   _tag: "loginFailed",
@@ -229,6 +257,8 @@ interface Held {
   readonly transcript: () => string;
   /** Resolves once everything the child printed has been read. */
   readonly finished: Promise<void>;
+  /** Whether the process exit alone decides this login (see `LoginCommand.endsAtExit`). */
+  readonly endsAtExit: boolean;
   /** Whether the child runs in a pseudo-terminal, which takes Enter, not a newline, to end a line. */
   readonly terminal: boolean;
   /** Whether the login makes a token, which the success result must then carry. */
@@ -454,6 +484,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
                   .slice(-MAX_TRANSCRIPT),
           ),
         finished: spent,
+        endsAtExit: screen === undefined && command.endsAtExit === true,
         terminal: screen !== undefined,
         makesToken: command.tokenPattern !== undefined,
         readToken,
@@ -573,6 +604,14 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           login.child.write(`${code}${login.terminal ? "\r" : "\n"}`);
         });
         const ended = Effect.promise(() => login.child.exited);
+        if (login.endsAtExit) {
+          // The login's idle timer still bounds a vendor that never exits.
+          const exit = yield* ended;
+          yield* forgetLogin(providerAccountId, login);
+          return exit === 0
+            ? { _tag: "loginResult", ok: true }
+            : buildLoginFailed(EXIT_FAILURE_MESSAGE);
+        }
         const outcome = yield* Effect.promise(() =>
           Promise.race([
             login.nextComplaint().then((line) => ({ complaint: line })),
@@ -583,10 +622,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           // The vendor's own screen answers a refused code with a new sign-in
           // and a new URL, so the URL the user holds is dead.
           yield* stopLogin(providerAccountId, login);
-          const reason = truncateFact(outcome.complaint.trim()).replace(/[.\s]+$/, "");
-          return buildLoginFailed(
-            `${reason}. This sign-in cannot take another code; start it again for a new link.`,
-          );
+          return buildLoginFailed(buildRefusalMessage(outcome.complaint));
         }
         if ("complaint" in outcome) {
           // The vendor also writes to stderr as it exits, so a stderr line only

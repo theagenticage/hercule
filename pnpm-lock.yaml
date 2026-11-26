@@ -267,6 +267,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.263
         version: 0.3.263(@anthropic-ai/sdk@0.124.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(zod@4.5.4)
+      '@hercule/acp':
+        specifier: workspace:*
+        version: link:../../packages/acp
       '@hercule/home':
         specifier: workspace:*
         version: link:../../packages/home
@@ -286,6 +289,12 @@ importers:
       '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@hercule/plugin-antigravity':
+        specifier: workspace:*
+        version: link:../../plugins/antigravity
+      '@hercule/plugin-google':
+        specifier: workspace:*
+        version: link:../../plugins/google
 
   apps/web:
     dependencies:

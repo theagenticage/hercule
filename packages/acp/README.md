@@ -33,7 +33,7 @@ The `elicitation/complete` notification gets a handler that only reports it: thi
 
 `agent.ts` (the agent side of the protocol), every `*.test.ts` and `test/` are copied only for T3's tests, which run in our suite.
 
-Only `src/connection.ts` imports the copy, tests and `import type` included, and the rest of the repository imports `@hercule/acp` only (and `@hercule/acp/testing`). An import rule in `eslint.config.js` enforces both, so `pnpm lint` fails otherwise. `pnpm dep-lint` keeps the package's import graph to `effect`, so that the runner can link the package: nothing links it yet.
+Only `src/connection.ts` imports the copy, tests and `import type` included, and the rest of the repository imports `@hercule/acp` only (and `@hercule/acp/testing`). An import rule in `eslint.config.js` enforces both, so `pnpm lint` fails otherwise. `pnpm dep-lint` keeps the package's import graph to `effect`, so that the runner can link the package, and the runner does.
 
 ## When the harness sends a value T3 does not know
 

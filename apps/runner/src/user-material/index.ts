@@ -31,6 +31,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../harnesses";
+import { isMissingPath } from "../harnesses/session-files";
 
 /**
  * User Material with no paths. A Claude Code Thread always gets it, because
@@ -60,12 +61,6 @@ interface FoundMaterial {
   readonly material: UserMaterial;
   readonly warnings: ReadonlyArray<string>;
 }
-
-/** Checks that a filesystem error means nothing is at the path. */
-const isMissingPath = (error: unknown): boolean => {
-  const code = (error as { readonly code?: unknown } | null)?.code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
 
 /**
  * Picks the user's instructions file: the first of `candidates` that is a

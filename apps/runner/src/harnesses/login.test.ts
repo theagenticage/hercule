@@ -20,7 +20,7 @@ import {
   type LoginChild,
   type LoginSpawn,
 } from "./login";
-import type { HarnessRunnerContext } from "./index";
+import type { HarnessAdapter, HarnessRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
 
 const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
@@ -87,6 +87,9 @@ interface Fake {
   readonly complains: (line: string) => void;
   readonly stdin: ReadonlyArray<string>;
   readonly exit: (code: number) => void;
+  /** Reports the exit but leaves stdout and stderr open, as a pipe a grandchild still holds. */
+  readonly exitWithOutputOpen: (code: number) => void;
+  readonly closeOutput: () => void;
   readonly killed: () => boolean;
 }
 
@@ -127,6 +130,11 @@ const createMachine = () => {
       says: out.write,
       complains: err.write,
       exit: endChild,
+      exitWithOutputOpen: settle,
+      closeOutput: () => {
+        out.end();
+        err.end();
+      },
       killed: () => killed,
     });
     return child;
@@ -456,6 +464,123 @@ describe("more than one login at a time", () => {
     );
 
     expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+});
+
+/**
+ * A plain-pipe login whose command sets `endsAtExit`, like Google's
+ * `agy acp --login`: the vendor reads one code and exits. After a wrong code it
+ * prints its refusal on stdout and exits 1; after a good code it exits 0. The
+ * exit alone decides, whatever the streams carried.
+ */
+describe("a plain-pipe login that ends at its exit", () => {
+  const AGY_URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=agy";
+  const FAILURE_MESSAGE =
+    "The sign-in did not finish: the code may be wrong or expired, or the runner could not reach the vendor. This sign-in cannot take another code; start it again for a new link.";
+
+  const adapterWith = (endsAtExit: boolean): HarnessAdapter => ({
+    ...claudeCode,
+    login: () => ({
+      command: ["agy", "acp", "--login"],
+      env: {},
+      ...(endsAtExit ? { endsAtExit } : {}),
+    }),
+  });
+
+  /** Starts the login, which prints its link and instructions before it waits for the code. */
+  const startLogin = (
+    driver: ReturnType<typeof makeLogins>,
+    children: ReadonlyArray<Fake>,
+    adapter: HarnessAdapter,
+  ) =>
+    Effect.gen(function* () {
+      const starting = yield* Effect.forkChild(
+        driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+      );
+      yield* TestClock.adjust(Duration.zero);
+      yield* Effect.sync(() => children[0]!.says(`${AGY_URL}\nEnter the code: `));
+      yield* Fiber.join(starting);
+    });
+
+  const submitCode = (driver: ReturnType<typeof makeLogins>) =>
+    Effect.gen(function* () {
+      const submitting = yield* Effect.forkChild(driver.submit(ACCOUNT_ID, "a-wrong-code"));
+      yield* TestClock.adjust(Duration.zero);
+      return submitting;
+    });
+
+  it("ends the login as failed with fixed text when the child exits non-zero", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(true));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => {
+          children[0]!.says(`couldn't log in: bad request for ${AGY_URL}&code=a-wrong-code\n`);
+          children[0]!.exit(1);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginFailed", message: FAILURE_MESSAGE });
+  });
+
+  it("fails the same way when the child exits non-zero without printing anything", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(true));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.exit(1));
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginFailed", message: FAILURE_MESSAGE });
+  });
+
+  it("does not read stderr as a complaint: a warning, then an exit 0 after the grace, is a success", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(true));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.complains("warning: keychain is locked\n"));
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* Effect.sync(() => {
+          children[0]!.says("Logged in as someone@example.com.\n");
+          children[0]!.exit(0);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+
+  it("reports a stderr line as an ordinary complaint when the command does not set endsAtExit", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(false));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.complains("Invalid code\n"));
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginResult", ok: false, message: "Invalid code" });
   });
 });
 

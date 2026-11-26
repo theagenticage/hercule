@@ -12,7 +12,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomically } from "./atomic-file";
+import { writeFileAtomically } from "../atomic-file";
 
 const STORE_FILE = "models-store.json";
 

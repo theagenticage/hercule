@@ -611,11 +611,13 @@ describe("adapters", () => {
       "claude-code/claude-code",
       "codex/codex",
       "pi/pi",
+      "antigravity/antigravity",
     ]);
     expect((await probePrinted({ git: GIT })).adapters).toEqual([
       "claude-code/claude-code",
       "codex/codex",
       "pi/pi",
+      "antigravity/antigravity",
     ]);
   });
 
@@ -624,7 +626,12 @@ describe("adapters", () => {
     expect(codex).toBeDefined();
 
     const facts = await probePrinted(withoutCodex);
-    expect(facts.adapters).toEqual(["claude-code/claude-code", "codex/codex", "pi/pi"]);
+    expect(facts.adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+      "antigravity/antigravity",
+    ]);
     // Adapters do not replace the binaries: the fleet has to show both that
     // this build can drive Codex and that the machine has no `codex` binary.
     expect(facts.harnesses).toEqual([

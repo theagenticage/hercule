@@ -905,7 +905,7 @@ describe("a session that cannot start", () => {
     const refused = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
 
     expect(refused).toBeInstanceOf(HarnessLoginMissing);
-    expect(refused.message).toContain("not logged in");
+    expect(refused.message).toBe("Codex is not signed in on this runner.");
     // The app-server must not be left running for a session that never started.
     expect(spawns).toHaveLength(1);
     expect(spawns[0]?.kills()).toBe(1);
