@@ -391,17 +391,24 @@ export interface AcpConnection {
   /** Tells the harness it may free the session `nativeSessionId`. */
   readonly closeSession: (nativeSessionId: string) => Effect.Effect<void, AcpError>;
   /**
-   * Sends a prompt and waits until the turn ends, which may take as long as the
-   * agent works. Fails when the connection ends first, with `refused` when the
-   * harness reports an error for the turn, and with `unreadable` when the reply
-   * has no stop reason this version knows. Updates the harness sent before its
-   * reply are handled before this returns. Updates it sends after its reply
-   * may be handled before the caller sees the reply.
+   * Sends a prompt in two stages. The returned effect succeeds once the line
+   * of the `session/prompt` request was written to the harness's input, and
+   * its value is a second effect that waits until the turn ends, which may take
+   * as long as the agent works.
+   *
+   * The first effect fails with `closed` when the write failed or the
+   * connection ended before the line was written: the harness did not get the
+   * prompt, and no reply will come. The second effect fails when the
+   * connection ends first, with `refused` when the harness reports an error for
+   * the turn, and with `unreadable` when the reply has no stop reason this
+   * version knows. Updates the harness sent before its reply are handled before
+   * the second effect returns. Updates it sends after its reply may be handled
+   * before the caller sees the reply.
    */
-  readonly prompt: (
+  readonly sendPrompt: (
     nativeSessionId: string,
     content: ReadonlyArray<PromptContent>,
-  ) => Effect.Effect<PromptReply, AcpError>;
+  ) => Effect.Effect<Effect.Effect<PromptReply, AcpError>, AcpError>;
   /**
    * Asks the harness to stop the turn. Returns when the request is queued for
    * writing. It does not answer an approval request that is still open: the

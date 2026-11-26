@@ -241,7 +241,7 @@ export const callEverything = (connection: AcpConnection) =>
     yield* connection.resumeSession({ nativeSessionId: SESSION, cwd: "/work", mcpServers: [] });
     yield* connection.setMode(SESSION, "auto");
     yield* connection.setConfigOption(SESSION, "model", "gemini");
-    yield* connection.prompt(SESSION, TEXT);
+    yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT));
     yield* connection.cancel(SESSION);
     yield* connection.closeSession(SESSION);
   });

@@ -6,7 +6,7 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
 import type { ElicitationField, ElicitationRequest } from "@hercule/acp";
-import { MAX_FACT_LENGTH, type QuestionAnswers } from "@hercule/protocol";
+import { MAX_FACT_ITEMS, MAX_FACT_LENGTH, type QuestionAnswers } from "@hercule/protocol";
 import {
   buildApprovalOutcome,
   buildElicitationReply,
@@ -192,17 +192,64 @@ describe("several questions", () => {
 });
 
 describe("option labels that are equal", () => {
-  it("keeps each option and maps each back to its own const after truncation", () => {
+  it("keeps the first of equal labels, also after truncation, and maps it to its own const", () => {
     const long = "x".repeat(MAX_FACT_LENGTH + 10);
-    const form = readForm({ q1: buildSelect("Pick?", `${long}a`, `${long}b`, "Same", "Same") });
+    const form = readForm({ q1: buildSelect("Pick?", "Red", long, "Blue", "Red", `${long}b`) });
     const labels = form.questions[0].options.map((option) => option.label);
-    expect(new Set(labels).size).toBe(4);
-    for (const label of labels) expect(label.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
+    expect(labels).toHaveLength(3);
+    expect([labels[0], labels[2]]).toEqual(["Red", "Blue"]);
     const consts = labels.map((label) => {
       const reply = answerOk(form, { Question: label });
       return reply.action === "accept" ? reply.content["q1"] : undefined;
     });
-    expect(consts).toEqual(["1", "2", "3", "4"]);
+    expect(consts).toEqual(["1", "2", "3"]);
+  });
+});
+
+describe("a form too big for the protocol", () => {
+  const choices = (count: number) =>
+    Array.from({ length: count }, (_, index) => `Choice ${String(index)}`);
+
+  it("reads a form at the bounds", () => {
+    const properties = Object.fromEntries(
+      Array.from({ length: MAX_FACT_ITEMS }, (_, index) => [
+        `q${String(index)}`,
+        buildSelect("Pick?", "A"),
+      ]),
+    );
+    expect(readQuestionForm(buildRequest(properties))).toBeDefined();
+    expect(
+      readQuestionForm(buildRequest({ q1: buildSelect("Pick?", ...choices(MAX_FACT_ITEMS)) })),
+    ).toBeDefined();
+  });
+
+  it("is undefined for too many questions", () => {
+    const properties = Object.fromEntries(
+      Array.from({ length: MAX_FACT_ITEMS + 1 }, (_, index) => [
+        `q${String(index)}`,
+        buildSelect("Pick?", "A"),
+      ]),
+    );
+    expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+  });
+
+  it("is undefined for too many choices", () => {
+    const properties = { q1: buildSelect("Pick?", ...choices(MAX_FACT_ITEMS + 1)) };
+    expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+  });
+
+  it("is undefined when the text of all of it would not fit one frame", () => {
+    const long = "y".repeat(MAX_FACT_LENGTH);
+    const properties = Object.fromEntries(
+      Array.from({ length: MAX_FACT_ITEMS }, (_, index) => [
+        `q${String(index)}`,
+        buildSelect(
+          "Pick?",
+          ...Array.from({ length: MAX_FACT_ITEMS }, (_, choice) => `${String(choice)}${long}`),
+        ),
+      ]),
+    );
+    expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
   });
 });
 

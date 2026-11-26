@@ -27,6 +27,7 @@ import type {
   ApprovalOutcome,
   ElicitationReply,
   PromptContent,
+  PromptReply,
   SessionSettings,
 } from "@hercule/acp";
 import { SteerRefused } from "@hercule/protocol";
@@ -46,6 +47,7 @@ import type {
   SessionSpec,
 } from "@hercule/protocol";
 import {
+  buildInputNotWritten,
   buildAdapterFailed,
   buildAnswerNotDelivered,
   buildHarnessNotInstalled,
@@ -73,12 +75,13 @@ import {
   closeProcess,
   closeTurn,
   describeRequestItem,
-  hasOpenSyntheticTurn,
+  findRequestOwner,
   holdTurn,
   markDeclined,
   normalizeUnhandled,
   normalizeUpdate,
   openTurn,
+  readSyntheticTurnId,
   releaseTurn,
 } from "./normalize";
 import type { Normalizing } from "./normalize";
@@ -137,8 +140,12 @@ export interface AgySession {
    * - `ModelChangeRefused` when `agy` refuses the model or level of the input,
    *   and `HarnessProtocolError` when it is not known whether it took them;
    * - `InputNotDelivered` when an interrupt or a stop came during the
-   *   preparation, and `AdapterFailed` when an image cannot be read or the
-   *   preparation takes longer than its budget.
+   *   preparation, or when writing the prompt to `agy` failed. No Turn is
+   *   opened then;
+   * - `HarnessProtocolError` when the budget ran out while the prompt was being
+   *   written, so it is not known whether `agy` got it;
+   * - `AdapterFailed` when an image cannot be read or the preparation takes
+   *   longer than its budget.
    */
   readonly send: (input: AdapterTurnInput) => Effect.Effect<SendResult, AdapterError>;
   /** Interrupts the running Turn, or the input being prepared. Does nothing when neither exists. */
@@ -168,6 +175,22 @@ const readCurrentValue = (
 ): string | undefined => {
   const option = options.find((candidate) => candidate.id === id);
   return option?.type === "select" ? option.currentValue : undefined;
+};
+
+/** What a reply to a change of a setting says about the setting. */
+type ChangeOutcome =
+  | { readonly kind: "confirmed" }
+  | { readonly kind: "other"; readonly named: string }
+  | { readonly kind: "unconfirmed" };
+
+/**
+ * Compares the value a reply (or an update that came before it) names for a
+ * setting with the value that was asked for. A reply that names nothing is
+ * `unconfirmed`, never taken as the requested value.
+ */
+const judgeChange = (requested: string, named: string | undefined): ChangeOutcome => {
+  if (named === undefined) return { kind: "unconfirmed" };
+  return named === requested ? { kind: "confirmed" } : { kind: "other", named };
 };
 
 /** Returns the effort level the selection asks for, or undefined when it asks for none. */
@@ -227,6 +250,12 @@ const buildChangeFailure = (
     `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${error.message}`,
   );
 };
+
+/** Returns the failure of an input whose model or level change `agy` did not confirm, so it is not known what `agy` holds. */
+const buildUnconfirmedChange = (change: string): HarnessProtocolError =>
+  buildHarnessProtocolError(
+    `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and the input was not sent.`,
+  );
 
 /**
  * Starts `agy` for one session and returns it ready for its first input, with
@@ -290,15 +319,15 @@ export const startAgySession = (
     let hasExited = false;
     let exitReason: ExitReason | undefined;
     const exitedSignal = Deferred.makeUnsafe<void>();
-    /** The mode `agy` is in, as far as its updates and its first reply say. */
+    /** The latest mode `agy` reported, in an update or in the reply that opened the conversation. A report is never replaced by an older one. */
     let currentMode: string | undefined;
+    /** Wakes the start that waits for the mode, whenever `agy` reports one. */
+    let modeChanged: Deferred.Deferred<void> | undefined;
+    /** The latest value `agy` reported for each setting in a `config_option_update`. */
+    const reportedSettings = new Map<string, string>();
     /** The mode the start asked for and `agy` confirmed. Undefined in `full-access`, which has no mode to guard. */
     let guardedMode: string | undefined;
     let isStarted = false;
-    /** The mode a start waits for, with the signal that `agy` reported it. */
-    let modeWatch:
-      | { readonly modeId: string; readonly confirmed: Deferred.Deferred<void> }
-      | undefined;
     let applied: AppliedSelection | undefined;
 
     const buildBase = (toolCallId?: string) =>
@@ -335,7 +364,11 @@ export const startAgySession = (
         const procedure = Effect.gen(function* () {
           if (turn !== undefined && options.stopTurn) yield* turn.stop;
           yield* Scope.close(processScope, Exit.void);
-          if (turn !== undefined) yield* Effect.timeoutOption(turn.ended, TURN_END_WAIT);
+          if (turn !== undefined) {
+            // A Turn that does not end by itself is ended here, so no event of it follows `session.exited`.
+            const ended = yield* Effect.timeoutOption(turn.ended, TURN_END_WAIT);
+            if (Option.isNone(ended)) yield* turn.abandon;
+          }
           if (normalizing !== undefined) emitEvents(closeProcess(normalizing));
           emitEvents([{ _tag: "session.exited", ...buildBase(), reason }]);
           hasExited = true;
@@ -389,10 +422,7 @@ export const startAgySession = (
     const handleModeUpdate = (modeId: string): void => {
       const previous = currentMode;
       currentMode = modeId;
-      if (modeWatch?.modeId === modeId) {
-        Deferred.doneUnsafe(modeWatch.confirmed, Effect.void);
-        return;
-      }
+      if (modeChanged !== undefined) Deferred.doneUnsafe(modeChanged, Effect.void);
       if (isStarted && guardedMode !== undefined && modeId !== guardedMode) {
         runDetached(endForModeChange(previous ?? guardedMode, modeId));
       }
@@ -427,6 +457,12 @@ export const startAgySession = (
         if (notification.update.sessionUpdate === "current_mode_update") {
           handleModeUpdate(notification.update.currentModeId);
           return;
+        }
+        if (notification.update.sessionUpdate === "config_option_update") {
+          for (const id of ["model", "thought_level"]) {
+            const value = readCurrentValue(notification.update.configOptions, id);
+            if (value !== undefined) reportedSettings.set(id, value);
+          }
         }
         emitEvents(normalizeUpdate(normalizing, notification));
       },
@@ -467,16 +503,16 @@ export const startAgySession = (
             );
             return Effect.succeed(CANCELLED_QUESTION);
           }
-          const item =
+          const owner =
             request.toolCallId == null
               ? undefined
-              : describeRequestItem(normalizing, request.toolCallId);
+              : findRequestOwner(normalizing, request.toolCallId);
           const turn = readRunningTurn();
-          if (item === undefined || turn === undefined || turn.id !== item.turnId) {
+          if (owner === undefined || turn === undefined || turn.id !== owner.turnId) {
             warnOrphan("a question", request.toolCallId);
             return Effect.succeed(CANCELLED_QUESTION);
           }
-          return turn.openQuestion(request, item);
+          return turn.openQuestion(request, owner);
         }),
       onUnhandledMessage: (message) => {
         if (hasExited) return;
@@ -489,6 +525,23 @@ export const startAgySession = (
     };
 
     // ---- The start ----
+
+    /**
+     * Waits until the latest mode `agy` reported is `modeId`, then arms the
+     * drift guard in the same step, so a report that follows is already
+     * checked. A contrary report that comes before the wait ends keeps it
+     * waiting.
+     */
+    const awaitMode = (modeId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        while (currentMode !== modeId) {
+          const changed = Deferred.makeUnsafe<void>();
+          modeChanged = changed;
+          yield* Deferred.await(changed);
+        }
+        modeChanged = undefined;
+        guardedMode = modeId;
+      });
 
     const start = Effect.gen(function* () {
       const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
@@ -552,6 +605,7 @@ export const startAgySession = (
       let heldModel = readCurrentValue(settings.configOptions, "model");
       let heldEffort = readCurrentValue(settings.configOptions, "thought_level");
       if (heldModel !== model) {
+        reportedSettings.delete("model");
         const options = yield* withConfigDeadline(
           connection.setConfigOption(conversation.id, "model", model),
           `switch to the model ${spec.modelSelection.model}`,
@@ -560,15 +614,36 @@ export const startAgySession = (
             buildStartConfigFailure(`the model ${spec.modelSelection.model}`, error),
           ),
         );
-        heldModel = readCurrentValue(options, "model") ?? model;
-        heldEffort = readCurrentValue(options, "thought_level");
+        const named = readCurrentValue(options, "model") ?? reportedSettings.get("model");
+        const outcome = judgeChange(model, named);
+        if (outcome.kind !== "confirmed") {
+          return yield* Effect.fail(
+            buildAdapterFailed(
+              `${ANTIGRAVITY_NAME} did not confirm the model ${spec.modelSelection.model}${outcome.kind === "other" ? `: it reports ${outcome.named}` : ""}, so the session was not started.`,
+            ),
+          );
+        }
+        heldModel = model;
+        heldEffort =
+          readCurrentValue(options, "thought_level") ?? reportedSettings.get("thought_level");
       }
       if (effort !== undefined && heldEffort !== effort) {
+        reportedSettings.delete("thought_level");
         const options = yield* withConfigDeadline(
           connection.setConfigOption(conversation.id, "thought_level", effort),
           `switch to the level ${effort}`,
         ).pipe(Effect.mapError((error) => buildStartConfigFailure(`the level ${effort}`, error)));
-        heldEffort = readCurrentValue(options, "thought_level") ?? effort;
+        const named =
+          readCurrentValue(options, "thought_level") ?? reportedSettings.get("thought_level");
+        const outcome = judgeChange(effort, named);
+        if (outcome.kind !== "confirmed") {
+          return yield* Effect.fail(
+            buildAdapterFailed(
+              `${ANTIGRAVITY_NAME} did not confirm the level ${effort}${outcome.kind === "other" ? `: it reports ${outcome.named}` : ""}, so the session was not started.`,
+            ),
+          );
+        }
+        heldEffort = effort;
       }
       applied = { model: heldModel, effort: heldEffort };
 
@@ -583,25 +658,36 @@ export const startAgySession = (
         if (modes === undefined || !modes.availableModes.some((mode) => mode.id === modeId)) {
           return yield* Effect.fail(modeFailure);
         }
-        currentMode = modes.currentModeId;
+        // An update that came since the reply is newer than the reply's snapshot.
+        currentMode ??= modes.currentModeId;
         if (currentMode !== modeId) {
-          // `agy` reported the new mode before the reply to `session/set_mode` in one recording and after it in another, so the watch starts first.
-          const confirmed = Deferred.makeUnsafe<void>();
-          modeWatch = { modeId, confirmed };
-          const switched = yield* connection.setMode(conversation.id, modeId).pipe(
-            Effect.andThen(Deferred.await(confirmed)),
+          yield* connection.setMode(conversation.id, modeId).pipe(
+            Effect.andThen(awaitMode(modeId)),
             Effect.timeoutOption(MODE_CONFIRMATION_DEADLINE),
             Effect.mapError(() => modeFailure),
+            Effect.flatMap((confirmed) =>
+              Option.isNone(confirmed) ? Effect.fail(modeFailure) : Effect.void,
+            ),
           );
-          modeWatch = undefined;
-          if (Option.isNone(switched)) return yield* Effect.fail(modeFailure);
+        } else {
+          guardedMode = modeId;
         }
-        guardedMode = modeId;
       }
 
       // From here to the monitor nothing waits, so no update slips in between.
       isStarted = true;
       emitEvents([{ _tag: "session.started", ...buildBase() }]);
+      // A resumed conversation was warned about when it first started.
+      if (spec.autoCompaction === false && spec.continue === undefined) {
+        emitEvents([
+          {
+            _tag: "runtime.warning",
+            ...buildBase(),
+            message:
+              "Antigravity compacts its context by itself, and Hercule cannot turn that off or see it.",
+          },
+        ]);
+      }
       yield* Effect.forkIn(
         Effect.flatMap(connection.awaitClosed, () =>
           exitSession("process_exit", { stopTurn: false }),
@@ -632,8 +718,11 @@ export const startAgySession = (
     /**
      * Changes the model and level to the ones the input asks for, when `agy`
      * does not hold them. What `agy` holds is `applied`: it is unknown while a
-     * request is in flight and after one that was not answered, so the next
-     * input sets it again. A refusal puts back what was held before the request.
+     * request is in flight and after one that was not confirmed, so the next
+     * input sets it again. A refusal puts back what was held before the
+     * request. A reply (or an update before it) must name the requested value:
+     * another value is a refusal, no value is a change that is not confirmed.
+     * A model that was confirmed stays recorded when its level fails.
      */
     const selectModel = (
       selection: ModelSelection,
@@ -646,72 +735,124 @@ export const startAgySession = (
         if (held?.model !== model) {
           const before = held;
           applied = undefined;
+          reportedSettings.delete("model");
+          const change = `switch to the model ${selection.model}`;
           const options = yield* withConfigDeadline(
             connection.setConfigOption(nativeId, "model", model),
-            `switch to the model ${selection.model}`,
+            change,
           ).pipe(
             Effect.tapError((error) =>
               Effect.sync(() => {
                 if (error.reason === "refused") applied = before;
               }),
             ),
-            Effect.mapError((error) =>
-              buildChangeFailure(`switch to the model ${selection.model}`, error),
-            ),
+            Effect.mapError((error) => buildChangeFailure(change, error)),
           );
-          held = {
-            model: readCurrentValue(options, "model") ?? model,
-            effort: readCurrentValue(options, "thought_level"),
-          };
+          const named = readCurrentValue(options, "model") ?? reportedSettings.get("model");
+          const reportedEffort =
+            readCurrentValue(options, "thought_level") ?? reportedSettings.get("thought_level");
+          const outcome = judgeChange(model, named);
+          if (outcome.kind === "other") {
+            applied = { model: outcome.named, effort: reportedEffort };
+            return yield* Effect.fail(
+              buildModelChangeRefused(
+                ANTIGRAVITY_NAME,
+                change,
+                `${ANTIGRAVITY_NAME} reports the model ${outcome.named} instead.`,
+              ),
+            );
+          }
+          if (outcome.kind === "unconfirmed") {
+            return yield* Effect.fail(buildUnconfirmedChange(change));
+          }
+          held = { model, effort: reportedEffort };
           applied = held;
           if (stopping || generation !== inputGeneration)
             return yield* Effect.fail(buildInputStopped());
         }
         if (effort !== undefined && held.effort !== effort) {
           const before = held;
-          applied = undefined;
+          applied = { model: held.model, effort: undefined };
+          reportedSettings.delete("thought_level");
+          const change = `switch to the level ${effort}`;
           const options = yield* withConfigDeadline(
             connection.setConfigOption(nativeId, "thought_level", effort),
-            `switch to the level ${effort}`,
+            change,
           ).pipe(
             Effect.tapError((error) =>
               Effect.sync(() => {
                 if (error.reason === "refused") applied = before;
               }),
             ),
-            Effect.mapError((error) => buildChangeFailure(`switch to the level ${effort}`, error)),
+            Effect.mapError((error) => buildChangeFailure(change, error)),
           );
-          applied = {
-            model: held.model,
-            effort: readCurrentValue(options, "thought_level") ?? effort,
-          };
+          const named =
+            readCurrentValue(options, "thought_level") ?? reportedSettings.get("thought_level");
+          const outcome = judgeChange(effort, named);
+          if (outcome.kind === "other") {
+            applied = { model: held.model, effort: outcome.named };
+            return yield* Effect.fail(
+              buildModelChangeRefused(
+                ANTIGRAVITY_NAME,
+                change,
+                `${ANTIGRAVITY_NAME} reports the level ${outcome.named} instead.`,
+              ),
+            );
+          }
+          if (outcome.kind === "unconfirmed") {
+            return yield* Effect.fail(buildUnconfirmedChange(change));
+          }
+          applied = { model: held.model, effort };
         }
       });
 
-    /** Reads the images and sets the model: everything before the prompt can be sent. Returns the prompt. */
+    /**
+     * Reads the images, sets the model, and writes the prompt to `agy`. Returns
+     * the effect that waits for the prompt's reply, once the line was written.
+     * Fails with `InputNotDelivered` when the write failed, which proves `agy`
+     * did not get the prompt, and with `HarnessProtocolError` when the budget
+     * ran out while the write was pending, which leaves it unknown.
+     */
     const prepareInput = (
       input: AdapterTurnInput,
       inputGeneration: number,
-    ): Effect.Effect<ReadonlyArray<PromptContent>, AdapterError> =>
-      Effect.gen(function* () {
-        const images = yield* readImages(input.attachments ?? []);
-        if (input.modelSelection !== undefined) {
-          yield* selectModel(input.modelSelection, inputGeneration);
-        }
-        const text: PromptContent = { type: "text", text: buildHarnessPrompt(input) };
-        return [text, ...images];
-      }).pipe(
-        Effect.timeoutOption(PREPARATION_BUDGET),
-        Effect.flatMap((prepared) =>
-          Option.isSome(prepared)
-            ? Effect.succeed(prepared.value)
-            : Effect.fail(
-                buildAdapterFailed(
-                  `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
+    ): Effect.Effect<Effect.Effect<PromptReply, AcpError>, AdapterError> =>
+      Effect.suspend(() => {
+        let isHandingOver = false;
+        return Effect.gen(function* () {
+          const images = yield* readImages(input.attachments ?? []);
+          // An interrupt that came while the images were read voids the input before anything is written to `agy`.
+          if (stopping || generation !== inputGeneration) {
+            return yield* Effect.fail(buildInputStopped());
+          }
+          if (input.modelSelection !== undefined) {
+            yield* selectModel(input.modelSelection, inputGeneration);
+          }
+          const text: PromptContent = { type: "text", text: buildHarnessPrompt(input) };
+          isHandingOver = true;
+          return yield* connection.sendPrompt(nativeId, [text, ...images]).pipe(
+            Effect.mapError((error) => {
+              isHandingOver = false;
+              return buildInputNotWritten(ANTIGRAVITY_NAME, error.message);
+            }),
+          );
+        }).pipe(
+          Effect.timeoutOption(PREPARATION_BUDGET),
+          Effect.flatMap((prepared) =>
+            Option.isSome(prepared)
+              ? Effect.succeed(prepared.value)
+              : Effect.fail(
+                  isHandingOver
+                    ? buildHarnessProtocolError(
+                        `${ANTIGRAVITY_NAME} did not take the input in time, so it may or may not have arrived.`,
+                      )
+                    : buildAdapterFailed(
+                        `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
+                      ),
                 ),
-              ),
-        ),
-      );
+          ),
+        );
+      });
 
     const send: AgySession["send"] = (input) =>
       Effect.gen(function* () {
@@ -737,15 +878,19 @@ export const startAgySession = (
         const prepared = yield* Effect.exit(prepareInput(input, inputGeneration)).pipe(
           Effect.onInterrupt(() => Effect.sync(abandonPreparation)),
         );
-        if (stopping || generation !== inputGeneration) {
+        if (Exit.isFailure(prepared)) {
+          abandonPreparation();
+          if (stopping || generation !== inputGeneration)
+            return yield* Effect.fail(buildInputStopped());
+          return yield* Effect.failCause(prepared.cause);
+        }
+        // The prompt is written, but a process that is going away reports no Turn.
+        if (stopping) {
           abandonPreparation();
           return yield* Effect.fail(buildInputStopped());
         }
-        if (Exit.isFailure(prepared)) {
-          abandonPreparation();
-          return yield* Effect.failCause(prepared.cause);
-        }
 
+        // The Turn opens only now: a prompt that could not be written leaves no Turn at all. What `agy` sent meanwhile is held, and replays into the Turn.
         const turnId = crypto.randomUUID();
         emitEvents(openTurn(state, turnId));
         emitEvents(
@@ -767,9 +912,11 @@ export const startAgySession = (
             normalizing: state,
             emit: emitEvents,
           },
-          { turnId, prompt: prepared.value },
+          { turnId, firstReply: prepared.value },
         ).pipe(Scope.provide(scope));
         preparing = false;
+        // An interrupt that came while the prompt was being written found no Turn, so it is applied now.
+        if (generation !== inputGeneration) runDetached(interrupt);
         return { turnId, delivery: "opened" } satisfies SendResult;
       });
 
@@ -779,12 +926,18 @@ export const startAgySession = (
       const turn = readRunningTurn();
       if (turn === undefined) {
         // Output with no prompt open has a synthetic turn. Stopping it asks `agy` to stop, and waits for nothing.
-        if (!hasOpenSyntheticTurn(state)) return Effect.void;
+        const syntheticTurnId = readSyntheticTurnId(state);
+        if (syntheticTurnId === undefined) return Effect.void;
+        // The wait lets an input open its own Turn, which this interrupt must not close.
         return withConfigDeadline(connection.cancel(nativeId), "cancel").pipe(
           Effect.catch((error) =>
             Effect.logWarning(`session/cancel was not sent: ${error.message}`),
           ),
-          Effect.andThen(Effect.sync(() => emitEvents(closeTurn(state, { state: "interrupted" })))),
+          Effect.andThen(
+            Effect.sync(() =>
+              emitEvents(closeTurn(state, { state: "interrupted", turnId: syntheticTurnId })),
+            ),
+          ),
         );
       }
       return Effect.flatMap(turn.interrupt, (result) =>

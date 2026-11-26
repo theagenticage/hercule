@@ -103,14 +103,15 @@ interface RunningTool {
 }
 
 /**
- * What stays of a tool item after it ends: no fields, so a long session does not
- * hold every file it edited. It is enough to ignore a late update.
+ * What stays of a tool item after it ends: nothing but the fact that it ended,
+ * so a long session does not hold every file it edited. It is enough to ignore
+ * a late update.
  */
 interface EndedTool {
-  readonly itemId: string;
-  readonly turnId: string;
   readonly ended: true;
 }
+
+const ENDED_TOOL: EndedTool = { ended: true };
 
 type ToolRecord = RunningTool | EndedTool;
 
@@ -148,10 +149,14 @@ export interface Normalizing {
   usageIsIncomplete: boolean;
 }
 
-/** The part of an approval Request that comes from its item. */
-export interface RequestItem {
+/** The turn and item a Request belongs to. */
+export interface RequestOwner {
   readonly turnId: string;
   readonly itemId: string;
+}
+
+/** The part of an approval Request that comes from its item: its owner and what the call is. */
+export interface RequestItem extends RequestOwner {
   readonly description: ApprovalDescription;
 }
 
@@ -295,8 +300,12 @@ const ensureTurn = (
   if (state.turn !== undefined) return { turn: state.turn, events: [] };
   const turn = buildTurnRecord(crypto.randomUUID(), true);
   state.turn = turn;
-  state.usageIsIncomplete = true;
-  return { turn, events: [buildTurnStarted(state, turn.id)] };
+  const events = [buildTurnStarted(state, turn.id)];
+  if (!state.usageIsIncomplete) {
+    state.usageIsIncomplete = true;
+    events.push(buildUsageUpdated(state));
+  }
+  return { turn, events };
 };
 
 /**
@@ -305,14 +314,16 @@ const ensureTurn = (
  * last showed, then `turn.completed` carries `end.state`, `end.error` (the text
  * of a failure) and the sum of the usage of the turn's prompts
  * (`addPromptUsage`). Items still running stay running: their late updates
- * complete them in this turn.
+ * complete them in this turn. When `end.turnId` is set, only the turn with
+ * that id is closed: a caller that waited before closing must not close
+ * a newer turn that opened meanwhile.
  */
 export const closeTurn = (
   state: Normalizing,
-  end: { readonly state: TurnState; readonly error?: string },
+  end: { readonly state: TurnState; readonly error?: string; readonly turnId?: string },
 ): HarnessEvent[] => {
   const turn = state.turn;
-  if (turn === undefined) return [];
+  if (turn === undefined || (end.turnId !== undefined && end.turnId !== turn.id)) return [];
   const events = closeTextItem(state);
   if (turn.todo !== undefined) {
     events.push(
@@ -340,8 +351,9 @@ export const closeTurn = (
   return events;
 };
 
-/** Returns true when a synthetic turn is open: output came with no input, and no input's turn is open. */
-export const hasOpenSyntheticTurn = (state: Normalizing): boolean => state.turn?.synthetic === true;
+/** Returns the id of the open synthetic turn (output came with no input, and no input's turn is open), or `undefined` when there is none. */
+export const readSyntheticTurnId = (state: Normalizing): string | undefined =>
+  state.turn?.synthetic === true ? state.turn.id : undefined;
 
 /** Returns the events that close the synthetic turn when its last item has completed, else nothing. */
 const closeIdleSyntheticTurn = (state: Normalizing): HarnessEvent[] =>
@@ -586,8 +598,11 @@ const normalizeToolCall = (
   call: ToolCall,
   isStart: boolean,
 ): HarnessEvent[] => {
-  const events = closeTextItem(state);
   let record = state.tools.get(call.toolCallId);
+  // A late update of an ended call changes nothing, so it must not close the
+  // open message either: that would split one message in two.
+  if (record?.ended === true) return [];
+  const events = closeTextItem(state);
   if (record === undefined) {
     if (!isStart && (call.rawInput == null || !call.name)) return events;
     const { turn, events: turnEvents } = ensureTurn(state);
@@ -610,7 +625,7 @@ const normalizeToolCall = (
         notification,
       ),
     );
-  } else if (!record.ended) {
+  } else {
     record.call = mergeCall(record.call, call);
   }
   if (record.ended || call.rawInput == null) return events;
@@ -620,7 +635,7 @@ const normalizeToolCall = (
   const wasDeclined = state.declined.delete(call.toolCallId);
   const status: ItemStatus =
     call.status === "completed" ? "completed" : wasDeclined ? "declined" : "failed";
-  state.tools.set(call.toolCallId, { itemId: record.itemId, turnId: record.turnId, ended: true });
+  state.tools.set(call.toolCallId, ENDED_TOOL);
   if (state.turn?.id === record.turnId) state.turn.running.delete(record.itemId);
   const { kind, detail } = buildToolItem(running.call);
   events.push(
@@ -643,12 +658,13 @@ const TASK_FILE = "task.md";
 const PLAN_FILE = "implementation_plan.md";
 
 /**
- * Returns the other spelling of `path` on macOS, where `/tmp`, `/var` and
+ * Returns the other spelling of `path`, but only on macOS, where `/tmp`, `/var` and
  * `/etc` are links to `/private/tmp`, `/private/var` and `/private/etc`. `agy`
  * reports the same file under either spelling.
  */
 const toOtherMacSpelling = (path: string): string => {
-  if (path.startsWith("/private/")) return path.slice("/private".length);
+  if (process.platform !== "darwin") return path;
+  if (/^\/private\/(tmp|var|etc)(\/|$)/.test(path)) return path.slice("/private".length);
   return /^\/(tmp|var|etc)(\/|$)/.test(path) ? `/private${path}` : path;
 };
 
@@ -845,32 +861,44 @@ export const normalizeUnhandled = (
 /**
  * Records that the adapter answered the Request of this call with a deny or a
  * cancel. `agy` reports `failed` for a call refused that way, so the item's
- * `failed` is then shown as `declined`.
+ * `failed` is then shown as `declined`. A call whose item is unknown or has
+ * ended is not recorded: no `failed` would ever remove it.
  */
 export const markDeclined = (state: Normalizing, toolCallId: string): void => {
-  state.declined.add(toolCallId);
+  if (state.tools.get(toolCallId)?.ended === false) state.declined.add(toolCallId);
 };
 
 /**
- * Returns the item an approval Request is about, with the Request's kind and
- * detail, or `undefined` when the call's item is unknown, has ended, or is in a
- * turn that is over, because a Request needs a running item in the turn in
- * flight. The caller then cancels the Request. The approval's own `snapshot` of
- * the tool call is read over the fields the item last had.
+ * Returns the turn and item a Request is about, or `undefined` when the call's
+ * item is unknown, has ended, or is in a turn that is over, because a Request
+ * needs a running item in the turn in flight. The caller then cancels the
+ * Request.
+ */
+export const findRequestOwner = (
+  state: Normalizing,
+  toolCallId: string,
+): RequestOwner | undefined => {
+  const record = state.tools.get(toolCallId);
+  if (record === undefined || record.ended || record.turnId !== state.turn?.id) return undefined;
+  return { turnId: record.turnId, itemId: record.itemId };
+};
+
+/**
+ * Returns the owner of an approval Request, as `findRequestOwner` does, with
+ * the Request's kind and detail built from the call. The approval's own
+ * `snapshot` of the tool call is read over the fields the item last had.
+ * Returns `undefined` under the same conditions as `findRequestOwner`.
  */
 export const describeRequestItem = (
   state: Normalizing,
   toolCallId: string,
   snapshot?: ToolCall,
 ): RequestItem | undefined => {
+  const owner = findRequestOwner(state, toolCallId);
   const record = state.tools.get(toolCallId);
-  if (record === undefined || record.ended || record.turnId !== state.turn?.id) return undefined;
+  if (owner === undefined || record === undefined || record.ended) return undefined;
   const call = snapshot === undefined ? record.call : mergeCall(record.call, snapshot);
-  return {
-    turnId: record.turnId,
-    itemId: record.itemId,
-    description: buildApprovalDescription(call),
-  };
+  return { ...owner, description: buildApprovalDescription(call) };
 };
 
 // ---- Public: usage ----
@@ -901,16 +929,19 @@ export const addPromptUsage = (
       state.turn.hasUsage = true;
     }
   }
+  return [buildUsageUpdated(state)];
+};
+
+/** Returns `session.usage.updated` with the process's sum, in the incomplete form once that applies. */
+const buildUsageUpdated = (state: Normalizing): HarnessEvent => {
   const counts = buildUsage(state.processUsage);
-  return [
-    {
-      _tag: "session.usage.updated",
-      ...buildBase(state),
-      ...(state.usageIsIncomplete
-        ? { usageReport: { status: "incomplete" as const, counts } }
-        : { usage: counts }),
-    },
-  ];
+  return {
+    _tag: "session.usage.updated",
+    ...buildBase(state),
+    ...(state.usageIsIncomplete
+      ? { usageReport: { status: "incomplete" as const, counts } }
+      : { usage: counts }),
+  };
 };
 
 const addTotals = (total: Totals, parts: Totals): void => {
@@ -932,7 +963,7 @@ export const closeProcess = (state: Normalizing): HarnessEvent[] => {
   const events = closeTextItem(state);
   for (const [toolCallId, record] of state.tools) {
     if (record.ended) continue;
-    state.tools.set(toolCallId, { itemId: record.itemId, turnId: record.turnId, ended: true });
+    state.tools.set(toolCallId, ENDED_TOOL);
     const { kind, detail } = buildToolItem(record.call);
     events.push(
       buildItemCompleted(

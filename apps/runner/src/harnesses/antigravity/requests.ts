@@ -13,12 +13,13 @@ import type {
   ElicitationRequest,
 } from "@hercule/acp";
 import {
-  MAX_FACT_LENGTH,
+  MAX_FACT_ITEMS,
+  MAX_FRAME_BYTES,
   type ApprovalDecision,
   type Question,
   type QuestionAnswers,
 } from "@hercule/protocol";
-import { truncateFact, truncateMessage, truncateWithMarker } from "../text";
+import { truncateFact, truncateMessage } from "../text";
 
 const ALLOW_ONCE = "allow_once";
 const REJECT_ONCE = "reject_once";
@@ -85,34 +86,45 @@ export interface QuestionForm {
 }
 
 /**
- * Returns `label` made unique among `taken`: unchanged when free, else the
- * label with the first free number after it ("Red (2)"). The user answers with
- * a label, so two options with one label could not both be chosen.
+ * The most questions a form may hold, and the most choices one question may
+ * hold. The protocol bounds neither list. Its own limit is on the answers: a
+ * set of answers holds at most `MAX_FACT_ITEMS` headers, so a form with more
+ * questions could not be answered in full. The same number bounds the choices,
+ * as it bounds every other list of facts.
  */
-const buildUniqueLabel = (label: string, taken: ReadonlySet<string>): string => {
-  const shown = truncateFact(label);
-  if (!taken.has(shown)) return shown;
-  for (let number = 2; ; number++) {
-    const suffix = ` (${String(number)})`;
-    const numbered = `${truncateWithMarker(label, MAX_FACT_LENGTH - suffix.length)}${suffix}`;
-    if (!taken.has(numbered)) return numbered;
-  }
-};
+const MAX_FORM_ITEMS = MAX_FACT_ITEMS;
+
+/**
+ * The most characters the questions, headers and labels of one form may hold
+ * together. `request.opened` must fit one frame of `MAX_FRAME_BYTES`, and one
+ * character takes at most six bytes of JSON (`\u00e9`). An eighth of the frame
+ * in characters therefore stays under three quarters of it, which leaves room
+ * for everything else the event holds. A form over it cannot be shown whole.
+ */
+const MAX_FORM_CHARACTERS = Math.floor(MAX_FRAME_BYTES / 8);
 
 /**
  * Reads the choices of one single-select field. Returns `undefined` when the
  * field is not a plain string field with a non-empty `oneOf` of titled
- * choices. An option with an empty title is left out, because it could not be
- * shown.
+ * choices, or has more than `MAX_FORM_ITEMS` of them. Two options are left out
+ * of the question:
+ *
+ * - one with an empty title, because it could not be shown;
+ * - one whose title repeats an earlier option's, because the answer is sent
+ *   back as the label and two options with one label could not be told apart
+ *   (spec 06 section 6.5, as for Claude Code and Codex). The user can still
+ *   type that option's text when the form has a `qN_other` field.
  */
 const readChoices = (field: ElicitationField): ReadonlyArray<FormChoice> | undefined => {
   if (field.type !== "string" || !field.oneOf || field.enum || field.items) return undefined;
+  if (field.oneOf.length > MAX_FORM_ITEMS) return undefined;
   const labels = new Set<string>();
   const choices: Array<FormChoice> = [];
   for (const choice of field.oneOf) {
     if (typeof choice.const !== "string" || typeof choice.title !== "string") return undefined;
     if (choice.title === "") continue;
-    const label = buildUniqueLabel(choice.title, labels);
+    const label = truncateFact(choice.title);
+    if (labels.has(label)) continue;
     labels.add(label);
     choices.push({ label, value: choice.const });
   }
@@ -127,6 +139,10 @@ const readChoices = (field: ElicitationField): ReadonlyArray<FormChoice> | undef
  * - a property is neither `qN` nor `qN_other`;
  * - a `qN` has no title, or is not a single-select string with `oneOf`
  *   (a multi-select or another type is not recorded yet);
+ * - it holds more than `MAX_FORM_ITEMS` questions, or a question more than
+ *   `MAX_FORM_ITEMS` choices, or all of it more than `MAX_FORM_CHARACTERS`
+ *   characters of text. The protocol bounds none of these, and a card it
+ *   refuses would leave `agy` waiting for an answer that cannot be given;
  * - a `qN_other` is not a string field;
  * - it holds no question (a `qN_other` with no `qN` beside it is ignored).
  */
@@ -146,7 +162,10 @@ export const readQuestionForm = (request: ElicitationRequest): QuestionForm | un
     }
   }
 
+  if (questionFields.length > MAX_FORM_ITEMS) return undefined;
+
   const required = new Set(request.requestedSchema.required ?? []);
+  let characters = 0;
   const mapping: Array<FormQuestion> = [];
   const questions: Array<Question> = [];
   for (const [index, { name, field }] of questionFields.entries()) {
@@ -160,8 +179,14 @@ export const readQuestionForm = (request: ElicitationRequest): QuestionForm | un
       required: required.has(name),
       choices,
     });
+    const question = truncateMessage(field.title);
+    characters +=
+      question.length +
+      header.length +
+      choices.reduce((sum, choice) => sum + choice.label.length, 0);
+    if (characters > MAX_FORM_CHARACTERS) return undefined;
     questions.push({
-      question: truncateMessage(field.title),
+      question,
       header,
       options: choices.map((choice) => ({ label: choice.label })),
       multiSelect: false,
@@ -185,8 +210,7 @@ const refuse = (message: string): ElicitationAnswerResult => ({ kind: "refused",
  * do, so the question can stay open for another try.
  *
  * - An answer equal to an option's label is sent as that option's own value in
- *   `qN`. The label is the one the question showed, so a label made unique
- *   ("Red (2)") still leads back to its own option.
+ *   `qN`. The label is the one the question showed.
  * - Any other text is a typed answer. It goes in `qN_other` alone, never with
  *   `qN`, because `agy` reads both fields when both are present.
  * - A list of one answer counts as that answer.

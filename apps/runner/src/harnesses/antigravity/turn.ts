@@ -5,7 +5,8 @@
  *
  * - the prompt in flight, so two prompts are never in flight at once;
  * - the Requests `agy` opens while the prompt runs, from the moment they open
- *   until their reply is written;
+ *   until their reply is written, and the Turn does not end before every one
+ *   of them was resolved;
  * - the interrupt, and what the Turn ends as (spec 06 sections 6.2 and 10.5).
  *
  * Translating a decision or answers into the ACP reply stays in `requests.ts`,
@@ -43,6 +44,7 @@ import {
   markDeclined,
   type Normalizing,
   type RequestItem,
+  type RequestOwner,
 } from "./normalize";
 import {
   buildApprovalOutcome,
@@ -81,7 +83,7 @@ const STOP_REASON_FAILURES: Readonly<Record<string, string | undefined>> = {
 export interface TurnContext {
   readonly sessionId: string;
   readonly nativeSessionId: string;
-  readonly connection: Pick<AcpConnection, "prompt" | "cancel">;
+  readonly connection: Pick<AcpConnection, "sendPrompt" | "cancel">;
   readonly normalizing: Normalizing;
   /** Publishes events on the session's stream, in order. */
   readonly emit: (events: ReadonlyArray<HarnessEvent>) => void;
@@ -108,7 +110,7 @@ export interface Turn {
    */
   readonly openQuestion: (
     request: ElicitationRequest,
-    item: RequestItem,
+    owner: RequestOwner,
   ) => Effect.Effect<ElicitationReply>;
   /**
    * Applies the user's decision to an open approval. Does nothing when the
@@ -145,9 +147,16 @@ export interface Turn {
    */
   readonly stop: Effect.Effect<void>;
   /**
-   * Returns true from the moment the Turn starts to end, before it emits
-   * anything for its end. A caller that asks it after `turn.completed` was
-   * published always gets true.
+   * Ends the Turn at once as `interrupted`, for a Turn that did not end by
+   * itself: stops its fibers and emits `turn.completed` unless it was already
+   * emitted. No event of the Turn follows. Used when the process is gone.
+   */
+  readonly abandon: Effect.Effect<void>;
+  /**
+   * Returns true from the moment `turn.completed` was emitted, and not before:
+   * until then the Turn still holds the session's one place for an input. The
+   * check and the emit happen in one step, so a caller that asks it after
+   * `turn.completed` was published always gets true.
    */
   readonly hasEnded: () => boolean;
   /** Waits until the Turn has ended, which is after it emitted `turn.completed`. */
@@ -157,6 +166,8 @@ export interface Turn {
 /** An approval Request that is open: `agy` waits for the reply held here. */
 interface ApprovalPark {
   readonly kind: "approval";
+  /** The id Hercule gave the Request. `request.requestId` is `agy`'s, which it reuses in every process. */
+  readonly requestId: string;
   readonly request: ApprovalRequest;
   readonly outcome: Deferred.Deferred<ApprovalOutcome>;
 }
@@ -164,6 +175,7 @@ interface ApprovalPark {
 /** A question Request that is open: `agy` waits for the reply held here. */
 interface QuestionPark {
   readonly kind: "question";
+  readonly requestId: string;
   readonly request: ElicitationRequest;
   readonly form: QuestionForm;
   readonly reply: Deferred.Deferred<ElicitationReply>;
@@ -188,38 +200,47 @@ const buildFollowUpText = (toolNames: ReadonlyArray<string | null | undefined>):
 };
 
 /**
- * Sends the Turn's first prompt and runs the Turn in a fiber of the current
- * scope. The caller has already emitted `turn.started` (`openTurn`) and the
- * `user_message`. The Turn ends by emitting `turn.completed`, and closing the
- * scope interrupts it.
+ * Runs the Turn in a fiber of the current scope. The caller has already written
+ * the Turn's first prompt to `agy` (`connection.sendPrompt`) and passes the
+ * effect that waits for its reply as `firstReply`, and it has emitted
+ * `turn.started` (`openTurn`) and the `user_message`. Follow-up prompts are
+ * sent by the Turn itself. The Turn ends by emitting `turn.completed`, and
+ * closing the scope interrupts it.
  */
 export const startTurn = (
   context: TurnContext,
-  input: { readonly turnId: string; readonly prompt: ReadonlyArray<PromptContent> },
+  input: {
+    readonly turnId: string;
+    readonly firstReply: Effect.Effect<PromptReply, AcpError>;
+  },
 ): Effect.Effect<Turn, never, Scope.Scope> =>
   Effect.gen(function* () {
     const { sessionId, nativeSessionId, connection, normalizing, emit } = context;
     const scope = yield* Effect.scope;
     const ended = yield* Deferred.make<void>();
 
-    /** The Requests that wait for a reply, by Request id. A Request leaves the map when it settles, so it settles once. */
+    /** The Requests that wait for a reply, by the id Hercule gave them. A Request leaves the map when it settles, so it settles once. */
     const open = new Map<string, ApprovalPark | QuestionPark>();
     let promptInFlight = false;
     /** Whether the Turn must end `interrupted`: the user or the session stopped it. */
     let interrupted = false;
     /** Whether a Request was answered `cancel`. `agy` then replies `end_turn`, so the reply alone does not show it. */
     let answeredCancel = false;
+    /** Whether the Turn started to end: no new Request opens and no interrupt is sent from then on. */
     let isEnding = false;
+    /** Whether `turn.completed` was emitted. */
+    let isClosed = false;
     let interruption: Deferred.Deferred<InterruptResult> | undefined;
     /** The tool names of the Denies the current prompt got, counted once their reply was written. */
     let deniedToolNames: Array<string | null | undefined> = [];
-    /** The fibers that finish the Requests of the current prompt, so the prompt's end waits for them. */
-    let pendingWrites: Array<Fiber.Fiber<void>> = [];
+    /** The fibers that resolve the Requests of the current prompt, so the prompt's end waits for them. */
+    let pendingResolutions: Array<Fiber.Fiber<unknown>> = [];
 
-    const buildEvent = (toolCallId?: string) =>
+    const buildEvent = (toolCallId?: string, acpRequestId?: string) =>
       buildEnvelope(sessionId, {
         nativeSessionId,
         ...(toolCallId === undefined ? {} : { toolCallId }),
+        ...(acpRequestId === undefined ? {} : { acpRequestId }),
       });
 
     const emitResolved = (
@@ -230,8 +251,10 @@ export const startTurn = (
     };
 
     /**
-     * Waits until the reply to a Request was written to `agy`. Returns false,
-     * and logs why, when the write failed or took longer than the deadline.
+     * Waits until the reply to a Request was written to `agy`. Returns false
+     * when the write failed or took longer than the deadline. It then logs why
+     * and emits a warning, because the user may have answered something that
+     * `agy` never got (spec 06 section 6.5).
      */
     const awaitReplyWritten = (
       replyWritten: Effect.Effect<void, AcpError>,
@@ -250,7 +273,35 @@ export const startTurn = (
             Effect.as(false),
           ),
         ),
+        Effect.tap((written) =>
+          Effect.sync(() => {
+            if (!written) {
+              emit([
+                {
+                  _tag: "runtime.warning",
+                  ...buildEvent(),
+                  turnId: input.turnId,
+                  message:
+                    "The reply to a Request may not have reached Antigravity, so the Request was closed as cancelled.",
+                },
+              ]);
+            }
+          }),
+        ),
         Effect.annotateLogs({ sessionId }),
+      );
+
+    /**
+     * Runs `resolution` in a fiber of the scope and records it, so the end of
+     * the Turn waits for it. The fiber outlives a caller that is interrupted.
+     */
+    const trackResolution = <A>(resolution: Effect.Effect<A>): Effect.Effect<Fiber.Fiber<A>> =>
+      Effect.forkIn(resolution, scope).pipe(
+        Effect.tap((fiber) =>
+          Effect.sync(() => {
+            pendingResolutions.push(fiber);
+          }),
+        ),
       );
 
     /**
@@ -260,9 +311,20 @@ export const startTurn = (
      * interrupt cannot both settle the Request.
      */
     const settleApproval = (park: ApprovalPark, decision: ApprovalDecision): Effect.Effect<void> =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const { request } = park;
-        if (!open.delete(request.requestId)) return Effect.void;
+        if (!open.delete(park.requestId)) return;
+        // `request.resolved` waits for the write, because the card must stay
+        // until the decision reached `agy`. When it did not, the card closes
+        // as `cancel`, and a Deny that did not arrive is no Deny.
+        const announce = awaitReplyWritten(request.replyWritten).pipe(
+          Effect.map((written) => {
+            if (written && decision === "deny") deniedToolNames.push(request.toolCall.name);
+            emitResolved(park.requestId, { decision: written ? decision : "cancel" });
+          }),
+        );
+        // Tracked before the reply is handed over, so nothing can end the Turn between the two.
+        yield* trackResolution(announce);
         // `agy` reports a refused call as failed, so the item must be marked to show as declined.
         if (decision !== "allow") markDeclined(normalizing, request.toolCall.toolCallId);
         if (decision === "cancel") answeredCancel = true;
@@ -270,33 +332,19 @@ export const startTurn = (
           park.outcome,
           Effect.succeed(buildApprovalOutcome(request.options, decision)),
         );
-        // `request.resolved` waits for the write, because the card must stay
-        // until the decision reached `agy`. When it did not, the card closes
-        // as `cancel`, and a Deny that did not arrive is no Deny.
-        const announce = awaitReplyWritten(request.replyWritten).pipe(
-          Effect.map((written) => {
-            if (written && decision === "deny") deniedToolNames.push(request.toolCall.name);
-            emitResolved(request.requestId, { decision: written ? decision : "cancel" });
-          }),
-        );
-        return Effect.forkIn(announce, scope).pipe(
-          Effect.map((fiber) => {
-            pendingWrites.push(fiber);
-          }),
-        );
       });
 
     /** Settles an open question as `cancel`, as for an interrupt. */
     const settleQuestionAsCancel = (park: QuestionPark): Effect.Effect<void> =>
-      Effect.suspend(() => {
-        if (!open.delete(park.request.requestId)) return Effect.void;
-        Deferred.doneUnsafe(park.reply, Effect.succeed(CANCELLED_QUESTION));
+      Effect.gen(function* () {
+        if (!open.delete(park.requestId)) return;
         const announce = awaitReplyWritten(park.request.replyWritten).pipe(
           Effect.map(() => {
-            emitResolved(park.request.requestId, { decision: "cancel" });
+            emitResolved(park.requestId, { decision: "cancel" });
           }),
         );
-        return Effect.asVoid(Effect.forkIn(announce, scope));
+        yield* trackResolution(announce);
+        Deferred.doneUnsafe(park.reply, Effect.succeed(CANCELLED_QUESTION));
       });
 
     const cancelOpenRequests: Effect.Effect<void> = Effect.suspend(() =>
@@ -310,18 +358,20 @@ export const startTurn = (
 
     const openApproval: Turn["openApproval"] = (request, item) =>
       Effect.gen(function* () {
-        if (interrupted) {
+        if (interrupted || isEnding) {
           markDeclined(normalizing, request.toolCall.toolCallId);
           return CANCELLED_APPROVAL;
         }
         const outcome = yield* Deferred.make<ApprovalOutcome>();
-        open.set(request.requestId, { kind: "approval", request, outcome });
+        // `agy` numbers its Requests from the start in every process, so its id cannot name a Request across a resume.
+        const requestId = crypto.randomUUID();
+        open.set(requestId, { kind: "approval", requestId, request, outcome });
         emit([
           {
             _tag: "request.opened",
-            ...buildEvent(request.toolCall.toolCallId),
+            ...buildEvent(request.toolCall.toolCallId, request.requestId),
             request: {
-              requestId: request.requestId,
+              requestId,
               itemId: item.itemId,
               ...item.description,
               decisions: readApprovalDecisions(request.options),
@@ -331,9 +381,9 @@ export const startTurn = (
         return yield* Deferred.await(outcome);
       });
 
-    const openQuestion: Turn["openQuestion"] = (request, item) =>
+    const openQuestion: Turn["openQuestion"] = (request, owner) =>
       Effect.gen(function* () {
-        if (interrupted) return CANCELLED_QUESTION;
+        if (interrupted || isEnding) return CANCELLED_QUESTION;
         const form = readQuestionForm(request);
         if (form === undefined) {
           emit([
@@ -348,14 +398,15 @@ export const startTurn = (
           return CANCELLED_QUESTION;
         }
         const reply = yield* Deferred.make<ElicitationReply>();
-        open.set(request.requestId, { kind: "question", request, form, reply });
+        const requestId = crypto.randomUUID();
+        open.set(requestId, { kind: "question", requestId, request, form, reply });
         emit([
           {
             _tag: "request.opened",
-            ...buildEvent(),
+            ...buildEvent(undefined, request.requestId),
             request: {
-              requestId: request.requestId,
-              itemId: item.itemId,
+              requestId,
+              itemId: owner.itemId,
               kind: "question",
               detail: { questions: form.questions },
             },
@@ -388,13 +439,17 @@ export const startTurn = (
           return yield* Effect.fail(buildAnswerNotDelivered(built.message));
         }
         open.delete(requestId);
+        // Tracked before the reply is handed over, so the Turn does not end before `request.resolved` is out.
+        const resolution = yield* trackResolution(
+          Effect.gen(function* () {
+            const written = yield* awaitReplyWritten(park.request.replyWritten);
+            emitResolved(requestId, written ? { answers } : { decision: "cancel" });
+            return written;
+          }),
+        );
         Deferred.doneUnsafe(park.reply, Effect.succeed(built.reply));
-        const written = yield* awaitReplyWritten(park.request.replyWritten);
-        if (written) {
-          emitResolved(requestId, { answers });
-          return;
-        }
-        emitResolved(requestId, { decision: "cancel" });
+        const written = yield* Fiber.join(resolution);
+        if (written) return;
         return yield* Effect.fail(
           buildAnswerNotDelivered(
             "It is not known whether Antigravity received the answer, so the question was cancelled. Ask again if the agent still needs it.",
@@ -419,7 +474,7 @@ export const startTurn = (
 
     const interrupt: Turn["interrupt"] = Effect.gen(function* () {
       if (interruption === undefined) {
-        if (Deferred.isDoneUnsafe(ended)) return "stopped";
+        if (Deferred.isDoneUnsafe(ended) || isEnding) return "stopped";
         // Marked before the first yield, so a Request that opens from now on is cancelled.
         interrupted = true;
         const result = Deferred.makeUnsafe<InterruptResult>();
@@ -445,6 +500,9 @@ export const startTurn = (
         isEnding = true;
         // A Request still open here belongs to a prompt that is over.
         yield* cancelOpenRequests;
+        // The controller closes the Requests of a Turn when it completes, so a
+        // `request.resolved` that comes after `turn.completed` would be lost.
+        yield* Effect.forEach(pendingResolutions, Fiber.await, { discard: true });
         if (error !== undefined) {
           emit([
             {
@@ -456,27 +514,33 @@ export const startTurn = (
             },
           ]);
         }
+        // The session admits the next input once the Turn is closed, so the close and the flag change in one step.
         emit(
           closeTurn(normalizing, {
             state,
+            turnId: input.turnId,
             ...(error === undefined ? {} : { error: error.message }),
           }),
         );
+        isClosed = true;
       });
 
-    const sendPrompt = (prompt: ReadonlyArray<PromptContent>): Effect.Effect<PromptResult> =>
-      connection.prompt(nativeSessionId, prompt).pipe(
+    /** Waits for the reply to a prompt, and turns a failure into a result. */
+    const awaitReply = (
+      waiting: Effect.Effect<PromptReply, AcpError>,
+    ): Effect.Effect<PromptResult> =>
+      waiting.pipe(
         Effect.map((reply): PromptResult => ({ kind: "replied", reply })),
         Effect.catch((error: AcpError) => Effect.succeed<PromptResult>({ kind: "failed", error })),
       );
 
     const runTurn = Effect.gen(function* () {
-      let prompt = input.prompt;
+      let waiting = input.firstReply;
       for (;;) {
         deniedToolNames = [];
-        pendingWrites = [];
+        pendingResolutions = [];
         promptInFlight = true;
-        const result = yield* sendPrompt(prompt);
+        const result = yield* awaitReply(waiting);
         promptInFlight = false;
 
         if (result.kind === "failed") {
@@ -499,13 +563,16 @@ export const startTurn = (
 
         emit(addPromptUsage(normalizing, result.reply.usage));
         // A Deny counts only once its reply was written, so wait for the writes of this prompt.
-        yield* Effect.forEach(pendingWrites, Fiber.await, { discard: true });
+        yield* Effect.forEach(pendingResolutions, Fiber.await, { discard: true });
 
         const { stopReason } = result.reply;
         if (stopReason === "end_turn") {
           if (interrupted || answeredCancel) return yield* finish("interrupted");
           if (deniedToolNames.length === 0) return yield* finish("completed");
-          prompt = [{ type: "text", text: buildFollowUpText(deniedToolNames) }];
+          const followUp: ReadonlyArray<PromptContent> = [
+            { type: "text", text: buildFollowUpText(deniedToolNames) },
+          ];
+          waiting = Effect.flatten(connection.sendPrompt(nativeSessionId, followUp));
           continue;
         }
         if (stopReason === "cancelled") return yield* finish("interrupted");
@@ -525,7 +592,25 @@ export const startTurn = (
     // The prompt is sent before this returns, so an interrupt right after
     // `startTurn` always finds it in flight.
     promptInFlight = true;
-    yield* Effect.forkIn(runTurn, scope, { startImmediately: true });
+    const runFiber = yield* Effect.forkIn(runTurn, scope, { startImmediately: true });
+
+    const abandon: Turn["abandon"] = Effect.suspend(() => {
+      if (isClosed) return Effect.void;
+      interrupted = true;
+      isEnding = true;
+      const fibers: Array<Fiber.Fiber<unknown>> = [...pendingResolutions, runFiber];
+      return Fiber.interruptAll(fibers).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            if (!isClosed) {
+              emit(closeTurn(normalizing, { state: "interrupted", turnId: input.turnId }));
+              isClosed = true;
+            }
+            Deferred.doneUnsafe(ended, Effect.void);
+          }),
+        ),
+      );
+    });
 
     return {
       id: input.turnId,
@@ -535,7 +620,8 @@ export const startTurn = (
       answer,
       interrupt,
       stop,
-      hasEnded: () => isEnding,
+      abandon,
+      hasEnded: () => isClosed,
       ended: Deferred.await(ended),
     };
   });

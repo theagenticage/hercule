@@ -336,7 +336,7 @@ const replayRecording = (name: RecordingName) =>
           const request = Schema.decodeUnknownSync(ClientParams["session/prompt"])(params);
           // A prompt waits for its reply, which comes after later messages of the client.
           const fiber = yield* Effect.forkChild(
-            connection.prompt(request.sessionId, request.prompt),
+            Effect.flatten(connection.sendPrompt(request.sessionId, request.prompt)),
           );
           prompts.push({ fiber, recordedReply });
           break;

@@ -10,13 +10,14 @@
 import type { SessionUpdate, SessionUpdateNotification, ToolCall } from "@hercule/acp";
 import { readRecording, type RecordingName } from "@hercule/acp/testing";
 import { MAX_TODO_STEPS, type HarnessEvent } from "@hercule/protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   addPromptUsage,
   buildNormalizingState,
   closeProcess,
   closeTurn,
   describeRequestItem,
+  findRequestOwner,
   holdTurn,
   markDeclined,
   normalizeUnhandled,
@@ -431,6 +432,27 @@ describe("tool items", () => {
     );
   });
 
+  it("ignores a late update of an ended call without closing the open message", () => {
+    const state = openState();
+    normalizeUpdate(state, buildToolStart(runCall("c1")));
+    normalizeUpdate(state, buildToolUpdate({ ...runCall("c1"), status: "completed" }));
+    normalizeUpdate(state, buildChunk("Hello "));
+    expect(
+      normalizeUpdate(state, buildToolUpdate({ ...runCall("c1"), status: "completed" })),
+    ).toEqual([]);
+    const events = normalizeUpdate(state, buildChunk("world"));
+    expect(outline(events)).toEqual(["content.delta"]);
+  });
+
+  it("records no decline for a call that is unknown or ended", () => {
+    const state = openState();
+    markDeclined(state, "never-seen");
+    normalizeUpdate(state, buildToolStart(runCall("c1")));
+    normalizeUpdate(state, buildToolUpdate({ ...runCall("c1"), status: "completed" }));
+    markDeclined(state, "c1");
+    expect(state.declined.size).toBe(0);
+  });
+
   it("ignores every later update of a call that ended, whatever it carries", () => {
     const state = openState();
     normalizeUpdate(state, buildToolStart(runCall("c1")));
@@ -490,6 +512,23 @@ describe("tool items", () => {
     expect(describeRequestItem(state, "nope")).toBeUndefined();
     closeTurn(state, { state: "completed" });
     expect(describeRequestItem(state, "c1")).toBeUndefined();
+  });
+
+  it("finds the owner of a Request without describing the call", () => {
+    const state = openState();
+    normalizeUpdate(state, buildToolStart(runCall("c1", "ls")));
+    expect(findRequestOwner(state, "c1")).toEqual({ turnId: "t1", itemId: "c1" });
+    expect(findRequestOwner(state, "nope")).toBeUndefined();
+    closeTurn(state, { state: "completed" });
+    expect(findRequestOwner(state, "c1")).toBeUndefined();
+  });
+
+  it("closes the turn in flight only when it has the expected id", () => {
+    const state = openState();
+    expect(closeTurn(state, { state: "interrupted", turnId: "older" })).toEqual([]);
+    expect(closeTurn(state, { state: "interrupted", turnId: "t1" })).toMatchObject([
+      { _tag: "turn.completed", turnId: "t1" },
+    ]);
   });
 
   it("starts an item for an update of a call it never saw, only when the update is whole", () => {
@@ -574,6 +613,7 @@ describe("synthetic turns", () => {
     const opened = normalizeUpdate(state, buildChunk("hello"));
     expect(outline(opened)).toEqual([
       "turn.started",
+      "session.usage.updated",
       "item.started assistant_message",
       "content.delta",
     ]);
@@ -589,6 +629,7 @@ describe("synthetic turns", () => {
     const state = freshState();
     expect(outline(normalizeUpdate(state, buildToolStart(runCall("c"))))).toEqual([
       "turn.started",
+      "session.usage.updated",
       "item.started command_execution",
     ]);
     expect(
@@ -725,6 +766,7 @@ describe("unknown items", () => {
     const state = freshState();
     expect(outline(normalizeUpdate(state, buildOther("plan")))).toEqual([
       "turn.started",
+      "session.usage.updated",
       "item.started unknown",
       "item.completed unknown",
       "turn.completed",
@@ -782,15 +824,47 @@ describe("the files of the plan", () => {
     return state;
   };
 
-  it("accepts the /private spelling of the same file", () => {
-    const state = buildNormalizingState({
-      sessionId: SESSION,
-      nativeSessionId: "native-1",
-      brainFolder: "/tmp/b/brain",
+  describe("the /private spelling of the same file", () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    const setPlatform = (value: string) => {
+      Object.defineProperty(process, "platform", { value });
+    };
+    afterEach(() => {
+      if (platform !== undefined) Object.defineProperty(process, "platform", platform);
     });
-    openTurn(state, "t");
-    const events = write(state, "/private/tmp/b/brain/native-1/task.md", "- [ ] a\n");
-    expect(outline(events)).toEqual(["item.completed file_change", "item.started todo_list"]);
+
+    const writeUnder = (brainFolder: string, path: string) => {
+      const state = buildNormalizingState({
+        sessionId: SESSION,
+        nativeSessionId: "native-1",
+        brainFolder,
+      });
+      openTurn(state, "t");
+      return outline(write(state, path, "- [ ] a\n"));
+    };
+
+    it("is accepted on macOS for /tmp, /var and /etc", () => {
+      setPlatform("darwin");
+      for (const root of ["tmp", "var", "etc"]) {
+        expect(writeUnder(`/${root}/b/brain`, `/private/${root}/b/brain/native-1/task.md`)).toEqual(
+          ["item.completed file_change", "item.started todo_list"],
+        );
+      }
+    });
+
+    it("is not accepted on another system", () => {
+      setPlatform("linux");
+      expect(writeUnder("/tmp/b/brain", "/private/tmp/b/brain/native-1/task.md")).toEqual([
+        "item.completed file_change",
+      ]);
+    });
+
+    it("is not accepted for any other folder, also on macOS", () => {
+      setPlatform("darwin");
+      expect(writeUnder("/private/data/brain", "/data/brain/native-1/task.md")).toEqual([
+        "item.completed file_change",
+      ]);
+    });
   });
 
   it("ignores another session's folder, other file names, and a path that only looks alike", () => {
@@ -932,6 +1006,14 @@ describe("usage", () => {
     expect(addPromptUsage(state, reply)[0]).toMatchObject({
       usageReport: { status: "incomplete", counts: { inputTokens: 10 } },
     });
+  });
+
+  it("reports the incomplete form once, when output comes with no prompt open", () => {
+    const state = freshState();
+    const first = normalizeUpdate(state, buildChunk("unasked"));
+    expect(first.map((event) => event._tag)).toContain("session.usage.updated");
+    const again = normalizeUpdate(state, buildToolStart(runCall("c1")));
+    expect(again.map((event) => event._tag)).not.toContain("session.usage.updated");
   });
 
   it("leaves usage out of a turn whose prompts reported none", () => {
