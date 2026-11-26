@@ -352,11 +352,12 @@ const listRuleCandidates = (
  * file left out because of the total limit.
  *
  * Antigravity reads all of these into every conversation, and reads both
- * `GEMINI.md` and `AGENTS.md` when a place has both. The texts are joined, by
- * a blank line, in this order:
+ * `AGENTS.md` and `GEMINI.md` when a place has both. The texts are joined, by
+ * a blank line, in the order in which the model reported its instructions
+ * when it was asked (`AGENTS.md` first at each place):
  *
- * - `GEMINI.md` and `AGENTS.md` in the gemini directory;
- * - `GEMINI.md` and `AGENTS.md` in its `config` folder;
+ * - `AGENTS.md` and `GEMINI.md` in the gemini directory;
+ * - `AGENTS.md` and `GEMINI.md` in its `config` folder;
  * - the files of `config/rules` whose YAML frontmatter has
  *   `trigger: always_on`, sorted by file name, without their frontmatter. A
  *   rule with no frontmatter, or with another trigger, is not put into every
@@ -366,8 +367,8 @@ const listRuleCandidates = (
  * the instructions: at most `MAX_INSTRUCTIONS_FILE_BYTES` of it. A missing
  * path is skipped quietly, and so is anything that is not a regular file
  * (following symlinks), a text with only white space, and a file that is the
- * same file as an earlier one, such as an `AGENTS.md` that is a symlink to
- * `GEMINI.md`. Any other error, such as a symlink loop, is a warning.
+ * same file as an earlier one, such as a `GEMINI.md` that is a symlink to
+ * `AGENTS.md`. Any other error, such as a symlink loop, is a warning.
  *
  * The texts add up to at most `MAX_INSTRUCTIONS_TOTAL_BYTES`. A file that does
  * not fit in what is left is left out whole, with a warning, and so is every
@@ -402,10 +403,10 @@ const findAntigravityMaterial = (home: string): FoundMaterial => {
   };
 
   for (const path of [
-    join(geminiDir, "GEMINI.md"),
     join(geminiDir, "AGENTS.md"),
-    join(geminiDir, "config", "GEMINI.md"),
+    join(geminiDir, "GEMINI.md"),
     join(geminiDir, "config", "AGENTS.md"),
+    join(geminiDir, "config", "GEMINI.md"),
   ]) {
     addFile(path, (text) => text);
   }

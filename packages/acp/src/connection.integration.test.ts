@@ -415,8 +415,13 @@ const replayRecording = (name: RecordingName) =>
  * Recordings that the generic replay below cannot play, with the reason. Tests
  * of their own cover them.
  *
- * - `resume`, `tmpdir-resume` and `t3-resume` hold several harness processes in one file,
- *   each starting with its own `initialize`. The replay opens one connection.
+ * - `resume`, `tmpdir-resume`, `t3-resume`, `instructions-files`,
+ *   `skills-additional-directory`, `skills-git-walk` and `skills-resume` hold
+ *   several harness processes in one file, each starting with its own
+ *   `initialize`. The replay opens one connection.
+ * - `gemini-dir-default` ends at the refused `authenticate`: the recorder ran
+ *   `agy` with no sign-in, to see where it keeps its files. The replay expects
+ *   `authenticate` to succeed.
  * - `subagent-approval2` ends with the recorder closing the harness while a
  *   prompt was open, so the prompt's error reply comes from the recorder, not
  *   from the harness.
@@ -427,7 +432,12 @@ const replayRecording = (name: RecordingName) =>
  *   reproduces that.
  */
 const RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY: ReadonlyArray<RecordingName> = [
+  "gemini-dir-default",
+  "instructions-files",
   "resume",
+  "skills-additional-directory",
+  "skills-git-walk",
+  "skills-resume",
   "stop-bg",
   "stop-cancel",
   "subagent-approval2",

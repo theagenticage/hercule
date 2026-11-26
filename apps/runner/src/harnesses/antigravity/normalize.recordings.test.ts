@@ -124,8 +124,14 @@ const playProcess = (messages: ReadonlyArray<RecordedMessage>): PlayedProcess =>
 /** Recordings that legitimately hold an update outside the decision table, with the reason. */
 const RECORDINGS_WITH_UNKNOWN_ITEMS = new Map<string, string>([]);
 
+/** Recordings with no session to normalize, with the reason. */
+const RECORDINGS_WITHOUT_A_SESSION: ReadonlyArray<string> = [
+  // Ends at the refused `authenticate`, so no `session/new` follows.
+  "gemini-dir-default",
+];
+
 describe("every recording through the normalizer", () => {
-  for (const name of RECORDING_NAMES) {
+  for (const name of RECORDING_NAMES.filter((n) => !RECORDINGS_WITHOUT_A_SESSION.includes(n))) {
     it(`${name}: the event stream holds together`, () => {
       const parts = splitProcesses(readRecording(name));
       for (const part of parts) {

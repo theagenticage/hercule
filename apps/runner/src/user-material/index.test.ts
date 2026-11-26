@@ -461,7 +461,7 @@ describe("Antigravity's material", () => {
 
     expect(material).toEqual({
       ...NO_USER_MATERIAL,
-      instructions: "gemini\n\nagents\n\nconfig gemini\n\nconfig agents\n\nAlways follow this.\n",
+      instructions: "agents\n\ngemini\n\nconfig agents\n\nconfig gemini\n\nAlways follow this.\n",
     });
     // Every session of the account shares its home; a link there would leak.
     expect(readdirSync(harnessHome)).toEqual([]);
@@ -556,8 +556,8 @@ describe("Antigravity's material", () => {
   it("returns a file once when another name links to it, at its first place", () => {
     const { home, harnessHome } = createHomes();
     const gemini = join(home, ".gemini");
-    const geminiFile = writeFile(join(gemini, "GEMINI.md"), "gemini");
-    symlinkSync(geminiFile, join(gemini, "AGENTS.md"));
+    const agentsFile = writeFile(join(gemini, "AGENTS.md"), "agents");
+    symlinkSync(agentsFile, join(gemini, "GEMINI.md"));
     const configAgents = writeFile(join(gemini, "config", "AGENTS.md"), "config agents");
     const rules = join(gemini, "config", "rules");
     mkdirSync(rules, { recursive: true });
@@ -565,7 +565,7 @@ describe("Antigravity's material", () => {
     writeFile(join(rules, "own.md"), ALWAYS_ON);
 
     expect(provision(ANTIGRAVITY, harnessHome, { HOME: home }).instructions).toBe(
-      "gemini\n\nconfig agents\n\nAlways follow this.\n",
+      "agents\n\nconfig agents\n\nAlways follow this.\n",
     );
   });
 
@@ -602,7 +602,7 @@ describe("Antigravity's material", () => {
     });
 
     expect(material.instructions).toBe(
-      ["g", "a", "c", "d"].map((letter) => letter.repeat(64 * 1024)).join("\n\n"),
+      ["a", "g", "d", "c"].map((letter) => letter.repeat(64 * 1024)).join("\n\n"),
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(`Left ${rule} out of the Thread's instructions`);
