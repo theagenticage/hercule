@@ -1895,6 +1895,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
         for (const warning of mcp.warnings) warn(host, warning);
+        // What the user's instructions lost, so the user knows what Codex does not see.
+        for (const warning of ctx.userMaterial?.warnings ?? []) warn(host, warning);
         const dropped = deliverFramesBeforeRegistration(held);
         // The dropped ones belong to no thread, so the session is not told;
         // the runner's log is.

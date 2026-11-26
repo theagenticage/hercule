@@ -495,6 +495,7 @@ const USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
   instructions: undefined,
   instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
+  warnings: [],
 };
 
 /** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */
@@ -598,6 +599,16 @@ describe("launching pi for a Thread that sees the user's own material", () => {
       join(agentFolderOf(run.child), "system-prompt.txt"),
       ...USER_MATERIAL_FLAGS,
     ]);
+  });
+
+  it("reports what the user's material lost as a warning of the session, after session.started", async () => {
+    const warning = "Cut /Users/someone/.pi/agent/AGENTS.md in the Thread's instructions";
+    const run = await startSessionWithMaterial({ ...USER_MATERIAL, warnings: [warning] });
+    await settle();
+
+    const tags = run.seen.map((event) => event._tag);
+    expect(filterByTag(run.seen, "runtime.warning")).toMatchObject([{ message: warning }]);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
   });
 
   it("adds nothing for a Thread whose user has no material on this machine", async () => {

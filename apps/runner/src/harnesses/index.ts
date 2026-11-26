@@ -288,6 +288,15 @@ export interface UserMaterial {
    * file itself (pi). Undefined when the user has none.
    */
   readonly instructionsFile: string | undefined;
+  /**
+   * A warning for each part of the user's material the runner found but could
+   * not use in full: a file cut at its size limit, a file left out because
+   * the total limit was reached, a file that could not be read. The adapter
+   * of a harness that takes instructions as text or as a file reports each
+   * as a `runtime.warning` after `session.started`, so the user learns what
+   * the agent does not see. Empty when nothing was left out.
+   */
+  readonly warnings: ReadonlyArray<string>;
 }
 
 /**

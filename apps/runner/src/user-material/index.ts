@@ -47,6 +47,7 @@ const NO_MATERIAL: UserMaterial = {
   promptTemplateDirs: [],
   instructions: undefined,
   instructionsFile: undefined,
+  warnings: [],
 };
 
 /**
@@ -433,7 +434,7 @@ const findAntigravityMaterial = (home: string): FoundMaterial => {
  * moment.
  *
  * Never fails. A missing source is skipped quietly, and a filesystem error is
- * logged as a warning and skipped, because a Thread must still start without
+ * logged as a warning, returned in `warnings` of the material, and skipped, because a Thread must still start without
  * the user's material.
  */
 export const provisionUserMaterial = (
@@ -458,8 +459,9 @@ export const provisionUserMaterial = (
           return { material: NO_MATERIAL, warnings: [] };
       }
     });
-    // A file name can hold a line break, which would forge a log line.
-    for (const warning of found.warnings)
-      yield* Effect.logWarning(escapeControlCharacters(warning));
-    return found.material;
+    // A file name can hold a line break, which would forge a log line or a
+    // thread message, so the warnings are escaped for both.
+    const warnings = found.warnings.map(escapeControlCharacters);
+    for (const warning of warnings) yield* Effect.logWarning(warning);
+    return { ...found.material, warnings };
   });

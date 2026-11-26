@@ -28,7 +28,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
-import { CODEX } from "../harnesses";
+import { ANTIGRAVITY, CODEX } from "../harnesses";
 import { NO_USER_MATERIAL } from "../harnesses/testing";
 
 import {
@@ -709,6 +709,20 @@ describe("the user's own material", () => {
     // No key at all, so the adapter keeps the harness isolated.
     expect(outcome._tag === "Success" && "userMaterial" in outcome.success.ctx).toBe(false);
     expect(readdirSync(join(machine.storageDir, HARNESS_HOME))).toEqual([]);
+  });
+
+  it("is left out of an Antigravity session whose frame does not set the userMaterial flag", () => {
+    const userHome = createRoot();
+    mkdirSync(join(userHome, ".gemini"));
+    writeFileSync(join(userHome, ".gemini", "AGENTS.md"), "the user's instructions");
+    const machine = buildMachine({ baseEnv: { PATH: "/usr/bin", HOME: userHome } });
+
+    const outcome = resolveSync(buildSessionStart({ harnessId: ANTIGRAVITY }), machine);
+
+    expect(outcome._tag).toBe("Success");
+    expect(
+      outcome._tag === "Success" ? outcome.success.ctx.userMaterial : "failed",
+    ).toBeUndefined();
   });
 
   it("reaches a session whose frame sets the userMaterial flag, and Claude Code's is linked into the Harness Home", () => {

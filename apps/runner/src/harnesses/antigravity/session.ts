@@ -688,6 +688,12 @@ export const startAgySession = (
           },
         ]);
       }
+      // What the user's instructions lost, so the user knows what `agy` does not see.
+      for (const warning of ctx.userMaterial?.warnings ?? []) {
+        emitEvents([
+          { _tag: "runtime.warning", ...buildBase(), message: truncateMessage(warning) },
+        ]);
+      }
       if (staged !== undefined && staged.shadowed.length > 0) {
         emitEvents([
           {

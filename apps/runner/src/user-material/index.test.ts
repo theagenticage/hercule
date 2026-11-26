@@ -149,7 +149,7 @@ describe("Claude Code's material", () => {
       HOME: home,
     });
 
-    expect(material).toEqual(NO_USER_MATERIAL);
+    expect(material).toEqual({ ...NO_USER_MATERIAL, warnings });
     expect(warnings).toEqual([
       expect.stringContaining(`${join(harnessHome, "agents")} already exists and is not a symlink`),
       expect.stringContaining(
@@ -210,7 +210,7 @@ describe("Claude Code's material", () => {
       HOME: home,
     });
 
-    expect(material).toEqual(NO_USER_MATERIAL);
+    expect(material).toEqual({ ...NO_USER_MATERIAL, warnings });
     expect(readFileSync(notADirectory, "utf8")).toBe("untouched");
     // Only the entry the user has is worth a warning, not the four they lack.
     expect(warnings).toHaveLength(1);
@@ -306,7 +306,7 @@ describe("Codex's material", () => {
       chmodSync(agents, 0o000);
       const neither = provisionCapturingWarnings(CODEX, harnessHome, { HOME: home });
 
-      expect(neither.material).toEqual(NO_USER_MATERIAL);
+      expect(neither.material).toEqual({ ...NO_USER_MATERIAL, warnings: neither.warnings });
       expect(neither.warnings).toHaveLength(2);
       expect(neither.warnings[1]).toContain(
         `Did not read ${agents} into the Thread's instructions: `,
@@ -327,6 +327,8 @@ describe("Codex's material", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(`Cut ${agents} `);
     expect(warnings[0]).toContain("left out the last 1000 of its 66536 bytes");
+    // The Thread is told the same text, so the user learns what the agent does not see.
+    expect(material.warnings).toEqual(warnings);
   });
 
   it("skips a named pipe, which would block a read", () => {
@@ -584,6 +586,8 @@ describe("Antigravity's material", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(`Cut ${geminiFile} `);
     expect(warnings[0]).toContain("left out the last 1000 of its 66536 bytes");
+    // The Thread is told the same text, so the user learns what the agent does not see.
+    expect(material.warnings).toEqual(warnings);
   });
 
   it("takes at most 256 KiB from all files, and leaves out the files that do not fit with a warning", () => {

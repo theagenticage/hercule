@@ -644,6 +644,22 @@ describe("the home directories a session's app-server gets", () => {
     expect(readdirSync(codexHome)).toEqual([]);
   });
 
+  it("reports what the user's instructions lost as a warning of the session, after session.started", async () => {
+    const run = createDriving();
+    const warning = "Cut /Users/someone/.codex/AGENTS.md in the Thread's instructions";
+
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...run.ctx,
+        userMaterial: { ...NO_USER_MATERIAL, warnings: [warning] },
+      }),
+    );
+
+    const tags = run.seen.map((event) => event._tag);
+    expect(filterByTag(run.seen, "runtime.warning")).toMatchObject([{ message: warning }]);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+  });
+
   it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
     const startWith = async (userMaterial: SessionStartContext["userMaterial"]) => {
       const home = createCodexHome();

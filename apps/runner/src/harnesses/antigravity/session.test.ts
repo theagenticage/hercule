@@ -581,6 +581,21 @@ describe("the instructions of a session", () => {
       ),
   );
 
+  it("tells the thread after session.started what the user's instructions lost", () => {
+    const warning = "Cut /Users/someone/.gemini/AGENTS.md in the Thread's instructions";
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(PARTS);
+
+          const tags = h.seen.map((event) => event._tag);
+          expect(h.tags("runtime.warning")).toMatchObject([{ message: warning }]);
+          expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+        }),
+      { context: () => ({ userMaterial: { ...NO_USER_MATERIAL, warnings: [warning] } }) },
+    );
+  });
+
   it("hold nothing of the user's own files when the session has no User Material", () => {
     const userHome = createScratchHome("agy-user-home");
     mkdirSync(join(userHome, ".gemini"));

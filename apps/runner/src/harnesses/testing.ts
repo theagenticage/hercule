@@ -137,6 +137,7 @@ export const NO_USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: [],
   instructions: undefined,
   instructionsFile: undefined,
+  warnings: [],
 };
 
 /**

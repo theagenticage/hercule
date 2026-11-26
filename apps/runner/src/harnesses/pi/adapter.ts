@@ -2192,6 +2192,8 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           at: now(),
           harnessRefs: { nativeSessionId },
         });
+        // What the user's material lost, so the user knows what pi does not see.
+        for (const warning of ctx.userMaterial?.warnings ?? []) warn(sessionId, warning);
         // pi answered and then exited before the check was over. The exit is
         // reported now, after the start it follows.
         if (exitedDuringCheck !== undefined) {
