@@ -5,9 +5,9 @@
  * them can run as another account.
  */
 import { mkdtempSync } from "node:fs";
-import { readdir, rm, unlink } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -25,6 +25,9 @@ import type {
 import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
 import { ResumeTranscriptMissing } from "@hercule/protocol";
 import type { AccessMode, AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
+import { locateCompiledBinary } from "@hercule/home";
+import { quoteShellWord } from "../../credentials";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks/mark-format";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
@@ -36,12 +39,20 @@ import type { HarnessRunnerContext } from "../index";
 import type { LoginCommand } from "../login";
 import { isExecutableNotFound, stopChild } from "../process";
 import type { CheckedFramedChild, FramedChild, Run } from "../process";
-import { describeFileFailure, isMissingPath } from "../session-files";
+import { describeFileFailure } from "../session-files";
 import { truncateFact } from "../text";
-import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
+import {
+  ANTIGRAVITY_NAME,
+  APP_DATA_DIR,
+  listOwnedPaths,
+  readLoginFile,
+  readRegularFile,
+  resetOwnedHomePaths,
+} from "./harness-home";
+import { HOOK_RULES_VARIABLE, buildHooksFile, encodeHookRules } from "./pre-tool-hook";
+import type { HookRules } from "./pre-tool-hook";
 
-/** The name the user knows the harness by. */
-export const ANTIGRAVITY_NAME = "Antigravity";
+export { ANTIGRAVITY_NAME };
 
 /**
  * What a caller opens `agy` for. A session also says how much the agent may do
@@ -53,66 +64,23 @@ export type AgyPurpose =
   | { readonly kind: "probe" }
   | {
       readonly kind: "session";
-      readonly accessMode: AccessMode;
+      readonly accessMode: Exclude<AccessMode, "auto">;
       readonly request: NewSessionRequest;
     };
 
 /**
- * Removes `<home>/config/hooks.json`, the hooks file of the Harness Home, and
- * logs that it did. Does nothing when there is none. A link is removed, never
- * what it points to. Fails with `AdapterFailed` when the file exists and cannot
- * be removed, because then Hercule cannot tell what `agy` would load.
- *
- * `agy` reads this file at every tool call, and every session of an account
- * shares the Harness Home. A hook left there (for example one that approves
- * every command) would silently loosen every later session, in any workspace,
- * so a session start removes it before `agy` runs. What stays possible: a
- * session that writes the file while another session of the same account runs.
- * That needs code execution as the runner's user, which already reaches
- * everything this user can.
+ * Returns the shell command that starts the `hercule` binary for the pre-tool
+ * hook: `words` with each word quoted, because `agy` runs the hook through a
+ * shell. `words` is the running executable, plus the entry script when
+ * running from source rather than the compiled binary. A test passes its own
+ * words to point `agy` at the verb of another build.
  */
-const removeHooksFile = (home: string): Effect.Effect<void, AdapterFailed> =>
-  removeOwnedFile(
-    join(home, "config", "hooks.json"),
-    "hooks file",
-    `Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
-  );
-
-/**
- * Removes `<home>/antigravity-acp/settings.json`, the settings file of the
- * Harness Home, and logs that it did. `toolPermission` in it works under
- * `agy acp`, so a value an earlier session wrote would change every later
- * session. `agy` does not create the file. Same rules as `removeHooksFile`.
- */
-const removeSettingsFile = (home: string): Effect.Effect<void, AdapterFailed> =>
-  removeOwnedFile(
-    join(home, APP_DATA_DIR, "settings.json"),
-    "settings file",
-    `Hercule owns the settings of the Harness Home, because a tool permission in them would change every session of the account.`,
-  );
-
-const removeOwnedFile = (
-  path: string,
-  label: string,
-  reason: string,
-): Effect.Effect<void, AdapterFailed> => {
-  return Effect.tryPromise({
-    try: () => unlink(path).then(() => true),
-    catch: (error) =>
-      isMissingPath(error)
-        ? "missing"
-        : buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} could not start, because Hercule could not remove the ${label} ${path}: ${describeFileFailure(error)}`,
-          ),
-  }).pipe(
-    Effect.catch((failure) =>
-      failure === "missing" ? Effect.succeed(false) : Effect.fail(failure),
-    ),
-    Effect.flatMap((wasRemoved) =>
-      wasRemoved ? Effect.logWarning(`Removed the ${label} ${path}: ${reason}`) : Effect.void,
-    ),
-  );
-};
+const buildHookLauncher = (
+  words: ReadonlyArray<string> = [
+    process.execPath,
+    ...(locateCompiledBinary() === undefined ? [Bun.main] : []),
+  ],
+): string => words.map(quoteShellWord).join(" ");
 
 /**
  * Returns the id of the `agy` mode that matches a Hercule Access Mode, or
@@ -142,6 +110,13 @@ export type AgySpawn = (
 export interface AgySeam {
   readonly spawn: AgySpawn;
   readonly run: Run;
+  /**
+   * The words that start the `hercule` binary for the pre-tool hook in the
+   * sessions this adapter starts. Absent, the running executable starts it,
+   * which is right in the compiled binary. A test that runs from source under
+   * vitest sets it to start the real verb.
+   */
+  readonly hookLauncher?: ReadonlyArray<string>;
 }
 
 /** A conversation `agy` opened: its id, the settings it returned for it, and whether Google holds the account. */
@@ -270,6 +245,14 @@ const STDERR_LINES = 5;
  * - `AGY_CLI_DISABLE_AUTO_UPDATE` must be exactly `true`. The value `1` has no
  *   effect, and `agy` then replaces its own binary in the background.
  *
+ * - `SESSION_MARKS_DIR_VARIABLE` is `sessionMarksDir` when one is given, which
+ *   only a session with an edit watch has. The hook in the Harness Home reads
+ *   it, and only the `agy` process of that session sees it.
+ * - `HOOK_RULES_VARIABLE` is `hookRules` when one is given: what the pre-tool
+ *   hook denies in this session. Only the `agy` process of that session sees
+ *   it. A process without it gets the hook that denies every edit and search,
+ *   because the hook reads a missing value as a setup that is wrong. Only the
+ *   sign-in and `agy --version` give none, and they run no tools.
  * - `TMPDIR` is `tempFolder` when one is given. In its `default` mode `agy`
  *   lets the agent write under the system's temporary folder without asking,
  *   and `agy` finds that folder through `$TMPDIR`. Pointing it at a private
@@ -283,6 +266,8 @@ const STDERR_LINES = 5;
 const buildAgyEnv = (
   ctx: HarnessRunnerContext,
   tempFolder?: string,
+  sessionMarksDir?: string,
+  hookRules?: HookRules,
 ): Record<string, string | undefined> => {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(ctx.env)) {
@@ -291,6 +276,8 @@ const buildAgyEnv = (
   env["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 0";
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
   if (tempFolder !== undefined) env["TMPDIR"] = tempFolder;
+  if (sessionMarksDir !== undefined) env[SESSION_MARKS_DIR_VARIABLE] = sessionMarksDir;
+  if (hookRules !== undefined) env[HOOK_RULES_VARIABLE] = encodeHookRules(hookRules);
   return env;
 };
 
@@ -684,6 +671,8 @@ export const openSignedInAgy = (
     readonly cwd: string;
     readonly handlers: AcpHandlers;
     readonly purpose: AgyPurpose;
+    /** The words that start the `hercule` binary for the pre-tool hook. Defaults to the running executable. */
+    readonly hookLauncher?: ReadonlyArray<string>;
   },
 ): Effect.Effect<SignedInAgy, AdapterError, Scope.Scope> =>
   Effect.gen(function* () {
@@ -696,10 +685,9 @@ export const openSignedInAgy = (
         ? options.purpose.request
         : { cwd: options.cwd, mcpServers: [] };
 
-    if (options.purpose.kind === "session") {
-      yield* removeHooksFile(ctx.home);
-      yield* removeSettingsFile(ctx.home);
-    }
+    // A probe resets them too, so no `agy` process ever starts on a home that
+    // holds a file that would loosen it.
+    yield* resetOwnedHomePaths(ctx.home, buildHooksFile(buildHookLauncher(options.hookLauncher)));
 
     const folder = yield* makeSessionLogFolder(ctx.home);
     const command = [
@@ -712,7 +700,19 @@ export const openSignedInAgy = (
       ...buildAccountFlags(ctx.home, folder),
     ];
     const tempFolder = yield* makeAgyTempFolder();
-    const env = buildAgyEnv(ctx, tempFolder);
+    const env = buildAgyEnv(
+      ctx,
+      tempFolder,
+      options.purpose.kind === "session" ? ctx.editMarks?.sessionMarksDir : undefined,
+      {
+        // A probe runs no tools, so it gets the strictest rules.
+        accessMode:
+          options.purpose.kind === "session" ? options.purpose.accessMode : "approval-required",
+        // Every additional directory is a folder Hercule gives the agent to read, never to change.
+        readOnlyFolders: (request.additionalDirectories ?? []).map((folder) => resolve(folder)),
+        harnessHomePaths: listOwnedPaths(ctx.home),
+      },
+    );
     const child = yield* Effect.acquireRelease(
       Effect.try({
         try: () => spawn(command, env, options.cwd),
@@ -763,7 +763,7 @@ export const openSignedInAgy = (
     }
 
     // One check per optional field of the request that `agy` must announce
-    // support for. The check of `request.mcpServers` goes here, beside this one.
+    // support for.
     if (
       options.purpose.kind === "session" &&
       request.additionalDirectories !== undefined &&
@@ -772,6 +772,18 @@ export const openSignedInAgy = (
       return yield* Effect.fail(
         buildAdapterFailed(
           `${ANTIGRAVITY_NAME} did not confirm that it takes a session's skills folder (\`additionalDirectories\`), so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+        ),
+      );
+    }
+
+    if (
+      options.purpose.kind === "session" &&
+      request.mcpServers.length > 0 &&
+      !connection.harness.acceptsHttpMcpServers
+    ) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} did not confirm that it takes MCP servers over HTTP, so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
         ),
       );
     }

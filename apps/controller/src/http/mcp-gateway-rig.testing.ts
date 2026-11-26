@@ -6,7 +6,16 @@
  */
 import { expect } from "vitest";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createProfile, spawnThreadUnder, type Arranged } from "../sessions/testing";
+import {
+  at,
+  createProfile,
+  readSessionToken,
+  reportEvent,
+  spawnThreadUnder,
+  waitForSession,
+  waitForStartFrames,
+  type Arranged,
+} from "../sessions/testing";
 import {
   createServers,
   eventually,
@@ -20,7 +29,7 @@ import {
   startRecordingProxy,
   type RecordingProxy,
 } from "./mcp-recording-proxy.testing";
-import { send } from "./testing";
+import { post, send } from "./testing";
 import { withFleet } from "../workspaces/testing";
 
 /** The revisions of the older wire era, which Codex and pi ask `initialize` for. */
@@ -97,10 +106,16 @@ export const TWIN_SCENARIOS: ReadonlyArray<TwinScenario> = [
   },
 ];
 
+/** A server a test puts in front of the recording proxy. */
+export interface FrontServer {
+  readonly url: string;
+  readonly stop: () => Promise<void>;
+}
+
 /** What a test needs to reach the gateway as a harness does. */
 export interface GatewayRig {
   readonly proxy: RecordingProxy;
-  /** The address the harness is given: the recording proxy in front of the controller. */
+  /** The address the harness is given: the front server when the rig has one, else the recording proxy in front of the controller. */
   readonly gatewayUrl: string;
   readonly sessionToken: string;
   /** The session whose list the gateway serves. */
@@ -114,6 +129,12 @@ export interface GatewayRig {
    * `tools/list`.
    */
   readonly forgetMcpSession: () => Promise<string>;
+  /**
+   * Ends the session and resumes it with an input, the way the controller
+   * resumes a session: the same session, started again with a new token.
+   * Returns the new token.
+   */
+  readonly resumeSession: () => Promise<string>;
 }
 
 /** A `GatewayRig` that can also change what the fake MCP server lists. */
@@ -143,6 +164,8 @@ export const withThreadOnGateway = async (
     readonly serverIds: ReadonlyArray<string>;
     readonly idsByName?: Readonly<Record<string, string>>;
     readonly answerDiscoverLikeOlderServer: boolean;
+    /** Starts a server in front of the recording proxy, given the proxy's address. */
+    readonly front?: (target: string) => FrontServer;
   },
   body: (rig: GatewayRig) => Promise<void>,
 ): Promise<void> => {
@@ -153,10 +176,11 @@ export const withThreadOnGateway = async (
   const proxy = startRecordingProxy(arranged.harness.base, {
     answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
   });
+  const front = options.front?.(proxy.url);
   try {
     await body({
       proxy,
-      gatewayUrl: proxy.url,
+      gatewayUrl: front?.url ?? proxy.url,
       sessionToken: thread.token,
       sessionId: thread.session.id,
       setList: async (names) => {
@@ -185,8 +209,37 @@ export const withThreadOnGateway = async (
         expect(gone.status).toBe(204);
         return initialize!.answeredSessionId!;
       },
+      resumeSession: async () => {
+        const sessionId = thread.session.id;
+        reportEvent(arranged.wire, 2, {
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          _tag: "session.exited",
+          reason: "stopped",
+        });
+        await waitForSession(arranged, sessionId, (one) => one.status === "exited");
+        const resumed = await post(
+          arranged.harness.base,
+          `/api/v1/sessions/${sessionId}/input`,
+          { text: "carry on" },
+          arranged.token,
+        );
+        expect(resumed.status, await resumed.clone().text()).toBe(200);
+        const frames = await waitForStartFrames(arranged, sessionId, 2);
+        reportEvent(arranged.wire, 1, {
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          _tag: "session.started",
+          harnessRefs: { nativeSessionId: "native-1" },
+        });
+        await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+        return readSessionToken(frames[1]!);
+      },
     });
   } finally {
+    await front?.stop();
     await proxy.stop();
   }
 };
@@ -203,6 +256,7 @@ export const withGatewayRig = (
     readonly serverNames: ReadonlyArray<string>;
     readonly listed: ReadonlyArray<string>;
     readonly answerDiscoverLikeOlderServer: boolean;
+    readonly front?: (target: string) => FrontServer;
   },
   body: (rig: ToolChangingGatewayRig) => Promise<void>,
 ): Promise<void> =>
@@ -228,6 +282,7 @@ export const withGatewayRig = (
           serverIds: options.listed.map((name) => idsByName[name]!),
           idsByName,
           answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
+          ...(options.front === undefined ? {} : { front: options.front }),
         },
         (rig) =>
           body({

@@ -2054,13 +2054,16 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
      * browser opened, the CLI would switch to a `localhost` callback, which a
      * browser on another machine cannot reach.
      */
-    login: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod): LoginCommand =>
-      method === "sign-in"
-        ? {
-            command: [binary, "auth", "login"],
-            env: { ...buildEnv(ctx), BROWSER: "false" },
-          }
-        : buildTokenLoginCommand(ctx, binary),
+    login: {
+      methods: ["sign-in", "create-token"],
+      build: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod): LoginCommand =>
+        method === "sign-in"
+          ? {
+              command: [binary, "auth", "login"],
+              env: { ...buildEnv(ctx), BROWSER: "false" },
+            }
+          : buildTokenLoginCommand(ctx, binary),
+    },
 
     /**
      * Installs the CLI version this build's SDK expects. The install script

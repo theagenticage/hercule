@@ -8,9 +8,11 @@
  */
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -26,6 +28,7 @@ import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
+import type { NewSessionRequest } from "@hercule/acp";
 import { answerWith } from "@hercule/acp/testing";
 import { buildAdapterFailed } from "../adapter-error-builders";
 import {
@@ -191,8 +194,9 @@ describe("how the process is started", () => {
     await Effect.runPromise(readAgyVersion(run, ctx, BINARY));
     const login = buildLoginCommand(ctx, BINARY);
 
-    const { TMPDIR, ...sessionEnv } = fake.spawns[0]!.env;
+    const { TMPDIR, HERCULE_AGY_HOOK_RULES, ...sessionEnv } = fake.spawns[0]!.env;
     expect(TMPDIR).toContain("hercule-agy-");
+    expect(HERCULE_AGY_HOOK_RULES).toBeDefined();
     expect(sessionEnv).toEqual(AGY_ENV);
     expect(versionEnvs).toEqual([AGY_ENV]);
     expect(login.env).toEqual(AGY_ENV);
@@ -202,10 +206,15 @@ describe("how the process is started", () => {
 describe("what the process is opened for", () => {
   const SKIP_FLAG = "--dangerously-skip-permissions";
   const REQUEST = { cwd: "/work", mcpServers: [] };
+  const GATEWAY_ENTRY = {
+    name: "tools",
+    url: "http://127.0.0.1:1/mcp",
+    headers: [{ name: "Authorization", value: "Bearer token" }],
+  };
   const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access", request: REQUEST };
 
   it("adds the skip-permissions flag for a session in full-access only", async () => {
-    const modes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
+    const modes = ["approval-required", "auto-accept-edits", "full-access"] as const;
     const commands: Array<ReadonlyArray<string>> = [];
     for (const accessMode of modes) {
       const { home, fake } = setUp();
@@ -219,12 +228,7 @@ describe("what the process is opened for", () => {
     const { home, fake } = setUp();
     await Effect.runPromise(Effect.scoped(open(fake, home)));
 
-    expect(commands.map((command) => command.includes(SKIP_FLAG))).toEqual([
-      false,
-      false,
-      false,
-      true,
-    ]);
+    expect(commands.map((command) => command.includes(SKIP_FLAG))).toEqual([false, false, true]);
     expect(fake.spawns[0]!.command).not.toContain(SKIP_FLAG);
   });
 
@@ -264,6 +268,26 @@ describe("what the process is opened for", () => {
     expect(fake.spawns[0]!.harness.received.map((message) => message.method)).toContain(
       "authenticate",
     );
+  });
+
+  it("fails a session start that has MCP servers before authenticate when agy takes none over HTTP, and a probe or a session without them does not need it", async () => {
+    const withServers: AgyPurpose = {
+      ...FULL_ACCESS,
+      request: { ...REQUEST, mcpServers: [GATEWAY_ENTRY] },
+    };
+    const { home, fake } = setUp({ withoutHttpMcpCapability: true });
+
+    const error = await runAndReadFailure(open(fake, home, { purpose: withServers }));
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain("MCP servers over HTTP");
+    const methods = fake.spawns[0]!.harness.received.map((message) => message.method);
+    expect(methods).toContain("initialize");
+    expect(methods).not.toContain("authenticate");
+
+    const other = setUp({ withoutHttpMcpCapability: true });
+    await Effect.runPromise(Effect.scoped(open(other.fake, other.home, { purpose: FULL_ACCESS })));
+    expect(await openAndReadPlan(other.fake, other.home)).toBe(PLAN_LABEL);
   });
 
   it("still reads a signed-out home as not signed in when the capability is there", async () => {
@@ -924,84 +948,335 @@ describe("closing the scope", () => {
   });
 });
 
-describe("the hooks file of the Harness Home", () => {
+describe("the files of the Harness Home that Hercule owns", () => {
   const SESSION: AgyPurpose = {
     kind: "session",
     accessMode: "approval-required",
     request: { cwd: "/work", mcpServers: [] },
   };
-  const HOOKS = (home: string) => join(home, "config", "hooks.json");
+  const REMOVED = [
+    ["antigravity-acp", "settings.json"],
+    ["config", "plugins"],
+    ["config", "plugins.json"],
+    [".", "skills"],
+    ["config", "skills"],
+    ["antigravity-acp", "skills"],
+    ["config", "skills.json"],
+    [".", "GEMINI.md"],
+    [".", "AGENTS.md"],
+    ["config", "GEMINI.md"],
+    ["config", "AGENTS.md"],
+    ["config", "rules"],
+  ] as const;
+  const MCP_CONFIG = (home: string) => join(home, "config", "mcp_config.json");
 
-  it("is removed before agy starts for a session", async () => {
+  it.each(REMOVED)("removes %s/%s before agy starts for a session", async (folder, name) => {
     const { home, fake } = setUp();
-    mkdirSync(join(home, "config"));
-    writeFileSync(HOOKS(home), "{}");
+    mkdirSync(join(home, folder), { recursive: true });
+    writeFileSync(join(home, folder, name), "{}");
 
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
-    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(existsSync(join(home, folder, name))).toBe(false);
     expect(fake.spawns).toHaveLength(1);
   });
 
-  it("is removed as a link, and what it points to stays", async () => {
+  it.each(REMOVED)("removes %s/%s as a link, and what it points to stays", async (folder, name) => {
     const { home, fake } = setUp();
-    const target = join(createScratchHome("agy-target"), "hooks.json");
+    const target = join(createScratchHome("agy-target"), name);
     writeFileSync(target, "{}");
-    mkdirSync(join(home, "config"));
-    symlinkSync(target, HOOKS(home));
+    mkdirSync(join(home, folder), { recursive: true });
+    symlinkSync(target, join(home, folder, name));
 
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
-    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(existsSync(join(home, folder, name))).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("{}");
   });
 
-  it("is left alone when agy is opened for a probe", async () => {
+  it.each(REMOVED)("removes %s/%s when it is a whole folder", async (folder, name) => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, folder, name, "inner"), { recursive: true });
+    writeFileSync(join(home, folder, name, "inner", "file"), "x");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(join(home, folder, name))).toBe(false);
+  });
+
+  it.each(REMOVED)(
+    "removes %s/%s as a link to a folder, and the folder stays",
+    async (folder, name) => {
+      const { home, fake } = setUp();
+      const target = createScratchHome("agy-target");
+      writeFileSync(join(target, "file"), "x");
+      mkdirSync(join(home, folder), { recursive: true });
+      symlinkSync(target, join(home, folder, name));
+
+      await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+      expect(existsSync(join(home, folder, name))).toBe(false);
+      expect(readFileSync(join(target, "file"), "utf8")).toBe("x");
+    },
+  );
+
+  it("empties the MCP servers file, also when it is a link, and leaves the link's target alone", async () => {
     const { home, fake } = setUp();
     mkdirSync(join(home, "config"));
-    writeFileSync(HOOKS(home), "{}");
+    writeFileSync(MCP_CONFIG(home), '{"mcpServers":{"x":{"url":"http://x"}}}');
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+
+    const target = join(createScratchHome("agy-target"), "mcp.json");
+    writeFileSync(target, "{}");
+    rmSync(MCP_CONFIG(home));
+    symlinkSync(target, MCP_CONFIG(home));
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+    expect(lstatSync(MCP_CONFIG(home)).isFile()).toBe(true);
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+    expect(readFileSync(target, "utf8")).toBe("{}");
+  });
+
+  it("creates the MCP servers file as an empty file when there is none", async () => {
+    const { home, fake } = setUp();
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+    expect(readdirSync(join(home, "config")).sort()).toEqual(["hooks.json", "mcp_config.json"]);
+  });
+
+  it("resets them also when agy is opened for a probe, before it starts", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(join(home, "config", "hooks.json"), "{}");
+    writeFileSync(MCP_CONFIG(home), "{}");
 
     await Effect.runPromise(Effect.scoped(open(fake, home)));
 
-    expect(existsSync(HOOKS(home))).toBe(true);
+    expect(readFileSync(join(home, "config", "hooks.json"), "utf8")).toContain("PreToolUse");
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
   });
 
-  it("fails the start with AdapterFailed, and spawns nothing, when it cannot be removed", async () => {
+  it("fails the start, changes nothing and spawns nothing when config is a link", async () => {
     const { home, fake } = setUp();
-    mkdirSync(join(HOOKS(home), "inner"), { recursive: true });
+    const outside = createScratchHome("agy-outside");
+    writeFileSync(join(outside, "mcp_config.json"), "{}");
+    symlinkSync(outside, join(home, "config"));
 
     const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
 
     expect(failure._tag).toBe("AdapterFailed");
-    expect(failure.message).toContain("hooks file");
+    expect(failure.message).toContain(join(home, "config"));
+    expect(failure.message).toContain("link");
+    expect(readdirSync(outside)).toEqual(["mcp_config.json"]);
+    expect(readFileSync(join(outside, "mcp_config.json"), "utf8")).toBe("{}");
     expect(fake.spawns).toHaveLength(0);
   });
 
-  it("removes the settings file in the app data folder too, and keeps what a link points to", async () => {
+  it("fails the start when the Harness Home itself is a link, for a probe too", async () => {
     const { home, fake } = setUp();
-    const target = join(createScratchHome("agy-target"), "settings.json");
+    const link = join(createScratchHome("agy-link"), "home");
+    symlinkSync(home, link);
+
+    const failure = await runAndReadFailure(open(fake, link));
+
+    expect(failure.message).toContain(link);
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("tells the user to remove a folder that stands where Hercule writes a file", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config", "hooks.json"), { recursive: true });
+
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+
+    expect(failure.message).toContain(join(home, "config", "hooks.json"));
+    expect(failure.message).toContain(
+      "is a folder, and Hercule needs a file there. Remove the folder",
+    );
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("fails the start with AdapterFailed naming the path, and spawns nothing, when one cannot be changed", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(MCP_CONFIG(home), "inner"), { recursive: true });
+
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain("mcp_config.json");
+    expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    expect(fake.spawns).toHaveLength(0);
+  });
+});
+
+describe("the pre-tool hook of a session", () => {
+  const SESSION: AgyPurpose = {
+    kind: "session",
+    accessMode: "approval-required",
+    request: { cwd: "/work", mcpServers: [] },
+  };
+  interface HooksFile {
+    readonly hercule: {
+      readonly PreToolUse: ReadonlyArray<{
+        readonly matcher: string;
+        readonly hooks: ReadonlyArray<{ readonly command: string }>;
+      }>;
+    };
+  }
+  const HOOKS_FILE = (home: string) => join(home, "config", "hooks.json");
+
+  /** Starts a session for the account in `home`, and returns what the spawned `agy` was given. */
+  const startSession = async (home: string, sessionMarksDir: string | null) => {
+    const fake = buildFakeAgy(home);
+    const ctx = buildContext(home);
+    await Effect.runPromise(
+      Effect.scoped(
+        openSignedInAgy(
+          fake.spawn,
+          sessionMarksDir === null
+            ? ctx
+            : {
+                ...ctx,
+                editMarks: {
+                  sessionMarksDir,
+                  recordToolStart: () => undefined,
+                  recordProcessStart: () => undefined,
+                  recordProcessEnd: () => undefined,
+                  recordRequestOnRunningItem: () => undefined,
+                },
+              },
+          BINARY,
+          { cwd: createScratchHome("agy-work"), handlers: NO_HANDLERS, purpose: SESSION },
+        ),
+      ),
+    );
+    return fake.spawns[0]!;
+  };
+
+  it("is the same hooks file for every session, writes it over what is there, and leaves no temporary file", async () => {
+    const home = createSignedInHome();
+    await startSession(home, null);
+    const hooks = readFileSync(HOOKS_FILE(home), "utf8");
+
+    const target = join(createScratchHome("agy-target"), "hooks.json");
     writeFileSync(target, "{}");
-    mkdirSync(join(home, "antigravity-acp"), { recursive: true });
-    symlinkSync(target, join(home, "antigravity-acp", "settings.json"));
+    rmSync(HOOKS_FILE(home));
+    symlinkSync(target, HOOKS_FILE(home));
+    await startSession(home, createScratchHome("agy-marks"));
 
-    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
-
-    expect(existsSync(join(home, "antigravity-acp", "settings.json"))).toBe(false);
+    expect(readFileSync(HOOKS_FILE(home), "utf8")).toBe(hooks);
+    expect(lstatSync(HOOKS_FILE(home)).isFile()).toBe(true);
     expect(readFileSync(target, "utf8")).toBe("{}");
+    expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    expect((JSON.parse(hooks) as HooksFile).hercule.PreToolUse[0]!.matcher).toBe(
+      "run_command|edit_file|write_file|search_web|invoke_subagent|mcp_chrome_devtools_.*",
+    );
+    expect(hooks).not.toContain("agy-marks");
   });
 
-  it("leaves the settings file alone for a probe, and fails a session start that cannot remove it", async () => {
-    const probe = setUp();
-    mkdirSync(join(probe.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(probe.home, "antigravity-acp", "settings.json"), "{}");
-    await Effect.runPromise(Effect.scoped(open(probe.fake, probe.home)));
-    expect(existsSync(join(probe.home, "antigravity-acp", "settings.json"))).toBe(true);
+  it("runs the verb of the binary, quoted so a shell reads it as the same words", async () => {
+    const home = createSignedInHome();
+    await startSession(home, null);
+    const hooks = JSON.parse(readFileSync(HOOKS_FILE(home), "utf8")) as HooksFile;
+    const command = hooks.hercule.PreToolUse[0]!.hooks[0]!.command;
 
-    const { home, fake } = setUp();
-    mkdirSync(join(home, "antigravity-acp", "settings.json", "inner"), { recursive: true });
-    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
-    expect(failure._tag).toBe("AdapterFailed");
-    expect(failure.message).toContain("settings file");
-    expect(fake.spawns).toHaveLength(0);
+    const words = Bun.spawnSync(["/bin/sh", "-c", `for word in ${command}; do echo "$word"; done`])
+      .stdout.toString()
+      .trimEnd()
+      .split("\n");
+
+    expect(words[0]).toBe(process.execPath);
+    expect(words.at(-1)).toBe("antigravity-pre-tool-hook");
+  });
+
+  it("runs the launcher the caller gives, quoted word by word, in front of the verb", async () => {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home);
+    await Effect.runPromise(
+      Effect.scoped(
+        openSignedInAgy(fake.spawn, buildContext(home), BINARY, {
+          cwd: createScratchHome("agy-work"),
+          handlers: NO_HANDLERS,
+          purpose: SESSION,
+          hookLauncher: ["/usr/bin/bun", "/a b/main.ts"],
+        }),
+      ),
+    );
+
+    const hooks = JSON.parse(readFileSync(HOOKS_FILE(home), "utf8")) as HooksFile;
+    expect(hooks.hercule.PreToolUse[0]!.hooks[0]!.command).toBe(
+      "'/usr/bin/bun' '/a b/main.ts' antigravity-pre-tool-hook",
+    );
+  });
+
+  it("gives the marks directory to the agy process of a session with an edit watch only", async () => {
+    const marks = createScratchHome("agy-marks");
+
+    const watched = await startSession(createSignedInHome(), marks);
+    const unwatched = await startSession(createSignedInHome(), null);
+
+    expect(watched.env["HERCULE_SESSION_MARKS_DIR"]).toBe(marks);
+    expect(unwatched.env).not.toHaveProperty("HERCULE_SESSION_MARKS_DIR");
+  });
+
+  it("gives the agy process of every session and probe the rules: the access mode, the read-only folders and the owned paths of the Harness Home", async () => {
+    const spawned = async (
+      purpose: (request: NewSessionRequest) => AgyPurpose,
+      additionalDirectories?: ReadonlyArray<string>,
+    ) => {
+      const home = createSignedInHome();
+      const fake = buildFakeAgy(home);
+      await Effect.runPromise(
+        Effect.scoped(
+          openSignedInAgy(fake.spawn, buildContext(home), BINARY, {
+            cwd: createScratchHome("agy-work"),
+            handlers: NO_HANDLERS,
+            purpose: purpose({
+              cwd: "/work",
+              mcpServers: [],
+              ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+            }),
+          }),
+        ),
+      );
+      const rules = JSON.parse(fake.spawns[0]!.env["HERCULE_AGY_HOOK_RULES"]!) as {
+        accessMode: string;
+        readOnlyFolders: ReadonlyArray<string>;
+        harnessHomePaths: ReadonlyArray<string>;
+      };
+      return { home, rules };
+    };
+    const inMode =
+      (accessMode: "approval-required" | "auto-accept-edits" | "full-access") =>
+      (request: NewSessionRequest): AgyPurpose => ({ kind: "session", accessMode, request });
+
+    const approval = await spawned(inMode("approval-required"), [
+      "/made/up/skills/../skills",
+      "/made/other",
+    ]);
+    const edits = await spawned(inMode("auto-accept-edits"));
+    const full = await spawned(inMode("full-access"));
+    const probe = await spawned(() => ({ kind: "probe" }));
+
+    expect(approval.rules.accessMode).toBe("approval-required");
+    expect(approval.rules.readOnlyFolders).toEqual(["/made/up/skills", "/made/other"]);
+    expect(edits.rules).toMatchObject({ accessMode: "auto-accept-edits", readOnlyFolders: [] });
+    expect(full.rules.accessMode).toBe("full-access");
+    expect(probe.rules.accessMode).toBe("approval-required");
+    for (const { home, rules } of [approval, edits, full, probe]) {
+      expect(rules.harnessHomePaths).toEqual(
+        expect.arrayContaining([
+          join(home, "config", "hooks.json"),
+          join(home, "config", "plugins"),
+          join(home, "config", "plugins.json"),
+          join(home, "config", "mcp_config.json"),
+          join(home, "antigravity-acp", "settings.json"),
+          join(home, "skills"),
+          join(home, "AGENTS.md"),
+        ]),
+      );
+    }
   });
 });

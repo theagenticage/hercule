@@ -69,6 +69,7 @@ The interface in `index.ts` stays the same, so nothing outside `connection.ts` c
 
 - The recorder is not in `main`. It lives on the branch `research/antigravity-sessions-1282`, under `docs/research/antigravity/sessions-recorder/`.
 - #1293 added 16 more (skills, instructions files, the default Harness Home) with its own recorder. It is not in `main` either. It lives on the branch `research/antigravity-skills-1293`, under `docs/research/antigravity/skills-recorder/`. Each of its recordings has a first `note` line (scenario, argv, `TMPDIR`, work folder, files placed) and a last `note` line with what was seen outside ACP: listings of folders, hook marker files, and the lines `agy` wrote in its own transcript.
+- The second PR of #1282 added 4 more (`skill-control`, `skill-list`, `skill-string`, `skill-underscore`): a skill with no `allowed-tools`, with `allowed-tools: ["run_command"]`, with `allowed-tools: run_command`, and with `allowed_tools: run_command`. Each asked once for the command, as the control did. They are made with the recorder of #1282 and have a first `note` line like the others.
 - The first line of each of the #1282 recordings is a `{"note": ...}` line that says which scenario made it, with which flags, in which mode, with which `TMPDIR`, in which work folder and with which files in place. The replay skips every `note` line.
 - Personal values were replaced: the Linux user name with `user`, the machine's host name with `runner-host`, and the controller's address with `controller.example`. No email address or token appears in them.
 

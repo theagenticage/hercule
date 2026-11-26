@@ -23,7 +23,7 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import type { AcpConnection, AcpHandlers, NewSessionRequest, PromptContent } from "@hercule/acp";
-import { SteerRefused } from "@hercule/protocol";
+import { MCP_GATEWAY_ENTRY_NAME, SteerRefused } from "@hercule/protocol";
 import type {
   AccessMode,
   AdapterError,
@@ -48,6 +48,7 @@ import {
   buildSessionStopping,
   buildStartFailure,
 } from "../adapter-error-builders";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import { readAttachmentBase64 } from "../attachments";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
@@ -73,7 +74,9 @@ import {
   buildNormalizerState,
   buildProcessEndEvents,
   closeTurn,
+  hideSecret,
   holdTurn,
+  makeEventSecretHider,
   normalizeUnhandled,
   normalizeUpdate,
   readSyntheticTurnId,
@@ -271,8 +274,21 @@ export const startAgySession = (
   spec: SessionSpec,
   ctx: SessionStartContext,
   emit: (events: ReadonlyArray<HarnessEvent>) => void,
-): Effect.Effect<AgySession, AdapterError, Scope.Scope> =>
-  Effect.gen(function* () {
+): Effect.Effect<AgySession, AdapterError, Scope.Scope> => {
+  // The token is read once. It goes to `agy` in the MCP servers' headers, over stdin, and `agy` may echo it, so every event is cleaned of it (`emitEvents`), and so is every error of a start or an input (`hideTokenInError`).
+  const token = ctx.env[SESSION_TOKEN_VARIABLE];
+  /**
+   * Returns `error` with the token hidden in its message, as a copy of the same
+   * class. A message can quote what `agy` wrote on stderr or in an error, which
+   * may echo the token. Every error that leaves a start or an input goes through this.
+   */
+  const hideTokenInError = <E extends AdapterError>(error: E): E => {
+    if (token === undefined || token === "" || !("message" in error)) return error;
+    if (!error.message.includes(token)) return error;
+    const copy = Object.create(Object.getPrototypeOf(error) as object) as E;
+    return Object.assign(copy, error, { message: hideSecret(error.message, token) });
+  };
+  return Effect.gen(function* () {
     const binary = ctx.binary;
     if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(ANTIGRAVITY_NAME));
     const accessMode = spec.accessMode;
@@ -286,6 +302,28 @@ export const startAgySession = (
     if (spec.continue?.mode === "fork") {
       return yield* Effect.die(new Error("Antigravity declares fork unsupported."));
     }
+
+    // The controller gives every session of a native harness exactly one entry, the Hercule tools. An empty list means the runner dropped it or the controller is older. Another name would mean a server of the repository stands in for it, so both fail the start.
+    if (ctx.mcpServers.length !== 1 || ctx.mcpServers[0]?.name !== MCP_GATEWAY_ENTRY_NAME) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} could not start, because Hercule's tools were not given to this session as the one MCP server named "${MCP_GATEWAY_ENTRY_NAME}" (it was given ${ctx.mcpServers.length === 0 ? "none" : ctx.mcpServers.map(({ name }) => `"${name}"`).join(", ")}). Update the controller and the runner to the same version.`,
+        ),
+      );
+    }
+    if (token === undefined || token === "") {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} could not start, because the session has no session token to give the Hercule tools.`,
+        ),
+      );
+    }
+    const mcpServers = ctx.mcpServers.map(({ name, url }) => ({
+      name,
+      url,
+      headers: [{ name: "Authorization", value: `Bearer ${token}` }],
+    }));
+    const hideEventSecret = makeEventSecretHider(token);
 
     const scope = yield* Scope.Scope;
     // The process has a scope of its own, so that a stop can close it while the
@@ -359,7 +397,8 @@ export const startAgySession = (
     /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
       if (!isStarted) return;
-      if (events.length > 0) emit(events);
+      const hidden = hideEventSecret(events);
+      if (hidden.length > 0) emit(hidden);
       boundSyntheticTurn();
     };
 
@@ -580,9 +619,7 @@ export const startAgySession = (
       const request: NewSessionRequest = {
         cwd,
         ...(skillsFolder === undefined ? {} : { additionalDirectories: [skillsFolder] }),
-        // The MCP Gateway is handed to `agy` here by a later change, together
-        // with its capability check in `openSignedInAgy`.
-        mcpServers: [],
+        mcpServers,
         ...(instructions === undefined
           ? {}
           : { meta: { antigravity: { systemPrompt: { append: instructions } } } }),
@@ -591,6 +628,7 @@ export const startAgySession = (
         cwd,
         handlers,
         purpose: { kind: "session", accessMode, request },
+        ...(seam.hookLauncher === undefined ? {} : { hookLauncher: seam.hookLauncher }),
       }).pipe(Scope.provide(processScope));
       const connection: AcpConnection = agy.connection;
 
@@ -875,7 +913,7 @@ export const startAgySession = (
         // The wait lets an input open its own Turn, which this interrupt must not close.
         return withDeadline(connection.cancel(nativeId), CANCEL_DEADLINE, "cancel").pipe(
           Effect.catch((error) =>
-            Effect.logWarning(`session/cancel was not sent: ${error.message}`),
+            Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
           ),
           Effect.andThen(
             Effect.sync(() =>
@@ -915,4 +953,5 @@ export const startAgySession = (
       stop: (reason) => exitSession(reason),
       exited: Deferred.await(exitedSignal),
     } satisfies AgySession;
-  });
+  }).pipe(Effect.mapError(hideTokenInError));
+};

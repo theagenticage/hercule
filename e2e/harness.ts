@@ -238,7 +238,8 @@ export const LOGIN_DEADLINE_MS = 120_000;
 /** What a runner reported about one Provider Account in one harness when it last probed it. */
 export interface Snapshot {
   readonly auth: { readonly status: string; readonly message?: string };
-  readonly models: ReadonlyArray<{ readonly slug: string }>;
+  /** `imageInput` is `null` for a model that takes no images. */
+  readonly models: ReadonlyArray<{ readonly slug: string; readonly imageInput?: unknown }>;
 }
 
 /** A Provider Account as `providerAccount.query` returns it. */
@@ -300,7 +301,7 @@ export const CLAUDE_CODE = "claude-code/claude-code";
 
 /**
  * The Provider and account kind that `ensureAccountOfHarness` creates for each
- * harness. Claude Code and Codex get a subscription that signs in on each
+ * harness. Claude Code, Codex and Antigravity get a subscription that signs in on each
  * machine, which is created without credentials. pi runs on a Z.ai key, which
  * the controller checks with Z.ai, so it needs `ZAI_API_KEY` and a network.
  */
@@ -312,6 +313,7 @@ const ACCOUNT_KIND_OF_HARNESS: Readonly<
     kind: "subscription-per-machine",
   },
   "codex/codex": { providerId: "openai/openai", kind: "subscription-per-machine" },
+  "antigravity/antigravity": { providerId: "google/google", kind: "subscription-per-machine" },
   "pi/pi": { providerId: "zai/zai", kind: "api-key" },
 };
 
@@ -694,6 +696,13 @@ export interface LiveHarness {
   readonly invokeRepositorySkill: (checkout: string, name: string) => string;
   /** Checks whether a model slug is one of the cheap models the live tests prefer. */
   readonly isCheapModel: (slug: string) => boolean;
+  /**
+   * The Access Mode its Threads start in when a test names none, or
+   * `undefined` for the default. A harness that declares `auto` unsupported
+   * falls back to a mode where it asks before every command, and a test that
+   * expects commands to run unasked would wait on that question forever.
+   */
+  readonly startAccessMode?: string;
   /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
   readonly findSkipReason: () => string | undefined;
   /** Gives the account its login in this harness on the runner in `target`. */
@@ -702,6 +711,9 @@ export interface LiveHarness {
 
 /** The Codex `auth.json` lent to the OpenAI account, when the developer named one. */
 const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
+
+/** The Antigravity `antigravity-oauth-token` file lent to the Google account, when the developer named one. */
+const LENT_ANTIGRAVITY_TOKEN = process.env["HERCULE_E2E_AGY_TOKEN"];
 
 /** The Z.ai key stored as the Z.ai account's own, when the environment has one. */
 const ZAI_API_KEY = process.env["ZAI_API_KEY"];
@@ -730,10 +742,17 @@ function findMissingBinary(name: string): string | undefined {
  *
  * - Claude Code: either of the two routes documented at `LENT_CREDENTIALS`.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the account's `CODEX_HOME`. Two live copies of an OAuth login can
- *   rotate each other out, so prefer a file written by `codex login
+ *   into the account's `CODEX_HOME`. A lent copy of an OAuth login and the
+ *   owner's own copy share one refresh token, and whichever refreshes first can
+ *   invalidate the other (this is not the sign-in against running processes
+ *   that spec 06 section 10.5 says Codex needs no lease for), so prefer a file written by `codex login
  *   --with-api-key`, which holds no refresh token. `codex` must be on the
  *   `PATH`.
+ * - Antigravity: `HERCULE_E2E_AGY_TOKEN` names an `antigravity-oauth-token`
+ *   file, which is copied into the account's Harness Home. `agy` must be on
+ *   the `PATH` of the runner (the e2e runner does not read
+ *   `HERCULE_AGY_TEST_BINARY`; link `agy` into a folder at the front of the
+ *   `PATH` instead).
  * - pi: `ZAI_API_KEY` on the environment, which is stored as the Z.ai
  *   account's key. `pi` must be on the `PATH`.
  */
@@ -782,6 +801,39 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     },
   },
   {
+    harnessId: "antigravity/antigravity",
+    label: "Antigravity",
+    // An input that starts with a slash is sent to `agy` as it is, and `agy`
+    // runs the command (spec 06 section 8, `available_commands_update`).
+    invokeSkill: (name) => `/${name}`,
+    invokeRepositorySkill: (_checkout, name) => `/${name}`,
+    isCheapModel: (slug) => slug.includes("flash"),
+    startAccessMode: "full-access",
+    findSkipReason: () =>
+      LENT_ANTIGRAVITY_TOKEN === undefined
+        ? "no login for the antigravity account: name an antigravity-oauth-token file in " +
+          "HERCULE_E2E_AGY_TOKEN. `agy` must also be on the PATH."
+        : findMissingBinary("agy"),
+    lendLogin: (target, accountId) => {
+      // The runner's Antigravity adapter keeps the login in the
+      // `antigravity-acp` folder of the account's Harness Home. It refuses a
+      // link, so the file is copied. A copy is safe: Google does not rotate
+      // the refresh token (measured 2026-11-26: it stayed the same across
+      // refreshes), so the lent login and the developer's own do not
+      // invalidate each other.
+      const appData = join(
+        buildHarnessHomeDir(target.runnerHome, accountId, "antigravity/antigravity"),
+        "antigravity-acp",
+      );
+      mkdirSync(appData, { recursive: true, mode: 0o700 });
+      chmodSync(appData, 0o700);
+      const token = join(appData, "antigravity-oauth-token");
+      writeFileSync(token, readFileSync(LENT_ANTIGRAVITY_TOKEN!, "utf8"), { mode: 0o600 });
+      chmodSync(token, 0o600);
+      return Promise.resolve();
+    },
+  },
+  {
     harnessId: "pi/pi",
     label: "pi",
     invokeSkill: (name) => `/skill:${name}`,
@@ -820,6 +872,14 @@ export interface PreparedHarness {
   readonly harnessId: string;
   /** The cheapest model the runner reported, or `undefined` for the account's default. */
   readonly model: string | undefined;
+  /** The Access Mode its Threads start in when a test names none, or `undefined` for the default. */
+  readonly accessMode: string | undefined;
+  /**
+   * Whether `model` takes images, as the runner's model list declares it. It is
+   * `true` when no model was picked, because the account's default model is
+   * not known here. The controller refuses an image for a model that takes none.
+   */
+  readonly modelTakesImages: boolean;
 }
 
 /**
@@ -850,7 +910,14 @@ export async function prepareHarness(
     harnessId: harness.harnessId,
   });
   const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
-  return { providerAccountId: account.id, harnessId: harness.harnessId, model };
+  const picked = snapshot.models.find((one) => one.slug === model);
+  return {
+    modelTakesImages: picked === undefined || picked.imageInput !== null,
+    providerAccountId: account.id,
+    harnessId: harness.harnessId,
+    model,
+    accessMode: harness.startAccessMode,
+  };
 }
 
 /**
@@ -879,6 +946,7 @@ export async function spawnThread(options: {
         "--runner",
         options.runnerId,
         ...(prepared.model === undefined ? [] : ["--model", prepared.model]),
+        ...(prepared.accessMode === undefined ? [] : ["--access-mode", prepared.accessMode]),
         ...(workspace === undefined ? [] : ["--workspace", JSON.stringify(workspace)]),
         "--json",
       ],

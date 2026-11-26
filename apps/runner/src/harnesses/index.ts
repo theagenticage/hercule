@@ -32,7 +32,7 @@ import { ANTIGRAVITY, antigravity } from "./antigravity";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
-import { makeLogins, type LoginCommand } from "./login";
+import { makeLogins, type LoginCommand, type LoginLeaseResult } from "./login";
 import { spawnLogin } from "./process";
 
 /**
@@ -354,17 +354,30 @@ export interface HarnessAdapter {
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
   /**
-   * Returns the command that makes the login `method` for the account in `ctx`,
-   * or `undefined` when this harness has no such login. Takes the binary
-   * separately, because a login needs a machine that already has the harness.
-   * The command may name a scratch folder it made; the caller must then
-   * start the command, which removes the folder when the login ends.
+   * The login of this harness, if it has one. `methods` lists the login
+   * methods it supports: a request for another method is refused before
+   * anything else happens, so it cannot stop a login that is running.
+   * `build` returns the command that makes the login `method` for the account
+   * in `ctx`, and is only called with a method in `methods`. It takes the
+   * binary separately, because a login needs a machine that already has the
+   * harness. The command may name a scratch folder it made; the caller must
+   * then start the command, which removes the folder when the login ends.
    */
-  readonly login?: (
-    ctx: HarnessRunnerContext,
-    binary: string,
-    method: LoginMethod,
-  ) => LoginCommand | undefined;
+  readonly login?: {
+    readonly methods: ReadonlyArray<LoginMethod>;
+    readonly build: (
+      ctx: HarnessRunnerContext,
+      binary: string,
+      method: LoginMethod,
+    ) => LoginCommand;
+  };
+  /**
+   * Set by a harness whose sign-in must not run beside its other processes on
+   * the same Harness Home (see `antigravity/harness-home-leases.ts`). Takes the exclusive
+   * lease on the account's home, or returns why it is refused. The login
+   * releases it once its process has exited, on every path.
+   */
+  readonly acquireLoginLease?: (ctx: HarnessRunnerContext) => LoginLeaseResult;
 
   /**
    * Makes one text generation: a single model call with the spec's

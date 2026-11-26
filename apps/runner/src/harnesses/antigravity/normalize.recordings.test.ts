@@ -9,6 +9,7 @@ import type { SessionUpdate, SessionUpdateNotification } from "@hercule/acp";
 import { RECORDING_NAMES, readRecording, type RecordedMessage } from "@hercule/acp/testing";
 import type { HarnessEvent } from "@hercule/protocol";
 import { describe, expect, it } from "vitest";
+import { expectEventStreamToHoldTogether } from "./event-stream.testing";
 import { buildPlanFilePaths } from "./harness-home";
 import {
   addPromptUsage,
@@ -121,9 +122,6 @@ const playProcess = (messages: ReadonlyArray<RecordedMessage>): PlayedProcess =>
   return { events, openedWhilePromptOpen };
 };
 
-/** Recordings that legitimately hold an update outside the decision table, with the reason. */
-const RECORDINGS_WITH_UNKNOWN_ITEMS = new Map<string, string>([]);
-
 /** Recordings with no session to normalize, with the reason. */
 const RECORDINGS_WITHOUT_A_SESSION: ReadonlyArray<string> = [
   // Ends at the refused `authenticate`, so no `session/new` follows.
@@ -137,53 +135,9 @@ describe("every recording through the normalizer", () => {
       for (const part of parts) {
         const { events, openedWhilePromptOpen } = playProcess(part);
 
-        const started = events.filter((e) => e._tag === "item.started");
-        const completed = events.filter((e) => e._tag === "item.completed");
-        const startedIds = started.map((e) => e.itemId);
-        expect(new Set(startedIds).size, "item ids are unique").toBe(startedIds.length);
-        for (const id of startedIds) {
-          expect(completed.filter((e) => e.itemId === id).length, `item ${id} completes once`).toBe(
-            1,
-          );
-        }
-
-        for (const event of events) {
-          if (event._tag === "item.updated") expect(event.kind).toBe("todo_list");
-        }
-
-        const completedAt = new Map<string, number>();
-        events.forEach((event, index) => {
-          if (event._tag === "item.completed") completedAt.set(event.itemId, index);
-        });
-        events.forEach((event, index) => {
-          if (event._tag === "content.delta") {
-            const end = completedAt.get(event.itemId);
-            expect(end === undefined || index < end, `delta of ${event.itemId} after its end`).toBe(
-              true,
-            );
-          }
-        });
-
-        let open: string | undefined;
-        for (const event of events) {
-          if (event._tag === "turn.started") {
-            expect(open, "no second turn opens").toBeUndefined();
-            open = event.turnId;
-          } else if (event._tag === "turn.completed") {
-            expect(event.turnId).toBe(open);
-            open = undefined;
-          }
-        }
-        expect(open, "the last turn completes").toBeUndefined();
+        expectEventStreamToHoldTogether(events);
 
         expect(openedWhilePromptOpen, "no synthetic turn while a prompt is open").toEqual([]);
-
-        if (!RECORDINGS_WITH_UNKNOWN_ITEMS.has(name)) {
-          expect(
-            events.filter((e) => e._tag === "item.started" && e.kind === "unknown"),
-            "no unknown item",
-          ).toEqual([]);
-        }
       }
     });
   }

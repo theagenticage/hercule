@@ -35,10 +35,9 @@ const definition: HarnessDefinition = {
       auto: "unsupported",
       "full-access": "native",
     },
-    // The runner's adapter does not hand the MCP Gateway to `agy` yet. With
-    // `native` a session would list servers that no call can reach. The change
-    // that hands it over declares `native`.
-    mcpPassthrough: "unsupported",
+    // The runner's adapter hands the MCP Gateway to `agy` over HTTP in the
+    // session's own request, so the session's servers are reachable.
+    mcpPassthrough: "native",
     disallowedTools: "unsupported",
     // ACP takes no output schema for a prompt.
     structuredOutput: "unsupported",

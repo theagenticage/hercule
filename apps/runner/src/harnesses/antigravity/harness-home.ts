@@ -9,9 +9,10 @@
  * against stale or misplaced links only. It does not protect against another
  * process of the same user that swaps paths while this code runs.
  */
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { AdapterFailed } from "@hercule/protocol";
@@ -23,6 +24,9 @@ import {
   removeSessionFiles,
   UUID_PATTERN,
 } from "../session-files";
+
+/** The name the user knows the harness by. */
+export const ANTIGRAVITY_NAME = "Antigravity";
 
 /** The folder in the Harness Home where `agy` keeps its own data. */
 export const APP_DATA_DIR = "antigravity-acp";
@@ -213,4 +217,237 @@ export const buildPlanFilePaths = (
     task: spellings(join(folder, "task.md")),
     plan: spellings(join(folder, "implementation_plan.md")),
   };
+};
+
+/** The file `agy` reads its hooks from at every tool call. */
+const HOOKS_FILE_PATH = join("config", "hooks.json");
+
+/** The file `agy` reads its MCP servers from. `agy` creates it empty. */
+const MCP_CONFIG_PATH = join("config", "mcp_config.json");
+
+/**
+ * The paths below the Harness Home that Hercule removes at every `agy`
+ * start, with the reason for each. Every session of an account shares the
+ * Harness Home, and `agy` reads these in every session, so what an earlier
+ * session left there would silently change every later one, in any workspace.
+ *
+ * - `antigravity-acp/settings.json`: `toolPermission` in it works under `agy
+ *   acp`, and a tool permission would change every session of the account.
+ * - `config/plugins`: `agy` loads a plugin from this folder live, and a
+ *   plugin's `hooks.json` can approve a command without asking.
+ * - `config/plugins.json`: `agy`'s docs name it as the list of plugin
+ *   folders. Unmeasured: removed in case `agy` reads it from here.
+ * - `skills`, `config/skills`, `antigravity-acp/skills`: the skills in these
+ *   folders load into every session and are read again at each prompt.
+ * - `config/skills.json`: lists folders of skills, which may be absolute paths
+ *   anywhere on the machine, and which load into every session.
+ * - `GEMINI.md`, `AGENTS.md`, `config/GEMINI.md`, `config/AGENTS.md`: the
+ *   instructions in them are added to every session and read again at each
+ *   prompt.
+ * - `config/rules`: the `always_on` rules in this folder apply to every
+ *   session.
+ */
+const PATHS_TO_REMOVE: ReadonlyArray<string> = [
+  join(APP_DATA_DIR, "settings.json"),
+  join("config", "plugins"),
+  join("config", "plugins.json"),
+  "skills",
+  join("config", "skills"),
+  join(APP_DATA_DIR, "skills"),
+  join("config", "skills.json"),
+  "GEMINI.md",
+  "AGENTS.md",
+  join("config", "GEMINI.md"),
+  join("config", "AGENTS.md"),
+  join("config", "rules"),
+];
+
+/** A file below the Harness Home that Hercule replaces with exactly this content. */
+interface FileToWrite {
+  readonly path: string;
+  readonly content: string;
+}
+
+/**
+ * Returns the files below the Harness Home that Hercule writes at every `agy`
+ * start, with the reason for each.
+ *
+ * - `config/hooks.json` holds `hooksFile`. `agy` runs the hooks in it at every
+ *   tool call, so a hook that approves every command would loosen every later
+ *   session. The one hook allowed is Hercule's pre-tool hook. The file is
+ *   never removed.
+ * - `config/mcp_config.json` is empty. `agy` loads every MCP server in it in
+ *   every session, and with no server in the session's own request such a
+ *   server would connect. `agy` creates it as an empty file, so it is emptied,
+ *   not removed.
+ */
+const buildFilesToWrite = (hooksFile: string): ReadonlyArray<FileToWrite> => [
+  { path: HOOKS_FILE_PATH, content: hooksFile },
+  { path: MCP_CONFIG_PATH, content: "" },
+];
+
+/**
+ * Returns the absolute path of every file and folder Hercule owns in the
+ * Harness Home `home`, so that the pre-tool hook can deny the agent every
+ * change to them.
+ */
+export const listOwnedPaths = (home: string): ReadonlyArray<string> =>
+  [...PATHS_TO_REMOVE, ...buildFilesToWrite("").map((file) => file.path)].map((path) =>
+    join(home, path),
+  );
+
+/**
+ * Returns the folders that hold the owned paths, from the Harness Home `home`
+ * down: the home itself and every folder between it and an owned path.
+ */
+const listOwnedFolders = (home: string): ReadonlyArray<string> => {
+  const folders = new Set([home]);
+  for (const path of [...PATHS_TO_REMOVE, HOOKS_FILE_PATH, MCP_CONFIG_PATH]) {
+    for (let at = dirname(path); at !== "."; at = dirname(at)) folders.add(join(home, at));
+  }
+  return [...folders];
+};
+
+/**
+ * Fails with `AdapterFailed` naming the folder when the Harness Home `home`,
+ * or a folder between it and an owned path, is a link or a file instead of a
+ * real folder. Changing an owned path through a link would change a file
+ * outside the Harness Home. A folder that does not exist yet passes: it is
+ * created as a real folder.
+ *
+ * This check runs before the changes. A process of the same user that swaps a
+ * folder for a link while the changes run is not prevented.
+ */
+const checkOwnedFolders = (home: string): Effect.Effect<void, AdapterFailed> =>
+  Effect.forEach(
+    listOwnedFolders(home),
+    (folder) =>
+      Effect.tryPromise({
+        try: async () => {
+          try {
+            return (await lstat(folder)).isDirectory();
+          } catch (error) {
+            if (isMissingPath(error)) return true;
+            throw error;
+          }
+        },
+        catch: (error) =>
+          buildAdapterFailed(
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not check ${folder}: ${describeFileFailure(error)}`,
+          ),
+      }).pipe(
+        Effect.filterOrFail(
+          (isFolder) => isFolder,
+          () =>
+            buildAdapterFailed(
+              `${ANTIGRAVITY_NAME} could not start, because ${folder} is a link or a file, not a folder. Hercule changes files in it that ${ANTIGRAVITY_NAME} reads in every session, and through a link it would change files outside the Harness Home. Remove it, and the account starts again.`,
+            ),
+        ),
+      ),
+    { discard: true },
+  );
+
+/**
+ * Deletes the file, link or folder (with all it holds) at `path`. A link is
+ * deleted, never followed. Returns whether there was anything to delete.
+ */
+const removePath = async (path: string): Promise<boolean> => {
+  try {
+    await lstat(path);
+  } catch (error) {
+    if (isMissingPath(error)) return false;
+    throw error;
+  }
+  await rm(path, { recursive: true, force: true });
+  return true;
+};
+
+/**
+ * Makes `path` a regular file that holds exactly `content`: writes the content
+ * to a file beside it, then renames that file over `path`, so a link or a file
+ * in its place is replaced and nothing is written through a link. A reader
+ * sees the old content or the new, never half of it. Creates the folder when
+ * it is missing. Removes the temporary file when the write or the rename
+ * fails. Returns whether `path` held anything else. Throws when a folder is at
+ * `path`, because replacing a folder would delete what is in it.
+ */
+const replaceWithFile = async (path: string, content: string): Promise<boolean> => {
+  const isAsWanted = await readRegularFile(path, Buffer.byteLength(content)).then(
+    ({ text, isTruncated }) => text === content && !isTruncated,
+    () => false,
+  );
+  if (isAsWanted) return false;
+  const existing = await lstat(path).catch(() => undefined);
+  if (existing?.isDirectory() === true) {
+    throw new Error("it is a folder, and Hercule needs a file there. Remove the folder");
+  }
+  await mkdir(dirname(path), { recursive: true });
+  const next = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(next, content, { flag: "wx" });
+    await rename(next, path);
+  } catch (error) {
+    await rm(next, { force: true });
+    throw error;
+  }
+  return true;
+};
+
+/**
+ * Brings the Harness Home `home` to what Hercule owns: removes every path in
+ * `PATHS_TO_REMOVE` and writes every file in `buildFilesToWrite(hooksFile)`.
+ * Logs each path it had to change. A path that is already as wanted (missing,
+ * or a file with the wanted content) is left alone and not logged. A link at
+ * an owned path is removed or replaced, never followed. Before any change,
+ * `checkOwnedFolders` checks the folders above the owned paths. Fails with
+ * `AdapterFailed` naming the path when it cannot be changed, because then
+ * Hercule cannot tell what `agy` would load.
+ *
+ * What stays possible: a process that writes one of these paths while another
+ * session of the same account runs. That needs code execution as the runner's
+ * user, which already reaches everything this user can. The agent's own edit
+ * tools are denied these paths by the pre-tool hook.
+ */
+export const resetOwnedHomePaths = (
+  home: string,
+  hooksFile: string,
+): Effect.Effect<void, AdapterFailed> => {
+  const changes = [
+    ...PATHS_TO_REMOVE.map((path) => ({
+      path: join(home, path),
+      verb: "remove",
+      past: "Removed",
+      apply: () => removePath(join(home, path)),
+    })),
+    ...buildFilesToWrite(hooksFile).map(({ path, content }) => ({
+      path: join(home, path),
+      verb: "write",
+      past: "Wrote",
+      apply: () => replaceWithFile(join(home, path), content),
+    })),
+  ];
+  return checkOwnedFolders(home).pipe(
+    Effect.andThen(
+      Effect.forEach(
+        changes,
+        ({ path, verb, past, apply }) =>
+          Effect.tryPromise({
+            try: apply,
+            catch: (error) =>
+              buildAdapterFailed(
+                `${ANTIGRAVITY_NAME} could not start, because Hercule could not ${verb} ${path}: ${describeFileFailure(error)}`,
+              ),
+          }).pipe(
+            Effect.flatMap((wasChanged) =>
+              wasChanged
+                ? Effect.logWarning(
+                    `${past} ${path}: Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session of the account.`,
+                  )
+                : Effect.void,
+            ),
+          ),
+        { discard: true },
+      ),
+    ),
+  );
 };

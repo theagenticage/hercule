@@ -52,6 +52,7 @@ import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
 import {
   buildApprovalDescription,
+  buildFailedToolItem,
   buildToolItem,
   type ApprovalDescription,
   type ToolCallFields,
@@ -206,6 +207,98 @@ const buildBase = (state: NormalizerState, toolCallId?: string) =>
     nativeSessionId: state.nativeSessionId,
     ...(toolCallId === undefined ? {} : { toolCallId }),
   });
+
+/**
+ * Returns `value` with every occurrence of `secret` replaced by `[hidden]`, in
+ * every string, in object keys, and at any depth of arrays and plain objects.
+ * The result is a copy. `agy` may echo a credential it was given, in any text
+ * it sends, so every event passes through this before it is published.
+ */
+export const hideSecret = <T>(value: T, secret: string): T => {
+  const hide = (item: unknown): unknown => {
+    if (typeof item === "string") return item.replaceAll(secret, "[hidden]");
+    if (Array.isArray(item)) return item.map(hide);
+    if (typeof item === "object" && item !== null) {
+      return Object.fromEntries(
+        Object.entries(item).map(([key, entry]) => [hide(key), hide(entry)]),
+      );
+    }
+    return item;
+  };
+  return hide(value) as T;
+};
+
+/** The length from which a released end of a split secret is hidden. Shorter ends are published. */
+const MIN_HIDDEN_END = 8;
+
+/**
+ * Makes a function that applies `hideSecret` to a sequence of events, and also
+ * hides a `secret` that `agy` split across several `content.delta` events of
+ * one text stream (one item and stream kind). The function must see every
+ * event of a session, in order.
+ *
+ * Per text stream, it holds back the longest end of the text so far that could
+ * be the start of the secret, and joins it to the next delta. A held end is
+ * released as its own delta before the event that closes its item
+ * (`item.completed`), and before `turn.completed` and `session.exited`. An
+ * interrupt, a stop and a lost connection all end in one of these, so no held
+ * end stays behind. A released end of `MIN_HIDDEN_END` characters or more is
+ * published as `[hidden]`; a shorter one is published as it is, so ordinary
+ * text that happens to end like the start of the secret is never cut, and a
+ * text that ends in the middle of the secret shows at most
+ * `MIN_HIDDEN_END - 1` of its characters. It does not cover a secret that
+ * another item interrupts: the part before the interruption is the held end.
+ *
+ * Only the `delta` of a `content.delta` changes (a delta left empty is
+ * dropped). Ids and every other field pass through `hideSecret` as before.
+ */
+export const makeEventSecretHider = (secret: string) => {
+  type Delta = Extract<HarnessEvent, { readonly _tag: "content.delta" }>;
+  /** Per stream: the last delta event, holding the withheld end in its `delta`. */
+  const held = new Map<string, Delta>();
+
+  const readStreamKey = (event: Delta): string => `${event.itemId}\u0000${event.streamKind}`;
+
+  /** Returns how many characters at the end of `text` are the start of the secret, but not all of it. */
+  const countSecretStart = (text: string): number => {
+    for (let length = Math.min(secret.length - 1, text.length); length > 0; length -= 1) {
+      if (secret.startsWith(text.slice(-length))) return length;
+    }
+    return 0;
+  };
+
+  /** Removes and returns the held ends that `isReleased` selects, as events. */
+  const releaseHeld = (isReleased: (delta: Delta) => boolean): HarnessEvent[] => {
+    const released: HarnessEvent[] = [];
+    for (const [key, delta] of held) {
+      if (!isReleased(delta)) continue;
+      held.delete(key);
+      released.push(delta.delta.length < MIN_HIDDEN_END ? delta : { ...delta, delta: "[hidden]" });
+    }
+    return released;
+  };
+
+  const hideSecretInEvent = (event: HarnessEvent): HarnessEvent[] => {
+    if (event._tag === "content.delta") {
+      const key = readStreamKey(event);
+      const text = `${held.get(key)?.delta ?? ""}${event.delta}`.replaceAll(secret, "[hidden]");
+      const tail = countSecretStart(text);
+      if (tail > 0) held.set(key, { ...event, delta: text.slice(-tail) });
+      else held.delete(key);
+      const delta = text.slice(0, text.length - tail);
+      return delta === "" ? [] : [hideSecret({ ...event, delta }, secret)];
+    }
+    const released =
+      event._tag === "item.completed"
+        ? releaseHeld((delta) => delta.itemId === event.itemId)
+        : event._tag === "turn.completed" || event._tag === "session.exited"
+          ? releaseHeld(() => true)
+          : [];
+    return [...released, hideSecret(event, secret)];
+  };
+
+  return (events: ReadonlyArray<HarnessEvent>): HarnessEvent[] => events.flatMap(hideSecretInEvent);
+};
 
 /** Returns the `raw` field for an event built from `message`, or nothing when there is none. */
 const buildMessageRaw = (message: { readonly raw: unknown } | undefined) =>
@@ -449,7 +542,6 @@ const appendText = (
   state: NormalizerState,
   kind: TextRecord["kind"],
   text: string,
-  notification: SessionUpdateNotification,
 ): HarnessEvent[] => {
   if (text === "") return [];
   const events = state.text?.kind === kind ? [] : closeTextItem(state);
@@ -460,7 +552,9 @@ const appendText = (
     turn.running.add(itemId);
     events.push(
       ...turnEvents,
-      buildItemStarted(state, { turnId: turn.id, itemId, kind }, notification),
+      // No raw message: it holds the chunk's text, which the secret hiding of
+      // the deltas could not cover when a token is split over two chunks.
+      buildItemStarted(state, { turnId: turn.id, itemId, kind }),
     );
   }
   events.push({
@@ -653,7 +747,8 @@ const normalizeToolCall = (
     call.status === "completed" ? "completed" : wasDeclined ? "declined" : "failed";
   state.tools.set(call.toolCallId, ENDED_TOOL);
   if (state.turn?.id === record.turnId) state.turn.running.delete(record.itemId);
-  const { kind, detail } = buildToolItem(record.call);
+  const { kind, detail } =
+    status === "failed" ? buildFailedToolItem(record.call) : buildToolItem(record.call);
   events.push(
     buildItemCompleted(
       state,
@@ -819,12 +914,7 @@ const routeUpdate = (
       const text = readChunkText(update);
       return text === undefined
         ? buildUnknownItem(state, name, notification)
-        : appendText(
-            state,
-            decision === "message" ? "assistant_message" : "reasoning",
-            text,
-            notification,
-          );
+        : appendText(state, decision === "message" ? "assistant_message" : "reasoning", text);
     }
     case "toolStart":
     case "toolUpdate": {

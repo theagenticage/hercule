@@ -30,16 +30,18 @@ import {
   writeTestImage,
 } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { answerPreToolCall, decodeHookRules } from "./pre-tool-hook";
 import {
   answerConfigChange,
   answerNewSession,
   answerResume,
-  BINARY,
   buildContext,
   buildFakeAgy,
+  buildStartContext,
   CONVERSATION,
   createConversationFiles,
   createSignedInHome,
+  GATEWAY_ENTRY,
   noAnswer,
   readRecordedSetup,
   refuse,
@@ -78,6 +80,10 @@ interface HarnessOptions {
   readonly context?: (home: string) => Partial<SessionStartContext>;
   /** The folder the session works in. Defaults to `CWD`, which does not exist. */
   readonly cwd?: string;
+  /** The MCP servers the runner resolved for the session. */
+  readonly mcpServers?: ReadonlyArray<{ readonly name: string; readonly url: string }>;
+  /** The environment of the session's process. Defaults to one with the session token. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
   /** What every start of the test changes in `SPEC`. */
   readonly spec?: Partial<SessionSpec>;
   /**
@@ -124,9 +130,9 @@ const buildHarness = (options: HarnessOptions = {}) =>
     yield* Effect.promise(settle);
     yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
     const ctx = {
-      ...buildContext(home, BINARY),
-      cwd: options.cwd ?? CWD,
-      mcpServers: [],
+      ...buildStartContext(home, options.cwd ?? CWD),
+      ...(options.env === undefined ? {} : { env: options.env }),
+      mcpServers: options.mcpServers ?? [GATEWAY_ENTRY],
       herculeTool: {
         ...buildContext(home).herculeTool,
         orientation: options.orientation ?? "",
@@ -246,7 +252,7 @@ describe("starting a session", () => {
           ]);
           expect(h.received("session/new")[0]?.params).toMatchObject({
             cwd: CWD,
-            mcpServers: [],
+            mcpServers: [expect.objectContaining({ name: "tools" })],
             _meta: {
               antigravity: {
                 systemPrompt: { append: "Orientation.\n\nPersona.\n\nCoordination.\n\nMemory." },
@@ -484,6 +490,47 @@ describe("the skills folder of a session", () => {
     );
   });
 
+  it("is a read-only folder of the hook, on the agy process of a start and of a resume", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    const resumedSkills = createSessionSkills({ library: ["review"] });
+    const skillFile = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
+    const readReadOnlyFolders = (env: Readonly<Record<string, string | undefined>>) =>
+      decodeHookRules(env["HERCULE_AGY_HOOK_RULES"] ?? "")?.readOnlyFolders;
+    const readDecision = (env: Readonly<Record<string, string | undefined>>) =>
+      answerPreToolCall(
+        JSON.stringify({
+          cwd: CWD,
+          toolCall: { name: "write_file", args: { Path: skillFile, Content: "x" } },
+        }),
+        env,
+      );
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          const env = h.fake.spawns[0]!.env;
+          expect(readReadOnlyFolders(env)).toEqual([skills.sessionSkillsFolder]);
+          expect(JSON.parse(readDecision(env)) as { decision: string }).toMatchObject({
+            decision: "deny",
+          });
+        }),
+      { context: () => skills.context },
+    ).then(() =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start(RESUME);
+
+            expect(readReadOnlyFolders(h.fake.spawns[0]!.env)).toEqual([
+              resumedSkills.sessionSkillsFolder,
+            ]);
+          }),
+        { fake: withConversation, context: () => resumedSkills.context },
+      ),
+    );
+  });
+
   it("is passed resolved when it is reached through a link, as the pointer lines name resolved paths", () => {
     const skills = createSessionSkills({ library: ["review"] });
     const link = join(createScratchHome("agy-session-link"), "linked");
@@ -609,7 +656,7 @@ describe("the instructions of a session", () => {
           expect(params).toContain("Persona.");
           expect(params).not.toContain("The user's marker.");
         }),
-      { context: (home) => ({ env: { ...buildContext(home).env, HOME: userHome } }) },
+      { context: (home) => ({ env: { ...buildStartContext(home, CWD).env, HOME: userHome } }) },
     );
   });
 });
@@ -654,6 +701,232 @@ describe("an input with Skill References", () => {
       { fake: { recording: "bad-model" }, context: () => skills.context },
     );
   });
+});
+
+describe("the MCP servers of a session", () => {
+  const TOKEN = "sess-tok-7f3a91c2e8";
+  const GATEWAY = { name: "tools", url: "http://127.0.0.1:4000/mcp" };
+  const ENTRY = {
+    name: "tools",
+    url: GATEWAY.url,
+    type: "http",
+    headers: [{ name: "Authorization", value: `Bearer ${TOKEN}` }],
+  };
+  const withGateway: HarnessOptions = {
+    mcpServers: [GATEWAY],
+    env: { PATH: "/usr/bin", HERCULE_TOKEN: TOKEN },
+  };
+
+  it("are given to agy with the session's token in a new conversation, and again in a resume", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          expect(h.received("session/new")[0]?.params).toMatchObject({ mcpServers: [ENTRY] });
+        }),
+      withGateway,
+    ).then(() =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start({ continue: { nativeSessionId: CONVERSATION, mode: "resume" } });
+            expect(h.received("session/resume")[0]?.params).toMatchObject({
+              mcpServers: [ENTRY],
+            });
+          }),
+        {
+          ...withGateway,
+          fake: (home) => {
+            createConversationFiles(home, CONVERSATION);
+            return {};
+          },
+        },
+      ),
+    ));
+
+  it("fail the start, and spawn nothing, when the session has no token", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("no session token");
+          expect(h.fake.spawns).toHaveLength(0);
+        }),
+      { mcpServers: [GATEWAY], env: { PATH: "/usr/bin" } },
+    ));
+
+  it.each([
+    ["none", [], "none"],
+    ["one that has another name", [{ name: "other", url: GATEWAY.url }], '"other"'],
+    [
+      "the Hercule tools and another server",
+      [GATEWAY, { name: "other", url: GATEWAY.url }],
+      '"tools", "other"',
+    ],
+    ["the Hercule tools twice", [GATEWAY, GATEWAY], '"tools", "tools"'],
+  ])("fail the start, and spawn nothing, when the session was given %s", (_name, servers, given) =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain(`it was given ${given}`);
+          expect(h.fake.spawns).toHaveLength(0);
+        }),
+      { mcpServers: servers, env: { PATH: "/usr/bin", HERCULE_TOKEN: TOKEN } },
+    ),
+  );
+
+  it("fail the start when agy takes no MCP server over HTTP", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("MCP servers over HTTP");
+          expect(h.received("authenticate")).toHaveLength(0);
+        }),
+      { ...withGateway, fake: { withoutHttpMcpCapability: true } },
+    ));
+
+  it("hides the token in what agy wrote on stderr when its start fails", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("panic: bad header");
+          expect(failure.message).not.toContain(TOKEN);
+        }),
+      {
+        ...withGateway,
+        fake: {
+          scripts: {
+            initialize: (_call, harness) => {
+              harness.end();
+              return [];
+            },
+          },
+          stderrLines: [`panic: bad header Bearer ${TOKEN}`],
+        },
+      },
+    ));
+
+  it("never publish the token, wherever agy echoes it", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const send = (message: JsonRpcMessage) => h.harness().sendLine(JSON.stringify(message));
+          const echo = `echo ${TOKEN} end`;
+          send(
+            buildUpdate({
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: echo },
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: "agent_thought_chunk",
+              content: { type: "text", text: echo },
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: "tool_call",
+              toolCallId: "call-1",
+              name: "run_command",
+              status: "in_progress",
+              kind: "execute",
+              title: echo,
+              rawInput: { CommandLine: `curl -H "Authorization: Bearer ${TOKEN}"` },
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: "tool_call_update",
+              toolCallId: "call-1",
+              name: "run_command",
+              status: "completed",
+              rawInput: { CommandLine: `curl -H "Authorization: Bearer ${TOKEN}"` },
+              rawOutput: echo,
+              content: [{ type: "content", content: { type: "text", text: echo } }],
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: `mystery_${TOKEN}`,
+              detail: echo,
+            }),
+          );
+          send({ jsonrpc: "2.0", method: `x/${TOKEN}`, params: { text: echo } });
+          send({
+            jsonrpc: "2.0",
+            id: "jetski-acp-front:9",
+            method: "session/request_permission",
+            params: {
+              sessionId: CONVERSATION,
+              toolCall: { toolCallId: "call-unknown", name: "run_command", title: echo },
+              options: [{ optionId: "deny", name: echo, kind: "reject_once" }],
+            },
+          });
+          send(buildModeUpdate(`mode-${TOKEN}`));
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+
+          const published = JSON.stringify(h.seen);
+          expect(published).not.toContain(TOKEN);
+          expect(published).toContain("echo [hidden] end");
+          expect(h.tags("runtime.error")).toHaveLength(1);
+          expect(h.tags("item.completed").length).toBeGreaterThan(1);
+        }),
+      { ...withGateway, fake: { recording: readRecordedSetup("cancel") } },
+    ));
+});
+
+describe("a token that agy streams in pieces", () => {
+  const TOKEN = "sess-tok-7f3a91c2e8";
+
+  it("is hidden when it is split over two text events, and a short held start is published whole at the end of the session", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const send = (text: string) =>
+            h.harness().sendLine(
+              JSON.stringify(
+                buildUpdate({
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text },
+                }),
+              ),
+            );
+          send(`echo ${TOKEN.slice(0, 9)}`);
+          send(`${TOKEN.slice(9)} end ${TOKEN.slice(0, 4)}`);
+          yield* h.until("the second chunk was read", () =>
+            h.tags("content.delta").some((event) => event.delta.includes("[hidden]")),
+          );
+          yield* h.adapter.stopSession(SESSION, "stopped");
+
+          const text = h
+            .tags("content.delta")
+            .map((event) => event.delta)
+            .join("");
+          expect(text).toBe(`echo [hidden] end ${TOKEN.slice(0, 4)}`);
+          expect(JSON.stringify(h.seen)).not.toContain(TOKEN);
+          // The held start went out before the session ended.
+          const tags = h.seen.map((event) => event._tag);
+          expect(tags.lastIndexOf("content.delta")).toBeLessThan(tags.indexOf("session.exited"));
+        }),
+      {
+        env: { PATH: "/usr/bin", HERCULE_TOKEN: TOKEN },
+        fake: { recording: readRecordedSetup("cancel") },
+      },
+    ));
 });
 
 describe("the temporary folder of a process", () => {

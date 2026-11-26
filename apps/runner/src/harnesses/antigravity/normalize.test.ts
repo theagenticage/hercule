@@ -19,6 +19,7 @@ import {
   describeRequestItem,
   findRequestOwner,
   holdTurn,
+  makeEventSecretHider,
   markDeclined,
   normalizeUnhandled,
   normalizeUpdate,
@@ -381,6 +382,20 @@ describe("the websearch recording", () => {
   });
 });
 
+describe("a text item whose first chunk holds the start of the token", () => {
+  it("carries none of the chunk in its start event", () => {
+    const secret = "sess-tok-7f3a91c2e8";
+    const hide = makeEventSecretHider(secret);
+    const state = freshState();
+    openTurn(state, "t");
+    const events = [
+      ...normalizeUpdate(state, buildChunk(`Bearer ${secret.slice(0, -1)}`)),
+      ...normalizeUpdate(state, buildChunk(secret.slice(-1))),
+    ].flatMap((event) => hide([event]));
+    expect(JSON.stringify(events)).not.toContain(secret.slice(0, 8));
+  });
+});
+
 describe("a web search with a domain", () => {
   it("shows the domain beside the query", () => {
     const state = freshState();
@@ -410,6 +425,73 @@ describe("the deny2 recording", () => {
     normalizeUpdate(state, buildToolStart(runCall("c1")));
     const events = normalizeUpdate(state, buildToolUpdate({ ...runCall("c1"), status: "failed" }));
     expect(events).toMatchObject([{ _tag: "item.completed", status: "failed" }]);
+  });
+});
+
+describe("a call the pre-tool hook denied", () => {
+  // The updates of recordings/rec12/c4-default.jsonl (lines 19 and 28), with
+  // the reason Hercule's hook gives where the recording has an empty one.
+  const buildDeniedUpdate = (call: ToolCall, reason: string): SessionUpdateNotification =>
+    buildToolUpdate({
+      ...call,
+      status: "failed",
+      rawOutput: reason,
+      content: [{ type: "content", content: { type: "text", text: reason } }],
+    });
+  const WRITE = {
+    toolCallId: "call_4241516389100288659",
+    name: "write_file",
+    kind: "edit",
+    title: "File hello.txt",
+    locations: [{ path: "/w/hello.txt" }],
+    rawInput: { Content: "hi", Path: "/w/hello.txt" },
+  };
+  const RUN = {
+    toolCallId: "call_980776587974295514",
+    name: "run_command",
+    kind: "execute",
+    title: "echo hi",
+    rawInput: { CommandLine: "echo hi", WaitMsBeforeAsync: 5000, toolSummary: "Echo hi" },
+  };
+  const REASON = "tool call denied by pre-tool hook: Web search is off in Approval required.";
+  const complete = (call: ToolCall, reason = REASON) => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildToolStart(call));
+    return normalizeUpdate(state, buildDeniedUpdate(call, reason));
+  };
+
+  it("shows the reason in the detail of a failed file_change", () => {
+    expect(complete(WRITE)).toMatchObject([
+      {
+        _tag: "item.completed",
+        kind: "file_change",
+        status: "failed",
+        detail: { content: REASON },
+      },
+    ]);
+  });
+
+  it("shows the reason in the detail of a failed command_execution", () => {
+    expect(complete(RUN)).toMatchObject([
+      {
+        _tag: "item.completed",
+        kind: "command_execution",
+        status: "failed",
+        detail: { command: "echo hi", content: REASON },
+      },
+    ]);
+  });
+
+  it("hides the session token when it is in the reason", () => {
+    const secret = "sess-tok-7f3a91c2e8";
+    const hide = makeEventSecretHider(secret);
+    const events = hide(complete(WRITE, `tool call denied by pre-tool hook: ${secret}`));
+    expect(JSON.stringify(events)).not.toContain(secret);
+    // The reason is hidden, not dropped: the card still shows why the call failed.
+    expect(events).toMatchObject([
+      { detail: { content: "tool call denied by pre-tool hook: [hidden]" } },
+    ]);
   });
 });
 
@@ -1066,5 +1148,117 @@ describe("buildProcessEndEvents", () => {
     expect(
       normalizeUpdate(state, buildToolUpdate({ ...runCall("a"), status: "completed" })),
     ).toEqual([]);
+  });
+});
+
+describe("makeEventSecretHider", () => {
+  const SECRET = "sess-tok-7f3a91c2e8";
+  const fields = { sessionId: "s", turnId: "t1", itemId: "i1" } as never;
+  const delta = (text: string, itemId = "i1"): HarnessEvent =>
+    ({
+      _tag: "content.delta",
+      ...(fields as object),
+      itemId,
+      streamKind: "assistant_text",
+      delta: text,
+    }) as HarnessEvent;
+  const closing = (tag: "item.completed" | "turn.completed" | "session.exited"): HarnessEvent =>
+    ({ _tag: tag, ...(fields as object) }) as HarnessEvent;
+  const joinEventText = (events: ReadonlyArray<HarnessEvent>): string =>
+    events
+      .map((event) => (event._tag === "content.delta" ? event.delta : `<${event._tag}>`))
+      .join("");
+
+  /** Fails when the text holds 8 consecutive characters of the token. */
+  const expectNoRunOfEight = (text: string) => {
+    for (let at = 0; at + 8 <= SECRET.length; at += 1) {
+      expect(text).not.toContain(SECRET.slice(at, at + 8));
+    }
+  };
+
+  it("leaves no 8 consecutive characters of the token at any split over 2 and 3 deltas of one stream", () => {
+    const publish = (parts: ReadonlyArray<string>): string => {
+      const hide = makeEventSecretHider(SECRET);
+      const events = [
+        ...parts.flatMap((part) => hide([delta(part)])),
+        ...hide([closing("item.completed")]),
+      ];
+      return joinEventText(events);
+    };
+    for (let first = 1; first < SECRET.length; first += 1) {
+      const two = publish([`before ${SECRET.slice(0, first)}`, `${SECRET.slice(first)} after`]);
+      expect(two).toBe("before [hidden] after<item.completed>");
+      for (let second = first + 1; second < SECRET.length; second += 1) {
+        const three = publish([
+          `before ${SECRET.slice(0, first)}`,
+          SECRET.slice(first, second),
+          `${SECRET.slice(second)} after`,
+        ]);
+        expectNoRunOfEight(three);
+        expect(three).toBe("before [hidden] after<item.completed>");
+      }
+    }
+  });
+
+  it("hides the token split over every number of deltas", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const events = [
+      ...[...SECRET].flatMap((character) => hide([delta(character)])),
+      ...hide([closing("item.completed")]),
+    ];
+    expect(joinEventText(events)).toBe("[hidden]<item.completed>");
+  });
+
+  it.each(["item.completed", "turn.completed", "session.exited"] as const)(
+    "delivers text that ends in 1 to 7 characters of the token's start whole, and hides 8 or more, at %s",
+    (tag) => {
+      for (let length = 1; length < SECRET.length; length += 1) {
+        const hide = makeEventSecretHider(SECRET);
+        const events = [
+          ...hide([delta(`The answer is ${SECRET.slice(0, length)}`)]),
+          ...hide([closing(tag)]),
+        ];
+        const shown = length < 8 ? SECRET.slice(0, length) : "[hidden]";
+        expect(joinEventText(events)).toBe(`The answer is ${shown}<${tag}>`);
+      }
+    },
+  );
+
+  it("treats every held stream's end the same way at the end of the turn", () => {
+    const hide = makeEventSecretHider(SECRET);
+    hide([delta(SECRET.slice(0, 3), "i1"), delta(SECRET.slice(0, 9), "i2")]);
+    expect(joinEventText(hide([closing("turn.completed")]))).toBe(
+      `${SECRET.slice(0, 3)}[hidden]<turn.completed>`,
+    );
+  });
+
+  it("does not cover a token that another item interrupts: the end of it is published", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const state = freshState();
+    openTurn(state, "t");
+    const events = [
+      buildChunk(`text ${SECRET.slice(0, 10)}`),
+      buildChunk("thinking", "agent_thought_chunk"),
+      buildChunk(SECRET.slice(10)),
+    ].flatMap((chunk) => normalizeUpdate(state, chunk).flatMap((event) => hide([event])));
+    events.push(...hide(buildProcessEndEvents(state)));
+    const text = JSON.stringify(events);
+    // The held start was 10 characters, so it is hidden; the rest follows as it is.
+    expect(text).not.toContain(SECRET.slice(0, 8));
+    expect(text).toContain(SECRET.slice(10));
+  });
+
+  it("keeps the held start of one item when another item closes", () => {
+    const hide = makeEventSecretHider(SECRET);
+    hide([delta(SECRET.slice(0, 3), "i1")]);
+    expect(
+      joinEventText(hide([{ ...closing("item.completed"), itemId: "i2" } as HarnessEvent])),
+    ).toBe("<item.completed>");
+  });
+
+  it("leaves ids and other events as they are", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const event = closing("turn.completed");
+    expect(hide([event])).toEqual([event]);
   });
 });

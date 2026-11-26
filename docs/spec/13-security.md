@@ -187,6 +187,8 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 
 ## 5. Session tokens and agent/user separation
 
+*(Amended 2026-11-26, [#1282](https://github.com/theagenticage/hercule/issues/1282).)* The Antigravity harness has a pre-tool hook that denies the agent's edits to the files that decide what it may do without asking, and to Hercule's own paths in the Harness Home. A repository's stdio MCP server starts with no card, and the hook does not cover what it does. *(Amended 2026-11-26, [#1282](https://github.com/theagenticage/hercule/issues/1282).)* The browser agent (`invoke_subagent` with `TypeName` "browser", and the chrome-devtools tools it drives) acts in the user's own Chrome with no card, so the hook denies it in Approval required and Auto-accept edits; only Full access runs it ([./06-providers.md](./06-providers.md) section 8.1, Exception 3). [./06-providers.md](./06-providers.md) section 8.1 holds the detail.
+
 - At session start the controller mints a **session token** whose subject is the Session row. The runner injects `HERCULE_API_URL` and `HERCULE_TOKEN` into the harness process. The token carries the agent's permission profile and is revoked when the session ends.
 - Every mutation is stamped `actor: user | session:<id>`.
 - The `hercule` CLI resolves credentials in this order: environment token first, the credential file second ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).

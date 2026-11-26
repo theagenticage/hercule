@@ -262,8 +262,13 @@ describe("Settings > Connections", () => {
     await error.waitFor();
     expect((await error.textContent())?.trim()).toBe("GitHub rejected the token.");
     // The controller asked GitHub who the token belongs to, with the pasted token.
+    // The stand-in also receives the controller's read of Antigravity's newest
+    // release, which carries no authorization header, so only the requests that
+    // carry one are compared.
     expect(
-      standIn.requests.map(({ method, path, headers }) => [method, path, headers["authorization"]]),
+      standIn.requests
+        .filter(({ headers }) => headers["authorization"] !== undefined)
+        .map(({ method, path, headers }) => [method, path, headers["authorization"]]),
     ).toEqual([["GET", "/user", `Bearer ${FAKE_TOKEN}`]]);
     expect(await readConnections(client)).toEqual([]);
 

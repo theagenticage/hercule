@@ -6,8 +6,6 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { antigravity } from "@hercule/plugin-antigravity";
-import { google } from "@hercule/plugin-google";
 import type { PluginDetail } from "@hercule/contract";
 import { checkPluginMark } from "./mark";
 import {
@@ -201,6 +199,40 @@ const SHIPPED = [
             },
           ],
           models: "own-list",
+        },
+      ],
+    },
+  },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    definition: {
+      id: "antigravity/antigravity",
+      displayName: "Antigravity",
+      binaryName: "agy",
+      releaseSource: {
+        kind: "github-releases",
+        repository: "google-antigravity/antigravity-cli",
+      },
+      declared: {
+        steering: "unsupported",
+        fork: "unsupported",
+        modelSwitch: "in-session",
+        accessModes: {
+          "approval-required": "native",
+          "auto-accept-edits": "native",
+          auto: "unsupported",
+          "full-access": "native",
+        },
+        mcpPassthrough: "native",
+        disallowedTools: "unsupported",
+        structuredOutput: "unsupported",
+      },
+      runs: [
+        {
+          providerId: "google/google",
+          kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
+          models: "all",
         },
       ],
     },
@@ -439,6 +471,28 @@ const SHIPPED_PROVIDERS = [
       suggestedTextGenerationModel: "MiniMax-M2.7",
     },
   },
+  {
+    id: "google",
+    displayName: "Google",
+    definition: {
+      id: "google/google",
+      displayName: "Google",
+      kinds: [
+        {
+          id: "subscription-per-machine",
+          title: "Google subscription, signed in on each machine",
+          description:
+            "Uses your Google plan through Antigravity. You sign in to Antigravity once on each machine that runs it.",
+          setup: [{ kind: "harness-login", method: "sign-in" }],
+          harnesses: ["antigravity/antigravity"],
+        },
+      ],
+      defaultHarnessId: "antigravity/antigravity",
+      catalogSource: { kind: "harness-probe", harnessId: "antigravity/antigravity" },
+      defaultSelection: "current-models",
+      defaultSelectionMaker: "Google",
+    },
+  },
 ];
 
 let details: ReadonlyArray<PluginDetail>;
@@ -460,13 +514,15 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three harness plugins, the six provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the four harness plugins, the seven provider plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
       "pi",
+      "antigravity",
       "anthropic",
       "openai",
+      "google",
       "zai",
       "openrouter",
       "opencode",
@@ -550,93 +606,5 @@ describe("the shipped registry after a boot", () => {
         }
       }
     }
-  });
-});
-
-// Not in the registry yet, because sessions cannot run on Antigravity yet.
-describe("the Antigravity and Google plugins", () => {
-  let booted: ReadonlyArray<PluginDetail>;
-
-  beforeAll(async () => {
-    booted = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([antigravity, google]);
-        return yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
-      }),
-    );
-  });
-
-  it("register the Antigravity harness, run by a Google subscription signed in on each machine", () => {
-    expect(booted.find((one) => one.id === "antigravity")?.contributions).toEqual([
-      {
-        extensionPoint: "harness",
-        id: "antigravity/antigravity",
-        definition: {
-          id: "antigravity/antigravity",
-          displayName: "Antigravity",
-          binaryName: "agy",
-          releaseSource: {
-            kind: "github-releases",
-            repository: "google-antigravity/antigravity-cli",
-          },
-          declared: {
-            steering: "unsupported",
-            fork: "unsupported",
-            modelSwitch: "in-session",
-            accessModes: {
-              "approval-required": "native",
-              "auto-accept-edits": "native",
-              auto: "unsupported",
-              "full-access": "native",
-            },
-            mcpPassthrough: "unsupported",
-            disallowedTools: "unsupported",
-            structuredOutput: "unsupported",
-          },
-          runs: [
-            {
-              providerId: "google/google",
-              kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
-              models: "all",
-            },
-          ],
-        },
-      },
-    ]);
-  });
-
-  it("register the Google provider, whose default selection holds Google's own models", () => {
-    expect(booted.find((one) => one.id === "google")?.contributions).toEqual([
-      {
-        extensionPoint: "provider",
-        id: "google/google",
-        definition: {
-          id: "google/google",
-          displayName: "Google",
-          kinds: [
-            {
-              id: "subscription-per-machine",
-              title: "Google subscription, signed in on each machine",
-              description:
-                "Uses your Google plan through Antigravity. You sign in to Antigravity once on each machine that runs it.",
-              setup: [{ kind: "harness-login", method: "sign-in" }],
-              harnesses: ["antigravity/antigravity"],
-            },
-          ],
-          defaultHarnessId: "antigravity/antigravity",
-          catalogSource: { kind: "harness-probe", harnessId: "antigravity/antigravity" },
-          defaultSelection: "current-models",
-          defaultSelectionMaker: "Google",
-        },
-      },
-    ]);
-  });
-
-  it("declare a Google mark that passes the core's check", () => {
-    const checked = checkPluginMark(google.manifest.mark);
-
-    expect(checked.markError).toBeUndefined();
-    expect(checked.mark?.paths).toHaveLength(1);
   });
 });

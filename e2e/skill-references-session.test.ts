@@ -274,7 +274,9 @@ const startThread = async (
         ...(prepared.model === undefined ? [] : ["--model", prepared.model]),
         "--workspace",
         JSON.stringify(options.workspace),
-        ...(options.accessMode === undefined ? [] : ["--access-mode", options.accessMode]),
+        ...((options.accessMode ?? prepared.accessMode) === undefined
+          ? []
+          : ["--access-mode", (options.accessMode ?? prepared.accessMode)!]),
         ...(options.images ?? []).flatMap((path) => ["--image", path]),
         "--json",
       ],
@@ -446,6 +448,11 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
       async (ctx) => {
         if (prepared === undefined) {
           ctx.skip(skipReason);
+          return;
+        }
+        if (!prepared.modelTakesImages) {
+          // The controller refuses an image for a model that declares none.
+          ctx.skip(`the model ${prepared.model} takes no images (imageInput is null)`);
           return;
         }
         const text = "$alpha $bravo what colour is the image? Answer in one short sentence.";
