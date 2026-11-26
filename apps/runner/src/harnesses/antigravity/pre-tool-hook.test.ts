@@ -591,4 +591,37 @@ describe("the verb of the binary", () => {
     expect(result.exitCode).toBe(0);
     expect(readReason(result.stdout.toString())).toContain("too large for Hercule to check");
   });
+
+  it.each([
+    ["Full access", FULL],
+    ["a guarded mode", GUARDED],
+  ])(
+    "reads a 2 MiB input to its end, so the writer sees no broken pipe, in %s",
+    async (_n, env) => {
+      const { cwd } = setUpRepo();
+      const large = hookInput(cwd, {
+        args: { Content: "x".repeat(2 * 1024 * 1024), Path: "a" },
+        id: "c",
+        name: "write_file",
+      });
+      const child = Bun.spawn([process.execPath, MAIN, "antigravity-pre-tool-hook"], {
+        env: { PATH: process.env["PATH"] ?? "", ...env },
+        stdin: "pipe",
+        stdout: "pipe",
+      });
+      const writeErrors: Array<string> = [];
+      try {
+        await child.stdin.write(large);
+        await child.stdin.end();
+      } catch (error) {
+        writeErrors.push(String(error));
+      }
+      const answer = await new Response(child.stdout).text();
+
+      expect(await child.exited).toBe(0);
+      expect(writeErrors).toEqual([]);
+      if (env === FULL) expect(answer).toBe("");
+      else expect(answer).toContain("too large for Hercule to check");
+    },
+  );
 });

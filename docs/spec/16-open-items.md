@@ -226,6 +226,7 @@ Not design questions. The constraint is stated where one exists.
     26. **Writes in a checkout under the home and the temporary folder.** Do: in Approval required, edit a file in a checkout under your home; write to `/tmp/x` and into the session's own `TMPDIR`. Settles: the checkout edit asks; whether the unasked exemption follows `TMPDIR` or the system temporary folder; whether the `TMPDIR` path is short enough for sockets.
     27. **Stop.** Do: stop the session while a command runs (foreground, and a background `sleep 600`). Settles: nothing is left running 5 s later (`ps`), including after `session/cancel`.
     28. **Sandbox and defaults.** Do: run `curl` to the controller and `git ls-remote` in each mode. Settles: reachable or blocked on macOS; and where `agy` keeps its own default gemini dir there (`~/.gemini`, app data `antigravity-cli`).
+    29. **Does `agy` trim a `Path`?** Do: ask the agent to write a file whose `Path` ends in a space, and one whose `Path` ends in a newline, next to a guarded file (for example `.agents/hooks.json ` with a trailing space), in Approval required. Settles: whether `agy` trims the `Path` before it writes. If it does, the guard must compare the trimmed path, because the hook compares the path as written.
   - **Not in the sitting (no safe way)**
     - A login revoked in the middle of a turn, and `session/cancel` in a silent turn (needs a provider error).
     - `allow_always`: `agy` never offers it, so what it keeps cannot be tested.

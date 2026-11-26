@@ -659,18 +659,21 @@ const formatAnswer = (denial: HookDenial | undefined): string =>
   denial === undefined ? "" : `${JSON.stringify(denial)}\n`;
 
 /**
- * Reads all of stdin, or returns `INPUT_TOO_LARGE` when it holds more than
- * `MAX_INPUT_BYTES`.
+ * Reads stdin to its end and returns its text, or `INPUT_TOO_LARGE` when it
+ * holds more than `MAX_INPUT_BYTES`. Always reads to the end, also past the
+ * bound (the excess is discarded, not kept): `agy` writes the call and waits
+ * for the answer, and a hook that closes stdin early makes that write fail
+ * with a broken pipe, which `agy` may count as a failing hook and stop the
+ * tool for, in every mode.
  */
 const readBoundedStdin = async (): Promise<string | typeof INPUT_TOO_LARGE> => {
   const chunks: Array<Buffer> = [];
   let size = 0;
   for await (const chunk of process.stdin as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > MAX_INPUT_BYTES) return INPUT_TOO_LARGE;
-    chunks.push(chunk);
+    if (size <= MAX_INPUT_BYTES) chunks.push(chunk);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return size > MAX_INPUT_BYTES ? INPUT_TOO_LARGE : Buffer.concat(chunks).toString("utf8");
 };
 
 /**
