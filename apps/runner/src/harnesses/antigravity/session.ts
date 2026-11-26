@@ -17,6 +17,7 @@
  * Time is measured on Effect's clock, so tests run the deadlines on a `TestClock`.
  */
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -25,6 +26,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import type { AcpConnection, AcpHandlers, NewSessionRequest, PromptContent } from "@hercule/acp";
 import { MCP_GATEWAY_ENTRY_NAME, SteerRefused } from "@hercule/protocol";
 import type {
@@ -93,6 +95,7 @@ import { openSessionFiles } from "./session-files";
 import type { SessionFileObservation, SessionFiles } from "./session-files";
 import {
   buildSubagentsState,
+  endUnreadableSubagent,
   hasOpenSubagentTurn,
   interruptSubagentTurns,
   introduceSubagent,
@@ -100,7 +103,7 @@ import {
   sumSubagentUsage,
 } from "./subagents";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
-import type { Turn } from "./turn";
+import type { InterruptResult, Turn } from "./turn";
 
 /**
  * How often the session reads `agy`'s files while something is open. A
@@ -109,6 +112,14 @@ import type { Turn } from "./turn";
  * short interval costs nothing in an idle session.
  */
 const FILE_READ_INTERVAL = Duration.millis(500);
+/**
+ * How long the session keeps reading the files after the last open turn
+ * closed. The files lag what `agy` sends over ACP: in the recording
+ * `subagent-full` a subagent's last step was written 80 ms after its parent's
+ * reply, and a child's launch message 100 ms after its folder appeared. One
+ * read at the close would miss them.
+ */
+const FILE_READ_TAIL = Duration.seconds(2);
 /** How long `session/cancel` may take to be acknowledged when the session asks `agy` to stop output that has no input. */
 const CANCEL_DEADLINE = Duration.seconds(3);
 
@@ -388,6 +399,12 @@ export const startAgySession = (
     let files: SessionFiles | undefined;
     /** Whether a subagent's files, or the session's own, could not be read. The session's usage is then incomplete. */
     let filesWereUnreadable = false;
+    /** Whether the reader showed a step of the session's own conversation. `agy` writes the first prompt there within seconds, so a Turn that replied with none shown means it wrote no transcript. */
+    let hasSeenOwnStep = false;
+    /** Whether a Turn of the session's own agent ended with its reply. */
+    let hasOwnReply = false;
+    /** Lets only one read of the files run at a time: the loop and a stop both read. */
+    const readLock = Semaphore.makeUnsafe(1);
     /** Completes when work opens while the reader of the files waits for it. */
     let readerWake: Deferred.Deferred<void> | undefined;
 
@@ -429,10 +446,31 @@ export const startAgySession = (
     /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
       if (!isStarted) return;
-      const hidden = hideEventSecret(events);
-      if (hidden.length > 0) emit(hidden);
+      if (
+        events.some(
+          (event) =>
+            event._tag === "turn.completed" &&
+            event.state === "completed" &&
+            event.turnId === current?.id,
+        )
+      ) {
+        hasOwnReply = true;
+      }
+      publishEvents(events);
       boundSyntheticTurn();
       wakeFileReader();
+    };
+
+    /**
+     * Publishes events with the session token hidden, and nothing when there
+     * are none. It does not touch the quiet wait of a synthetic turn: only
+     * output from `agy` over ACP keeps that turn open, and what the files show
+     * is a subagent's work, which never changes the session's own state.
+     */
+    const publishEvents = (events: ReadonlyArray<HarnessEvent>): void => {
+      if (!isStarted) return;
+      const hidden = hideEventSecret(events);
+      if (hidden.length > 0) emit(hidden);
     };
 
     /** Lets the reader of the files go on when it waits for work to open. It checks for itself that some is open. */
@@ -848,6 +886,7 @@ export const startAgySession = (
       switch (observation.kind) {
         case "step":
           if (observation.conversationId === nativeId) {
+            hasSeenOwnStep = true;
             readRunningTurn()?.observeRootStep(observation.step);
             return [];
           }
@@ -862,39 +901,70 @@ export const startAgySession = (
             findLaunchItem(state, toolCallId),
           );
         case "unreadable":
-          return recordUnreadableFiles(observation.conversationId, observation.reason);
+          return [
+            ...recordUnreadableFiles(observation.conversationId, observation.reason),
+            ...endUnreadableSubagent(subagentsState, observation.conversationId),
+          ];
       }
     };
 
-    /** Reads what is new in `agy`'s files once and publishes what follows, then the session's usage when it changed. */
-    const readSessionFiles: Effect.Effect<void> = Effect.suspend(() => {
-      const reader = files;
-      if (reader === undefined) return Effect.void;
-      return Effect.map(reader.read, (observations) => {
-        for (const observation of observations) emitEvents(routeObservation(observation));
-        const { usage, hasIncompleteCount } = sumSubagentUsage(subagentsState);
-        emitEvents(setSubagentUsage(state, usage, filesWereUnreadable || hasIncompleteCount));
-      });
+    /** Publishes the session's usage when what the subagents used, or whether that count is complete, changed. */
+    const publishSubagentUsage = (): void => {
+      const { usage, hasIncompleteCount } = sumSubagentUsage(subagentsState);
+      publishEvents(setSubagentUsage(state, usage, filesWereUnreadable || hasIncompleteCount));
+    };
+
+    /** Reads what is new in `agy`'s files once and publishes what follows, then the session's usage when it changed. Only one read runs at a time. */
+    const readSessionFiles: Effect.Effect<void> = readLock.withPermits(1)(
+      Effect.suspend(() => {
+        const reader = files;
+        if (reader === undefined) return Effect.void;
+        return Effect.map(reader.read, (observations) => {
+          for (const observation of observations) publishEvents(routeObservation(observation));
+          publishSubagentUsage();
+        });
+      }),
+    );
+
+    /**
+     * Closes the reader for the session's own files when a Turn replied and
+     * the reader never showed a step of them: `agy` wrote no transcript for
+     * this conversation, so waiting longer shows nothing.
+     */
+    const endReaderWithoutTranscript = Effect.sync(() => {
+      if (files === undefined || !hasOwnReply || hasSeenOwnStep) return;
+      publishEvents(
+        recordUnreadableFiles(nativeId, "agy wrote no transcript for this conversation"),
+      );
+      publishSubagentUsage();
     });
 
     /**
-     * Reads the files every `FILE_READ_INTERVAL` while work is open, and once
-     * more after the last of it closed, because the files lag ACP by up to
-     * 100 ms and a subagent can write after its parent's reply. Then it waits
-     * until work opens again. One fiber does all of it, so two reads never
-     * overlap, and nothing is read or timed while the session is idle.
+     * Reads the files every `FILE_READ_INTERVAL` while work is open, and for
+     * `FILE_READ_TAIL` after the last of it closed, because the files lag ACP
+     * and a subagent can write after its parent's reply. Then it waits until
+     * work opens again. One fiber does all of it, so nothing is read or timed
+     * while the session is idle.
      */
     const readFilesWhileWorkIsOpen = Effect.gen(function* () {
       let wasOpen = false;
+      let tailEndsAt: number | undefined;
       // A closed reader stays closed, so the loop ends with it.
       while (files !== undefined) {
-        if (isWorkOpen()) {
+        const now = yield* Clock.currentTimeMillis;
+        const isOpen = isWorkOpen();
+        if (isOpen) {
           wasOpen = true;
-          yield* readSessionFiles;
-          yield* Effect.sleep(FILE_READ_INTERVAL);
         } else if (wasOpen) {
           wasOpen = false;
+          tailEndsAt = now + Duration.toMillis(FILE_READ_TAIL);
+        }
+        if (isOpen || (tailEndsAt !== undefined && now < tailEndsAt)) {
           yield* readSessionFiles;
+          yield* Effect.sleep(FILE_READ_INTERVAL);
+        } else if (tailEndsAt !== undefined) {
+          tailEndsAt = undefined;
+          yield* endReaderWithoutTranscript;
         } else {
           const opened = Deferred.makeUnsafe<void>();
           readerWake = opened;
@@ -1096,46 +1166,76 @@ export const startAgySession = (
             );
           }),
         );
-      });
+      }).pipe(Effect.mapError(hideTokenInError));
+
+    /**
+     * Writes `session/cancel` for the session's own conversation, and returns
+     * whether `agy` got it. A cancel that could not be written is logged and
+     * is no failure, because the caller then leaves what runs alone. It is
+     * written before the prompt of any later input, on the same ordered pipe,
+     * so it cannot stop an input that comes after it.
+     */
+    const writeCancel: Effect.Effect<boolean> = withDeadline(
+      connection.cancel(nativeId),
+      CANCEL_DEADLINE,
+      "cancel",
+    ).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        Effect.as(
+          Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
+          false,
+        ),
+      ),
+    );
+
+    /**
+     * Ends the open subagent turns as `interrupted` after `agy` took a
+     * `session/cancel`, which stops every subagent. It reads the files once
+     * first, so the steps a subagent wrote before the cancel are shown before
+     * its turn ends.
+     */
+    const endSubagentTurnsAfterCancel = Effect.gen(function* () {
+      yield* readSessionFiles;
+      emitEvents(interruptSubagentTurns(subagentsState));
+    });
+
+    /**
+     * The one place every way of stopping the session's work ends in. `result`
+     * is what the Turn's interrupt or the answer `cancel` of an approval did.
+     *
+     * - `unresponsive`: the process is stopped.
+     * - `cancelled`: `agy` took a cancel, so the subagent turns end.
+     * - `not-cancelled`: no cancel reached `agy`. When subagents have open
+     *   turns, the cancel is written here, and their turns end only if `agy`
+     *   took it. A subagent that keeps running keeps its turn open.
+     */
+    const finishStop = (turn: Turn, result: InterruptResult): Effect.Effect<void> => {
+      if (result === "unresponsive") return stopUnresponsiveProcess(turn.id);
+      if (result === "cancelled") return endSubagentTurnsAfterCancel;
+      if (!hasOpenSubagentTurn(subagentsState)) return Effect.void;
+      return Effect.flatMap(writeCancel, (wasWritten) =>
+        wasWritten ? endSubagentTurnsAfterCancel : Effect.void,
+      );
+    };
 
     const interrupt: AgySession["interrupt"] = Effect.suspend(() => {
       // An input still being prepared is void from now on.
       generation += 1;
       const turn = readRunningTurn();
-      if (turn === undefined) {
-        // Output with no prompt open has a synthetic turn, and subagents can run while the session's own agent is idle. Stopping either asks `agy` to stop, and waits for nothing else.
-        const syntheticTurnId = readSyntheticTurnId(state);
-        if (syntheticTurnId === undefined && !hasOpenSubagentTurn(subagentsState)) {
-          return Effect.void;
-        }
-        // The cancel is written before the prompt of any later input, on the same ordered pipe, so it cannot stop an input that comes after it. An input still being prepared is void (`generation`).
-        return withDeadline(connection.cancel(nativeId), CANCEL_DEADLINE, "cancel").pipe(
-          Effect.as(true),
-          Effect.catch((error) =>
-            Effect.as(
-              Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
-              false,
-            ),
-          ),
-          Effect.flatMap((wasCancelWritten) =>
-            Effect.sync(() => {
-              emitEvents([
-                ...(syntheticTurnId === undefined
-                  ? []
-                  : closeTurn(state, { state: "interrupted", turnId: syntheticTurnId })),
-                // The subagents keep running when the cancel was not written, so their turns must not read as interrupted.
-                ...(wasCancelWritten ? interruptSubagentTurns(subagentsState) : []),
-              ]);
-            }),
-          ),
-        );
+      if (turn !== undefined)
+        return Effect.flatMap(turn.interrupt, (result) => finishStop(turn, result));
+      // Output with no prompt open has a synthetic turn, and subagents can run while the session's own agent is idle. Stopping either asks `agy` to stop, and waits for nothing else.
+      const syntheticTurnId = readSyntheticTurnId(state);
+      if (syntheticTurnId === undefined && !hasOpenSubagentTurn(subagentsState)) {
+        return Effect.void;
       }
-      // `agy` stops every subagent with the Turn, once it has answered the cancel.
-      return Effect.flatMap(turn.interrupt, (result) =>
-        result === "unresponsive"
-          ? stopUnresponsiveProcess(turn.id)
-          : Effect.sync(() => emitEvents(interruptSubagentTurns(subagentsState))),
-      );
+      return Effect.flatMap(writeCancel, (wasWritten) => {
+        if (syntheticTurnId !== undefined) {
+          emitEvents(closeTurn(state, { state: "interrupted", turnId: syntheticTurnId }));
+        }
+        return wasWritten ? endSubagentTurnsAfterCancel : Effect.void;
+      });
     });
 
     const decide: AgySession["decide"] = (requestId, decision) =>
@@ -1143,7 +1243,7 @@ export const startAgySession = (
         const turn = readRunningTurn();
         if (turn === undefined) return Effect.void;
         return Effect.flatMap(turn.decide(requestId, decision), (result) =>
-          result === "unresponsive" ? stopUnresponsiveProcess(turn.id) : Effect.void,
+          result === "decided" ? Effect.void : finishStop(turn, result),
         );
       });
 
