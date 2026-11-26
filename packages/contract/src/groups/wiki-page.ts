@@ -64,12 +64,14 @@ export const MAX_WIKI_REVISIONS_LISTED = 50;
  *
  * It exists because a session sees only its own task and a few page titles.
  * Told only to write down what it learned, each session wrote a page about
- * its ticket, and the next session copied it.
+ * its ticket, and the next session copied it. So the text opens with what
+ * the Wiki is not, and sets the bar by how many would need a lesson: many
+ * other agents on many other tasks, not the next agent on the same work.
  */
 export const WIKI_WRITING_RULES =
-  "The wiki holds lasting knowledge about the repository, one page per subject: how something is run or checked, a trap in a tool, a fact about a machine or an outside service. " +
-  "Record what an agent doing different work here would need, even if you learned it while working on a ticket. " +
-  "It is not a worklog: leave out ticket, pull request and thread recaps, as well as dated entries. " +
+  "The wiki is not a worklog, and nothing in it is about one ticket, pull request or thread. " +
+  "It holds only general lessons that many other agents are likely to need on many other tasks: how something is run or checked, a trap in a tool, a fact about a machine or an outside service. " +
+  "What you learned on a ticket belongs here only when it holds beyond that ticket. A recap, a handoff note or a dated entry never does. " +
   "List the pages before you write. Add to the page on the subject, and create a page only when there is none. Name a page for its subject. " +
   "A decision or a rule belongs in the repository's own docs, not in the wiki. " +
   "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when. " +

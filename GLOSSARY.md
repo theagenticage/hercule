@@ -360,7 +360,7 @@ The Queued Input, with the source `discussion`, that the controller sends to tel
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:
-The set of Wiki Pages of one repository, which agents keep for the agents after them: lasting knowledge about the repository, one page per subject. It is not a worklog of tickets. The repository's own docs win over it. The Wiki is not a record of its own.
+The set of Wiki Pages of one repository, which agents keep for the agents after them: general lessons about the repository that many agents need on many tasks, one page per subject. It is not a worklog, and no page is about one ticket. The repository's own docs win over it. The Wiki is not a record of its own.
 _Avoid_: knowledge base, memory (an assistant's), docs, worklog
 
 **Wiki Page**:
