@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdapterFailed,
   buildAnswerNotDelivered,
+  buildHarnessLoginMissing,
   buildHarnessNotInstalled,
   buildHarnessNotRunnable,
   buildHarnessProtocolError,
@@ -19,6 +20,13 @@ describe("the messages of the adapter error builders", () => {
     expect(buildHarnessNotInstalled("Claude Code")).toMatchObject({
       _tag: "HarnessNotInstalled",
       message: "Claude Code is not installed on this runner.",
+    });
+  });
+
+  it("tell the user that a harness has no account on this runner, in the words of the glossary", () => {
+    expect(buildHarnessLoginMissing("Codex")).toMatchObject({
+      _tag: "HarnessLoginMissing",
+      message: "Codex is not signed in on this runner.",
     });
   });
 

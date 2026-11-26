@@ -12,6 +12,7 @@
  */
 import {
   AnswerNotDelivered,
+  HarnessLoginMissing,
   HarnessNotInstalled,
   HarnessProtocolError,
   InputNotDelivered,
@@ -54,6 +55,10 @@ export const buildAnswerNotDelivered = (text: string): AnswerNotDelivered =>
 /** Builds the failure of `startSession` for a runner that has no binary of the harness. */
 export const buildHarnessNotInstalled = (harnessName: string): HarnessNotInstalled =>
   new HarnessNotInstalled({ message: `${harnessName} is not installed on this runner.` });
+
+/** Builds the failure of `startSession` for a harness that needs an account and has none on this runner. */
+export const buildHarnessLoginMissing = (harnessName: string): HarnessLoginMissing =>
+  new HarnessLoginMissing({ message: `${harnessName} is not signed in on this runner.` });
 
 /**
  * Returns the sentence for a harness that could not be started. Used by

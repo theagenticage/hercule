@@ -38,7 +38,6 @@ import type {
 import {
   AdapterFailed,
   AnswerNotDelivered,
-  HarnessLoginMissing,
   HarnessNotInstalled,
   HarnessProtocolError,
   SessionNotRunning,
@@ -67,6 +66,7 @@ import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
   buildAdapterFailed,
   buildAnswerNotDelivered,
+  buildHarnessLoginMissing,
   buildHarnessNotInstalled,
   buildHarnessNotRunnable,
   buildHarnessProtocolError,
@@ -1013,11 +1013,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         buildStartError(host, "Codex could not tell whether it is logged in", error),
       ),
       (account) =>
-        isLoginMissing(account)
-          ? Effect.fail(
-              new HarnessLoginMissing({ message: "Codex is not logged in on this runner." }),
-            )
-          : Effect.void,
+        isLoginMissing(account) ? Effect.fail(buildHarnessLoginMissing(CODEX_NAME)) : Effect.void,
     );
 
   /**

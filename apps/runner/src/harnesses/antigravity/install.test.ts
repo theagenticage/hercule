@@ -4,7 +4,7 @@
  * PATH, so nothing is downloaded and nothing outside the temporary folders is
  * touched. The stub `curl` serves an archive the test makes. Because the
  * pinned checksums cannot match that archive, most tests install through
- * `makeAntigravityInstallWithChecksums` with the archive's own digest.
+ * the installer's `checksums` parameter with the archive's own digest.
  */
 import { createHash } from "node:crypto";
 import {
@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import { runProcess } from "../process";
-import { makeAntigravityInstall, makeAntigravityInstallWithChecksums } from "./install";
+import { makeAntigravityInstall } from "./install";
 
 const NEW_AGY = "#!/bin/sh\necho new agy\n";
 const OLD_AGY = "#!/bin/sh\necho old agy\n";
@@ -180,7 +180,7 @@ const environment = () => ({ HOME: home, PATH: `${stubs}:/usr/bin:/bin` });
 
 /** Runs the installer's real script with an environment built from nothing. */
 const install = (checksums: Readonly<Record<string, string>> = checksumsOfServedArchive()) =>
-  Effect.runPromise(makeAntigravityInstallWithChecksums(runProcess, checksums)(environment()));
+  Effect.runPromise(makeAntigravityInstall(runProcess, checksums)(environment()));
 
 const readLines = (name: string): ReadonlyArray<string> => {
   const file = join(stubs, name);
@@ -218,7 +218,7 @@ describe("installing Antigravity", () => {
         const outcome = await Effect.runPromise(makeAntigravityInstall(runProcess)(environment()));
 
         expect(outcome.ok).toBe(false);
-        expect(outcome.message).toContain("does not match the checksum pinned");
+        expect(outcome.message).toContain("is not the one this Hercule build was made for");
       });
     });
   }
@@ -277,11 +277,11 @@ describe("installing Antigravity", () => {
       expectOldAgyKept();
     });
 
-    it("keeps the existing agy when the download does not match its checksum", async () => {
+    it("keeps the existing agy when the download is not the one this build was made for", async () => {
       const outcome = await install({ agy_cli_mac_arm64: "0".repeat(64) });
 
       expect(outcome.ok).toBe(false);
-      expect(outcome.message).toContain("does not match the checksum pinned");
+      expect(outcome.message).toContain("is not the one this Hercule build was made for");
       expectOldAgyKept();
     });
 

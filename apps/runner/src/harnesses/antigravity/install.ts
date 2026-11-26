@@ -2,25 +2,10 @@
  * Installs Antigravity (`agy`) on a machine.
  */
 import type * as Effect from "effect/Effect";
-import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
+import { ANTIGRAVITY_CHECKSUMS, ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { InstallOutcome } from "../index";
 import { makeInstall } from "../install";
 import type { Run } from "../process";
-
-/**
- * The SHA-256 digest of each release asset, keyed by the asset's name without
- * `.tar.gz`. These belong to `ANTIGRAVITY_VERSION`: when that version changes,
- * replace all six with the digests GitHub lists for the new release. A
- * download whose digest differs is never installed.
- */
-const ASSET_CHECKSUMS: Readonly<Record<string, string>> = {
-  agy_cli_linux_arm64: "e5b5d7ca1dda2cfdc0b09c72931320c3ef5c481a14dbda137304107ce6e776b1",
-  agy_cli_linux_arm64_musl: "455d20cc37507058bd9287d47d51aa7e6110351eb717fbf17e19619a7dc9d32e",
-  agy_cli_linux_x64: "8d9913298602049ef29e9669f35252b6b79571979ce1bd0fb27753c7bac84114",
-  agy_cli_linux_x64_musl: "a12514fb33e8835186082a00b60725f6fb15941ba061f0403347b86c4dbd8f46",
-  agy_cli_mac_arm64: "9e25108f3ea70cc6c846d88b9397456d13ae472a010016c3d625eb3fe99afc3a",
-  agy_cli_mac_x64: "91fee043a384b76cee5d5f1568b946ab2f25bf38c938f0bd7c4b27fefa0c4e43",
-};
 
 /**
  * Builds a shell script that runs on macOS (bash 3.2) and Linux. It stops at
@@ -99,7 +84,7 @@ else
   set -- $(shasum -a 256 "$stage/agy.tar.gz")
 fi
 if [ "$1" != "$expected" ]; then
-  echo "The download of $asset does not match the checksum pinned for Antigravity $version, so nothing was installed." >&2
+  echo "The file downloaded for $asset is not the one this Hercule build was made for, so nothing was installed. Update Hercule, or report this problem if it is already up to date." >&2
   exit 1
 fi
 tar -xzf "$stage/agy.tar.gz" -C "$stage" antigravity
@@ -112,23 +97,14 @@ mv -f "$stage/antigravity" "$bin/agy"
 `;
 
 /**
- * Builds the Antigravity installer with the given digests in place of the
- * pinned ones. Only tests call it, because they serve an archive of their own.
- * Production code uses `makeAntigravityInstall`.
- */
-export const makeAntigravityInstallWithChecksums = (
-  run: Run,
-  checksums: Readonly<Record<string, string>>,
-): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>
-  makeInstall(run, ["bash", "-c", buildInstallScript(checksums)]);
-
-/**
  * Builds the Antigravity installer. It installs the release this build pins,
  * with a command of our own: Google's install script takes no version and
  * does nothing when `agy` is already there, so it can neither pin a release
- * nor move an existing install to the pinned one.
+ * nor move an existing install to the pinned one. The table of checksums is a
+ * parameter so that tests can serve an archive of their own.
  */
 export const makeAntigravityInstall = (
   run: Run,
+  checksums: Readonly<Record<string, string>> = ANTIGRAVITY_CHECKSUMS,
 ): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>
-  makeAntigravityInstallWithChecksums(run, ASSET_CHECKSUMS);
+  makeInstall(run, ["bash", "-c", buildInstallScript(checksums)]);
