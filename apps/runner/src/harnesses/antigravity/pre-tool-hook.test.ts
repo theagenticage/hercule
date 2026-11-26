@@ -620,30 +620,26 @@ describe("the verb of the binary", () => {
     ["Full access", FULL],
     ["a guarded mode", GUARDED],
   ])(
-    "reads a 2 MiB input to its end, so the writer sees no broken pipe, in %s",
-    async (_n, env) => {
-      const { cwd } = setUpRepo();
-      const large = hookInput(cwd, {
-        args: { Content: "x".repeat(2 * 1024 * 1024), Path: "a" },
-        id: "c",
-        name: "write_file",
-      });
-      const child = Bun.spawn([process.execPath, MAIN, "antigravity-pre-tool-hook"], {
-        env: { PATH: process.env["PATH"] ?? "", ...env },
-        stdin: "pipe",
-        stdout: "pipe",
-      });
-      const writeErrors: Array<string> = [];
-      try {
-        await child.stdin.write(large);
-        await child.stdin.end();
-      } catch (error) {
-        writeErrors.push(String(error));
-      }
-      const answer = await new Response(child.stdout).text();
+    "reads a 2 MiB input to its end, so a shell that writes it is not killed by a broken pipe, in %s",
+    (_n, env) => {
+      // A shell writer reports its status, which shows a SIGPIPE (141) on every
+      // platform; a Bun writer reports no error on macOS.
+      const result = Bun.spawnSync(
+        [
+          "sh",
+          "-c",
+          '{ head -c 2097152 /dev/zero; echo "writer=$?" >&2; } | "$@"',
+          "sh",
+          process.execPath,
+          MAIN,
+          "antigravity-pre-tool-hook",
+        ],
+        { env: { PATH: process.env["PATH"] ?? "", ...env } },
+      );
 
-      expect(await child.exited).toBe(0);
-      expect(writeErrors).toEqual([]);
+      expect(result.stderr.toString()).toBe("writer=0\n");
+      expect(result.exitCode).toBe(0);
+      const answer = result.stdout.toString();
       if (env === FULL) expect(answer).toBe("");
       else expect(answer).toContain("too large for Hercule to check");
     },
