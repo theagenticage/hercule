@@ -218,7 +218,7 @@ const SHIPPED = [
         repository: "google-antigravity/antigravity-cli",
       },
       declared: {
-        steering: "unsupported",
+        steering: "native",
         fork: "unsupported",
         modelSwitch: "in-session",
         accessModes: {

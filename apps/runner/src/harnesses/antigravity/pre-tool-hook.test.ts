@@ -12,7 +12,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { takeStartMarks } from "../../edit-marks";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks/mark-format";
 import { cleanupHomes, createScratchHome } from "../testing";
-import { HOOK_RULES_VARIABLE, answerPreToolCall, encodeHookRules } from "./pre-tool-hook";
+import { listOwnedPaths } from "./harness-home";
+import {
+  HOOK_RULES_VARIABLE,
+  answerPreToolCall,
+  buildSubagentReason,
+  encodeHookRules,
+} from "./pre-tool-hook";
 import type { HookRules } from "./pre-tool-hook";
 
 afterEach(cleanupHomes);
@@ -347,6 +353,52 @@ describe("a subagent's call", () => {
     },
   );
 
+  const mcp = (conversationId: unknown) =>
+    callIn(conversationId, { args: {}, id: "call_6", name: "mcp_tools_whoami" });
+
+  it.each([
+    ["Approval required", "approval-required"],
+    ["Auto-accept edits", "auto-accept-edits"],
+  ] as const)(
+    "is denied in %s for an MCP tool call, which would otherwise wait for an approval that cannot come",
+    (name, mode) => {
+      const reason = readReason(answerPreToolCall(mcp(CHILD), sessionEnv(mode, OWN)));
+
+      expect(reason).toBe(buildSubagentReason("mcp", mode));
+      expect(reason).toContain(`this subagent's MCP tool call: in ${name}`);
+    },
+  );
+
+  it.each(["approval-required", "auto-accept-edits"] as const)(
+    "lets the session's own MCP tool call run in %s, and denies nothing in Full access",
+    (mode) => {
+      expect(answerPreToolCall(mcp(OWN), sessionEnv(mode, OWN))).toBe("");
+      expect(answerPreToolCall(mcp(CHILD), sessionEnv("full-access", OWN))).toBe("");
+    },
+  );
+
+  it("takes no edit-watch mark for an MCP tool call", () => {
+    const marks = createScratchHome("hook-marks");
+    answerPreToolCall(mcp(CHILD), {
+      ...sessionEnv("approval-required", OWN),
+      [SESSION_MARKS_DIR_VARIABLE]: marks,
+    });
+
+    expect(readdirSync(marks)).toEqual([]);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["not a safe id", "../x"],
+    ["not a safe id, with a space", "a b"],
+  ])("does not apply when the call's conversation id is %s", (_name, id) => {
+    const env = sessionEnv("approval-required", OWN);
+
+    expect(answerPreToolCall(command(id), env)).toBe("");
+    expect(answerPreToolCall(edit(id), env)).toBe("");
+    expect(answerPreToolCall(mcp(id), env)).toBe("");
+  });
+
   it.each(["approval-required", "auto-accept-edits"] as const)(
     "lets the session's own command and file change run in %s",
     (mode) => {
@@ -540,6 +592,28 @@ describe("the guard of the approval files", () => {
     expect(isDenied(decide(cwd, join(home, "config", "plugins", "p", "x.json"), env))).toBe(true);
     expect(decide(cwd, join(home, "config", "other.json"), env)).toBe("");
     expect(decide(cwd, hooks, FULL)).toBe("");
+  });
+
+  it("denies a change to the files Hercule reads in any conversation's brain folder, and lets the model's own files be written", () => {
+    const { cwd } = setUpRepo();
+    const home = createScratchHome("hook-home");
+    const env = rulesEnv("auto-accept-edits", { harnessHomePaths: [...listOwnedPaths(home)] });
+    const brain = join(home, "antigravity-acp", "brain");
+
+    expect(isDenied(decide(cwd, join(brain, "conv-1", ".system_generated"), env))).toBe(true);
+    expect(
+      isDenied(decide(cwd, join(brain, "conv-2", ".system_generated", "steps", "1.json"), env)),
+    ).toBe(true);
+    expect(
+      isDenied(decide(cwd, join(brain, "conv-2", ".SYSTEM_GENERATED", "steps", "1.json"), env)),
+    ).toBe(true);
+    expect(decide(cwd, join(brain, "conv-1", "task.md"), env)).toBe("");
+    expect(decide(cwd, join(brain, "conv-1", "implementation_plan.md"), env)).toBe("");
+    expect(decide(cwd, join(brain, "conv-1", "notes", ".system_generated"), env)).toBe("");
+    expect(decide(cwd, join(brain, ".system_generated"), env)).toBe("");
+    expect(decide(cwd, join(brain, "conv-1", ".system_generated", "steps", "1.json"), FULL)).toBe(
+      "",
+    );
   });
 
   it.each([

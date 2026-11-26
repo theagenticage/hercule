@@ -1173,7 +1173,7 @@ describe("the pre-tool hook of a session", () => {
     expect(readFileSync(target, "utf8")).toBe("{}");
     expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     expect((JSON.parse(hooks) as HooksFile).hercule.PreToolUse[0]!.matcher).toBe(
-      "run_command|edit_file|write_file|search_web|invoke_subagent|mcp_chrome_devtools_.*",
+      "run_command|edit_file|write_file|search_web|invoke_subagent|mcp_.*",
     );
     expect(hooks).not.toContain("agy-marks");
   });
@@ -1277,6 +1277,7 @@ describe("the pre-tool hook of a session", () => {
           join(home, "antigravity-acp", "settings.json"),
           join(home, "skills"),
           join(home, "AGENTS.md"),
+          join(home, "antigravity-acp", "brain", "*", ".system_generated"),
         ]),
       );
     }

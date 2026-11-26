@@ -64,6 +64,7 @@ import { REAL_HOOK_LAUNCHER } from "./real-agy-session.testing";
 import { findAgyTestBinary } from "./agy-binary.testing";
 import { buildContext, TEST_SESSION_TOKEN } from "./fake-agy.testing";
 import { APP_DATA_DIR } from "./harness-home";
+import { buildSubagentReason } from "./pre-tool-hook";
 
 const pinnedBinary = findAgyTestBinary();
 const loginFile = process.env["HERCULE_AGY_TEST_LOGIN"];
@@ -1286,7 +1287,7 @@ describe.skipIf(skipReason !== undefined)(
         (usage.cacheWriteTokens ?? 0);
 
       /** Returns the id of the subagent an event belongs to, or `undefined` for the session's own agent or an event with no owner. */
-      const subagentOf = (event: HarnessEvent): string | undefined =>
+      const readSubagentId = (event: HarnessEvent): string | undefined =>
         "subagentId" in event ? event.subagentId : undefined;
 
       /** Returns the items of `kind` that completed in `events`. */
@@ -1331,7 +1332,7 @@ describe.skipIf(skipReason !== undefined)(
           );
           expect(started[0]!.itemId, why).toBe(launch?.itemId);
 
-          const own = events.filter((event) => subagentOf(event) === subagentId);
+          const own = events.filter((event) => readSubagentId(event) === subagentId);
           const turnStarted = own.find(
             (event): event is Event<"turn.started"> => event._tag === "turn.started",
           );
@@ -1394,7 +1395,7 @@ describe.skipIf(skipReason !== undefined)(
             why,
           ).toEqual([]);
           const refused = completedItems(
-            events.filter((event) => subagentOf(event) !== undefined),
+            events.filter((event) => readSubagentId(event) !== undefined),
             "command_execution",
           );
           expect(
@@ -1402,7 +1403,7 @@ describe.skipIf(skipReason !== undefined)(
             why,
           ).toEqual(["failed"]);
           expect(JSON.stringify(refused[0]?.detail), why).toContain(
-            "refused this subagent's command",
+            buildSubagentReason("shell", "approval-required"),
           );
           expect(existsSync(join(session.cwd, "sub.txt")), why).toBe(false);
           expect(rootEnd.state, why).toBe("completed");
