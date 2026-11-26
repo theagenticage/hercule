@@ -1370,6 +1370,25 @@ describe("an error that agy wrote into the chat", () => {
     ),
   );
 
+  it("ends failed when a usage_update comes between the notice and the reply", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${QUOTA}\n`);
+        h.events.push(
+          ...normalizeUpdate(h.normalizing, {
+            nativeSessionId: "native",
+            update: { sessionUpdate: "other", name: "usage_update" },
+            raw: {},
+          }),
+        );
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect(h.tags("runtime.error")).toMatchObject([{ class: "usage_limit" }]);
+        expect(shownText(h)).toBe("");
+      }),
+    ));
+
   it("ends completed, with the text shown, when more output follows the notice", () =>
     run((h) =>
       Effect.gen(function* () {

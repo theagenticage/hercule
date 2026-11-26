@@ -24,8 +24,8 @@
  *   `readAgyErrorNotice`) waits one step, because agy replies `end_turn` right
  *   after it and only then is it known to be the end of the turn and not text
  *   in the middle of one. The Turn takes it (`takeErrorNotice`) when the reply
- *   comes; any other update, the end of the turn and the end of the process
- *   show it as the assistant text it would have been;
+ *   comes; an update that draws something, the end of the turn and the end of
+ *   the process show it as the assistant text it would have been;
  * - the `todo_list` and `plan` items, rebuilt from the files the model writes,
  *   because `agy` sends no ACP `plan` update. It compares a written path with
  *   the plan file paths it was given; it does not build paths.
@@ -928,8 +928,14 @@ export const normalizeUpdate = (
     state.buffered.push({ type: "update", notification });
     return [];
   }
+  // `usage_update` follows the message chunks of every model call, so it must not
+  // release the notice before the reply. The updates the session drops draw
+  // nothing either (available commands, session info, mode, config option and
+  // the echo of the user's message), so they keep the hold too.
+  const decision = decideUpdate(readUpdateName(notification.update));
+  const drawsNothing = decision === "closeText" || decision === "drop";
   return [
-    ...releaseErrorNotice(state),
+    ...(drawsNothing ? [] : releaseErrorNotice(state)),
     ...routeUpdate(state, notification),
     ...closeIdleSyntheticTurn(state),
   ];
