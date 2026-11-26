@@ -71,6 +71,7 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
     harnessId: ANTIGRAVITY,
     harnessName: ANTIGRAVITY_NAME,
     binaryName: ANTIGRAVITY_BINARY,
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.empty,

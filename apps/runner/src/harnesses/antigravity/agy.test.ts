@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -961,6 +962,15 @@ describe("the files of the Harness Home that Hercule owns", () => {
   const REMOVED = [
     ["antigravity-acp", "settings.json"],
     ["config", "plugins"],
+    [".", "skills"],
+    ["config", "skills"],
+    ["antigravity-acp", "skills"],
+    ["config", "skills.json"],
+    [".", "GEMINI.md"],
+    [".", "AGENTS.md"],
+    ["config", "GEMINI.md"],
+    ["config", "AGENTS.md"],
+    ["config", "rules"],
   ] as const;
   const MCP_CONFIG = (home: string) => join(home, "config", "mcp_config.json");
 
@@ -1073,7 +1083,7 @@ describe("the hook that takes the start marks of the edit watch", () => {
   const SESSION: AgyPurpose = {
     kind: "session",
     accessMode: "approval-required",
-    hasMcpServers: false,
+    request: { cwd: "/work", mcpServers: [] },
   };
   interface HooksFile {
     readonly hercule: {
@@ -1157,7 +1167,7 @@ describe("the hook that takes the start marks of the edit watch", () => {
     expect(readFileSync(target, "utf8")).toBe("{}");
     expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     expect((JSON.parse(hooks) as HooksFile).hercule.PreToolUse[0]!.matcher).toBe(
-      "run_command|edit_file|write_file",
+      "run_command|edit_file|write_file|search_web",
     );
     expect(hooks).not.toContain("agy-marks");
   });
@@ -1170,6 +1180,49 @@ describe("the hook that takes the start marks of the edit watch", () => {
 
     expect(watched.env["HERCULE_SESSION_MARKS_DIR"]).toBe(marks);
     expect(unwatched.env).not.toHaveProperty("HERCULE_SESSION_MARKS_DIR");
+  });
+
+  it("sets the guard and the web search denial on the agy process by access mode, and the skills directory only when there is one", async () => {
+    const spawned = async (
+      accessMode: "approval-required" | "auto-accept-edits" | "full-access",
+      additionalSkillsDirectory?: string,
+    ) => {
+      const home = createSignedInHome();
+      const fake = buildFakeAgy(home);
+      await Effect.runPromise(
+        Effect.scoped(
+          openSignedInAgy(fake.spawn, buildContext(home), BINARY, {
+            cwd: createScratchHome("agy-work"),
+            handlers: NO_HANDLERS,
+            purpose: {
+              kind: "session",
+              accessMode,
+              request: {
+                cwd: "/work",
+                mcpServers: [],
+                ...(additionalSkillsDirectory === undefined
+                  ? {}
+                  : { additionalDirectories: [additionalSkillsDirectory] }),
+              },
+            },
+          }),
+        ),
+      );
+      return fake.spawns[0]!.env;
+    };
+
+    const approval = await spawned("approval-required", "/made/up/skills/../skills");
+    const edits = await spawned("auto-accept-edits");
+    const full = await spawned("full-access");
+
+    expect(approval["HERCULE_AGY_GUARD"]).toBe("1");
+    expect(approval["HERCULE_AGY_DENY_WEB_SEARCH"]).toBe("1");
+    expect(approval["HERCULE_AGY_SKILLS_DIR"]).toBe("/made/up/skills");
+    expect(edits["HERCULE_AGY_GUARD"]).toBe("1");
+    expect(edits).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
+    expect(edits).not.toHaveProperty("HERCULE_AGY_SKILLS_DIR");
+    expect(full).not.toHaveProperty("HERCULE_AGY_GUARD");
+    expect(full).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
   });
 
   describe("the script", () => {
@@ -1220,6 +1273,181 @@ describe("the hook that takes the start marks of the edit watch", () => {
         ).toEqual([{ toolUseId: "call_9", shellCommand: undefined }]);
       },
     );
+
+    describe("the guard of the approval files", () => {
+      const GUARDED = { HERCULE_AGY_GUARD: "1", PATH: "/usr/bin:/bin" };
+      const editInput = (cwd: string, path: string, name = "write_file") =>
+        JSON.stringify({
+          cwd,
+          hookEventName: "PreToolUse",
+          toolCall: { args: { Content: "x", Path: path }, id: "call_5", name },
+        });
+
+      /** A git repository `root` with the session in `root/sub`, and links that lead to `.agents`. */
+      const setUpRepo = async () => {
+        const { home, marks } = await setUpHome();
+        const root = realpathSync(createScratchHome("agy-repo"));
+        mkdirSync(join(root, ".git"));
+        mkdirSync(join(root, ".agents", "plugins"), { recursive: true });
+        mkdirSync(join(root, "sub", ".agents"), { recursive: true });
+        symlinkSync(join(root, ".agents"), join(root, "sub", "agents-link"));
+        symlinkSync(join(root, ".agents", "hooks.json"), join(root, "sub", "hooks-link"));
+        symlinkSync(root, join(root, "root-link"));
+        return { home, marks, root, cwd: join(root, "sub") };
+      };
+
+      const decide = (home: string, cwd: string, path: string, env: Record<string, string>) => {
+        const result = runHook(home, editInput(cwd, path), env);
+        expect(result.exitCode).toBe(0);
+        return result.stdout.toString();
+      };
+
+      it.each([
+        ["a plain path", (root: string) => join(root, "sub", ".agents", "hooks.json")],
+        ["a relative path", () => ".agents/mcp_config.json"],
+        ["a path with ..", () => "a/../.agents/hooks.json"],
+        ["a link to .agents", () => "agents-link/plugins.json"],
+        ["a link to the file itself", () => "hooks-link"],
+        [
+          "a path through a link to the repository",
+          (root: string) => join(root, "root-link", ".agents", "plugins", "x", "hooks.json"),
+        ],
+        ["the git root above the folder", () => "../.agents/hooks.json"],
+        [
+          "a file that does not exist yet, below a missing folder",
+          () => ".agents/plugins/new/plugin.json",
+        ],
+      ])("denies %s, in the words the model reads", async (_name, pick) => {
+        const { home, root, cwd } = await setUpRepo();
+        const path = pick(root);
+
+        const answer = decide(home, cwd, path, GUARDED);
+
+        expect(JSON.parse(answer)).toEqual({
+          decision: "deny",
+          reason: `Hercule does not let the agent change ${path}: it decides what the agent may do without asking. Ask the user to change it.`,
+        });
+      });
+
+      it("escapes the path in the reason", async () => {
+        const { home, root, cwd } = await setUpRepo();
+        const path = join(root, "sub", 'a"b\\c', "..", "..", ".agents", "hooks.json");
+
+        const answer = JSON.parse(decide(home, cwd, path, GUARDED)) as { reason: string };
+
+        expect(answer.reason).toContain(`change ${path}:`);
+      });
+
+      it("denies every path inside the skills directory, and only when it has one", async () => {
+        const { home, root, cwd } = await setUpRepo();
+        const skills = join(createScratchHome("agy-skills"), "skills");
+        const link = join(root, "skills-link");
+        mkdirSync(skills);
+        symlinkSync(skills, link);
+        const env = { ...GUARDED, HERCULE_AGY_SKILLS_DIR: skills };
+
+        expect(decide(home, cwd, join(skills, "deploy", "SKILL.md"), env)).toContain("deny");
+        expect(decide(home, cwd, join(link, ".git", "config"), env)).toContain("deny");
+        expect(decide(home, cwd, join(skills, "..", "other.md"), env)).toBe("");
+        expect(decide(home, cwd, join(skills, "deploy", "SKILL.md"), GUARDED)).toBe("");
+      });
+
+      it("goes to the parent of the folder a link leads to, as the operating system does", async () => {
+        const { home, root, cwd } = await setUpRepo();
+        mkdirSync(join(root, ".agents", "plugins", "p"), { recursive: true });
+        symlinkSync(join(root, ".agents", "plugins", "p"), join(cwd, "sub"));
+
+        // The operating system writes .agents/plugins/hooks.json, not sub/../hooks.json.
+        expect(decide(home, cwd, "sub/../hooks.json", GUARDED)).toContain("deny");
+        expect(decide(home, cwd, "sub/p/../../../hooks.json", GUARDED)).toContain("deny");
+      });
+
+      it("ends on a link loop and on a dangling link, and allows both", async () => {
+        const { home, cwd } = await setUpRepo();
+        symlinkSync(join(cwd, "loop-b"), join(cwd, "loop-a"));
+        symlinkSync(join(cwd, "loop-a"), join(cwd, "loop-b"));
+        symlinkSync(join(cwd, "nowhere", "file"), join(cwd, "dangling"));
+
+        expect(decide(home, cwd, "loop-a/x", GUARDED)).toBe("");
+        expect(decide(home, cwd, "dangling", GUARDED)).toBe("");
+      });
+
+      it("follows a link to a file that leads into a guarded folder", async () => {
+        const { home, cwd } = await setUpRepo();
+        symlinkSync("../../.agents/plugins.json", join(cwd, ".agents", "relative-link"));
+
+        expect(decide(home, cwd, ".agents/relative-link", GUARDED)).toContain("deny");
+      });
+
+      it("ignores case on macOS only", async () => {
+        const { home, cwd } = await setUpRepo();
+        const macos = { ...GUARDED, HERCULE_AGY_HOOK_PLATFORM: "Darwin" };
+        const linux = { ...GUARDED, HERCULE_AGY_HOOK_PLATFORM: "Linux" };
+
+        expect(decide(home, cwd, ".Agents/Hooks.json", macos)).toContain("deny");
+        expect(decide(home, cwd, ".Agents/Hooks.json", linux)).toBe("");
+      });
+
+      it("guards the session's folder only outside a repository", async () => {
+        const { home } = await setUpHome();
+        const folder = realpathSync(createScratchHome("agy-norepo"));
+        mkdirSync(join(folder, "sub"));
+
+        expect(decide(home, join(folder, "sub"), "../.agents/hooks.json", GUARDED)).toBe("");
+        expect(decide(home, join(folder, "sub"), ".agents/hooks.json", GUARDED)).toContain("deny");
+      });
+
+      it.each([
+        ["other files in .agents", ".agents/rules/x.md"],
+        ["AGENTS.md", "../AGENTS.md"],
+        ["a source file", "src/a.ts"],
+        ["a file named like a guarded one elsewhere", "docs/.agents/hooks.json"],
+      ])("allows %s, with no output", async (_name, path) => {
+        const { home, cwd } = await setUpRepo();
+
+        expect(decide(home, cwd, path, GUARDED)).toBe("");
+      });
+
+      it("allows everything in full access, where the process has no guard variable", async () => {
+        const { home, cwd } = await setUpRepo();
+
+        expect(decide(home, cwd, ".agents/hooks.json", { PATH: "/usr/bin:/bin" })).toBe("");
+      });
+
+      it("takes the mark before it decides", async () => {
+        const { home, marks, cwd } = await setUpRepo();
+
+        const answer = decide(home, cwd, ".agents/hooks.json", {
+          ...GUARDED,
+          HERCULE_SESSION_MARKS_DIR: marks,
+        });
+
+        expect(answer).toContain("deny");
+        expect(takeStartMarks(marks).map((mark) => mark.toolUseId)).toEqual(["call_5"]);
+      });
+
+      it("denies search_web only for the process that has the variable", async () => {
+        const { home } = await setUpHome();
+        const search = JSON.stringify({
+          cwd: "/work",
+          toolCall: { args: { query: "x" }, id: "call_6", name: "search_web" },
+        });
+
+        const denied = runHook(home, search, {
+          HERCULE_AGY_DENY_WEB_SEARCH: "1",
+          PATH: "/usr/bin:/bin",
+        });
+        const allowed = runHook(home, search, GUARDED);
+
+        expect(JSON.parse(denied.stdout.toString())).toEqual({
+          decision: "deny",
+          reason:
+            "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.",
+        });
+        expect(allowed.exitCode).toBe(0);
+        expect(allowed.stdout.toString()).toBe("");
+      });
+    });
 
     it("does nothing, and exits 0 with nothing on stdout, without the marks directory, and when it cannot write", async () => {
       const { home, marks } = await setUpHome();

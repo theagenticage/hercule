@@ -80,8 +80,8 @@ describe("the probe without a binary", () => {
 });
 
 describe("the MCP Gateway", () => {
-  it("is not handed to agy: the controller would give sessions an MCP entry that agy cannot reach", () => {
-    expect(buildAdapter(createSignedInHome()).mapsMcpServers).toBeUndefined();
+  it("is handed to agy: the adapter maps the session's MCP servers", () => {
+    expect(buildAdapter(createSignedInHome()).mapsMcpServers).toBe(true);
   });
 });
 

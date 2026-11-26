@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -90,27 +90,78 @@ type OwnedHomePath = {
 const START_MARK_SCRIPT_PATH = join("config", "hercule-start-mark.sh");
 
 /**
- * The script of the gate of an `agy` session (spec 19 section 4.1). `agy`
- * runs it before every `run_command`, `edit_file` and `write_file`, and the
- * tool waits for it. `agy` writes the hook's input to it as one line of JSON,
- * and its `toolCall.id` is the id of the call's item. The script turns that
- * into a mark file in the session's marks directory, so the file's ctime is
- * the start of the call:
+ * The variable that is set on the `agy` process of every session that is not
+ * in full access. Without it the guard of the hook script does nothing.
+ */
+const GUARD_VARIABLE = "HERCULE_AGY_GUARD";
+
+/**
+ * The variable that is set only on the `agy` process of a session in Approval
+ * required. The hook script then denies `search_web`, because a search runs
+ * without a card.
+ */
+const DENY_WEB_SEARCH_VARIABLE = "HERCULE_AGY_DENY_WEB_SEARCH";
+
+/**
+ * The variable that holds the session's additional skills directory, when it
+ * has one. The guard of the hook script denies every change inside it.
+ */
+const SKILLS_DIRECTORY_VARIABLE = "HERCULE_AGY_SKILLS_DIR";
+
+/**
+ * The variable that replaces the answer of `uname` in the hook script. Only
+ * the tests set it, to run the macOS case comparison on any machine.
+ */
+const PLATFORM_VARIABLE = "HERCULE_AGY_HOOK_PLATFORM";
+
+/**
+ * The script of the hook of an `agy` session (spec 19 section 4.1). `agy`
+ * runs it before every `run_command`, `edit_file`, `write_file` and
+ * `search_web`, and the tool waits for it. `agy` writes the hook's input to it
+ * as one line of JSON, and its `toolCall.id` is the id of the call's item. The
+ * script does two things, in this order.
  *
- * - The directory comes from the environment of the `agy` process of the
- *   session. The script is the same for every session of the account, because
- *   they share the Harness Home. A process without the variable gets no mark.
- * - It extracts the fields with `sed` and no JSON parser, because the runner's
- *   machine may have no other tool. The command's text stays in the JSON
- *   escaped form it arrived in, so it goes into the mark as it is.
- * - It never overwrites a mark (`set -C`), and an id with characters that are
- *   not safe in a file name gets none.
- * - It always exits 0 and prints nothing, so the call runs unchanged. When it
- *   could not write the mark, the call still runs: watching edits is best
- *   effort and never blocks a session.
+ * 1. It turns the call into a mark file in the session's marks directory, so
+ *    the file's ctime is the start of the call:
+ *    - The directory comes from the environment of the `agy` process of the
+ *      session. The script is the same for every session of the account,
+ *      because they share the Harness Home. A process without the variable
+ *      gets no mark.
+ *    - It extracts the fields with `sed` and no JSON parser, because the
+ *      runner's machine may have no other tool. The command's text stays in
+ *      the JSON escaped form it arrived in, so it goes into the mark as it is.
+ *    - It never overwrites a mark (`set -C`), and an id with characters that
+ *      are not safe in a file name gets none.
+ *    - When it could not write the mark, the call still runs: watching edits
+ *      is best effort and never blocks a session.
+ * 2. It denies the calls Hercule does not allow, by printing
+ *    `{"decision":"deny","reason":...}`. Every other call gets no output, so
+ *    it runs unchanged. The script always exits 0.
+ *    - `search_web` is denied when the process has `DENY_WEB_SEARCH_VARIABLE`.
+ *    - `edit_file` and `write_file` are denied, when the process has
+ *      `GUARD_VARIABLE`, for a file that `agy` loads approval rules from:
+ *      `.agents/hooks.json`, `.agents/plugins.json`, `.agents/mcp_config.json`
+ *      and everything below `.agents/plugins/`, in the session's folder and
+ *      every folder above it up to the git root (the nearest folder holding
+ *      `.git`; with none, the session's folder only). Also every path inside
+ *      the folder in `SKILLS_DIRECTORY_VARIABLE`. A file in the first group
+ *      could approve commands or start programs in the next turn.
  *
- * A rule that decides about a call, such as one that denies it, belongs at the
- * end of the script, after the mark is taken, and prints its answer there.
+ * `agy` hands the hook the path as the model wrote it: it may be relative to
+ * `cwd`, hold `..`, or go through links. The script resolves it the way the
+ * operating system does before it compares: component by component from
+ * `cwd`, `..` goes to the parent of the folder reached so far (not of the
+ * written one, which differs after a link), a link is replaced by its target
+ * (at most 40 links, so a loop ends), and a component that does not exist is
+ * kept as written. The guarded paths are resolved the same way. On macOS
+ * (`uname` is Darwin), whose default filesystem ignores case, both sides are
+ * lowercased first.
+ *
+ * A call whose `Path` or `cwd` the script cannot read goes through. The guard
+ * is best effort like the mark: a script that blocked on input it does not
+ * understand could stop every edit of every session of the account after a
+ * change of agy's hook input, and the guard is a check on a path, not a
+ * sandbox.
  */
 const START_MARK_SCRIPT = `#!/bin/sh
 set -C
@@ -129,14 +180,115 @@ take_mark() {
   fi
 }
 
+# Turns the JSON escapes that a path can hold back into characters.
+unescape() {
+  ph=$(printf '\\001')
+  printf %s "$1" | sed -e 's/\\\\\\\\/'"$ph"'/g' -e 's/\\\\"/"/g' -e 's|\\\\/|/|g' -e 's/\\\\u0026/\\&/g' -e 's/\\\\u003[cC]/</g' -e 's/\\\\u003[eE]/>/g' -e 's/'"$ph"'/\\\\/g'
+}
+
+# Prints the absolute path of $1 (relative to the folder $2) the way the
+# operating system resolves it: component by component from the start folder,
+# ".." goes to the parent of the folder reached so far, a link is replaced by
+# its target, and a component that does not exist is kept as written. At most
+# 40 links are followed, so a loop ends.
+resolve_path() {
+  rest=$1
+  case $rest in
+    /*) cur=/ ;;
+    *) cur=$(cd -P "$2" 2>/dev/null && pwd -P) || cur=$2 ;;
+  esac
+  links=0
+  while [ -n "$rest" ]; do
+    part=\${rest%%/*}
+    case $rest in */*) rest=\${rest#*/} ;; *) rest= ;; esac
+    case $part in
+      ''|.) continue ;;
+      ..) cur=$(dirname "$cur"); continue ;;
+    esac
+    case $cur in /) next=/$part ;; *) next=$cur/$part ;; esac
+    if [ -L "$next" ]; then
+      links=$((links + 1))
+      if [ "$links" -gt 40 ]; then
+        cur=$next
+        continue
+      fi
+      target=$(readlink "$next") || { cur=$next; continue; }
+      case $target in /*) cur=/ ;; esac
+      rest=$target/$rest
+    elif [ -d "$next" ]; then
+      cur=$(cd -P "$next" 2>/dev/null && pwd -P) || cur=$next
+    else
+      cur=$next
+    fi
+  done
+  printf %s "$cur"
+}
+
+# Prints the path as it is compared: lowercased on macOS, whose default
+# filesystem ignores case, so ".Agents/Hooks.json" is the guarded file there.
+fold_case() {
+  if [ "\${${PLATFORM_VARIABLE}:-$(uname)}" = Darwin ]; then
+    printf %s "$1" | tr 'A-Z' 'a-z'
+  else
+    printf %s "$1"
+  fi
+}
+
+deny() {
+  reason=$(printf %s "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g')
+  printf '{"decision":"deny","reason":"%s"}\\n' "$reason"
+  exit 0
+}
+
+# Denies a change of a file that agy loads approval rules from.
+guard_edit() {
+  raw=$(printf %s "$input" | sed -nE 's/.*"Path":"(([^"\\\\]|\\\\.)*)".*/\\1/p')
+  cwd=$(printf %s "$input" | sed -nE 's/.*"cwd":"(([^"\\\\]|\\\\.)*)".*/\\1/p')
+  [ -n "$raw" ] && [ -n "$cwd" ] || return 0
+  path=$(unescape "$raw")
+  cwd=$(unescape "$cwd")
+  target=$(fold_case "$(resolve_path "$path" "$cwd")")
+  message="Hercule does not let the agent change $path: it decides what the agent may do without asking. Ask the user to change it."
+
+  skills=$${SKILLS_DIRECTORY_VARIABLE}
+  if [ -n "$skills" ]; then
+    skills=$(fold_case "$(resolve_path "$skills" /)")
+    case $target in "$skills"|"$skills"/*) deny "$message" ;; esac
+  fi
+
+  folder=$(resolve_path "$cwd" /)
+  top=$folder
+  while [ "$top" != / ] && [ ! -e "$top/.git" ]; do top=$(dirname "$top"); done
+  [ -e "$top/.git" ] || top=$folder
+  while :; do
+    for name in hooks.json plugins.json mcp_config.json; do
+      [ "$target" = "$(fold_case "$(resolve_path "$folder/.agents/$name" /)")" ] && deny "$message"
+    done
+    plugins=$(fold_case "$(resolve_path "$folder/.agents/plugins" /)")
+    case $target in "$plugins"|"$plugins"/*) deny "$message" ;; esac
+    [ "$folder" = "$top" ] && break
+    folder=$(dirname "$folder")
+  done
+}
+
 take_mark 2>/dev/null
+
+tool=$(printf %s "$input" | sed -nE 's/.*"name":"([a-z_]+)".*/\\1/p')
+case $tool in
+  search_web)
+    [ -z "$${DENY_WEB_SEARCH_VARIABLE}" ] || deny "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode."
+    ;;
+  edit_file|write_file)
+    [ -z "$${GUARD_VARIABLE}" ] || guard_edit 2>/dev/null
+    ;;
+esac
 exit 0
 `;
 
 /**
  * The hooks file of the Harness Home: one `PreToolUse` hook for the tools
- * that become `command_execution` and `file_change` items, which runs
- * `START_MARK_SCRIPT`. The path is quoted for the shell, because it holds the
+ * that become `command_execution` and `file_change` items, and for
+ * `search_web`, which runs `START_MARK_SCRIPT`. The path is quoted for the shell, because it holds the
  * account's folder.
  */
 const buildHooksFile = (home: string): string => {
@@ -145,7 +297,7 @@ const buildHooksFile = (home: string): string => {
     hercule: {
       PreToolUse: [
         {
-          matcher: "run_command|edit_file|write_file",
+          matcher: "run_command|edit_file|write_file|search_web",
           hooks: [{ type: "command", command: `/bin/sh '${script}'` }],
         },
       ],
@@ -170,6 +322,16 @@ const buildHooksFile = (home: string): string => {
  *   `agy acp`. `agy` does not create the file.
  * - `config/plugins`: `agy` loads a plugin from this folder live, and a
  *   plugin's `hooks.json` auto-approved a command in the default mode.
+ * - `skills`, `config/skills`, `antigravity-acp/skills`: `agy` loads the skills
+ *   in these folders into every session of the account and reads them again at
+ *   each prompt.
+ * - `config/skills.json`: lists folders of skills, which may be absolute paths
+ *   anywhere, and `agy` loads them in every session of the account.
+ * - `GEMINI.md`, `AGENTS.md`, `config/GEMINI.md`, `config/AGENTS.md`: `agy`
+ *   adds the instructions in them to every session of the account and reads
+ *   them again at each prompt.
+ * - `config/rules`: `agy` applies the `always_on` rules in this folder to every
+ *   session of the account.
  * - `config/mcp_config.json`: `agy` loads every MCP server in it in every
  *   session, and with no server in the session's own request, such a server
  *   would connect. `agy` creates it as an empty file, so it is emptied, not
@@ -197,6 +359,51 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
     path: join("config", "plugins"),
     whenStarting: "remove",
     reason: `${ANTIGRAVITY_NAME} loads a plugin from this folder in every session of the account, and a plugin's hooks.json can approve a command without asking.`,
+  },
+  {
+    path: join("skills"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`,
+  },
+  {
+    path: join("config", "skills"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`,
+  },
+  {
+    path: join(APP_DATA_DIR, "skills"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`,
+  },
+  {
+    path: join("config", "skills.json"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: it can list folders of skills anywhere on the machine, and they load into every session of the account.`,
+  },
+  {
+    path: "GEMINI.md",
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+  },
+  {
+    path: "AGENTS.md",
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+  },
+  {
+    path: join("config", "GEMINI.md"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+  },
+  {
+    path: join("config", "AGENTS.md"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+  },
+  {
+    path: join("config", "rules"),
+    whenStarting: "remove",
+    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: its always_on rules apply to every session of the account.`,
   },
   {
     path: join("config", "mcp_config.json"),
@@ -434,6 +641,16 @@ const STDERR_WAIT = Duration.seconds(1);
 /** The number of lines from the end of stderr that a failed start repeats. */
 const STDERR_LINES = 5;
 
+/** What the hook script denies in one session, given through the environment of its `agy` process. */
+interface HookRules {
+  /** Whether the hook denies a change of a file that `agy` loads approval rules from. */
+  readonly guardsApprovalFiles: boolean;
+  /** Whether the hook denies `search_web`. */
+  readonly deniesWebSearch: boolean;
+  /** The folder in which the hook denies every change, when there is one. */
+  readonly skillsDirectory?: string;
+}
+
 /**
  * Returns the environment of an `agy` process of this account: the context's
  * environment without the variables `agy` reads settings and credentials from,
@@ -452,6 +669,10 @@ const STDERR_LINES = 5;
  * - `SESSION_MARKS_DIR_VARIABLE` is `sessionMarksDir` when one is given, which
  *   only a session with an edit watch has. The hook in the Harness Home reads
  *   it, and only the `agy` process of that session sees it.
+ * - `GUARD_VARIABLE`, `DENY_WEB_SEARCH_VARIABLE` and `SKILLS_DIRECTORY_VARIABLE`
+ *   come from `hookRules`. The hook script in the Harness Home reads them, and
+ *   only the `agy` process of that session sees them. A process without them
+ *   gets the unguarded hook: no denials.
  * - `TMPDIR` is `tempFolder` when one is given. In its `default` mode `agy`
  *   lets the agent write under the system's temporary folder without asking,
  *   and `agy` finds that folder through `$TMPDIR`. Pointing it at a private
@@ -466,6 +687,7 @@ const buildAgyEnv = (
   ctx: HarnessRunnerContext,
   tempFolder?: string,
   sessionMarksDir?: string,
+  hookRules?: HookRules,
 ): Record<string, string | undefined> => {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(ctx.env)) {
@@ -475,6 +697,10 @@ const buildAgyEnv = (
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
   if (tempFolder !== undefined) env["TMPDIR"] = tempFolder;
   if (sessionMarksDir !== undefined) env[SESSION_MARKS_DIR_VARIABLE] = sessionMarksDir;
+  if (hookRules?.guardsApprovalFiles === true) env[GUARD_VARIABLE] = "1";
+  if (hookRules?.deniesWebSearch === true) env[DENY_WEB_SEARCH_VARIABLE] = "1";
+  if (hookRules?.skillsDirectory !== undefined)
+    env[SKILLS_DIRECTORY_VARIABLE] = hookRules.skillsDirectory;
   return env;
 };
 
@@ -899,6 +1125,16 @@ export const openSignedInAgy = (
       ctx,
       tempFolder,
       options.purpose.kind === "session" ? ctx.editMarks?.sessionMarksDir : undefined,
+      options.purpose.kind === "session"
+        ? {
+            guardsApprovalFiles: options.purpose.accessMode !== "full-access",
+            deniesWebSearch: options.purpose.accessMode === "approval-required",
+            // The session's skills folder is the one additional directory of its request.
+            ...(request.additionalDirectories?.[0] === undefined
+              ? {}
+              : { skillsDirectory: resolve(request.additionalDirectories[0]) }),
+          }
+        : undefined,
     );
     const child = yield* Effect.acquireRelease(
       Effect.try({
