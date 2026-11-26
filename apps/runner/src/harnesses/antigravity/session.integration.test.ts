@@ -86,6 +86,8 @@ let harnessHome = "";
 let userHome = "";
 let cheapModel = "";
 let otherModel = "";
+/** Words that name the other model's family and not the cheap model's, such as "carbon" against "neon". */
+let otherModelFamilyWords: ReadonlyArray<string> = [];
 
 const makeScratchFolder = (label: string): string => {
   const folder = mkdtempSync(join(tmpdir(), `hercule-agy-live-${label}-`));
@@ -391,6 +393,15 @@ beforeAll(async () => {
   }
   cheapModel = cheap.slug;
   otherModel = other.slug;
+  const wordsOf = (name: string): ReadonlyArray<string> =>
+    name.toLowerCase().match(/[a-z]{3,}/g) ?? [];
+  const cheapWords = new Set(wordsOf(cheap.name));
+  otherModelFamilyWords = wordsOf(other.name).filter((word) => !cheapWords.has(word));
+  if (otherModelFamilyWords.length === 0) {
+    throw new Error(
+      `The names "${cheap.name}" and "${other.name}" share every word, so a reply cannot tell the models apart.`,
+    );
+  }
 }, 120_000);
 
 afterAll(async () => {
@@ -535,7 +546,7 @@ describe.skipIf(skipReason !== undefined)(
     );
 
     it(
-      "applies the instructions in spec.systemPrompt, and keeps them and the conversation on a resume without replaying the old events (spec 06 sections 9.2 and 10.5)",
+      "applies the instructions in spec.systemPrompt, applies the ones given on a resume instead, and keeps the conversation without replaying the old events (spec 06 sections 9.2 and 10.5)",
       async () => {
         const systemPrompt =
           "The secret word is PELICAN. When asked for the secret word, reply with it alone.";
@@ -559,9 +570,13 @@ describe.skipIf(skipReason !== undefined)(
           dumpEvents(first.id),
         ).toBe(true);
 
+        // Different instructions on the resume: the recordings cannot tell
+        // whether a resume applies its own or keeps those of the first process.
+        const resumedPrompt =
+          "The secret word is HERON. When asked for the secret word, reply with it alone.";
         const resumed = await startLiveSession({
           accessMode: "full-access",
-          systemPrompt,
+          systemPrompt: resumedPrompt,
           cwd: first.cwd,
           continue: { nativeSessionId: first.nativeSessionId, mode: "resume" },
         });
@@ -573,7 +588,9 @@ describe.skipIf(skipReason !== undefined)(
         const why = dumpEvents(resumed.id);
 
         expect(assistantText(number.events), why).toContain("7");
-        expect(assistantText(word.events).toUpperCase(), why).toContain("PELICAN");
+        const resumedWord = assistantText(word.events).toUpperCase();
+        expect(resumedWord, why).toContain("HERON");
+        expect(resumedWord, why).not.toContain("PELICAN");
         const resumedEvents = eventsOf(resumed.id);
         const replayedItems = resumedEvents.filter(
           (event) => event._tag === "item.completed" && firstItemIds.has(event.itemId),
@@ -644,6 +661,44 @@ describe.skipIf(skipReason !== undefined)(
         ).toEqual([]);
         expect(existsSync(join(session.cwd, "made.txt")), why).toBe(true);
         expect(turn.completed.state, why).toBe("completed");
+      },
+      TEST_MS,
+    );
+
+    it(
+      "opens a multi-select question Request, and answering with two labels reaches the agent (spec 06 section 6.5)",
+      async () => {
+        const session = await startLiveSession({ accessMode: "approval-required" });
+        const mark = eventsOf(session.id).length;
+        const sent = await run(
+          adapter.sendInput(session.id, {
+            text: 'Use your question tool to ask me one multi-select question, "Pick the colours you like", with exactly the options Red, Green and Blue. Wait for my answer, then reply with the colours I chose in one short sentence.',
+          }),
+        );
+        const request = await waitFor(session.id, "opened a question", (events) =>
+          findOpenedRequest(events.slice(mark), "question"),
+        );
+        if (request.kind !== "question") throw new Error("not a question");
+        const question = request.detail.questions[0];
+        expect(question.multiSelect, dumpEvents(session.id)).toBe(true);
+
+        await run(
+          adapter.respondToQuestion(
+            session.id,
+            request.requestId,
+            { [question.header]: ["Red", "Blue"] },
+            { model: cheapModel, options: {} },
+          ),
+        );
+        const ended = await waitFor(session.id, "ended the turn", (events) =>
+          findTurnEnd(events, sent.turnId),
+        );
+        const why = dumpEvents(session.id);
+
+        const reply = assistantText(eventsOf(session.id).slice(mark)).toLowerCase();
+        expect(reply, why).toContain("red");
+        expect(reply, why).toContain("blue");
+        expect(ended.state, why).toBe("completed");
       },
       TEST_MS,
     );
@@ -720,10 +775,22 @@ describe.skipIf(skipReason !== undefined)(
       async () => {
         const session = await startLiveSession({ accessMode: "full-access" });
 
-        const switched = await runTurn(session, "Reply with the single word OK.", {
-          input: { modelSelection: { model: otherModel, options: {} } },
-        });
-        expect(switched.completed.state, dumpEvents(session.id)).toBe("completed");
+        // No event reports the model in effect, so the model is asked. A
+        // model knows its family name, though not always its exact id, so the
+        // reply must contain a word of the other model's name that the first
+        // model's name does not have.
+        const switched = await runTurn(
+          session,
+          "Which model are you? Answer with your model id only.",
+          { input: { modelSelection: { model: otherModel, options: {} } } },
+        );
+        const why = dumpEvents(session.id);
+        expect(switched.completed.state, why).toBe("completed");
+        const reply = assistantText(switched.events).toLowerCase();
+        expect(
+          otherModelFamilyWords.some((word) => reply.includes(word)),
+          `the reply "${reply}" names none of ${otherModelFamilyWords.join(", ")}.\n${why}`,
+        ).toBe(true);
 
         const error = await Effect.runPromise(
           Effect.flip(

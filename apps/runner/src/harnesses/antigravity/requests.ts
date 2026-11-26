@@ -73,6 +73,8 @@ interface FormQuestion {
   readonly otherField: string | undefined;
   /** Whether the form lists the question in `required`, so it must be answered. */
   readonly required: boolean;
+  /** Whether the field takes a list of choices (`qN` is an array) rather than one. */
+  readonly multiSelect: boolean;
   readonly choices: ReadonlyArray<FormChoice>;
 }
 
@@ -104,10 +106,12 @@ const MAX_FORM_ITEMS = MAX_FACT_ITEMS;
 const MAX_FORM_CHARACTERS = Math.floor(MAX_FRAME_BYTES / 8);
 
 /**
- * Reads the choices of one single-select field. Returns `undefined` when the
- * field is not a plain string field with a non-empty `oneOf` of titled
- * choices, or has more than `MAX_FORM_ITEMS` of them. Two options are left out
- * of the question:
+ * Reads the titled choices of one field. A single-select field is a string
+ * with `oneOf`; a multi-select field is an array whose `items.anyOf` lists the
+ * choices. Returns `undefined` when the field is neither, when its list is empty,
+ * or when it has more than `MAX_FORM_ITEMS` choices. Otherwise returns the
+ * choices and whether the field is a multi-select. Two options are left out of
+ * the question:
  *
  * - one with an empty title, because it could not be shown;
  * - one whose title repeats an earlier option's, because the answer is sent
@@ -115,20 +119,33 @@ const MAX_FORM_CHARACTERS = Math.floor(MAX_FRAME_BYTES / 8);
  *   (spec 06 section 6.5, as for Claude Code and Codex). The user can still
  *   type that option's text when the form has a `qN_other` field.
  */
-const readChoices = (field: ElicitationField): ReadonlyArray<FormChoice> | undefined => {
-  if (field.type !== "string" || !field.oneOf || field.enum || field.items) return undefined;
-  if (field.oneOf.length > MAX_FORM_ITEMS) return undefined;
+const readChoices = (
+  field: ElicitationField,
+): { readonly choices: ReadonlyArray<FormChoice>; readonly multiSelect: boolean } | undefined => {
+  if (field.enum) return undefined;
+  let list: ReadonlyArray<unknown> | undefined;
+  let multiSelect = false;
+  if (field.type === "string" && field.oneOf && !field.items) {
+    list = field.oneOf;
+  } else if (field.type === "array" && !field.oneOf) {
+    const anyOf = field.items?.["anyOf"];
+    list = Array.isArray(anyOf) ? anyOf : undefined;
+    multiSelect = true;
+  }
+  if (list === undefined || list.length > MAX_FORM_ITEMS) return undefined;
   const labels = new Set<string>();
   const choices: Array<FormChoice> = [];
-  for (const choice of field.oneOf) {
-    if (typeof choice.const !== "string" || typeof choice.title !== "string") return undefined;
-    if (choice.title === "") continue;
-    const label = truncateFact(choice.title);
+  for (const choice of list) {
+    if (typeof choice !== "object" || choice === null) return undefined;
+    const { const: value, title } = choice as { const?: unknown; title?: unknown };
+    if (typeof value !== "string" || typeof title !== "string") return undefined;
+    if (title === "") continue;
+    const label = truncateFact(title);
     if (labels.has(label)) continue;
     labels.add(label);
-    choices.push({ label, value: choice.const });
+    choices.push({ label, value });
   }
-  return choices.length === 0 ? undefined : choices;
+  return choices.length === 0 ? undefined : { choices, multiSelect };
 };
 
 /**
@@ -137,8 +154,8 @@ const readChoices = (field: ElicitationField): ReadonlyArray<FormChoice> | undef
  * warning. A form is unreadable when:
  *
  * - a property is neither `qN` nor `qN_other`;
- * - a `qN` has no title, or is not a single-select string with `oneOf`
- *   (a multi-select or another type is not recorded yet);
+ * - a `qN` has no title, or is not a single-select string with `oneOf` or a
+ *   multi-select array with `items.anyOf` (another type is not recorded);
  * - it holds more than `MAX_FORM_ITEMS` questions, or a question more than
  *   `MAX_FORM_ITEMS` choices, or all of it more than `MAX_FORM_CHARACTERS`
  *   characters of text. The protocol bounds none of these, and a card it
@@ -169,14 +186,16 @@ export const readQuestionForm = (request: ElicitationRequest): QuestionForm | un
   const mapping: Array<FormQuestion> = [];
   const questions: Array<Question> = [];
   for (const [index, { name, field }] of questionFields.entries()) {
-    const choices = readChoices(field);
-    if (choices === undefined || !field.title) return undefined;
+    const read = readChoices(field);
+    if (read === undefined || !field.title) return undefined;
+    const { choices, multiSelect } = read;
     const header = questionFields.length === 1 ? "Question" : `Question ${String(index + 1)}`;
     mapping.push({
       header,
       field: name,
       otherField: otherFields.has(name) ? `${name}_other` : undefined,
       required: required.has(name),
+      multiSelect,
       choices,
     });
     const question = truncateMessage(field.title);
@@ -189,7 +208,7 @@ export const readQuestionForm = (request: ElicitationRequest): QuestionForm | un
       question,
       header,
       options: choices.map((choice) => ({ label: choice.label })),
-      multiSelect: false,
+      multiSelect,
     });
   }
   const [first, ...rest] = questions;
@@ -209,15 +228,30 @@ const refuse = (message: string): ElicitationAnswerResult => ({ kind: "refused",
  * be delivered as given is refused, with a message that tells the user what to
  * do, so the question can stay open for another try.
  *
+ * Single-choice question:
  * - An answer equal to an option's label is sent as that option's own value in
  *   `qN`. The label is the one the question showed.
  * - Any other text is a typed answer. It goes in `qN_other` alone, never with
  *   `qN`, because `agy` reads both fields when both are present.
  * - A list of one answer counts as that answer.
  *
+ * Multi-select question (the answer is a list, or one text counting as a list
+ * of one):
+ * - The labels go in `qN` as the array of their values, without repeats.
+ * - A text that is not a label is a typed answer and goes in `qN_other`. A list
+ *   of only typed text sends `qN_other` alone. A list of labels and one typed
+ *   text sends both fields, because `agy` reads both and the user gave both.
+ * - An empty list counts as no answer.
+ *
+ * What `agy` does with the array in `qN` is not recorded yet: the recordings
+ * only answered single-choice questions. The next recording of a multi-select
+ * answer must check that `agy` hands every chosen label to the model.
+ *
  * It refuses when:
  * - a typed answer has no `qN_other` field to carry it;
- * - an answer is a list of several values (each question takes one answer);
+ * - a single-choice answer is a list of several values;
+ * - a multi-select answer holds more than one typed text (`qN_other` is one
+ *   text);
  * - an answer has a header the form does not have;
  * - a question the form lists in `requestedSchema.required` got no answer. A
  *   question that is not required may be left unanswered, and then it is
@@ -233,23 +267,35 @@ export const buildElicitationReply = (
       return refuse(`"${header}" is not a question of this form. Answer the questions shown.`);
     }
   }
-  const content: Record<string, string> = {};
+  const content: Record<string, string | ReadonlyArray<string>> = {};
   for (const question of form.mapping) {
     const given = answers[question.header];
-    if (given === undefined) {
+    const list = given === undefined ? [] : typeof given === "string" ? [given] : given;
+    if (list.length === 0) {
       if (question.required) return refuse(`${question.header} needs an answer. Answer it.`);
       continue;
     }
-    if (typeof given !== "string" && given.length !== 1) {
+    if (!question.multiSelect && list.length !== 1) {
       return refuse(`${question.header} takes one answer. Give one answer.`);
     }
-    const answer = typeof given === "string" ? given : given[0];
-    const chosen = question.choices.find((choice) => choice.label === answer);
-    if (chosen !== undefined) content[question.field] = chosen.value;
-    else if (question.otherField !== undefined && answer !== undefined) {
-      content[question.otherField] = answer;
-    } else {
+    const values = new Set<string>();
+    const typed: Array<string> = [];
+    for (const answer of list) {
+      const chosen = question.choices.find((choice) => choice.label === answer);
+      if (chosen !== undefined) values.add(chosen.value);
+      else typed.push(answer);
+    }
+    if (typed.length > 0 && question.otherField === undefined) {
       return refuse(`${question.header} takes one of its options only. Pick one of them.`);
+    }
+    if (typed.length > 1) {
+      return refuse(`${question.header} takes one typed answer at most. Give one.`);
+    }
+    if (values.size > 0) {
+      content[question.field] = question.multiSelect ? [...values] : [...values][0]!;
+    }
+    if (typed[0] !== undefined && question.otherField !== undefined) {
+      content[question.otherField] = typed[0];
     }
   }
   return { kind: "reply", reply: { action: "accept", content } };

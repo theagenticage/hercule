@@ -253,9 +253,79 @@ describe("a form too big for the protocol", () => {
   });
 });
 
+describe("a recorded form with a multi-select question", () => {
+  // The form of agy 1.5.15 (question-variants, "The agent has 2 questions."),
+  // field for field.
+  const properties: Record<string, ElicitationField> = {
+    q1: buildSelect("Which colour should the banner be?", "Red", "Green", "Blue"),
+    q1_other: OTHER,
+    q2: {
+      type: "array",
+      title: "Which features would you like to enable?",
+      items: {
+        anyOf: [
+          { const: "1", title: "Dark mode" },
+          { const: "2", title: "Search" },
+          { const: "3", title: "Export" },
+        ],
+      },
+    },
+    q2_other: OTHER,
+  };
+
+  it("reads the array as a multi-select whose options are the anyOf titles", () => {
+    expect(readForm(properties).questions).toEqual([
+      {
+        question: "Which colour should the banner be?",
+        header: "Question 1",
+        options: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }],
+        multiSelect: false,
+      },
+      {
+        question: "Which features would you like to enable?",
+        header: "Question 2",
+        options: [{ label: "Dark mode" }, { label: "Search" }, { label: "Export" }],
+        multiSelect: true,
+      },
+    ]);
+  });
+
+  it("answers labels with the array of their consts", () => {
+    const form = readForm(properties);
+    expect(
+      answerOk(form, { "Question 1": "Green", "Question 2": ["Dark mode", "Export"] }),
+    ).toEqual({ action: "accept", content: { q1: "2", q2: ["1", "3"] } });
+  });
+
+  it("answers typed text in q2_other alone, and a label plus typed text in both fields", () => {
+    const form = readForm(properties);
+    expect(answerOk(form, { "Question 2": ["Sound"] })).toEqual({
+      action: "accept",
+      content: { q2_other: "Sound" },
+    });
+    expect(answerOk(form, { "Question 2": ["Search", "Sound"] })).toEqual({
+      action: "accept",
+      content: { q2: ["2"], q2_other: "Sound" },
+    });
+  });
+
+  it("refuses two typed texts, and still refuses several answers to a single-choice question", () => {
+    const form = readForm(properties);
+    expect(buildElicitationReply(form, { "Question 2": ["A", "B"] }).kind).toBe("refused");
+    expect(buildElicitationReply(form, { "Question 1": ["Red", "Blue"] }).kind).toBe("refused");
+  });
+
+  it("refuses a typed answer when the multi-select has no q2_other", () => {
+    const form = readForm({ q1: properties["q1"]!, q2: properties["q2"]! });
+    expect(buildElicitationReply(form, { "Question 2": ["Sound"] }).kind).toBe("refused");
+  });
+});
+
 describe("a form that cannot be read", () => {
   const cases: Record<string, Record<string, ElicitationField>> = {
-    "a multi-select": { q1: { type: "array", title: "Pick?", items: { enum: ["a", "b"] } } },
+    "a multi-select listing plain strings": {
+      q1: { type: "array", title: "Pick?", items: { enum: ["a", "b"] } },
+    },
     "a field of another type": { q1: { type: "boolean", title: "Sure?" } },
     "a field with no choices": { q1: { type: "string", title: "Name?" } },
     "a field with no title": {
