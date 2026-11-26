@@ -109,7 +109,7 @@ const playRecording = (name: RecordingName): Played => {
     ) {
       const reply = message.result as { stopReason: string; usage?: never };
       events.push(
-        ...addPromptUsage(state, reply.usage),
+        ...addPromptUsage(state, reply.usage, "turn-1"),
         ...closeTurn(state, {
           state: reply.stopReason === "cancelled" ? "interrupted" : "completed",
         }),
@@ -776,7 +776,7 @@ describe("synthetic turns", () => {
     const state = freshState();
     normalizeUpdate(state, buildChunk("x"));
     expect(
-      addPromptUsage(state, { totalTokens: 3, inputTokens: 1, outputTokens: 2 }),
+      addPromptUsage(state, { totalTokens: 3, inputTokens: 1, outputTokens: 2 }, "t1"),
     ).toMatchObject([
       { usageReport: { status: "incomplete", counts: { inputTokens: 1, outputTokens: 2 } } },
     ]);
@@ -1091,27 +1091,37 @@ describe("usage", () => {
   it("adds the replies of the process, and gives the turn the sum of its own prompts", () => {
     const state = freshState();
     openTurn(state, "t1");
-    addPromptUsage(state, reply);
-    addPromptUsage(state, reply);
+    addPromptUsage(state, reply, "t1");
+    addPromptUsage(state, reply, "t1");
     expect(closeTurn(state, { state: "completed" }).at(-1)).toMatchObject({
       usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 14, cacheWriteTokens: 2 },
     });
     openTurn(state, "t2");
-    addPromptUsage(state, reply);
+    addPromptUsage(state, reply, "t2");
     expect(closeTurn(state, { state: "completed" }).at(-1)).toMatchObject({
       usage: { inputTokens: 10 },
     });
     expect(
-      addPromptUsage(state, { totalTokens: 0, inputTokens: 1, outputTokens: 0 }),
+      addPromptUsage(state, { totalTokens: 0, inputTokens: 1, outputTokens: 0 }, "t2"),
     ).toMatchObject([{ usage: { inputTokens: 31, outputTokens: 15 } }]);
+  });
+
+  it("counts the reply of an earlier turn toward the process, never toward the turn open now", () => {
+    const state = freshState();
+    openTurn(state, "t1");
+    closeTurn(state, { state: "completed" });
+    openTurn(state, "t2");
+
+    expect(addPromptUsage(state, reply, "t1")).toMatchObject([{ usage: { inputTokens: 10 } }]);
+    expect(closeTurn(state, { state: "completed" }).at(-1)).not.toHaveProperty("usage");
   });
 
   it("reports the incomplete form once a reply had no usage, and keeps it so", () => {
     const state = freshState();
-    expect(addPromptUsage(state, undefined)[0]).toMatchObject({
+    expect(addPromptUsage(state, undefined, "t1")[0]).toMatchObject({
       usageReport: { status: "incomplete" },
     });
-    expect(addPromptUsage(state, reply)[0]).toMatchObject({
+    expect(addPromptUsage(state, reply, "t1")[0]).toMatchObject({
       usageReport: { status: "incomplete", counts: { inputTokens: 10 } },
     });
   });
@@ -1126,7 +1136,7 @@ describe("usage", () => {
 
   it("adds the subagents' tokens to the session's usage, and sends nothing when they did not change", () => {
     const state = freshState();
-    addPromptUsage(state, reply);
+    addPromptUsage(state, reply, "t1");
     const subagents = {
       inputTokens: 100,
       outputTokens: 20,
@@ -1142,7 +1152,7 @@ describe("usage", () => {
 
   it("reports the incomplete form when the files of a subagent could not be read, with the counts so far", () => {
     const state = freshState();
-    addPromptUsage(state, reply);
+    addPromptUsage(state, reply, "t1");
     const none = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
     expect(setSubagentUsage(state, none, true)).toMatchObject([

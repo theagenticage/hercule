@@ -114,7 +114,7 @@ const playProcess = (messages: ReadonlyArray<RecordedMessage>): PlayedProcess =>
       openPrompts.delete(message.id);
       const reply = message.result as { stopReason?: string; usage?: never } | undefined;
       push([
-        ...addPromptUsage(state, reply?.usage),
+        ...addPromptUsage(state, reply?.usage, promptTurnId(message.id)),
         ...closeTurn(state, {
           state: reply?.stopReason === "cancelled" ? "interrupted" : "completed",
           turnId: promptTurnId(message.id),

@@ -1105,8 +1105,11 @@ export const describeRequestItem = (
 // ---- Public: usage ----
 
 /**
- * Adds the usage of one prompt reply to the turn in flight and to the process,
- * and returns `session.usage.updated` with the process's sum. The event has
+ * Adds the usage of one prompt reply to the process, and to the turn in flight
+ * only when that turn is `ownerTurnId`, the turn that sent the prompt. A reply
+ * that arrives after a newer turn opened still counts toward the process, but
+ * not toward the newer turn. Returns `session.usage.updated` with the process's
+ * sum. The event has
  * the incomplete form once the process used tokens that no reply counts:
  * output came with no prompt open, or a reply had no usage.
  * `thoughtTokens` is never added, because `outputTokens` already includes it.
@@ -1114,6 +1117,7 @@ export const describeRequestItem = (
 export const addPromptUsage = (
   state: NormalizerState,
   usage: PromptUsage | null | undefined,
+  ownerTurnId: string,
 ): HarnessEvent[] => {
   if (usage == null) {
     state.usageIsIncomplete = true;
@@ -1125,7 +1129,7 @@ export const addPromptUsage = (
       cacheWriteTokens: clampCount(usage.cachedWriteTokens),
     };
     addTotals(state.processUsage, parts);
-    if (state.turn !== undefined) {
+    if (state.turn?.id === ownerTurnId) {
       addTotals(state.turn.usage, parts);
       state.turn.hasUsage = true;
     }

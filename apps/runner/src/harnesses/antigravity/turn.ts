@@ -891,7 +891,8 @@ export const startTurn = (
       Effect.forkIn(
         Effect.map(awaitReply(waiting), (result) => {
           // Every reply adds its usage when it arrives, whatever the Turn is doing, so a reply that comes after the Turn ended is counted too.
-          if (result.kind === "replied") emit(addPromptUsage(normalizing, result.reply.usage));
+          if (result.kind === "replied")
+            emit(addPromptUsage(normalizing, result.reply.usage, turnId));
           postTurnEvent({ kind: "prompt-settled", prompt, result });
         }),
         scope,
@@ -1097,6 +1098,15 @@ export const startTurn = (
               return undefined;
             }
             // The superseded prompt is still the newest, so what its reply means depends on the steer.
+            if (
+              result.kind === "failed" &&
+              result.error.reason === "refused" &&
+              acceptedSteer?.own === prompt
+            ) {
+              // A late refusal of an accepted steer is definite, not a lost connection. The Turn goes on, and the open steer waits for its own decision.
+              warnSteerRefusedLate(acceptedSteer);
+              return undefined;
+            }
             current.supersededResult = result;
             if (result.kind === "failed") {
               // A prompt that failed means the connection is gone, and the steer is lost with it.
@@ -1140,6 +1150,20 @@ export const startTurn = (
       ]);
     };
 
+    /** Warns that `agy` refused a steer after it had confirmed it, so the user sends the message again. */
+    const warnSteerRefusedLate = (accepted: AcceptedSteer): void => {
+      emit([
+        {
+          _tag: "runtime.warning",
+          ...buildEvent(),
+          turnId,
+          message: truncateMessage(
+            `Antigravity refused a message after it had confirmed it, so the message did not reach the agent. Send it again: "${truncateFact(accepted.text)}"`,
+          ),
+        },
+      ]);
+    };
+
     /**
      * Returns the result that ends the Turn for the reply of the newest prompt
      * `prompt`. It is `result` itself, except when `agy` refuses a steer after
@@ -1157,16 +1181,7 @@ export const startTurn = (
       ) {
         return result;
       }
-      emit([
-        {
-          _tag: "runtime.warning",
-          ...buildEvent(),
-          turnId,
-          message: truncateMessage(
-            `Antigravity refused a message after it had confirmed it, so the message did not reach the agent. Send it again: "${truncateFact(accepted.text)}"`,
-          ),
-        },
-      ]);
+      warnSteerRefusedLate(accepted);
       return accepted.supersededResult;
     };
 
@@ -1190,7 +1205,7 @@ export const startTurn = (
 
         if (result.kind === "failed") {
           // Nothing is known about the tokens of a prompt that did not answer.
-          emit(addPromptUsage(normalizing, undefined));
+          emit(addPromptUsage(normalizing, undefined, turnId));
           if (result.error.reason === "closed") {
             return yield* interrupted
               ? finish("interrupted")

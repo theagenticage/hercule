@@ -21,7 +21,7 @@ import {
 } from "@hercule/acp";
 import type { HarnessEvent } from "@hercule/protocol";
 import { buildPlanFilePaths } from "./harness-home";
-import { buildNormalizerState, holdTurn, normalizeUpdate } from "./normalize";
+import { buildNormalizerState, closeTurn, holdTurn, normalizeUpdate, openTurn } from "./normalize";
 import { startTurn, type PreparedInput } from "./turn";
 import type { AgyStep } from "./session-files";
 
@@ -1384,6 +1384,57 @@ describe("a steer", () => {
         yield* h.reply(2, "end_turn", 3);
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 10 } });
+      }),
+    ));
+
+  it("keeps the second steer going when the first, accepted one is refused late, and warns about the first", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const first = yield* startSteer(h);
+        yield* h.reply(0, "end_turn", 1);
+        yield* waitOutGrace;
+        expect(yield* Fiber.join(first)).toEqual({ kind: "accepted" });
+
+        const second = yield* startSteer(h, 3);
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        yield* letTurnRead;
+
+        expect(h.tags("runtime.warning")).toMatchObject([
+          {
+            message: expect.stringContaining(
+              "refused a message after it had confirmed it",
+            ) as unknown,
+          },
+        ]);
+        expect(
+          second.pollUnsafe(),
+          "the second steer is not decided by the refusal",
+        ).toBeUndefined();
+        expect(h.completed()).toBeUndefined();
+
+        yield* h.reply(2, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(second)).toEqual({ kind: "accepted" });
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 4 } });
+      }),
+    ));
+
+  it("counts the late reply of this turn toward the session but not toward a turn opened after it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        h.events.push(...openTurn(h.normalizing, "later-turn"));
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.until(() => h.tags("session.usage.updated").length === 2);
+
+        expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+          usage: { inputTokens: 8 },
+        });
+        expect(closeTurn(h.normalizing, { state: "completed" }).at(-1)).not.toHaveProperty("usage");
       }),
     ));
 
