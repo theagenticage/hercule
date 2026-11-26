@@ -20,10 +20,9 @@ import {
   type PromptReply,
 } from "@hercule/acp";
 import type { HarnessEvent } from "@hercule/protocol";
-import { buildNormalizingState, normalizeUpdate, openTurn } from "./normalize";
+import { buildNormalizingState, normalizeUpdate } from "./normalize";
 import { startTurn } from "./turn";
 
-const TURN = "turn-1";
 const FIRST_PROMPT: ReadonlyArray<PromptContent> = [{ type: "text", text: "go" }];
 
 const ALLOW_AND_DENY: ReadonlyArray<ApprovalOption> = [
@@ -90,116 +89,135 @@ const buildQuestion = (): Sent<ElicitationRequest> => {
   };
 };
 
-/** Starts a Turn on a fake connection and returns it with what the test needs to drive and read it. */
-const startHarness = Effect.gen(function* () {
-  const events: Array<HarnessEvent> = [];
-  const prompts: Array<PromptCall> = [];
-  const cancels: Array<string> = [];
-  const normalizing = buildNormalizingState({
-    sessionId: "session-1",
-    nativeSessionId: "native",
-    brainFolder: "/tmp/brain",
-  });
-  events.push(...openTurn(normalizing, TURN));
-  // The session writes the first prompt before it starts the Turn, so the Turn gets its reply only.
-  const firstReply = yield* Deferred.make<PromptReply, AcpError>();
-  prompts.push({ content: FIRST_PROMPT, reply: firstReply });
-  const turn = yield* startTurn(
-    {
+/**
+ * Starts a Turn on a fake connection and returns it with what the test needs to
+ * drive and read it. The outer stage of the first prompt (its write) finishes
+ * when `firstWrite` does, or at once without one.
+ */
+const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
+  Effect.gen(function* () {
+    const events: Array<HarnessEvent> = [];
+    const prompts: Array<PromptCall> = [];
+    const cancels: Array<string> = [];
+    const normalizing = buildNormalizingState({
       sessionId: "session-1",
       nativeSessionId: "native",
-      normalizing,
-      emit: (batch) => events.push(...batch),
-      connection: {
-        sendPrompt: (_id, content) =>
-          Effect.gen(function* () {
-            const reply = yield* Deferred.make<PromptReply, AcpError>();
-            prompts.push({ content, reply });
-            return Deferred.await(reply);
-          }),
-        cancel: (id) =>
-          Effect.sync(() => {
-            cancels.push(id);
-          }),
-      },
-    },
-    { turnId: TURN, firstReply: Deferred.await(firstReply) },
-  );
-
-  /** Lets forked fibers run until `condition` holds. */
-  const until = (condition: () => boolean) =>
-    Effect.gen(function* () {
-      for (let tries = 0; tries < 500 && !condition(); tries++) yield* Effect.yieldNow;
-      expect(condition()).toBe(true);
+      brainFolder: "/tmp/brain",
     });
-  const reply = (index: number, stopReason: string, inputTokens = 0) =>
-    Deferred.succeed(prompts[index]?.reply as PromptCall["reply"], {
-      stopReason,
-      usage: { totalTokens: inputTokens, inputTokens, outputTokens: 0 },
-    });
-  const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
-    events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
-  const completed = () =>
-    events.find(
-      (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
-        event._tag === "turn.completed",
-    );
-  /** Makes a call known to the normalizing state, as the `tool_call` update that precedes a Request about it does. */
-  const announceCall = (toolCallId: string): void => {
-    events.push(
-      ...normalizeUpdate(normalizing, {
+    let deliveryUnknown = 0;
+    const turn = yield* startTurn(
+      {
+        sessionId: "session-1",
         nativeSessionId: "native",
-        update: {
-          sessionUpdate: "tool_call",
-          toolCallId,
-          name: "run_command",
-          kind: "execute",
-          rawInput: { CommandLine: "ls" },
-          status: "pending",
+        normalizing,
+        emit: (batch) => events.push(...batch),
+        onDeliveryUnknown: () => {
+          deliveryUnknown += 1;
         },
-        raw: {},
-      }),
+        connection: {
+          sendPrompt: (_id, content) =>
+            Effect.gen(function* () {
+              if (prompts.length === 0 && firstWrite !== undefined)
+                yield* Deferred.await(firstWrite);
+              const reply = yield* Deferred.make<PromptReply, AcpError>();
+              prompts.push({ content, reply });
+              return Deferred.await(reply);
+            }),
+          cancel: (id) =>
+            Effect.sync(() => {
+              cancels.push(id);
+            }),
+        },
+      },
+      {
+        input: { text: "go" },
+        prompt: FIRST_PROMPT,
+        handoffBudget: Duration.seconds(8),
+      },
     );
-  };
-  const openApproval = (request: ApprovalRequest) => {
-    announceCall(request.toolCall.toolCallId);
-    return turn.openApproval(request);
-  };
-  const openQuestion = (request: ElicitationRequest) => {
-    if (request.toolCallId != null) announceCall(request.toolCallId);
-    return turn.openQuestion(request);
-  };
-  /** Returns the id Hercule gave the Request that `agy` sent with the ACP id `acpRequestId`. */
-  const findRequestId = (acpRequestId: string): string => {
-    const opened = events.find(
-      (event): event is Extract<HarnessEvent, { _tag: "request.opened" }> =>
-        event._tag === "request.opened" && event.harnessRefs?.["acpRequestId"] === acpRequestId,
-    );
-    expect(opened, `a Request opened for ${acpRequestId}`).toBeDefined();
-    return opened!.request.requestId;
-  };
-  return {
-    turn,
-    events,
-    prompts,
-    cancels,
-    normalizing,
-    until,
-    reply,
-    tags,
-    completed,
-    findRequestId,
-    openApproval,
-    openQuestion,
-    announceCall,
-  };
-});
 
-type Harness = Effect.Success<typeof startHarness>;
+    /** Lets forked fibers run until `condition` holds. */
+    const until = (condition: () => boolean) =>
+      Effect.gen(function* () {
+        for (let tries = 0; tries < 500 && !condition(); tries++) yield* Effect.yieldNow;
+        expect(condition()).toBe(true);
+      });
+    const reply = (index: number, stopReason: string, inputTokens = 0) =>
+      Deferred.succeed(prompts[index]?.reply as PromptCall["reply"], {
+        stopReason,
+        usage: { totalTokens: inputTokens, inputTokens, outputTokens: 0 },
+      });
+    const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
+      events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
+    const completed = () =>
+      events.find(
+        (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
+          event._tag === "turn.completed",
+      );
+    /** Makes a call known to the normalizing state, as the `tool_call` update that precedes a Request about it does. */
+    const announceCall = (toolCallId: string): void => {
+      events.push(
+        ...normalizeUpdate(normalizing, {
+          nativeSessionId: "native",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            name: "run_command",
+            kind: "execute",
+            rawInput: { CommandLine: "ls" },
+            status: "pending",
+          },
+          raw: {},
+        }),
+      );
+    };
+    const openApproval = (request: ApprovalRequest) => {
+      announceCall(request.toolCall.toolCallId);
+      return turn.openApproval(request);
+    };
+    const openQuestion = (request: ElicitationRequest) => {
+      if (request.toolCallId != null) announceCall(request.toolCallId);
+      return turn.openQuestion(request);
+    };
+    /** Returns the id Hercule gave the Request that `agy` sent with the ACP id `acpRequestId`. */
+    const findRequestId = (acpRequestId: string): string => {
+      const opened = events.find(
+        (event): event is Extract<HarnessEvent, { _tag: "request.opened" }> =>
+          event._tag === "request.opened" && event.harnessRefs?.["acpRequestId"] === acpRequestId,
+      );
+      expect(opened, `a Request opened for ${acpRequestId}`).toBeDefined();
+      return opened!.request.requestId;
+    };
+    return {
+      turn,
+      events,
+      prompts,
+      cancels,
+      normalizing,
+      until,
+      reply,
+      tags,
+      completed,
+      findRequestId,
+      openApproval,
+      openQuestion,
+      announceCall,
+      deliveryUnknown: () => deliveryUnknown,
+    };
+  });
 
-const run = (test: (harness: Harness) => Effect.Effect<void, unknown, Scope.Scope>) =>
+type Harness = Effect.Success<ReturnType<typeof startHarness>>;
+
+const run = (
+  test: (harness: Harness) => Effect.Effect<void, unknown, Scope.Scope>,
+  firstWrite?: Deferred.Deferred<void, AcpError>,
+) =>
   Effect.runPromise(
-    startHarness.pipe(Effect.flatMap(test), Effect.scoped, Effect.provide(TestClock.layer())),
+    startHarness(firstWrite).pipe(
+      Effect.flatMap(test),
+      Effect.scoped,
+      Effect.provide(TestClock.layer()),
+    ),
   );
 
 /** Opens an approval, decides it, and finishes its reply write. Returns the ACP outcome. */
@@ -247,6 +265,74 @@ describe("a plain turn", () => {
         yield* h.until(() => h.prompts.length === 2);
       }),
     ));
+});
+
+describe("the handoff of the first prompt", () => {
+  const notSent = new AcpError({ reason: "not-sent", message: "stdin is closed" });
+
+  it("applies an interrupt that comes meanwhile when the write is proven, and not before", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+          yield* Effect.yieldNow;
+          expect(h.cancels, "no prompt to cancel yet").toEqual([]);
+
+          yield* Deferred.succeed(written, undefined);
+          yield* h.until(() => h.cancels.length === 1);
+          yield* h.reply(0, "cancelled");
+
+          expect(yield* Fiber.join(interrupting)).toBe("stopped");
+          expect(h.completed()).toMatchObject({ state: "interrupted" });
+        }),
+      written,
+    );
+  });
+
+  it("publishes no turn, releases the held output, and cancels a Request that waited when the prompt was not sent", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const sent = buildTool("run_command");
+          h.announceCall(sent.request.toolCall.toolCallId);
+          const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request));
+
+          yield* Deferred.fail(written, notSent);
+
+          expect(yield* Deferred.await(h.turn.handoff)).toEqual({
+            kind: "not-sent",
+            message: "stdin is closed",
+          });
+          expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
+          expect(h.turn.hasEnded()).toBe(true);
+          expect(h.tags("turn.started").map((event) => event.turnId)).not.toContain(h.turn.id);
+          expect(h.tags("turn.completed").map((event) => event.turnId)).not.toContain(h.turn.id);
+          expect(h.tags("runtime.warning")).toMatchObject([
+            { message: expect.any(String) as unknown },
+          ]);
+          expect(h.tags("runtime.warning")[0]).not.toHaveProperty("turnId");
+          expect(h.deliveryUnknown()).toBe(0);
+        }),
+      written,
+    );
+  });
+
+  it("is unknown when an abandoned turn was still being written", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.turn.abandon;
+
+          expect(yield* Deferred.await(h.turn.handoff)).toMatchObject({ kind: "unknown" });
+          expect(h.turn.hasEnded()).toBe(true);
+          expect(h.tags("turn.completed")).toEqual([]);
+        }),
+      written,
+    );
+  });
 });
 
 describe("approvals", () => {
@@ -345,7 +431,7 @@ describe("a Request about a call that is not a running item of the turn", () => 
 });
 
 describe("the follow-up after a deny", () => {
-  it("sends one follow-up in the same turn, makes no user_message, and sums the usage", () =>
+  it("sends one follow-up in the same turn, makes no second user_message, and sums the usage", () =>
     run((h) =>
       Effect.gen(function* () {
         yield* askAndDecide(h, buildTool("run_command"), "deny");
@@ -362,7 +448,7 @@ describe("the follow-up after a deny", () => {
           h
             .tags("item.started")
             .filter((event) => "kind" in event && event.kind === "user_message"),
-        ).toHaveLength(0);
+        ).toHaveLength(1);
       }),
     ));
 
@@ -664,7 +750,10 @@ describe("how a turn fails", () => {
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "failed" });
         expect(h.tags("runtime.error")).toMatchObject([
-          { turnId: TURN, message: expect.stringContaining("refused the prompt") as unknown },
+          {
+            turnId: expect.any(String) as unknown,
+            message: expect.stringContaining("refused the prompt") as unknown,
+          },
         ]);
       }),
     ));
@@ -788,7 +877,10 @@ describe("the end of a turn and its Requests", () => {
         yield* Deferred.fail(sent.written, closedError);
         yield* h.until(() => h.tags("request.resolved").length === 1);
         expect(h.tags("runtime.warning")).toMatchObject([
-          { turnId: TURN, message: expect.stringContaining("may not have reached") as unknown },
+          {
+            turnId: expect.any(String) as unknown,
+            message: expect.stringContaining("may not have reached") as unknown,
+          },
         ]);
       }),
     ));

@@ -1758,6 +1758,57 @@ describe("an input whose prompt is handed over slowly", () => {
   });
 });
 
+describe("the output that comes while a prompt is handed over, with a synthetic turn open", () => {
+  const isPrompt = (message: JsonRpcMessage) => message.method === "session/prompt";
+  const buildCall = (toolCallId: string, status: string) =>
+    JSON.stringify(
+      buildUpdate({
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        name: "run_command",
+        kind: "execute",
+        status,
+        rawInput: { CommandLine: "ls" },
+      }),
+    );
+
+  it("holds a new call for the input's turn, and completes an earlier call in its own turn", () => {
+    const acknowledged = Promise.withResolvers<void>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          h.harness().sendLine(buildCall("call-early", "in_progress"));
+          yield* h.until("a synthetic turn opened", () => h.tags("turn.started").length === 1);
+          const syntheticTurnId = h.tags("turn.started")[0]!.turnId;
+
+          const sending = yield* Effect.forkChild(h.adapter.sendInput(SESSION, buildInput("Hi.")));
+          yield* h.untilReceived("session/prompt");
+          h.harness().sendLine(buildCall("call-new", "in_progress"));
+          h.harness().sendLine(buildCall("call-early", "completed"));
+          yield* Effect.promise(settle);
+          expect(h.tags("item.started"), "the new call waits for the input's turn").toHaveLength(1);
+          acknowledged.resolve();
+          const { turnId } = (yield* Fiber.join(sending)) as { turnId: string };
+
+          const started = h.tags("item.started");
+          expect(started.map((event) => [event.turnId, event.kind])).toEqual([
+            [syntheticTurnId, "command_execution"],
+            [turnId, "user_message"],
+            [turnId, "command_execution"],
+          ]);
+          expect(
+            h.tags("item.completed").filter((event) => event.kind === "command_execution"),
+          ).toMatchObject([{ turnId: syntheticTurnId, itemId: started[0]!.itemId }]);
+        }),
+      {
+        fake: { recording: readRecordedSetup("cancel"), scripts: { "session/prompt": noAnswer } },
+        holdAcknowledgement: (message) => (isPrompt(message) ? acknowledged.promise : undefined),
+      },
+    );
+  });
+});
+
 describe("the output that comes before a start is ready", () => {
   const CHUNK = buildUpdate({
     sessionUpdate: "agent_message_chunk",

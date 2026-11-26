@@ -3,6 +3,9 @@
  * here from one `session/prompt` and its reply, plus one more prompt for each
  * round of denied calls (spec 06 section 6.5). The Turn owns:
  *
+ * - the handoff of its first prompt: the Turn writes the prompt itself, stays
+ *   unpublished until `agy` is known to have it, and only then emits
+ *   `turn.started`, the `user_message` and the output `agy` sent meanwhile;
  * - the prompt in flight, so two prompts are never in flight at once;
  * - the Requests `agy` opens while the prompt runs, from the moment they open
  *   until their reply is written, and the Turn does not end before every one
@@ -17,6 +20,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
 import type {
   AcpConnection,
@@ -36,6 +40,8 @@ import type {
   TurnState,
 } from "@hercule/protocol";
 import { buildAnswerNotDelivered } from "../adapter-error-builders";
+import { buildUserMessage } from "../events";
+import type { AdapterTurnInput } from "../index";
 import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
 import {
@@ -43,7 +49,10 @@ import {
   closeTurn,
   describeRequestItem,
   findRequestOwner,
+  holdTurn,
   markDeclined,
+  openTurn,
+  releaseTurn,
   type Normalizing,
 } from "./normalize";
 import {
@@ -88,18 +97,48 @@ export interface TurnContext {
   readonly normalizing: Normalizing;
   /** Publishes events on the session's stream, in order. */
   readonly emit: (events: ReadonlyArray<HarnessEvent>) => void;
+  /**
+   * Called when it is not known whether `agy` got the first prompt. The prompt
+   * may be running, so the session must end the process before it writes
+   * another one.
+   */
+  readonly onDeliveryUnknown: () => void;
 }
 
 /** How an interrupt ended: `agy` answered `session/cancel` in time, or it did not. */
 export type InterruptResult = "stopped" | "unresponsive";
 
+/**
+ * How the handoff of a Turn's first prompt ended.
+ *
+ * - `proven`: `agy` has the prompt, and the Turn is published.
+ * - `not-sent`: `agy` certainly did not get the prompt, and no Turn is published.
+ * - `unknown`: it is not known whether `agy` got the prompt, and no Turn is
+ *   published. The prompt may be running, so the session must end the process.
+ *
+ * `message` says what went wrong, for the user.
+ */
+export type Handoff =
+  | { readonly kind: "proven" }
+  | { readonly kind: "not-sent"; readonly message: string }
+  | { readonly kind: "unknown"; readonly message: string };
+
 export interface Turn {
   readonly id: string;
+  /**
+   * Completes once, with how the handoff of the first prompt ended. Until then
+   * the Turn is reserved: it counts as running, so no other input is admitted,
+   * and the output `agy` sends is held. An interrupt or a stop that comes
+   * meanwhile is applied when the handoff is proven.
+   */
+  readonly handoff: Deferred.Deferred<Handoff>;
   /**
    * Opens an approval Request and waits for its decision. Returns the ACP
    * outcome to send to `agy`: the user's decision, or `cancelled` when the
    * Turn is interrupted before or while it waits, or when the call the Request
-   * is about is not a running item of this Turn (the Turn then warns).
+   * is about is not a running item of this Turn (the Turn then warns). A
+   * Request that comes during the handoff waits for it, because the item it is
+   * about may be in the output that is held.
    */
   readonly openApproval: (request: ApprovalRequest) => Effect.Effect<ApprovalOutcome>;
   /**
@@ -197,24 +236,87 @@ const buildFollowUpText = (toolNames: ReadonlyArray<string | null | undefined>):
 };
 
 /**
- * Runs the Turn in a fiber of the current scope. The caller has already written
- * the Turn's first prompt to `agy` (`connection.sendPrompt`) and passes the
- * effect that waits for its reply as `firstReply`, and it has emitted
- * `turn.started` (`openTurn`) and the `user_message`. Follow-up prompts are
- * sent by the Turn itself. The Turn ends by emitting `turn.completed`, and
- * closing the scope interrupts it.
+ * Warns that a Request of `agy` belongs to no running item of a Turn. `turnId`
+ * is left out when the Request has no published Turn to belong to.
+ */
+const warnOrphan = (
+  normalizing: Normalizing,
+  emit: TurnContext["emit"],
+  what: string,
+  toolCallId: string | null | undefined,
+  turnId: string | undefined,
+): void => {
+  emit([
+    {
+      _tag: "runtime.warning",
+      ...buildEnvelope(normalizing.sessionId, {
+        nativeSessionId: normalizing.nativeSessionId,
+        ...(toolCallId == null ? {} : { toolCallId }),
+      }),
+      ...(turnId === undefined ? {} : { turnId }),
+      message: buildOrphanMessage(what),
+    },
+  ]);
+};
+
+/**
+ * Cancels an approval Request that belongs to no running item of a Turn, shows
+ * the call as declined, and warns. Returns the outcome to send to `agy`.
+ * `turnId` is the Turn the warning is about, or undefined when there is none.
+ */
+export const cancelOrphanApproval = (
+  normalizing: Normalizing,
+  emit: TurnContext["emit"],
+  request: ApprovalRequest,
+  turnId?: string,
+): ApprovalOutcome => {
+  // A call that is shown as cancelled, not as failed, because nobody ran it.
+  markDeclined(normalizing, request.toolCall.toolCallId);
+  warnOrphan(normalizing, emit, "for approval of a call", request.toolCall.toolCallId, turnId);
+  return CANCELLED_APPROVAL;
+};
+
+/** Cancels a question Request that belongs to no running item of a Turn, and warns. Returns the reply to send to `agy`. */
+export const cancelOrphanQuestion = (
+  normalizing: Normalizing,
+  emit: TurnContext["emit"],
+  request: ElicitationRequest,
+  turnId?: string,
+): ElicitationReply => {
+  warnOrphan(normalizing, emit, "a question", request.toolCallId, turnId);
+  return CANCELLED_QUESTION;
+};
+
+/**
+ * Starts a Turn for `input` and returns it reserved: its handoff is pending,
+ * and the output of `agy` is held from now on. A fiber of the current scope
+ * writes the first prompt (`prompt`) to `agy`, which must take at most
+ * `handoffBudget`, and then runs the Turn. Follow-up prompts are sent by the
+ * Turn itself. The Turn ends by emitting `turn.completed`, and closing the
+ * scope interrupts it.
+ *
+ * The Turn is published only when the handoff is proven: it emits
+ * `turn.started`, the input's `user_message`, the held output and then lets the
+ * Requests that waited go on. When the prompt is not delivered, or it is not
+ * known whether it was, the Turn emits nothing of its own and releases the held
+ * output as output with no input (see `Handoff`).
  */
 export const startTurn = (
   context: TurnContext,
   input: {
-    readonly turnId: string;
-    readonly firstReply: Effect.Effect<PromptReply, AcpError>;
+    readonly input: AdapterTurnInput;
+    readonly prompt: ReadonlyArray<PromptContent>;
+    readonly handoffBudget: Duration.Duration;
   },
 ): Effect.Effect<Turn, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const { sessionId, nativeSessionId, connection, normalizing, emit } = context;
+    const { sessionId, nativeSessionId, connection, normalizing, emit, onDeliveryUnknown } =
+      context;
     const scope = yield* Effect.scope;
+    const turnId = crypto.randomUUID();
     const ended = yield* Deferred.make<void>();
+    const handoff = yield* Deferred.make<Handoff>();
+    holdTurn(normalizing);
 
     /** The Requests that wait for a reply, by the id Hercule gave them. A Request leaves the map when it settles, so it settles once. */
     const open = new Map<string, ApprovalPark | QuestionPark>();
@@ -224,10 +326,12 @@ export const startTurn = (
     /** Whether a Request was answered `cancel`. `agy` then replies `end_turn`, so the reply alone does not show it. */
     let answeredCancel = false;
     /**
-     * Where the Turn is in its life. From `ending` on, no new Request opens and
-     * no interrupt is sent. `closed` is from the moment `turn.completed` was emitted.
+     * Where the Turn is in its life. `handoff` lasts until the first prompt is
+     * proven delivered or refused. From `ending` on, no new Request opens and no
+     * interrupt is sent. `closed` is from the moment `turn.completed` was
+     * emitted, or from the refusal of the first prompt.
      */
-    let phase: "running" | "ending" | "closed" = "running";
+    let phase: "handoff" | "running" | "ending" | "closed" = "handoff";
     /** Whether the session is ending, so a reply that cannot be written is no news to the user. */
     let isStopped = false;
     /** The interrupt that was sent and waits for its result, shared with a second caller. */
@@ -281,7 +385,7 @@ export const startTurn = (
                 {
                   _tag: "runtime.warning",
                   ...buildEvent(),
-                  turnId: input.turnId,
+                  turnId,
                   message:
                     "The reply to a Request may not have reached Antigravity, so the Request was closed as cancelled.",
                 },
@@ -357,30 +461,21 @@ export const startTurn = (
       ),
     );
 
-    /** Warns that a Request belongs to no running item of this Turn. */
-    const warnOrphan = (what: string, toolCallId: string | null | undefined): void => {
-      emit([
-        {
-          _tag: "runtime.warning",
-          ...buildEvent(toolCallId ?? undefined),
-          turnId: input.turnId,
-          message: buildOrphanMessage(what),
-        },
-      ]);
-    };
+    /** Whether `turn.started` was emitted. The Turn of a refused prompt never is. */
+    let isPublished = false;
+    const orphanTurnId = (): string | undefined => (isPublished ? turnId : undefined);
 
     const openApproval: Turn["openApproval"] = (request) =>
       Effect.gen(function* () {
+        // The item the Request is about may be in the output held during the handoff.
+        yield* Deferred.await(handoff);
         const item = describeRequestItem(
           normalizing,
           request.toolCall.toolCallId,
           request.toolCall,
         );
-        if (item === undefined || item.turnId !== input.turnId) {
-          // A call that is shown as cancelled, not as failed, because nobody ran it.
-          markDeclined(normalizing, request.toolCall.toolCallId);
-          warnOrphan("for approval of a call", request.toolCall.toolCallId);
-          return CANCELLED_APPROVAL;
+        if (item === undefined || item.turnId !== turnId) {
+          return cancelOrphanApproval(normalizing, emit, request, orphanTurnId());
         }
         if (interrupted || phase !== "running") {
           markDeclined(normalizing, request.toolCall.toolCallId);
@@ -407,13 +502,13 @@ export const startTurn = (
 
     const openQuestion: Turn["openQuestion"] = (request) =>
       Effect.gen(function* () {
+        yield* Deferred.await(handoff);
         const owner =
           request.toolCallId == null
             ? undefined
             : findRequestOwner(normalizing, request.toolCallId);
-        if (owner === undefined || owner.turnId !== input.turnId) {
-          warnOrphan("a question", request.toolCallId);
-          return CANCELLED_QUESTION;
+        if (owner === undefined || owner.turnId !== turnId) {
+          return cancelOrphanQuestion(normalizing, emit, request, orphanTurnId());
         }
         if (interrupted || phase !== "running") return CANCELLED_QUESTION;
         const form = parseQuestionForm(request);
@@ -422,7 +517,7 @@ export const startTurn = (
             {
               _tag: "runtime.warning",
               ...buildEvent(),
-              turnId: input.turnId,
+              turnId,
               message:
                 "Antigravity asked a question in a form Hercule cannot show, so it was cancelled.",
             },
@@ -502,15 +597,21 @@ export const startTurn = (
 
     const interrupt: Turn["interrupt"] = Effect.gen(function* () {
       if (pendingInterrupt === undefined) {
-        if (Deferred.isDoneUnsafe(ended) || phase !== "running") return "stopped";
+        if (phase === "ending" || phase === "closed") return "stopped";
         // Marked before the first yield, so a Request that opens from now on is cancelled.
         interrupted = true;
         const result = Deferred.makeUnsafe<InterruptResult>();
         pendingInterrupt = result;
         yield* cancelOpenRequests;
         // A fiber of the scope runs the wait, so a caller that is interrupted cannot leave a second caller waiting for ever.
+        // `session/cancel` follows the proven handoff, because `agy` has no prompt to cancel before it.
         yield* Effect.forkIn(
-          Effect.flatMap(sendCancel, (value) => Deferred.succeed(result, value)),
+          Deferred.await(handoff).pipe(
+            Effect.flatMap((outcome) =>
+              outcome.kind === "proven" ? sendCancel : Effect.succeed("stopped" as const),
+            ),
+            Effect.flatMap((value) => Deferred.succeed(result, value)),
+          ),
           scope,
         );
       }
@@ -537,7 +638,7 @@ export const startTurn = (
             {
               _tag: "runtime.error",
               ...buildEvent(),
-              turnId: input.turnId,
+              turnId,
               class: error.class,
               message: truncateMessage(error.message),
             },
@@ -547,7 +648,7 @@ export const startTurn = (
         emit(
           closeTurn(normalizing, {
             state,
-            turnId: input.turnId,
+            turnId,
             ...(error === undefined ? {} : { error: error.message }),
           }),
         );
@@ -563,8 +664,68 @@ export const startTurn = (
         Effect.catch((error: AcpError) => Effect.succeed<PromptResult>({ kind: "failed", error })),
       );
 
+    /**
+     * Ends the handoff without a published Turn: releases the held output as
+     * output with no input, and closes the Turn. Does nothing once the handoff
+     * has ended, so the first outcome stays.
+     */
+    const refuseHandoff = (outcome: Exclude<Handoff, { readonly kind: "proven" }>): void => {
+      if (phase !== "handoff") return;
+      phase = "closed";
+      emit(releaseTurn(normalizing));
+      Deferred.doneUnsafe(handoff, Effect.succeed(outcome));
+      if (outcome.kind === "unknown") onDeliveryUnknown();
+    };
+
+    /** Writes the first prompt and returns the effect that waits for its reply, or refuses the handoff and returns undefined. */
+    const handOverFirstPrompt = Effect.gen(function* () {
+      const written = yield* Effect.result(
+        connection.sendPrompt(nativeSessionId, input.prompt),
+      ).pipe(Effect.timeoutOption(input.handoffBudget));
+      if (Option.isNone(written)) {
+        refuseHandoff({
+          kind: "unknown",
+          message: "Antigravity did not take the input in time, so it may or may not have arrived.",
+        });
+        return undefined;
+      }
+      if (Result.isFailure(written.value)) {
+        const { reason, message } = written.value.failure;
+        refuseHandoff(
+          reason === "not-sent"
+            ? { kind: "not-sent", message }
+            : {
+                kind: "unknown",
+                message: `Antigravity lost its connection while the input was handed over, so it may or may not have arrived: ${message}`,
+              },
+        );
+        return undefined;
+      }
+      // Proven: the Turn is published before anything that waited on the handoff goes on.
+      phase = "running";
+      isPublished = true;
+      emit(
+        openTurn(
+          normalizing,
+          turnId,
+          buildUserMessage({
+            sessionId,
+            turnId,
+            text: input.input.text,
+            attachments: input.input.attachments,
+            senderSessionId: input.input.senderSessionId,
+            steered: false,
+            harnessRefs: { nativeSessionId },
+          }),
+        ),
+      );
+      Deferred.doneUnsafe(handoff, Effect.succeed({ kind: "proven" }));
+      return written.value.success;
+    });
+
     const runTurn = Effect.gen(function* () {
-      let waiting = input.firstReply;
+      let waiting = yield* handOverFirstPrompt;
+      if (waiting === undefined) return;
       for (;;) {
         deniedToolNames = [];
         pendingResolutions = [];
@@ -616,23 +777,33 @@ export const startTurn = (
             : { class: truncateFact(stopReason), message: known },
         );
       }
-    }).pipe(Effect.ensuring(Deferred.succeed(ended, undefined)));
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          // A Turn that is interrupted while its prompt is written has no outcome yet.
+          refuseHandoff({
+            kind: "unknown",
+            message:
+              "Antigravity was stopped while the input was handed over, so it may or may not have arrived.",
+          });
+          Deferred.doneUnsafe(ended, Effect.void);
+        }),
+      ),
+    );
 
-    // The prompt is sent before this returns, so an interrupt right after
-    // `startTurn` always finds it in flight.
-    promptInFlight = true;
     const runFiber = yield* Effect.forkIn(runTurn, scope, { startImmediately: true });
 
     const abandon: Turn["abandon"] = Effect.suspend(() => {
       if (phase === "closed") return Effect.void;
       interrupted = true;
-      phase = "ending";
+      // Interrupting the fiber of a Turn that is still in its handoff refuses the handoff.
+      if (phase !== "handoff") phase = "ending";
       const fibers: Array<Fiber.Fiber<unknown>> = [...pendingResolutions, runFiber];
       return Fiber.interruptAll(fibers).pipe(
         Effect.andThen(
           Effect.sync(() => {
             if (phase !== "closed") {
-              emit(closeTurn(normalizing, { state: "interrupted", turnId: input.turnId }));
+              emit(closeTurn(normalizing, { state: "interrupted", turnId }));
               phase = "closed";
             }
             Deferred.doneUnsafe(ended, Effect.void);
@@ -642,7 +813,8 @@ export const startTurn = (
     });
 
     return {
-      id: input.turnId,
+      id: turnId,
+      handoff,
       openApproval,
       openQuestion,
       decide,

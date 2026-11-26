@@ -21,17 +21,7 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
-import type {
-  AcpConnection,
-  AcpError,
-  AcpHandlers,
-  ApprovalOutcome,
-  ApprovalRequest,
-  ElicitationReply,
-  ElicitationRequest,
-  PromptContent,
-  PromptReply,
-} from "@hercule/acp";
+import type { AcpConnection, AcpError, AcpHandlers, PromptContent } from "@hercule/acp";
 import { SteerRefused } from "@hercule/protocol";
 import type {
   AccessMode,
@@ -62,7 +52,6 @@ import {
 } from "../adapter-error-builders";
 import { formatModelArgument } from "../account";
 import { readAttachmentBase64 } from "../attachments";
-import { buildUserMessage } from "../events";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
@@ -86,22 +75,14 @@ import {
   closeProcess,
   closeTurn,
   holdTurn,
-  isCallBuffered,
-  markDeclined,
   normalizeUnhandled,
   normalizeUpdate,
-  openTurn,
   readSyntheticTurnId,
   releaseTurn,
 } from "./normalize";
 import type { Normalizing } from "./normalize";
-import {
-  buildOrphanMessage,
-  buildQuestionNotOpen,
-  CANCELLED_APPROVAL,
-  CANCELLED_QUESTION,
-} from "./requests";
-import { startTurn } from "./turn";
+import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
+import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
 import type { Turn } from "./turn";
 
 /** How long `session/cancel` may take to be acknowledged when the session asks `agy` to stop output that has no input. */
@@ -281,15 +262,12 @@ export const startAgySession = (
     /** Grows at every interrupt and stop, so an input that was prepared before it knows it is void. */
     let generation = 0;
     let stopping = false;
-    let hasExited = false;
     let exitReason: ExitReason | undefined;
     const exitedSignal = Deferred.makeUnsafe<void>();
     /** The latest mode `agy` reported, in an update or in the reply that opened the conversation. A report is never replaced by an older one. */
     let currentMode: string | undefined;
     /** Wakes the start that waits for the mode, whenever `agy` reports one. */
     let modeChanged: Deferred.Deferred<void> | undefined;
-    /** Completes when the input being handed over has a Turn or is abandoned. A Request about a call of that input waits for it. */
-    let handoff: Deferred.Deferred<void> | undefined;
     /** The mode the start asked for and `agy` confirmed. Undefined in `full-access`, which has no mode to guard. */
     let guardedMode: string | undefined;
     let isStarted = false;
@@ -301,9 +279,12 @@ export const startAgySession = (
         ...(toolCallId === undefined ? {} : { toolCallId }),
       });
 
+    /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
-      if (events.length > 0) emit(events);
+      if (isStarted && events.length > 0) emit(events);
     };
+
+    const isExited = (): boolean => Deferred.isDoneUnsafe(exitedSignal);
 
     /** The Turn of an input that is running, which is one that has not started to end. */
     const readRunningTurn = (): Turn | undefined =>
@@ -329,16 +310,13 @@ export const startAgySession = (
           const runningTurn = readRunningTurn();
           if (runningTurn !== undefined && options.stopTurn) yield* runningTurn.stop;
           yield* Scope.close(processScope, Exit.void);
-          // An input whose handoff was proven while the process closed opens its Turn meanwhile.
-          const turn = runningTurn ?? readRunningTurn();
-          if (turn !== undefined) {
+          if (runningTurn !== undefined) {
             // A Turn that does not end by itself is ended here, so no event of it follows `session.exited`.
-            const ended = yield* Effect.timeoutOption(turn.ended, TURN_END_WAIT);
-            if (Option.isNone(ended)) yield* turn.abandon;
+            const ended = yield* Effect.timeoutOption(runningTurn.ended, TURN_END_WAIT);
+            if (Option.isNone(ended)) yield* runningTurn.abandon;
           }
           if (normalizing !== undefined) emitEvents(closeProcess(normalizing));
           emitEvents([{ _tag: "session.exited", ...buildBase(), reason }]);
-          hasExited = true;
           Deferred.doneUnsafe(exitedSignal, Effect.void);
         });
         // A fiber of the session's scope runs it, so a caller that is interrupted cannot leave the exit half done.
@@ -439,75 +417,9 @@ export const startAgySession = (
       }
     };
 
-    /** Warns that a Request belongs to no running Turn. Before the start is ready there is no event to give it to. */
-    const warnOrphan = (what: string, toolCallId: string | null | undefined): void => {
-      if (!isStarted) return;
-      emitEvents([
-        {
-          _tag: "runtime.warning",
-          ...buildBase(toolCallId ?? undefined),
-          message: buildOrphanMessage(what),
-        },
-      ]);
-    };
-
-    /**
-     * Opens `request` in the running Turn. A Request about a call that the
-     * input being handed over made (its update waits in the hold) waits until
-     * the handoff ends, then goes to the Turn the input opened, or is
-     * cancelled when the input was refused.
-     */
-    const routeApproval = (request: ApprovalRequest): Effect.Effect<ApprovalOutcome> =>
-      Effect.suspend(() => {
-        if (normalizing === undefined || request.nativeSessionId !== nativeSessionId) {
-          runDetached(
-            Effect.logWarning(
-              `${ANTIGRAVITY_NAME} asked for approval for a conversation this session does not hold, so it was cancelled.`,
-            ),
-          );
-          return Effect.succeed(CANCELLED_APPROVAL);
-        }
-        const turn = readRunningTurn();
-        if (turn !== undefined) return turn.openApproval(request);
-        const settled = handoff;
-        if (settled !== undefined && isCallBuffered(normalizing, request.toolCall.toolCallId)) {
-          return Effect.flatMap(Deferred.await(settled), () => routeApproval(request));
-        }
-        markDeclined(normalizing, request.toolCall.toolCallId);
-        warnOrphan("for approval of a call", request.toolCall.toolCallId);
-        return Effect.succeed(CANCELLED_APPROVAL);
-      });
-
-    const routeQuestion = (request: ElicitationRequest): Effect.Effect<ElicitationReply> =>
-      Effect.suspend(() => {
-        if (
-          normalizing === undefined ||
-          (request.nativeSessionId !== undefined && request.nativeSessionId !== nativeSessionId)
-        ) {
-          runDetached(
-            Effect.logWarning(
-              `${ANTIGRAVITY_NAME} asked a question for a conversation this session does not hold, so it was cancelled.`,
-            ),
-          );
-          return Effect.succeed(CANCELLED_QUESTION);
-        }
-        const turn = readRunningTurn();
-        if (turn !== undefined) return turn.openQuestion(request);
-        const settled = handoff;
-        if (
-          settled !== undefined &&
-          request.toolCallId != null &&
-          isCallBuffered(normalizing, request.toolCallId)
-        ) {
-          return Effect.flatMap(Deferred.await(settled), () => routeQuestion(request));
-        }
-        warnOrphan("a question", request.toolCallId);
-        return Effect.succeed(CANCELLED_QUESTION);
-      });
-
     const handlers: AcpHandlers = {
       onSessionUpdate: (notification) => {
-        if (hasExited) return;
+        if (isExited()) return;
         // Before the reply that opens the conversation, an update is part of a resume's replay.
         if (normalizing === undefined) {
           replayedUpdates += 1;
@@ -534,10 +446,41 @@ export const startAgySession = (
         }
         emitEvents(normalizeUpdate(normalizing, notification));
       },
-      onApprovalRequest: routeApproval,
-      onElicitation: routeQuestion,
+      onApprovalRequest: (request) =>
+        Effect.suspend(() => {
+          if (normalizing === undefined || request.nativeSessionId !== nativeSessionId) {
+            runDetached(
+              Effect.logWarning(
+                `${ANTIGRAVITY_NAME} asked for approval for a conversation this session does not hold, so it was cancelled.`,
+              ),
+            );
+            return Effect.succeed(CANCELLED_APPROVAL);
+          }
+          const turn = readRunningTurn();
+          return turn === undefined
+            ? Effect.succeed(cancelOrphanApproval(normalizing, emitEvents, request))
+            : turn.openApproval(request);
+        }),
+      onElicitation: (request) =>
+        Effect.suspend(() => {
+          if (
+            normalizing === undefined ||
+            (request.nativeSessionId !== undefined && request.nativeSessionId !== nativeSessionId)
+          ) {
+            runDetached(
+              Effect.logWarning(
+                `${ANTIGRAVITY_NAME} asked a question for a conversation this session does not hold, so it was cancelled.`,
+              ),
+            );
+            return Effect.succeed(CANCELLED_QUESTION);
+          }
+          const turn = readRunningTurn();
+          return turn === undefined
+            ? Effect.succeed(cancelOrphanQuestion(normalizing, emitEvents, request))
+            : turn.openQuestion(request);
+        }),
       onUnhandledMessage: (message) => {
-        if (hasExited) return;
+        if (isExited()) return;
         if (normalizing === undefined) {
           replayedUpdates += 1;
           return;
@@ -822,72 +765,56 @@ export const startAgySession = (
         }
       });
 
-    /** What went on while an input's prompt was handed to `agy`. */
-    interface Handover {
-      /** True from the moment the prompt is handed over until the hand-over is known to have failed before anything was sent. */
-      isHandingOver: boolean;
-    }
+    /** Whether an interrupt or a stop came after the input `inputGeneration` was admitted, which voids it. */
+    const isVoided = (inputGeneration: number): boolean =>
+      stopping || generation !== inputGeneration;
 
     /**
-     * Reads the images, sets the model, and writes the prompt to `agy`. Returns
-     * the effect that waits for the prompt's reply, once the line was written.
-     * Fails with `InputNotDelivered` when `agy` certainly got nothing, and with
-     * `HarnessProtocolError` when it is not known (the budget ran out while the
-     * write was pending, or the connection ended during it). In those cases
-     * `handover.isHandingOver` stays true.
+     * Reads the images and sets the model, and returns the prompt for `agy` with
+     * the part of `PREPARATION_BUDGET` that is left to hand it over. Fails with
+     * `InputNotDelivered` when an interrupt or a stop voids the input, with the
+     * failures of the model change, and with `AdapterFailed` when an image cannot
+     * be read or the budget runs out.
      */
     const prepareInput = (
       input: AdapterTurnInput,
       inputGeneration: number,
-      handover: Handover,
-    ): Effect.Effect<Effect.Effect<PromptReply, AcpError>, AdapterError> =>
+    ): Effect.Effect<
+      { readonly prompt: ReadonlyArray<PromptContent>; readonly handoffBudget: Duration.Duration },
+      AdapterError
+    > =>
       Effect.gen(function* () {
         const images = yield* readImages(input.attachments ?? []);
         // An interrupt that came while the images were read voids the input before anything is written to `agy`.
-        if (stopping || generation !== inputGeneration) {
-          return yield* Effect.fail(buildInputStopped());
-        }
+        if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
         if (input.modelSelection !== undefined) {
           yield* selectModel(input.modelSelection, inputGeneration);
         }
         // The last wait before the write is over, so an interrupt that came during it is checked here.
-        if (stopping || generation !== inputGeneration) {
-          return yield* Effect.fail(buildInputStopped());
-        }
-        const text: PromptContent = { type: "text", text: buildHarnessPrompt(input) };
-        handover.isHandingOver = true;
-        return yield* connection.sendPrompt(nativeId, [text, ...images]).pipe(
-          Effect.mapError((error) => {
-            if (error.reason === "not-sent") {
-              handover.isHandingOver = false;
-              return buildInputNotWritten(ANTIGRAVITY_NAME, error.message);
-            }
-            return buildHarnessProtocolError(
-              `${ANTIGRAVITY_NAME} lost its connection while the input was handed over, so it may or may not have arrived: ${error.message}`,
-            );
-          }),
-        );
+        if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
+        return images;
       }).pipe(
         Effect.timeoutOption(PREPARATION_BUDGET),
-        Effect.flatMap((prepared) =>
-          Option.isSome(prepared)
-            ? Effect.succeed(prepared.value)
+        Effect.flatMap((images) =>
+          Option.isSome(images)
+            ? Effect.succeed(images.value)
             : Effect.fail(
-                handover.isHandingOver
-                  ? buildHarnessProtocolError(
-                      `${ANTIGRAVITY_NAME} did not take the input in time, so it may or may not have arrived.`,
-                    )
-                  : buildAdapterFailed(
-                      `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
-                    ),
+                buildAdapterFailed(
+                  `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
+                ),
               ),
         ),
+        Effect.timed,
+        Effect.map(([elapsed, images]) => ({
+          prompt: [{ type: "text", text: buildHarnessPrompt(input) } as const, ...images],
+          handoffBudget: Duration.subtract(PREPARATION_BUDGET, elapsed),
+        })),
       );
 
     const send: AgySession["send"] = (input) =>
       Effect.gen(function* () {
         if (stopping) {
-          return yield* Effect.fail(hasExited ? buildSessionNotRunning() : buildSessionStopping());
+          return yield* Effect.fail(isExited() ? buildSessionNotRunning() : buildSessionStopping());
         }
         if (readRunningTurn() !== undefined || preparing) {
           return yield* Effect.fail(
@@ -899,73 +826,51 @@ export const startAgySession = (
         // Admission is reserved here, before the first wait, so a second input is refused while this one is prepared.
         const inputGeneration = generation;
         preparing = true;
-        holdTurn(state);
-        const settled = Deferred.makeUnsafe<void>();
-        handoff = settled;
-        /** Ends the handoff: the place for an input is free, and a Request that waited goes on. */
-        const endHandoff = (): void => {
-          preparing = false;
-          handoff = undefined;
-          Deferred.doneUnsafe(settled, Effect.void);
-        };
-        const abandonPreparation = (): void => {
-          emitEvents(releaseTurn(state));
-          endHandoff();
-        };
-        const handover: Handover = { isHandingOver: false };
 
-        // Uninterruptible except the preparation, so an interrupt can never leave the admission taken or a Turn opened and unread.
+        // Uninterruptible except the two waits, so an interrupt can never leave the admission taken or a Turn unread.
         return yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            const prepared = yield* Effect.exit(
-              restore(prepareInput(input, inputGeneration, handover)),
-            );
+            const prepared = yield* Effect.exit(restore(prepareInput(input, inputGeneration)));
             if (Exit.isFailure(prepared)) {
-              abandonPreparation();
-              // The prompt may be on the wire, so no other prompt may follow on this process.
-              if (handover.isHandingOver) {
-                endForUnknownDelivery();
+              preparing = false;
+              if (Cause.hasInterrupts(prepared.cause) || !isVoided(inputGeneration)) {
                 return yield* Effect.failCause(prepared.cause);
               }
-              if (Cause.hasInterrupts(prepared.cause))
-                return yield* Effect.failCause(prepared.cause);
-              if (stopping || generation !== inputGeneration)
-                return yield* Effect.fail(buildInputStopped());
-              return yield* Effect.failCause(prepared.cause);
+              return yield* Effect.fail(buildInputStopped());
             }
-            // The handoff is proven here, so the input is opened even when a stop came meanwhile: failing it would let the controller send it again. The stop then ends the Turn as interrupted.
-            // The Turn opens only now: a prompt that could not be written leaves no Turn at all. What `agy` sent meanwhile is held, and replays into the Turn.
-            const turnId = crypto.randomUUID();
-            emitEvents(
-              openTurn(
-                state,
-                turnId,
-                buildUserMessage({
-                  sessionId,
-                  turnId,
-                  text: input.text,
-                  attachments: input.attachments,
-                  senderSessionId: input.senderSessionId,
-                  steered: false,
-                  harnessRefs: { nativeSessionId: nativeId },
-                }),
-              ),
-            );
-            current = yield* startTurn(
+            // The Turn reserves the place for the input and writes its prompt. It is
+            // published only when `agy` is known to have the prompt, so a prompt that
+            // could not be written leaves no Turn at all.
+            const turn = yield* startTurn(
               {
                 sessionId,
                 nativeSessionId: nativeId,
                 connection,
                 normalizing: state,
                 emit: emitEvents,
+                onDeliveryUnknown: endForUnknownDelivery,
               },
-              { turnId, firstReply: prepared.value },
+              { input, ...prepared.value },
             ).pipe(Scope.provide(scope));
-            endHandoff();
-            if (stopping) yield* current.stop;
-            // An interrupt that came while the prompt was being written found no Turn, so it is applied now.
-            if (generation !== inputGeneration) runDetached(interrupt);
-            return { turnId, delivery: "opened" } satisfies SendResult;
+            current = turn;
+            preparing = false;
+            const handoff = yield* Effect.exit(restore(Deferred.await(turn.handoff)));
+            if (Exit.isFailure(handoff)) {
+              // The caller is gone while `agy` may be reading the prompt, so no other prompt may follow on this process.
+              if (!Deferred.isDoneUnsafe(turn.handoff)) endForUnknownDelivery();
+              return yield* Effect.failCause(handoff.cause);
+            }
+            const outcome = handoff.value;
+            // A proven handoff opens the input even when a stop came meanwhile: failing it would let the controller send it again. The stop then ends the Turn as interrupted.
+            if (outcome.kind === "proven")
+              return { turnId: turn.id, delivery: "opened" } satisfies SendResult;
+            if (outcome.kind === "unknown")
+              return yield* Effect.fail(buildHarnessProtocolError(outcome.message));
+            return yield* Effect.fail(
+              isVoided(inputGeneration)
+                ? buildInputStopped()
+                : buildInputNotWritten(ANTIGRAVITY_NAME, outcome.message),
+            );
           }),
         );
       });

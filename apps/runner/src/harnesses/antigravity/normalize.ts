@@ -131,9 +131,9 @@ export interface Normalizing {
   readonly brainFolder: string;
   /** The turn in flight, if any. */
   turn: TurnRecord | undefined;
-  /** Whether an input is being prepared: no synthetic turn opens while it is. */
+  /** Whether an input is being handed over: nothing new is drawn while it is. */
   held: boolean;
-  /** What arrived while `held` and no turn was open, in order. */
+  /** What arrived while `held` and would draw something new, in order. */
   readonly buffered: Array<BufferedMessage>;
   /** The open assistant message or reasoning block, if any. */
   text: TextRecord | undefined;
@@ -362,11 +362,11 @@ const closeIdleSyntheticTurn = (state: Normalizing): HarnessEvent[] =>
     : [];
 
 /**
- * Starts holding a turn for an input that is being prepared. From now on, a
- * message that would draw something is kept in a buffer and no synthetic turn
- * opens, because the input's own turn is about to start and a second turn would
- * overlap it. An update for a call that is already known goes through, because
- * it completes an item of an earlier turn.
+ * Starts holding a turn for an input that is being handed over. From now on, a
+ * message that would draw something new is kept in a buffer, also while a
+ * synthetic turn is open, because the input's own turn is about to start and
+ * the new output belongs to it. An update for a call that is already known goes
+ * through, because it completes an item of the turn the call started in.
  */
 export const holdTurn = (state: Normalizing): void => {
   state.held = true;
@@ -772,12 +772,14 @@ const buildPlanFileEvents = (
 // ---- Public: messages ----
 
 /**
- * Returns true when `message` must wait in the buffer: an input is held, no
- * turn is open, and the message is not an update for a call that is already
- * known (that one completes an item in an earlier turn and may go through).
+ * Returns true when `message` must wait in the buffer: an input is held, and the
+ * message is not an update for a call that is already known. That one goes
+ * through, also when a synthetic turn is open, because it completes an item of
+ * the turn the call belongs to. Anything else would draw something new, which
+ * belongs to the input's turn and not to a turn that is about to close.
  */
 const mustBuffer = (state: Normalizing, update?: SessionUpdate): boolean => {
-  if (!state.held || state.turn !== undefined) return false;
+  if (!state.held) return false;
   const call = update === undefined ? undefined : readToolCall(update);
   return call === undefined || !state.tools.has(call.toolCallId);
 };
@@ -795,8 +797,8 @@ const mustBuffer = (state: Normalizing, update?: SessionUpdate): boolean => {
  * - `plan`, any value this build does not know, and a chunk that holds no text
  *   are `unknown` items labelled `antigravity: <name>`.
  *
- * While a turn is held (`holdTurn`) with none open, the messages that would draw
- * something are kept, and this returns nothing for them.
+ * While a turn is held (`holdTurn`), the messages that would draw something new
+ * are kept, and this returns nothing for them.
  */
 export const normalizeUpdate = (
   state: Normalizing,
@@ -887,18 +889,6 @@ export const findRequestOwner = (
   if (record === undefined || record.ended || record.turnId !== state.turn?.id) return undefined;
   return { turnId: record.turnId, itemId: record.itemId };
 };
-
-/**
- * Returns true when an update about the call `toolCallId` waits in the buffer
- * of a held turn. A Request about such a call is early, not orphaned: its item
- * appears when the input's turn opens.
- */
-export const isCallBuffered = (state: Normalizing, toolCallId: string): boolean =>
-  state.buffered.some(
-    (message) =>
-      message.type === "update" &&
-      readToolCall(message.notification.update)?.toolCallId === toolCallId,
-  );
 
 /**
  * Returns the owner of an approval Request, as `findRequestOwner` does, with
