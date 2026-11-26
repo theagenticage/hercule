@@ -421,7 +421,14 @@ const listOtherSpellings = (path: string, home: string): ReadonlyArray<string> =
 const buildEditTarget = (cwd: string, path: string, home: string): EditTarget => {
   const paths: Array<string> = [];
   const identities: Array<string> = [];
-  for (const spelling of [path, ...listOtherSpellings(path, home)]) {
+  // `agy` may trim the `Path` before it writes (not measured), so the trimmed
+  // reading is compared too. Over-denying a path that ends in whitespace is harmless.
+  const trimmed = path.trim();
+  const readings = trimmed === path ? [path] : [path, trimmed];
+  for (const spelling of readings.flatMap((reading) => [
+    reading,
+    ...listOtherSpellings(reading, home),
+  ])) {
     paths.push(resolve(cwd, spelling));
     // Not `join`: it would clean `..` as text first.
     const resolved = resolveLikeOperatingSystem(

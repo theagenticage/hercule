@@ -283,6 +283,16 @@ describe("the guard of the approval files", () => {
     expect(decide(cwd, `${name}/rules/x.md`)).toBe("");
   });
 
+  it.each([[".agents/hooks.json "], [".agents/hooks.json\n"], ["\t .agents/hooks.json \r\n"]])(
+    "denies %j, a guarded path with whitespace around it, which agy may trim",
+    (path) => {
+      const { cwd } = setUpRepo();
+
+      expect(isDenied(decide(cwd, path))).toBe(true);
+      expect(decide(cwd, "src/a.ts ")).toBe("");
+    },
+  );
+
   it("denies a file that is another name for a guarded file (a hard link), by file identity", () => {
     const { root, cwd } = setUpRepo();
     linkSync(join(root, ".agents", "hooks.json"), join(cwd, "hardlink.json"));
