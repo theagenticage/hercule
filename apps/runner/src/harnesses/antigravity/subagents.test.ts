@@ -170,8 +170,17 @@ describe("a recorded child that is stuck", () => {
     expect(hasOpenSubagentTurn(state)).toBe(true);
 
     const interrupted = interruptSubagentTurns(state);
-    expect(interrupted).toHaveLength(1);
+    expect(interrupted).toHaveLength(2);
     expect(interrupted[0]).toMatchObject({
+      _tag: "item.completed",
+      kind: "command_execution",
+      status: "failed",
+      subagentId: STUCK_CHILD,
+    });
+    expect(interrupted[0]).toMatchObject({
+      itemId: find(events, "item.started").find((e) => e.kind === "command_execution")?.itemId,
+    });
+    expect(interrupted[1]).toMatchObject({
       _tag: "turn.completed",
       state: "interrupted",
       subagentId: STUCK_CHILD,
@@ -301,6 +310,13 @@ describe("which subagent a step belongs to", () => {
       }),
     );
     normalizeSubagentStep(state, "A", step(2, "GENERIC"));
+    normalizeSubagentStep(
+      state,
+      "A",
+      step(3, "PLANNER_RESPONSE", { toolCalls: [{ name: "swarm", args: {} }] }),
+    );
+    normalizeSubagentStep(state, "A", step(4, "GENERIC"));
+    expect(findSubagentLaunchItem(state, "A", 4)).toBeDefined();
     const itemId = findSubagentLaunchItem(state, "A", 2);
     expect(itemId).toBe(find(calls, "item.started").find((e) => e.kind === "subagent")?.itemId);
     expect(findSubagentLaunchItem(state, "A", 9)).toBeUndefined();

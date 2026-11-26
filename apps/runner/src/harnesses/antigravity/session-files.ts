@@ -169,7 +169,7 @@ const decodeLaunchArguments = Schema.decodeUnknownResult(
 );
 
 /** The tools of a parent conversation whose call starts a subagent. */
-const LAUNCH_TOOL_NAMES: ReadonlyArray<string> = ["invoke_subagent", "swarm"];
+export const LAUNCH_TOOL_NAMES: ReadonlyArray<string> = ["invoke_subagent", "swarm"];
 
 const NEWLINE = 0x0a;
 

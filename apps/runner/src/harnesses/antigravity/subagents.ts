@@ -25,7 +25,7 @@ import type { HarnessEvent, ItemStatus, SubagentId, Usage } from "@hercule/proto
 import { buildEnvelope } from "../normalize";
 import { buildUserMessage } from "../events";
 import { truncateFact, truncateMessage } from "../text";
-import type { AgyStep, AgySubagentLink } from "./session-files";
+import { LAUNCH_TOOL_NAMES, type AgyStep, type AgySubagentLink } from "./session-files";
 import { buildFailedToolItem, buildToolItem, type ToolCallFields } from "./tool-items";
 
 /** The token counts of one scope (a turn, or the process), added up. */
@@ -237,8 +237,9 @@ const ensureTurn = (state: SubagentsState, agent: Subagent, model?: string) =>
 
 /**
  * Closes the turn `agent` has open and returns `turn.completed` with the
- * turn's usage, or nothing when no turn is open. Tool items without a result
- * stay running, as in the session's own turns: nothing in the files completes
+ * turn's usage, or nothing when no turn is open. An `interrupted` end first
+ * fails every tool item that has no result (see the comment in the body). A
+ * `completed` end leaves such items running: nothing in the files completes
  * them later.
  */
 const closeTurn = (
@@ -249,8 +250,24 @@ const closeTurn = (
   const turn = agent.turn;
   if (turn === undefined) return [];
   agent.turn = undefined;
+  // `agy` stops the subagent's commands when it is interrupted, so a call
+  // without a result will never get one. It fails now, as the items of the
+  // session's own agent do when the process ends. A call that left `pending`
+  // with a `RUNNING` result is not tracked any more, so it stays as it is.
+  const failedItems: HarnessEvent[] =
+    endState === "interrupted"
+      ? agent.pending.map(({ itemId, call }) => ({
+          _tag: "item.completed",
+          ...buildBase(state, agent),
+          turnId: turn.id,
+          itemId,
+          ...buildToolItem(call),
+          status: "failed",
+        }))
+      : [];
   agent.pending = [];
   return [
+    ...failedItems,
     {
       _tag: "turn.completed",
       ...buildBase(state, agent),
@@ -388,7 +405,8 @@ const readExitCode = (resultText: string | undefined): number | undefined => {
 const normalizeResultStep = (state: SubagentsState, agent: Subagent, step: AgyStep) => {
   const pending = agent.pending.shift();
   if (pending === undefined || agent.turn === undefined) return [];
-  if (pending.call.name === "invoke_subagent") agent.launchItems.set(step.index, pending.itemId);
+  if (LAUNCH_TOOL_NAMES.includes(pending.call.name ?? ""))
+    agent.launchItems.set(step.index, pending.itemId);
   if (step.status !== "DONE" && step.status !== "ERROR") return [];
 
   const exitCode = readExitCode(step.content);
