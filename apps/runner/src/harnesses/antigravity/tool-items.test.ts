@@ -116,6 +116,13 @@ describe("buildToolItem", () => {
       });
     });
 
+    it("removes a header that a transcript step repeats", () => {
+      const output = `${HEADER}${HEADER}Command exited with code 0.\n\nCommand output:\nSUBMARK\r\n`;
+      expect(buildToolItem(buildCommand({ output })).detail).toMatchObject({
+        content: "SUBMARK\n",
+      });
+    });
+
     it("shows no content for a command that printed nothing", () => {
       const output = `${HEADER}Command exited with code 0.\n\nNo output from the command.`;
       expect(buildToolItem(buildCommand({ output, exit_code: 0 })).detail).toEqual({

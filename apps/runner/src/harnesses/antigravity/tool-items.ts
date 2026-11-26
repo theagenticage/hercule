@@ -77,12 +77,13 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
  * Antigravity writes this above every command's output, so a reader cannot
  * tell where the command's own output begins. The pattern matches the lines
  * from `Created At` to `Command output:`, or to `No output from the command.`
- * when the command printed nothing. It applies at the start of the text, or
+ * when the command printed nothing. The `Created At` and `Completed At` pair
+ * is repeated in a transcript step, so the pattern accepts one or more pairs. It applies at the start of the text, or
  * after the notice that Antigravity cut a long output, which comes first and
  * ends with `output truncated:`.
  */
 const COMMAND_OUTPUT_HEADER =
-  /(^|output truncated:\n)Created At: [^\n]*\nCompleted At: [^\n]*\n(?:Command exited with code [^\n]*\n)?\n?(?:Command output:\n|No output from the command\.)/;
+  /(^|output truncated:\n)(?:Created At: [^\n]*\nCompleted At: [^\n]*\n)+(?:Command exited with code [^\n]*\n)?\n?(?:Command output:\n|No output from the command\.)/;
 
 const readRecord = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
