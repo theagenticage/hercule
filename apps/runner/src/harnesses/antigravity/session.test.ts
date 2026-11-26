@@ -751,6 +751,30 @@ describe("the MCP servers of a session", () => {
       { ...withGateway, fake: { withoutHttpMcpCapability: true } },
     ));
 
+  it("hides the token in what agy wrote on stderr when its start fails", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("panic: bad header");
+          expect(failure.message).not.toContain(TOKEN);
+        }),
+      {
+        ...withGateway,
+        fake: {
+          scripts: {
+            initialize: (_call, harness) => {
+              harness.end();
+              return [];
+            },
+          },
+          stderrLines: [`panic: bad header Bearer ${TOKEN}`],
+        },
+      },
+    ));
+
   it("never publish the token, wherever agy echoes it", () =>
     run(
       (h) =>

@@ -16,6 +16,7 @@ import { answerPreToolCall } from "./pre-tool-hook";
 afterEach(cleanupHomes);
 
 const GUARDED = { HERCULE_AGY_GUARD: "1" };
+const CONFIG_FOLDERS = [".agents", ".agent", "_agents", "_agent"];
 
 /** The input `agy` 1.5.15 gives a PreToolUse hook, as recorded. */
 const hookInput = (cwd: string, toolCall: Record<string, unknown>): string =>
@@ -199,23 +200,20 @@ describe("the guard of the approval files", () => {
     });
   });
 
-  it.each([".agents", ".agent", "_agents", "_agent"])(
-    "guards the same files and the plugins folder under %s",
-    (name) => {
-      const { cwd } = setUpRepo();
+  it.each(CONFIG_FOLDERS)("guards the same files and the plugins folder under %s", (name) => {
+    const { cwd } = setUpRepo();
 
-      for (const path of [
-        `${name}/hooks.json`,
-        `${name}/plugins.json`,
-        `${name}/mcp_config.json`,
-        `${name}/plugins/p/plugin.json`,
-        `../${name}/hooks.json`,
-      ]) {
-        expect(isDenied(decide(cwd, path))).toBe(true);
-      }
-      expect(decide(cwd, `${name}/rules/x.md`)).toBe("");
-    },
-  );
+    for (const path of [
+      `${name}/hooks.json`,
+      `${name}/plugins.json`,
+      `${name}/mcp_config.json`,
+      `${name}/plugins/p/plugin.json`,
+      `../${name}/hooks.json`,
+    ]) {
+      expect(isDenied(decide(cwd, path))).toBe(true);
+    }
+    expect(decide(cwd, `${name}/rules/x.md`)).toBe("");
+  });
 
   it("denies a file that is another name for a guarded file (a hard link), by file identity", () => {
     const { root, cwd } = setUpRepo();
@@ -287,21 +285,61 @@ describe("the guard of the approval files", () => {
       expect(decide(cwd, "../other/p/hooks.json")).toBe("");
     });
 
-    it.each([
-      ["not JSON", "{"],
-      ["no entries", "{}"],
-      ["an entry with no path", JSON.stringify({ entries: [{ name: "x" }, 5] })],
-      [
-        "a file larger than the limit",
-        JSON.stringify({ entries: [{ path: "myplugins" }], pad: "x".repeat(70_000) }),
-      ],
-    ])("lists no folder for %s, and the fixed guard stays", (_name, content) => {
+    it("lists no folder for a manifest with no entries, and the fixed guard stays", () => {
       const { root, cwd } = setUpRepo();
-      writePluginsFile(root, content);
+      writePluginsFile(root, "{}");
 
       expect(decide(cwd, "../myplugins/p/hooks.json")).toBe("");
       expect(isDenied(decide(cwd, "../.agents/hooks.json"))).toBe(true);
     });
+
+    it("lists no folder for an entry with no path, and a missing manifest is not a problem", () => {
+      const { root, cwd } = setUpRepo();
+      writePluginsFile(root, JSON.stringify({ entries: [{ name: "x" }, 5] }));
+
+      expect(decide(cwd, "../myplugins/p/hooks.json")).toBe("");
+    });
+
+    it.each([
+      ["not JSON", "{"],
+      ["JSON of another shape", "5"],
+      [
+        "a file larger than the limit",
+        JSON.stringify({ entries: [{ path: "myplugins" }], pad: "x".repeat(70_000) }),
+      ],
+    ])("denies every edit as unreadable when the manifest is %s", (_name, content) => {
+      const { root, cwd } = setUpRepo();
+      writePluginsFile(root, content);
+
+      expect(readReason(decide(cwd, "src/a.ts"))).toContain("could not read");
+    });
+
+    it.each(CONFIG_FOLDERS)(
+      "denies every edit when the manifest under %s is not a regular file",
+      (name) => {
+        const { root, cwd } = setUpRepo();
+        mkdirSync(join(root, name), { recursive: true });
+        mkdirSync(join(root, name, "plugins.json"));
+
+        expect(readReason(decide(cwd, "src/a.ts"))).toContain("could not read");
+      },
+    );
+
+    it("does not hang on a named pipe in place of the manifest, and denies", () => {
+      const { root, cwd } = setUpRepo();
+      mkdirSync(join(root, "_agents"));
+      expect(Bun.spawnSync(["mkfifo", join(root, "_agents", "plugins.json")]).exitCode).toBe(0);
+
+      expect(readReason(decide(cwd, "src/a.ts"))).toContain("could not read");
+    });
+  });
+
+  it("denies an edit as unreadable when the walk to the git root passes the folder limit", () => {
+    const folder = realpathSync(createScratchHome("hook-deep"));
+    const deep = join(folder, ...Array.from({ length: 70 }, () => "d"));
+    mkdirSync(deep, { recursive: true });
+
+    expect(readReason(decide(deep, "a.ts"))).toContain("could not read");
   });
 
   it.each([

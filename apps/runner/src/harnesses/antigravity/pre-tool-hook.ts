@@ -24,7 +24,9 @@
  */
 import {
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   openSync,
   readlinkSync,
@@ -53,13 +55,13 @@ import type { DecodedToolCall, EditTarget, GuardedPlace, HookDenial } from "./pr
 /** The most input the hook reads. A call larger than this counts as unreadable. */
 const MAX_INPUT_BYTES = 1024 * 1024;
 
-/** The most folders the hook walks up from the session's folder looking for the git root. */
+/** The most folders the hook walks up from the session's folder looking for the git root. A longer walk makes it deny edits. */
 const MAX_WALK_DEPTH = 64;
 
 /** The most links the hook follows while it resolves one path, so a loop of links ends. */
 const MAX_LINKS = 40;
 
-/** The largest `plugins.json` the hook reads. A larger file adds no guarded folder. */
+/** The largest `plugins.json` the hook reads. A larger file makes it deny edits. */
 const MAX_PLUGINS_FILE_BYTES = 64 * 1024;
 
 /** The tools whose calls get an edit-watch mark. */
@@ -79,7 +81,7 @@ const HookInput = Schema.Struct({
 
 const decodeHookInput = Schema.decodeUnknownOption(HookInput);
 
-const PluginsFile = Schema.Struct({ entries: Schema.Array(Schema.Unknown) });
+const PluginsFile = Schema.Struct({ entries: Schema.optionalKey(Schema.Array(Schema.Unknown)) });
 const decodePluginsFile = Schema.decodeUnknownOption(PluginsFile);
 const decodePluginsEntry = Schema.decodeUnknownOption(Schema.Struct({ path: Schema.String }));
 
@@ -200,46 +202,59 @@ const buildPlace = (path: string, isFolder: boolean): GuardedPlace => {
 /**
  * Returns the folders `agy` reads configuration from for a session in `cwd`:
  * the folder itself and every folder above it up to the nearest one holding
- * `.git`. Without a git root, or when the walk reaches `MAX_WALK_DEPTH`
- * folders, only the session's folder.
+ * `.git`. Without a git root, only the session's folder. Throws when the walk
+ * reaches `MAX_WALK_DEPTH` folders before it finds a git root or the top,
+ * because `agy` walks without a limit, so the guard cannot say which folders
+ * it reads.
  */
 const listConfigRoots = (cwd: string): ReadonlyArray<string> => {
   const start = resolveLikeOperatingSystem(resolve(cwd));
   const roots: Array<string> = [];
-  for (let at = start; roots.length < MAX_WALK_DEPTH; at = dirname(at)) {
+  for (let at = start; ; at = dirname(at)) {
     roots.push(at);
     if (existsSync(join(at, ".git"))) return roots;
-    if (dirname(at) === at) break;
+    if (dirname(at) === at) return [start];
+    if (roots.length >= MAX_WALK_DEPTH) {
+      throw new Error(`More than ${String(MAX_WALK_DEPTH)} folders above ${start}.`);
+    }
   }
-  return [start];
 };
 
 /**
  * Returns the folders listed in the `plugins.json` at `file`, as absolute
  * paths (a relative one is relative to `root`, the folder that holds the
- * configuration folder). An absent, unreadable, oversized or malformed file
- * lists none.
+ * configuration folder). A file that does not exist lists none. Throws when
+ * the file exists and cannot be checked (not a regular file, too large,
+ * unreadable, not JSON of the expected shape), because `agy` may read it and
+ * load the folders it lists. The file is opened without blocking, so a named
+ * pipe in its place cannot hang the hook.
  */
 const readPluginFolders = (file: string, root: string): ReadonlyArray<string> => {
-  let text: string;
+  let descriptor: number;
   try {
-    const descriptor = openSync(file, "r");
-    try {
-      const buffer = Buffer.alloc(MAX_PLUGINS_FILE_BYTES + 1);
-      const count = readSync(descriptor, buffer, 0, buffer.length, 0);
-      if (count > MAX_PLUGINS_FILE_BYTES) return [];
-      text = buffer.toString("utf8", 0, count);
-    } finally {
-      closeSync(descriptor);
+    descriptor = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw error;
+  }
+  try {
+    const stats = fstatSync(descriptor);
+    if (!stats.isFile() || stats.size > MAX_PLUGINS_FILE_BYTES) {
+      throw new Error(
+        `${file} is not a regular file of at most ${String(MAX_PLUGINS_FILE_BYTES)} bytes.`,
+      );
     }
-    const decoded = decodePluginsFile(JSON.parse(text));
-    if (decoded._tag === "None") return [];
-    return decoded.value.entries.flatMap((entry) => {
+    const buffer = Buffer.alloc(stats.size);
+    readSync(descriptor, buffer, 0, buffer.length, 0);
+    const decoded = decodePluginsFile(JSON.parse(buffer.toString("utf8")));
+    if (decoded._tag === "None") throw new Error(`${file} does not list entries.`);
+    return (decoded.value.entries ?? []).flatMap((entry) => {
       const path = decodePluginsEntry(entry);
       return path._tag === "Some" ? [resolve(root, path.value.path)] : [];
     });
-  } catch {
-    return [];
+  } finally {
+    closeSync(descriptor);
   }
 };
 

@@ -624,7 +624,13 @@ export const startAgySession = (
         cwd,
         handlers,
         purpose: { kind: "session", accessMode, request },
-      }).pipe(Scope.provide(processScope));
+      }).pipe(
+        Scope.provide(processScope),
+        // The message holds what `agy` wrote on stderr, which may echo the token.
+        Effect.mapError((error) =>
+          error._tag === "AdapterFailed" ? buildAdapterFailed(hideInText(error.message)) : error,
+        ),
+      );
       const connection: AcpConnection = agy.connection;
 
       // From the reply on, updates are the session's own. Before it, they are a resume's replay.
