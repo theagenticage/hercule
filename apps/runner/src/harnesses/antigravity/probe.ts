@@ -4,14 +4,17 @@
  * (spec 06 section 3.2).
  *
  * `agy models` cannot run in a Harness Home, so the models come from the reply
- * to `session/new`. That opens a conversation, and `agy` has no call that
- * deletes one. The probe therefore closes the conversation, waits until the
- * `agy` process has exited, and then deletes the conversation's files itself.
+ * to `session/new` or `session/resume`. Both need a conversation, and `agy`
+ * has no call that deletes one. Every new conversation adds a row to `agy`'s
+ * shared summary database and a new working folder adds a file, and nothing
+ * removes them. A probe runs about every hour per account, so the probe does
+ * not make a conversation each time. It keeps one conversation per
+ * Harness Home, in one fixed working folder, and resumes it. A resume adds
+ * nothing.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
 import type { AcpConnection, AcpError, AcpHandlers, SessionSettings } from "@hercule/acp";
@@ -21,15 +24,32 @@ import type { HarnessRunnerContext } from "../index";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Run } from "../process";
 import { truncateFact } from "../text";
-import { isSignInRequired, openSignedInAgy, readAgyVersion, type AgySpawn } from "./agy";
-import { deleteSessionFiles, makeScratchFolder, readSignedInEmail } from "./harness-home";
+import {
+  isSignInRequired,
+  openSignedInAgy,
+  readAgyVersion,
+  readUsablePlan,
+  type AgySpawn,
+} from "./agy";
+import {
+  makeProbeFolder,
+  readProbeConversationId,
+  readSignedInEmail,
+  writeProbeConversationId,
+} from "./harness-home";
 import { buildModelCatalog } from "./model-catalog";
 
-/** How long `session/close` may take. `agy` keeps the conversation's files either way, and the process ends next. */
+/** How long `session/close` may take. `agy` keeps the conversation either way, and the process ends next. */
 const CLOSE_DEADLINE = Duration.seconds(2);
 
 /** What a probe finds out about a signed-in account. */
 type AccountFindings = Pick<ProbeResult, "auth" | "models">;
+
+/** The conversation the probe used and the settings `agy` returned for it. */
+interface ProbeConversation {
+  readonly id: string;
+  readonly settings: SessionSettings;
+}
 
 /**
  * The handlers of a probe's connection. A probe sends no prompt, so `agy`
@@ -54,18 +74,54 @@ const buildDecliningHandlers = Effect.map(Effect.context<never>(), (services): A
 }));
 
 /**
- * Opens a conversation and stores its id in `conversation` in the same step
- * that receives the reply. An interruption can therefore never leave a
- * conversation whose id nobody knows. Fails with the error of `session/new`.
+ * Resumes the conversation whose id is stored in the Harness Home. Returns
+ * undefined when none is stored, or when `agy` cannot resume it for any reason
+ * but a missing sign-in, for example because its files are gone. That is logged,
+ * and the caller makes a new conversation. Fails only with the `AcpError` that
+ * means the account is not signed in: a failed resume must never make a signed-in
+ * account read as signed out.
  */
-const openConversation = (
+const resumeStoredConversation = (
   connection: AcpConnection,
-  cwd: string,
-  conversation: Ref.Ref<string | undefined>,
-): Effect.Effect<{ readonly id: string; readonly settings: SessionSettings }, AcpError> =>
+  home: string,
+  folder: string,
+): Effect.Effect<ProbeConversation | undefined, AcpError> =>
+  Effect.gen(function* () {
+    const id = yield* readProbeConversationId(home);
+    if (id === undefined) return undefined;
+    return yield* connection
+      .resumeSession({ nativeSessionId: id, cwd: folder, mcpServers: [] })
+      .pipe(
+        Effect.map((settings) => ({ id, settings })),
+        Effect.catch((error) =>
+          isSignInRequired(error)
+            ? Effect.fail(error)
+            : Effect.as(
+                Effect.logWarning(
+                  `Could not resume the conversation of the Antigravity check, so a new one is made: ${error.message}`,
+                ),
+                undefined,
+              ),
+        ),
+      );
+  });
+
+/**
+ * Makes a new conversation and stores its id in the Harness Home, replacing
+ * the id there. The reply and the store are one step that cannot be
+ * interrupted, so an interruption never leaves a conversation whose id is
+ * lost. Fails with the error of `session/new`, or with an `AdapterFailed` when
+ * the id cannot be stored: a probe that forgot its conversation would make a
+ * new one every time.
+ */
+const makeConversation = (
+  connection: AcpConnection,
+  home: string,
+  folder: string,
+): Effect.Effect<ProbeConversation, AcpError | AdapterError> =>
   Effect.uninterruptibleMask((restore) =>
-    restore(connection.newSession({ cwd, mcpServers: [] })).pipe(
-      Effect.tap((reply) => Ref.set(conversation, reply.nativeSessionId)),
+    restore(connection.newSession({ cwd: folder, mcpServers: [] })).pipe(
+      Effect.tap((reply) => writeProbeConversationId(home, reply.nativeSessionId)),
       Effect.map((reply) => ({ id: reply.nativeSessionId, settings: reply })),
     ),
   );
@@ -75,34 +131,43 @@ const closeConversation = (connection: AcpConnection, id: string): Effect.Effect
   connection.closeSession(id).pipe(Effect.timeoutOption(CLOSE_DEADLINE), Effect.ignore);
 
 /**
- * Opens a conversation in a scratch folder of the Harness Home and returns
- * the account's plan and the settings `agy` sent for it. The scope owns the
- * scratch folder and the `agy` process, and closing it stops the process.
+ * Returns the plan and the settings `agy` gives for the account, from the
+ * probe's own conversation: the stored one when `agy` resumes it, else a new
+ * one. Two probes that find no stored id at the same time may each make a
+ * conversation. The last id written wins, and the other conversation stays in
+ * `agy`'s files. There is no locking, because it costs one conversation, once.
+ *
+ * The scope owns the `agy` process, and closing it stops the process.
  */
 const readSettings = (
   spawn: AgySpawn,
   ctx: HarnessRunnerContext,
   binary: string,
-  conversation: Ref.Ref<string | undefined>,
 ): Effect.Effect<
   { readonly settings: SessionSettings; readonly planLabel: string | undefined },
   AdapterError | AcpError,
   Scope.Scope
 > =>
   Effect.gen(function* () {
-    const cwd = yield* makeScratchFolder(ctx.home);
+    const folder = yield* makeProbeFolder(ctx.home);
     const handlers = yield* buildDecliningHandlers;
-    const { connection, planLabel } = yield* openSignedInAgy(spawn, ctx, binary, { cwd, handlers });
-    const { id, settings } = yield* openConversation(connection, cwd, conversation);
-    yield* closeConversation(connection, id);
-    return { settings, planLabel };
+    const { connection, planLabel } = yield* openSignedInAgy(spawn, ctx, binary, {
+      cwd: folder,
+      handlers,
+    });
+    const conversation =
+      (yield* resumeStoredConversation(connection, ctx.home, folder)) ??
+      (yield* makeConversation(connection, ctx.home, folder));
+    yield* closeConversation(connection, conversation.id);
+    return { settings: conversation.settings, planLabel };
   });
 
 /**
  * Reads the signed-in account's email, plan and models. Fails with a typed
  * error for every outcome that is not a result: a missing login, a refused
- * `session/new`, no models, no email, or a second person who signed in while
- * the check ran. Fails when it takes longer than `PROBE_DEADLINE`.
+ * `session/new`, an account `agy` cannot use (see `readUsablePlan`), no
+ * email, or a second person who signed in while the check ran. Fails when it
+ * takes longer than `PROBE_DEADLINE`.
  *
  * The email in the token file is read before the process opens and again after
  * the models are read. A sign-in rewrites that file while a probe may be
@@ -112,25 +177,12 @@ const readAccount = (
   spawn: AgySpawn,
   ctx: HarnessRunnerContext,
   binary: string,
-  conversation: Ref.Ref<string | undefined>,
 ): Effect.Effect<AccountFindings, AdapterError | AcpError> =>
   Effect.gen(function* () {
     const emailBefore = yield* readSignedInEmail(ctx.home);
-    const { settings, planLabel } = yield* Effect.scoped(
-      readSettings(spawn, ctx, binary, conversation),
-    );
-    const models = buildModelCatalog(settings);
-    // With a login token that has not expired yet, `agy` answers `authenticate`
-    // without asking Google, and lists no models when it cannot reach Google or
-    // Google refuses the login. An `ok` with no models would empty the
-    // account's Model Catalog.
-    if (models.length === 0) {
-      return yield* Effect.fail(
-        buildAdapterFailed(
-          "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.",
-        ),
-      );
-    }
+    const { settings, planLabel } = yield* Effect.scoped(readSettings(spawn, ctx, binary));
+    const usable = readUsablePlan(planLabel, settings);
+    if (Result.isFailure(usable)) return yield* Effect.fail(usable.failure);
     const emailAfter = yield* readSignedInEmail(ctx.home);
     if (emailAfter === undefined) {
       return yield* Effect.fail(
@@ -148,9 +200,9 @@ const readAccount = (
       auth: {
         status: "ok",
         identity: truncateFact(emailAfter),
-        ...(planLabel === undefined ? {} : { planLabel }),
+        planLabel: usable.success,
       },
-      models,
+      models: buildModelCatalog(settings),
     };
     return findings;
   }).pipe(
@@ -169,41 +221,10 @@ const readAccount = (
   );
 
 /**
- * Reads the account, and then deletes the files of the conversation the
- * check opened. The files are deleted whichever way the check ends,
- * interruption included, and only when the id of the conversation was
- * received: the probe never guesses whose files to remove. Fails with the
- * check's error, or with an `AdapterFailed` when the files cannot be removed.
- */
-const readAccountAndRemoveFiles = (
-  spawn: AgySpawn,
-  ctx: HarnessRunnerContext,
-  binary: string,
-): Effect.Effect<AccountFindings, AdapterError | AcpError> =>
-  Effect.acquireUseRelease(
-    Ref.make<string | undefined>(undefined),
-    (conversation) => readAccount(spawn, ctx, binary, conversation),
-    // Runs after the scope of `readSettings` closed, so the `agy` process has
-    // exited and nothing writes to the conversation's files any more.
-    (conversation) =>
-      Effect.flatMap(Ref.get(conversation), (id) =>
-        id === undefined
-          ? Effect.void
-          : deleteSessionFiles(ctx.home, id).pipe(
-              Effect.mapError((error) =>
-                buildAdapterFailed(
-                  `Could not remove the files of the Antigravity check: ${error.message}`,
-                ),
-              ),
-            ),
-      ),
-  );
-
-/**
  * Returns the probe result for what the account check found. A missing login,
- * and the `-32000` "Authentication required" of `session/new`, mean the
- * account is signed out. Any other failure is an `error`, so that being offline
- * never reads as signed out.
+ * and the `-32000` "Authentication required" of `session/new` or
+ * `session/resume`, mean the account is signed out. Any other failure is an
+ * `error`, so that being offline never reads as signed out.
  */
 const buildProbeResult = (
   version: string | null,
@@ -225,8 +246,7 @@ const buildProbeResult = (
  *
  * The version and the account are read at the same time, each inside
  * `PROBE_DEADLINE`. Stopping the process, which has a grace period of its own,
- * and deleting the conversation's files come after it, inside the 20 seconds
- * the controller waits.
+ * comes after it, inside the 20 seconds the controller waits.
  */
 export const makeProbe =
   (seam: { readonly spawn: AgySpawn; readonly run: Run }) =>
@@ -237,7 +257,7 @@ export const makeProbe =
           Effect.timeoutOption(PROBE_DEADLINE),
           Effect.map(Option.getOrNull),
         ),
-        Effect.result(readAccountAndRemoveFiles(seam.spawn, ctx, binary)),
+        Effect.result(readAccount(seam.spawn, ctx, binary)),
       ],
       { concurrency: "unbounded" },
     ).pipe(Effect.map(([version, account]) => buildProbeResult(version, account)));

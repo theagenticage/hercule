@@ -39,6 +39,7 @@ import * as Effect from "effect/Effect";
 import type { AcpHandlers } from "@hercule/acp";
 import type { ProbeResult } from "@hercule/protocol";
 import { PROBE_DEADLINE } from "../probe";
+import { UUID_PATTERN } from "../session-files";
 import { makeLogins } from "../login";
 import { runProcess, spawnAgy, spawnLogin } from "../process";
 import type { HarnessRunnerContext } from "../index";
@@ -193,6 +194,16 @@ const ignoringHandlers: AcpHandlers = {
   onUnhandledMessage: () => undefined,
 };
 
+/** Returns the id in the probe's conversation file, or undefined when the file is missing. */
+const readProbeConversationId = (home: string): string | undefined => {
+  const path = join(home, "hercule-probe-conversation");
+  return existsSync(path) ? readFileSync(path, "utf8").trim() : undefined;
+};
+
+/** Lists the database files in `conversations/`, without the `-wal` and `-shm` files. */
+const listConversationDatabases = (home: string): ReadonlyArray<string> =>
+  listTree(join(home, APP_DATA_DIR, "conversations")).filter((name) => name.endsWith(".db"));
+
 /** Returns the text of every log file of an `agy` worker (`agy.log.<pid>`) in `folder`. */
 const readWorkerLogs = (folder: string): ReadonlyArray<string> =>
   readdirSync(folder)
@@ -253,25 +264,63 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     expect(probed.models).toEqual([]);
   }, 30_000);
 
-  it("probes an unexpired token with no network as an error and leaves nothing behind", async () => {
+  it("probes an unexpired token with no network as an error, and the next probe resumes the same conversation", async () => {
     const account = makeAccount();
     writeUnexpiredToken(account.ctx.home);
+    const home = account.ctx.home;
+    const appData = join(home, APP_DATA_DIR);
     const startedAt = Date.now();
+
+    const first = await probeAccount(account);
+
+    expect(Date.now() - startedAt).toBeLessThan(Duration.toMillis(PROBE_DEADLINE) / 2);
+    // Offline, `agy` lists no models and gives no plan.
+    expect(first.auth.status).toBe("error");
+    expect(first.auth.message).toContain("listed no models");
+    expect(first.models).toEqual([]);
+    const conversationId = readProbeConversationId(home);
+    expect(conversationId).toMatch(UUID_PATTERN);
+    const implicitAfterFirst = listTree(join(appData, "implicit"));
+    // The files the check compares below exist, so a second conversation would show.
+    expect(implicitAfterFirst.length).toBeGreaterThan(0);
+    expect(listConversationDatabases(home)).toEqual([`${conversationId}.db`]);
+
+    const second = await probeAccount(account);
+
+    expect(second.auth.status).toBe("error");
+    expect(second.auth.message).toContain("listed no models");
+    // The second probe resumed the stored conversation: no second one, and
+    // nothing new in the files `agy` shares between conversations. The rows
+    // of its summary database cannot be counted without a SQLite reader, so
+    // the conversation files and `implicit/` stand for them.
+    expect(readProbeConversationId(home)).toBe(conversationId);
+    expect(listConversationDatabases(home)).toEqual([`${conversationId}.db`]);
+    expect(readdirSync(join(appData, "brain"))).toEqual([conversationId]);
+    expect(listTree(join(appData, "implicit"))).toEqual(implicitAfterFirst);
+    // The probe leaves no scratch folder and no log of `agy` in the Harness Home.
+    expect(readdirSync(home).filter((name) => name.startsWith("hercule-scratch-"))).toEqual([]);
+    expect(existsSync(join(home, "log"))).toBe(false);
+    expect(existsSync(join(appData, "log"))).toBe(false);
+  }, 60_000);
+
+  it("makes a new conversation and stores its id when the stored one has lost its files", async () => {
+    const account = makeAccount();
+    writeUnexpiredToken(account.ctx.home);
+    const home = account.ctx.home;
+    await probeAccount(account);
+    const lostId = readProbeConversationId(home)!;
+    await Effect.runPromise(deleteSessionFiles(home, lostId));
+    expect(listConversationDatabases(home)).toEqual([]);
 
     const probed = await probeAccount(account);
 
-    expect(Date.now() - startedAt).toBeLessThan(Duration.toMillis(PROBE_DEADLINE) / 2);
     expect(probed.auth.status).toBe("error");
     expect(probed.auth.message).toContain("listed no models");
-    const appData = join(account.ctx.home, APP_DATA_DIR);
-    expect(listTree(join(appData, "conversations"))).toEqual([]);
-    expect(listTree(join(appData, "brain"))).toEqual([]);
-    expect(
-      readdirSync(account.ctx.home).filter((name) => name.startsWith("hercule-scratch-")),
-    ).toEqual([]);
-    expect(existsSync(join(account.ctx.home, "log"))).toBe(false);
-    expect(existsSync(join(appData, "log"))).toBe(false);
-  }, 30_000);
+    const newId = readProbeConversationId(home);
+    expect(newId).toMatch(UUID_PATTERN);
+    expect(newId).not.toBe(lostId);
+    expect(listConversationDatabases(home)).toEqual([`${newId}.db`]);
+  }, 60_000);
 
   it("probes a token file that is not JSON as unauthenticated", async () => {
     const account = makeAccount();
@@ -434,9 +483,11 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
 
     await Effect.runPromise(deleteSessionFiles(account.ctx.home, first));
 
-    // Besides these, `agy` leaves a small file in `implicit/` for each
-    // conversation, named with an id that is not the conversation's. Nothing
+    // Besides these, `agy` leaves a small file in `implicit/` for each new
+    // working folder, named with an id that is not the conversation's. Nothing
     // links it to the conversation, so it stays with the shared files.
+    // `annotations/<id>.pbtxt` is not covered: `agy` writes it only after a
+    // real prompt, which no test without an account can send.
     expect(filesOfFirst).toContain(`conversations/${first}.db`);
     expect(filesOfFirst).toContain(`brain/${first}`);
     expect(filesWithSecond.some((name) => name.includes(second))).toBe(true);

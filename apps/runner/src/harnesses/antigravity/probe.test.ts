@@ -1,12 +1,12 @@
 /**
  * Tests the probe of an Antigravity account through `makeProbe`: what it
- * reports for a signed-in account, a signed-out one and every failure, and
- * that it leaves nothing of its own behind in the Harness Home. A fake `agy`
- * answers from the recording of a signed-in account and writes the files a
- * real one writes, so the tests see the files appear and disappear. The real
- * `agy` is never started.
+ * reports for a signed-in account, a signed-out one, an account Google holds
+ * and every failure, and that it keeps one conversation per Harness Home and
+ * resumes it instead of making a new one each time. A fake `agy` answers from
+ * the recording of a signed-in account and writes the files a real one writes.
+ * The real `agy` is never started.
  */
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
@@ -24,7 +24,6 @@ import {
   CONVERSATION,
   PLAN_LABEL,
   SIGNED_IN_EMAIL,
-  answerNewSession,
   buildContext,
   buildFakeAgy,
   createConversationFiles,
@@ -41,9 +40,10 @@ afterEach(() => {
   cleanupHomes();
 });
 
-const isRoot = process.getuid?.() === 0;
-
 const OTHER_CONVERSATION = "11111111-2222-4333-8444-555555555555";
+
+const NO_MODELS =
+  "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.";
 
 const probeAccount = (home: string, fake: FakeAgy): Promise<ProbeResult> =>
   Effect.runPromise(makeProbe(fake)(buildContext(home), BINARY));
@@ -62,19 +62,20 @@ const probeUntilWaiting = (
     Effect.gen(function* () {
       const probing = yield* Effect.forkChild(makeProbe(fake)(buildContext(home), BINARY));
       yield* Effect.promise(() =>
-        waitUntil(
-          `received ${method}`,
-          () =>
-            fake.spawns[0]?.harness.received.some((message) => message.method === method) === true,
-        ),
+        waitUntil(`received ${method}`, () => receivedMethods(fake).includes(method)),
       );
       yield* whenWaiting;
       return yield* Fiber.join(probing);
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+/** Returns the methods the first process of the fake received, in order. */
 const receivedMethods = (fake: FakeAgy): ReadonlyArray<string | undefined> =>
-  fake.spawns[0]!.harness.received.map((message) => message.method);
+  fake.spawns[0]?.harness.received.map((message) => message.method) ?? [];
+
+const storedIdPath = (home: string): string => join(home, "hercule-probe-conversation");
+
+const readStoredId = (home: string): string => readFileSync(storedIdPath(home), "utf8");
 
 const conversationFiles = (home: string): ReadonlyArray<string> => [
   join(home, APP_DATA_DIR, "conversations", `${CONVERSATION}.db`),
@@ -100,52 +101,97 @@ describe("a signed-in account", () => {
     expect(result.usage).toBeNull();
   });
 
-  it("leaves nothing new in the Harness Home, and keeps the files of other conversations", async () => {
+  it("makes one conversation, stores its id, and keeps it", async () => {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home);
+
+    await probeAccount(home, fake);
+
+    expect(receivedMethods(fake)).toEqual(
+      expect.arrayContaining(["initialize", "authenticate", "session/new", "session/close"]),
+    );
+    expect(receivedMethods(fake)).not.toContain("session/resume");
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(true);
+    expect(fake.spawns[0]!.hasExited).toBe(true);
+  });
+
+  it("runs the conversation in one fixed folder that only the user can enter, and sends no prompt", async () => {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home);
+
+    await probeAccount(home, fake);
+
+    const folder = join(home, "hercule-probe");
+    expect(fake.spawns[0]!.cwd).toBe(folder);
+    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    expect(receivedMethods(fake)).not.toContain("session/prompt");
+    const newSession = fake.spawns[0]!.harness.received.find(
+      (message) => message.method === "session/new",
+    );
+    expect(newSession?.params).toMatchObject({ cwd: folder, mcpServers: [] });
+  });
+
+  it("resumes the kept conversation the next time, and adds nothing to the Harness Home", async () => {
+    const home = createSignedInHome();
+    await probeAccount(home, buildFakeAgy(home));
+    const afterFirst = listHomeFiles(home);
+    const second = buildFakeAgy(home);
+
+    const result = await probeAccount(home, second);
+
+    expect(receivedMethods(second)).toContain("session/resume");
+    expect(receivedMethods(second)).not.toContain("session/new");
+    expect(
+      second.spawns[0]!.harness.received.find((m) => m.method === "session/resume")?.params,
+    ).toMatchObject({ sessionId: CONVERSATION, cwd: join(home, "hercule-probe") });
+    expect(result.auth.status).toBe("ok");
+    expect(result.models).toHaveLength(5);
+    expect(listHomeFiles(home)).toEqual(afterFirst);
+    expect(listHomeFiles(home).some((name) => name.startsWith("hercule-scratch-"))).toBe(false);
+  });
+
+  it("makes a new conversation and replaces the stored id when the stored one cannot be resumed", async () => {
+    const home = createSignedInHome();
+    writeFileSync(storedIdPath(home), `${OTHER_CONVERSATION}\n`);
+    const fake = buildFakeAgy(home);
+
+    const result = await probeAccount(home, fake);
+
+    expect(receivedMethods(fake)).toEqual(
+      expect.arrayContaining(["session/resume", "session/new"]),
+    );
+    expect(result.auth.status).toBe("ok");
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+  });
+
+  it.each([
+    ["text that is not a UUID", "not-a-uuid\n"],
+    ["an empty file", ""],
+    ["a UUID followed by more", `${OTHER_CONVERSATION}\n${"x".repeat(500)}`],
+  ])("treats a stored file with %s as no conversation", async (_what, content) => {
+    const home = createSignedInHome();
+    writeFileSync(storedIdPath(home), content);
+    const fake = buildFakeAgy(home);
+
+    const result = await probeAccount(home, fake);
+
+    expect(receivedMethods(fake)).not.toContain("session/resume");
+    expect(receivedMethods(fake)).toContain("session/new");
+    expect(result.auth.status).toBe("ok");
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+  });
+
+  it("keeps the files of other conversations as they are", async () => {
     const home = createSignedInHome();
     createConversationFiles(home, OTHER_CONVERSATION);
     writeFileSync(join(home, APP_DATA_DIR, "conversation_summaries.db"), "summaries");
     const before = listHomeFiles(home);
-    const fake = buildFakeAgy(home);
 
-    await probeAccount(home, fake);
+    await probeAccount(home, buildFakeAgy(home));
 
-    // The conversation was there while the process ran, and it is gone now.
-    expect(fake.spawns).toHaveLength(1);
-    expect(fake.spawns[0]!.filesAtExit).toContain(
-      `${APP_DATA_DIR}/conversations/${CONVERSATION}.db`,
-    );
-    expect(fake.spawns[0]!.hasExited).toBe(true);
-    expect(listHomeFiles(home)).toEqual(before);
-  });
-
-  it("deletes the conversation's files only after the process has exited", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy(home);
-
-    await probeAccount(home, fake);
-
-    const atExit = fake.spawns[0]!.filesAtExit!;
-    expect(atExit).toContain(`${APP_DATA_DIR}/conversations/${CONVERSATION}.db`);
-    expect(atExit).toContain(`${APP_DATA_DIR}/brain/${CONVERSATION}`);
-    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(false);
-  });
-
-  it("opens a conversation in a scratch folder, closes it and sends no prompt", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy(home);
-
-    await probeAccount(home, fake);
-
-    const methods = receivedMethods(fake);
-    expect(methods).toEqual(
-      expect.arrayContaining(["initialize", "authenticate", "session/new", "session/close"]),
-    );
-    expect(methods).not.toContain("session/prompt");
-    const newSession = fake.spawns[0]!.harness.received.find(
-      (message) => message.method === "session/new",
-    );
-    expect(newSession?.params).toMatchObject({ mcpServers: [] });
-    expect(fake.spawns[0]!.cwd.startsWith(join(home, "hercule-scratch-"))).toBe(true);
+    const after = listHomeFiles(home);
+    for (const file of before) expect(after).toContain(file);
   });
 
   it("still reports the models when the process never answers session/close", async () => {
@@ -161,7 +207,6 @@ describe("a signed-in account", () => {
 
     expect(result.auth.status).toBe("ok");
     expect(result.models).not.toEqual([]);
-    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(false);
   });
 });
 
@@ -193,32 +238,53 @@ describe("an account that is not signed in", () => {
     expect(result.harnessVersion).toBe(AGY_VERSION);
     expect(fake.spawns[0]!.hasExited).toBe(true);
   });
+
+  it("is unauthenticated when session/resume answers -32000, and makes no new conversation", async () => {
+    const home = createSignedInHome();
+    writeFileSync(storedIdPath(home), `${CONVERSATION}\n`);
+    const fake = buildFakeAgy(home, {
+      scripts: { "session/resume": refuse(-32000, "Authentication required") },
+    });
+
+    const result = await probeAccount(home, fake);
+
+    expect(result.auth).toEqual({ status: "unauthenticated" });
+    expect(receivedMethods(fake)).not.toContain("session/new");
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+  });
 });
 
-describe("a probe that cannot trust what it found", () => {
-  it("is an error when the account lists no models, and still removes the conversation", async () => {
+describe("an account Antigravity cannot use", () => {
+  it("is an error that says Google holds the account when it lists models but gives no plan", async () => {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home, { scripts: { authenticate: answerWith({}) } });
+
+    const result = await probeAccount(home, fake);
+
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toContain("Google is holding this account until it is verified");
+    expect(result.auth.message).toContain("need not be repeated");
+    expect(result.models).toEqual([]);
+    expect(result.harnessVersion).toBe(AGY_VERSION);
+  });
+
+  it("is an error that says the runner may be offline when no model is listed", async () => {
     const home = createSignedInHome();
     const fake = buildFakeAgy(home, {
       scripts: {
-        "session/new": (call, harness) => {
-          createConversationFiles(home, CONVERSATION);
-          return answerWith({ sessionId: CONVERSATION })(call, harness);
-        },
+        "session/new": (call, harness) => answerWith({ sessionId: CONVERSATION })(call, harness),
       },
     });
 
     const result = await probeAccount(home, fake);
 
-    expect(result.auth).toEqual({
-      status: "error",
-      message:
-        "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.",
-    });
+    expect(result.auth).toEqual({ status: "error", message: NO_MODELS });
     expect(result.models).toEqual([]);
     expect(result.harnessVersion).toBe(AGY_VERSION);
-    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(false);
   });
+});
 
+describe("a probe that cannot trust what it found", () => {
   it("is an error when the token file names nobody", async () => {
     const home = createScratchHome("agy-probe");
     writeToken(home, undefined);
@@ -250,7 +316,6 @@ describe("a probe that cannot trust what it found", () => {
       message: "Someone signed in to Antigravity while the account was checked. Check it again.",
     });
     expect(result.models).toEqual([]);
-    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(false);
   });
 
   it("is an error, not signed out, for a failure it does not know", async () => {
@@ -265,20 +330,39 @@ describe("a probe that cannot trust what it found", () => {
     expect(result.auth.message).toContain("the model service fell over");
     expect(result.harnessVersion).toBe(AGY_VERSION);
   });
+
+  it("is an error that says why when the conversation's id cannot be stored", async () => {
+    const home = createSignedInHome();
+    // A folder in the place of the file: the rename onto it fails.
+    mkdirSync(join(storedIdPath(home), "inside"), { recursive: true });
+
+    const result = await probeAccount(home, buildFakeAgy(home));
+
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toMatch(
+      /^Could not remember the conversation of the Antigravity check on this runner: .+\.$/,
+    );
+  });
+
+  it("is an error when the probe's working folder is a link", async () => {
+    const home = createSignedInHome();
+    symlinkSync(createScratchHome("agy-elsewhere"), join(home, "hercule-probe"));
+    const fake = buildFakeAgy(home);
+
+    const result = await probeAccount(home, fake);
+
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toMatch(
+      /^Could not make the working folder for the Antigravity check on this runner: /,
+    );
+    expect(fake.spawns).toHaveLength(0);
+  });
 });
 
 describe("a probe that takes too long", () => {
-  it("is an error when session/new never answers, stops the process and deletes nothing", async () => {
+  it("is an error when session/new never answers, and stops the process", async () => {
     const home = createSignedInHome();
-    const fake = buildFakeAgy(home, {
-      scripts: {
-        // The files exist, but the probe never learned whose they are.
-        "session/new": (call, harness) => {
-          createConversationFiles(home, CONVERSATION);
-          return noAnswer(call, harness);
-        },
-      },
-    });
+    const fake = buildFakeAgy(home, { scripts: { "session/new": noAnswer } });
 
     const result = await probeUntilWaiting(
       home,
@@ -293,65 +377,6 @@ describe("a probe that takes too long", () => {
     });
     expect(result.harnessVersion).toBe(AGY_VERSION);
     expect(fake.spawns[0]!.hasExited).toBe(true);
-    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(true);
-    expect(listHomeFiles(home).some((name) => name.startsWith("hercule-scratch-"))).toBe(false);
-  });
-});
-
-describe("a probe that is interrupted", () => {
-  it("still stops the process and deletes the conversation it opened", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy(home, { scripts: { "session/close": noAnswer } });
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const probing = yield* Effect.forkChild(makeProbe(fake)(buildContext(home), BINARY));
-        yield* Effect.promise(() =>
-          waitUntil(
-            "received session/close",
-            () =>
-              fake.spawns[0]?.harness.received.some(
-                (message) => message.method === "session/close",
-              ) === true,
-          ),
-        );
-        yield* Fiber.interrupt(probing);
-      }),
-    );
-
-    expect(fake.spawns[0]!.hasExited).toBe(true);
-    for (const path of conversationFiles(home)) expect(existsSync(path)).toBe(false);
-    expect(listHomeFiles(home).some((name) => name.startsWith("hercule-scratch-"))).toBe(false);
-  });
-});
-
-describe.skipIf(isRoot)("a conversation whose files cannot be removed", () => {
-  it("is an error that says why", async () => {
-    const home = createSignedInHome();
-    const conversations = join(home, APP_DATA_DIR, "conversations");
-    const fake = buildFakeAgy(home, {
-      scripts: {
-        "session/new": (call, harness) => {
-          const reply = answerNewSession(home)(call, harness);
-          // A folder nobody may write to: the files stay.
-          chmodSync(conversations, 0o500);
-          return reply;
-        },
-      },
-    });
-
-    try {
-      const result = await probeAccount(home, fake);
-
-      expect(result.auth.status).toBe("error");
-      expect(result.auth.message).toMatch(
-        /^Could not remove the files of the Antigravity check: .*permission denied/i,
-      );
-      expect(result.models).toEqual([]);
-      expect(result.harnessVersion).toBe(AGY_VERSION);
-    } finally {
-      mkdirSync(conversations, { recursive: true });
-      chmodSync(conversations, 0o700);
-    }
+    expect(existsSync(storedIdPath(home))).toBe(false);
   });
 });

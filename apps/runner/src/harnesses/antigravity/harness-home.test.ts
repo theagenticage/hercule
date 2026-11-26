@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -23,8 +24,11 @@ import {
   APP_DATA_DIR,
   deleteSessionFiles,
   hasTokenFile,
+  makeProbeFolder,
   makeScratchFolder,
+  readProbeConversationId,
   readSignedInEmail,
+  writeProbeConversationId,
 } from "./harness-home";
 
 const isRoot = process.getuid?.() === 0;
@@ -32,6 +36,8 @@ const isRoot = process.getuid?.() === 0;
 afterEach(() => {
   cleanupHomes();
 });
+
+const SESSION_ID = "44444444-4444-4444-8444-444444444444";
 
 const createHome = (): string => createScratchHome("antigravity");
 
@@ -239,6 +245,7 @@ describe("deleteSessionFiles", () => {
     join(home, APP_DATA_DIR, "conversations", `${id}.db`),
     join(home, APP_DATA_DIR, "conversations", `${id}.db-wal`),
     join(home, APP_DATA_DIR, "conversations", `${id}.db-shm`),
+    join(home, APP_DATA_DIR, "annotations", `${id}.pbtxt`),
     join(home, APP_DATA_DIR, "brain", id, "notes", "plan.md"),
   ];
 
@@ -246,6 +253,8 @@ describe("deleteSessionFiles", () => {
     join(home, APP_DATA_DIR, "conversation_summaries.db"),
     join(home, APP_DATA_DIR, "jetbox_summaries_proto.pb"),
     join(home, APP_DATA_DIR, "implicit", "state.json"),
+    // The conversation the probe keeps is not a session of Hercule's.
+    join(home, "hercule-probe-conversation"),
     tokenPath(home),
   ];
 
@@ -290,6 +299,18 @@ describe("deleteSessionFiles", () => {
     expect(remaining(outsideFiles)).toEqual(outsideFiles);
   });
 
+  it("does not delete below an annotations folder that is a link", async () => {
+    const home = createHome();
+    const outside = createHome();
+    const outsideFile = createFile(join(outside, "annotations", `${SESSION}.pbtxt`));
+    mkdirSync(join(home, APP_DATA_DIR));
+    symlinkSync(join(outside, "annotations"), join(home, APP_DATA_DIR, "annotations"));
+
+    await Effect.runPromise(deleteSessionFiles(home, SESSION));
+
+    expect(existsSync(outsideFile)).toBe(true);
+  });
+
   it("does not delete below an app data folder that is a link", async () => {
     const home = createHome();
     const outside = createHome();
@@ -314,4 +335,74 @@ describe("deleteSessionFiles", () => {
       expect(remaining(files)).toEqual(files);
     },
   );
+});
+
+describe("the probe's conversation", () => {
+  const ID = "33333333-3333-4333-8333-333333333333";
+
+  it("makes its working folder once, with mode 0700, and reuses it", async () => {
+    const home = createHome();
+
+    const first = await Effect.runPromise(makeProbeFolder(home));
+    createFile(join(first, "kept.txt"));
+    const second = await Effect.runPromise(makeProbeFolder(home));
+
+    expect(first).toBe(join(home, "hercule-probe"));
+    expect(second).toBe(first);
+    expect(statSync(first).mode & 0o777).toBe(0o700);
+    expect(existsSync(join(first, "kept.txt"))).toBe(true);
+  });
+
+  it.each(["a link to a folder", "a file"])(
+    "does not take %s for its working folder",
+    async (what) => {
+      const home = createHome();
+      if (what === "a file") createFile(join(home, "hercule-probe"));
+      else symlinkSync(createHome(), join(home, "hercule-probe"));
+
+      const error = await Effect.runPromise(Effect.flip(makeProbeFolder(home)));
+
+      expect(error._tag).toBe("AdapterFailed");
+      expect(error.message).toMatch(/^Could not make the working folder for the Antigravity check/);
+    },
+  );
+
+  it("stores an id and reads it back, replacing the one before", async () => {
+    const home = createHome();
+
+    await Effect.runPromise(writeProbeConversationId(home, ID));
+    expect(await Effect.runPromise(readProbeConversationId(home))).toBe(ID);
+    await Effect.runPromise(writeProbeConversationId(home, SESSION_ID));
+
+    expect(await Effect.runPromise(readProbeConversationId(home))).toBe(SESSION_ID);
+    expect(readdirSync(home)).toEqual(["hercule-probe-conversation"]);
+  });
+
+  it("reads no id from a missing file, a link, a FIFO, a long file or text that is not a UUID", async () => {
+    const home = createHome();
+    const path = join(home, "hercule-probe-conversation");
+    const read = () => Effect.runPromise(readProbeConversationId(home));
+
+    expect(await read()).toBeUndefined();
+    createFile(path, "../../etc/passwd\n");
+    expect(await read()).toBeUndefined();
+    createFile(path, `${ID}${" ".repeat(200)}`);
+    expect(await read()).toBeUndefined();
+    rmSync(path);
+    createFile(join(home, "elsewhere"), `${ID}\n`);
+    symlinkSync(join(home, "elsewhere"), path);
+    expect(await read()).toBeUndefined();
+    rmSync(path);
+    createFifo(path);
+    expect(await read()).toBeUndefined();
+  });
+
+  it("fails with a sentence for the user when the id cannot be stored", async () => {
+    const home = join(createHome(), "missing");
+
+    const error = await Effect.runPromise(Effect.flip(writeProbeConversationId(home, ID)));
+
+    expect(error._tag).toBe("AdapterFailed");
+    expect(error.message).toMatch(/^Could not remember the conversation of the Antigravity check/);
+  });
 });

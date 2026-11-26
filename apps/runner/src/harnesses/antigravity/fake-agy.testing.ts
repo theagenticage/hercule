@@ -110,6 +110,23 @@ const readRecordedNewSession = (id: string): Record<string, unknown> => {
 };
 
 /**
+ * Returns a script for `session/resume`. Like `agy`, it answers with the
+ * recording's models when the conversation's files exist in `home`, and
+ * otherwise refuses with the error `agy` gives for an id it does not know.
+ */
+export const answerResume =
+  (home: string): HarnessScript =>
+  (call, harness) => {
+    const id = (call.params as { sessionId: string }).sessionId;
+    return existsSync(join(home, APP_DATA_DIR, "conversations", `${id}.db`))
+      ? answerWith(readRecordedNewSession(id))(call, harness)
+      : refuse(-32603, `Failed to read session ${id}; retry, or load it with session/load`)(
+          call,
+          harness,
+        );
+  };
+
+/**
  * Returns a script for `session/new` that creates the conversation's files in
  * `home` first, as `agy` does, and then answers with the recording's models.
  */
@@ -127,8 +144,6 @@ export interface Spawned {
   /** The signals the runner sent, in order. */
   readonly signals: Array<string | undefined>;
   hasExited: boolean;
-  /** What was in the Harness Home at the moment the process exited. */
-  filesAtExit: ReadonlyArray<string> | undefined;
 }
 
 export interface FakeAgy {
@@ -141,8 +156,8 @@ export interface FakeAgy {
 
 /**
  * Builds a fake `agy` for the Harness Home `home`. Its process answers from
- * the recording, with `session/new` and `session/close` answered as `agy`
- * does unless `scripts` says otherwise. A spawn writes the logs of a process
+ * the recording, with `session/new`, `session/resume` and `session/close`
+ * answered as `agy` does unless `scripts` says otherwise. A spawn writes the logs of a process
  * that uses file storage next to the path of `--log-file`.
  */
 export const buildFakeAgy = (
@@ -151,6 +166,7 @@ export const buildFakeAgy = (
 ): FakeAgy => {
   const scripts = {
     "session/new": answerNewSession(home),
+    "session/resume": answerResume(home),
     "session/close": answerWith({}),
     ...options.scripts,
   };
@@ -162,17 +178,9 @@ export const buildFakeAgy = (
     writeFileSync(`${logFile}.4000`, FILE_STORAGE_LINE);
     const harness = startFakeHarness({ recording: readRecording("cancel"), scripts });
     const signals: Array<string | undefined> = [];
-    const spawned: Spawned = {
-      command,
-      cwd,
-      harness,
-      signals,
-      hasExited: false,
-      filesAtExit: undefined,
-    };
+    const spawned: Spawned = { command, cwd, harness, signals, hasExited: false };
     void harness.exited.then(() => {
       spawned.hasExited = true;
-      spawned.filesAtExit = existsSync(home) ? listHomeFiles(home) : [];
     });
     spawns.push(spawned);
     return {

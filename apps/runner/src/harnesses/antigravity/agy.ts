@@ -9,13 +9,14 @@ import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { openAcpConnection } from "@hercule/acp";
-import type { AcpConnection, AcpError, AcpHandlers } from "@hercule/acp";
+import type { AcpConnection, AcpError, AcpHandlers, SessionSettings } from "@hercule/acp";
 import { VERSION } from "@hercule/home/version";
 import { HarnessLoginMissing } from "@hercule/protocol";
-import type { AdapterError } from "@hercule/protocol";
+import type { AdapterError, AdapterFailed } from "@hercule/protocol";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
@@ -143,6 +144,47 @@ export const isSignInRequired = (error: AcpError): boolean =>
   error.reason === "refused" &&
   error.code === -32000 &&
   (error.harnessMessage ?? "").includes("Authentication required");
+
+/**
+ * Checks that the account that opened a session can be used, from the plan
+ * `authenticate` gave and the settings `session/new` or `session/resume`
+ * returned. Returns the plan name when it can, and the failure that says why
+ * when it cannot. Two cases look alike from outside, and the user must do
+ * something different in each:
+ *
+ * - No model is listed: `agy` could not reach Google, or Google refused the
+ *   login. With a token that has not expired yet, `agy` answers `authenticate`
+ *   without asking Google, so the sign-in looks fine.
+ * - Models are listed but there is no plan: Google holds the account until it
+ *   is verified. `agy` lists the free models, and then answers every prompt
+ *   with "Verification Required". Signing in again does not help.
+ */
+export const readUsablePlan = (
+  planLabel: string | undefined,
+  settings: SessionSettings,
+): Result.Result<string, AdapterFailed> => {
+  const modelOption = settings.configOptions.find(
+    (option) => option.id === "model" && option.type === "select",
+  );
+  const hasModels =
+    modelOption?.type === "select" &&
+    modelOption.options.some((choice) => !("options" in choice) || choice.options.length > 0);
+  if (!hasModels) {
+    return Result.fail(
+      buildAdapterFailed(
+        `${ANTIGRAVITY_NAME} listed no models for this account. The runner may be offline, or Google may have refused the sign-in.`,
+      ),
+    );
+  }
+  if (planLabel === undefined) {
+    return Result.fail(
+      buildAdapterFailed(
+        `Google is holding this account until it is verified ("Verify your account to continue."), so ${ANTIGRAVITY_NAME} cannot use it. Sign in to this Google account in a browser and follow Google's steps; Google explains them at https://support.google.com/accounts?p=al_alert. The sign-in in Hercule is fine and need not be repeated.`,
+      ),
+    );
+  }
+  return Result.succeed(planLabel);
+};
 
 const decodePlan = Schema.decodeUnknownOption(
   Schema.Struct({

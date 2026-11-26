@@ -12,9 +12,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import { AcpError } from "@hercule/acp";
-import type { AcpHandlers } from "@hercule/acp";
+import type { AcpHandlers, SessionSettings } from "@hercule/acp";
 import {
   answerWith,
   readRecording,
@@ -36,6 +38,7 @@ import {
 import {
   buildLoginCommand,
   buildNotSignedIn,
+  readUsablePlan,
   isSignInRequired,
   openSignedInAgy,
   readAgyVersion,
@@ -356,6 +359,62 @@ describe("the plan", () => {
     const fake = buildFakeAgy({ scripts: { authenticate: answerWith(reply) } });
 
     expect(await openAndReadPlan(fake, createSignedInHome())).toBeUndefined();
+  });
+});
+
+describe("readUsablePlan", () => {
+  const listing = (...values: ReadonlyArray<string>): SessionSettings => ({
+    configOptions: [
+      {
+        id: "model",
+        name: "Model",
+        type: "select",
+        currentValue: values[0] ?? "",
+        options: values.map((value) => ({ value, name: value })),
+      },
+    ],
+  });
+
+  it("returns the plan of an account that has a plan and models", () => {
+    expect(readUsablePlan("Antigravity Starter Quota", listing("gemini-4-hydrogen"))).toEqual(
+      Result.succeed("Antigravity Starter Quota"),
+    );
+  });
+
+  it("says Google holds an account that lists models but has no plan, and that signing in again does not help", () => {
+    const failure = Result.getFailure(readUsablePlan(undefined, listing("gemini-3.8-flash")));
+
+    expect(Option.getOrUndefined(failure)).toBeInstanceOf(AdapterFailed);
+    expect(Option.getOrUndefined(failure)?.message).toBe(
+      'Google is holding this account until it is verified ("Verify your account to continue."), so Antigravity cannot use it. Sign in to this Google account in a browser and follow Google\'s steps; Google explains them at https://support.google.com/accounts?p=al_alert. The sign-in in Hercule is fine and need not be repeated.',
+    );
+  });
+
+  it.each([
+    ["no config options", { configOptions: [] }],
+    ["a model option with no choices", listing()],
+    [
+      "only a thought level",
+      {
+        configOptions: [
+          {
+            id: "thought_level",
+            name: "Level",
+            type: "select" as const,
+            currentValue: "low",
+            options: [{ value: "low", name: "Low" }],
+          },
+        ],
+      },
+    ],
+  ])("says the runner may be offline when the settings have %s, plan or not", (_what, settings) => {
+    const message =
+      "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.";
+
+    for (const plan of ["Antigravity Starter Quota", undefined]) {
+      const failure = Result.getFailure(readUsablePlan(plan, settings));
+      expect(Option.getOrUndefined(failure)?.message).toBe(message);
+    }
   });
 });
 

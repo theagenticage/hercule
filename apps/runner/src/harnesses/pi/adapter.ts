@@ -126,7 +126,7 @@ import {
   writeModelFiles,
   type ModelFiles,
 } from "./agent-folder";
-import { writeFileAtomically } from "./atomic-file";
+import { writeFileAtomically } from "../atomic-file";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
 import {
