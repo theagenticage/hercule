@@ -1303,7 +1303,10 @@ describe("the error notices of agy", () => {
   it("reads the quota error, and tells it from other errors", () => {
     expect(parseAgyErrorNotice(`\n\u26a0 ${QUOTA_NOTICE}\n`)).toBe(QUOTA_NOTICE);
     expect(isQuotaError(QUOTA_NOTICE)).toBe(true);
-    expect(isQuotaError("rpc error: code = 429")).toBe(true);
+    expect(
+      isQuotaError("RESOURCE_EXHAUSTED (code 429): You have exhausted your capacity on this model"),
+    ).toBe(true);
+    expect(isQuotaError("quota service unavailable")).toBe(false);
   });
 
   it.each([

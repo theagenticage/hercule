@@ -236,14 +236,18 @@ export const parseAgyErrorNotice = (text: string): string | undefined => {
 };
 
 /**
- * The pattern with which the swarm monitor of `agy` 1.5.15 classes an error
- * as a quota error (found in its code). A later `agy` with another pattern
- * makes `isQuotaError` miss, and the turn then fails as an ordinary provider
- * error with the same words.
+ * Matches the two texts recorded for a quota error of the model service:
+ * - "Individual quota reached. Please upgrade your subscription to increase
+ *   your limits. Resets in 1h22m55s." (a live run on 2026-11-26).
+ * - "RESOURCE_EXHAUSTED (code 429): You have exhausted your capacity on this
+ *   model" (research of 2026-11-25, `docs/research/antigravity-harness.md`
+ *   section 6.5).
+ * A quota error worded another way is not matched, and the turn then fails
+ * as an ordinary provider error with the same words.
  */
-const QUOTA_ERROR_PATTERN = /RESOURCE_EXHAUSTED|quota|\b429\b|exhausted your capacity|rate.?limit/i;
+const QUOTA_ERROR_PATTERN = /quota reached|RESOURCE_EXHAUSTED/i;
 
-/** Returns true when the text of an error of `agy` is a quota error, by the pattern `agy` itself uses. */
+/** Returns true when the text of an error of `agy` is one of the recorded quota errors. */
 export const isQuotaError = (text: string): boolean => QUOTA_ERROR_PATTERN.test(text);
 
 /** The most bytes of one worker log that are read. A line that comes later is not found. */

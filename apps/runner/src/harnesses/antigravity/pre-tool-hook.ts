@@ -2,7 +2,7 @@
  * `hercule antigravity-pre-tool-hook`: the pre-tool hook of an `agy` session
  * (spec 06 section 8.1). The hooks file in the Harness Home runs it before
  * every `run_command`, `edit_file`, `write_file`, `search_web`,
- * `invoke_subagent` and chrome-devtools call, and the tool waits for it. `agy`
+ * `invoke_subagent` and MCP tool (`mcp_`) call, and the tool waits for it. `agy`
  * writes the call as one JSON document on stdin; the hook prints a denial as
  * JSON, or nothing to let the call run. It always exits 0.
  *
@@ -25,14 +25,17 @@
  *
  * One call goes through one straight line: read the rules, decode the call,
  * take the edit-watch mark (spec 19 section 4.1), then decide. The mark is
- * best effort and its errors never reach the decision.
+ * best effort and its errors never reach the decision. The decision reads one
+ * more file, the session's conversation id (`conversationIdFile`), but only for
+ * a shell, edit or MCP call and only to tell a subagent's call from the
+ * session's own.
  *
  * This runs at every tool call, so startup time counts. The compiled binary
  * starts this file without the dispatcher, so keep its imports to Node
  * built-ins and the mark format, and not `effect`. `pnpm dep-lint` checks this.
  *
- * The input is decoded from its top-level fields only (`cwd`, `toolCall.id`,
- * `toolCall.name`, `toolCall.args`). The text of a command or a file is never
+ * The input is decoded from its top-level fields only (`cwd`,
+ * `conversationId`, `toolCall.id`, `toolCall.name`, `toolCall.args`). The text of a command or a file is never
  * searched, so a model cannot plant a field in it.
  *
  * Known limits, recorded in spec 06 section 8.1:
