@@ -4,10 +4,11 @@
  * is built here, so that all of them get the same environment and none of
  * them can run as another account.
  */
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
-import { readdir, rm, unlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -57,61 +58,120 @@ export type AgyPurpose =
       readonly request: NewSessionRequest;
     };
 
+/** What Hercule does at a session start with a path it owns in the Harness Home. */
+interface OwnedHomePath {
+  /** The path, relative to the Harness Home. */
+  readonly path: string;
+  /**
+   * `remove` deletes a file or a whole folder. `empty` replaces the file with
+   * an empty one, which is what `agy` creates itself and may need to find.
+   */
+  readonly whenStarting: "remove" | "empty";
+  /** Why Hercule owns the path, for the log line and the failure message. */
+  readonly reason: string;
+}
+
 /**
- * Removes `<home>/config/hooks.json`, the hooks file of the Harness Home, and
- * logs that it did. Does nothing when there is none. A link is removed, never
- * what it points to. Fails with `AdapterFailed` when the file exists and cannot
- * be removed, because then Hercule cannot tell what `agy` would load.
+ * The paths of the Harness Home that Hercule owns. Every session of an account
+ * shares the Harness Home, and `agy` reads these in every session, so what an
+ * earlier session left there would silently change every later one, in any
+ * workspace. `resetOwnedHomePaths` resets them all before `agy` runs.
  *
- * `agy` reads this file at every tool call, and every session of an account
- * shares the Harness Home. A hook left there (for example one that approves
- * every command) would silently loosen every later session, in any workspace,
- * so a session start removes it before `agy` runs. What stays possible: a
- * session that writes the file while another session of the same account runs.
- * That needs code execution as the runner's user, which already reaches
- * everything this user can.
+ * - `config/hooks.json`: `agy` runs the hooks in it at every tool call, so a
+ *   hook that approves every command would loosen every later session.
+ * - `antigravity-acp/settings.json`: `toolPermission` in it works under
+ *   `agy acp`. `agy` does not create the file.
+ * - `config/mcp_config.json`: `agy` loads every MCP server in it in every
+ *   session, and with no server in the session's own request, such a server
+ *   would connect. `agy` creates it as an empty file, so it is emptied, not
+ *   removed.
  */
-const removeHooksFile = (home: string): Effect.Effect<void, AdapterFailed> =>
-  removeOwnedFile(
-    join(home, "config", "hooks.json"),
-    "hooks file",
-    `Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
+const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
+  {
+    path: join("config", "hooks.json"),
+    whenStarting: "remove",
+    reason: `Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
+  },
+  {
+    path: join(APP_DATA_DIR, "settings.json"),
+    whenStarting: "remove",
+    reason: `Hercule owns the settings of the Harness Home, because a tool permission in them would change every session of the account.`,
+  },
+  {
+    path: join("config", "mcp_config.json"),
+    whenStarting: "empty",
+    reason: `Hercule gives ${ANTIGRAVITY_NAME} its MCP servers in each session, and a server in this file would load in every session of the account.`,
+  },
+];
+
+/**
+ * Applies `OWNED_HOME_PATHS` to the Harness Home `home`, and logs each path it
+ * had to change. A path that is already as wanted (missing for `remove`, an
+ * empty file for `empty`) is left alone and not logged. A link is removed or
+ * replaced, never followed. Fails with `AdapterFailed` naming the path when it
+ * cannot be changed, because then Hercule cannot tell what `agy` would load.
+ *
+ * What stays possible: a session that writes one of these paths while another
+ * session of the same account runs. That needs code execution as the runner's
+ * user, which already reaches everything this user can.
+ */
+const resetOwnedHomePaths = (home: string): Effect.Effect<void, AdapterFailed> =>
+  Effect.forEach(
+    OWNED_HOME_PATHS,
+    (owned) => {
+      const path = join(home, owned.path);
+      return Effect.tryPromise({
+        try: () =>
+          owned.whenStarting === "remove" ? removePath(path) : replaceWithEmptyFile(path),
+        catch: (error) =>
+          buildAdapterFailed(
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not ${owned.whenStarting === "remove" ? "remove" : "empty"} ${path}: ${describeFileFailure(error)}`,
+          ),
+      }).pipe(
+        Effect.flatMap((wasChanged) =>
+          wasChanged
+            ? Effect.logWarning(
+                `${owned.whenStarting === "remove" ? "Removed" : "Emptied"} ${path}: ${owned.reason}`,
+              )
+            : Effect.void,
+        ),
+      );
+    },
+    { discard: true },
   );
 
 /**
- * Removes `<home>/antigravity-acp/settings.json`, the settings file of the
- * Harness Home, and logs that it did. `toolPermission` in it works under
- * `agy acp`, so a value an earlier session wrote would change every later
- * session. `agy` does not create the file. Same rules as `removeHooksFile`.
+ * Deletes the file, link or folder (with all it holds) at `path`. A link is
+ * deleted, never followed. Returns whether there was anything to delete.
  */
-const removeSettingsFile = (home: string): Effect.Effect<void, AdapterFailed> =>
-  removeOwnedFile(
-    join(home, APP_DATA_DIR, "settings.json"),
-    "settings file",
-    `Hercule owns the settings of the Harness Home, because a tool permission in them would change every session of the account.`,
-  );
+const removePath = async (path: string): Promise<boolean> => {
+  try {
+    await lstat(path);
+  } catch (error) {
+    if (isMissingPath(error)) return false;
+    throw error;
+  }
+  await rm(path, { recursive: true, force: true });
+  return true;
+};
 
-const removeOwnedFile = (
-  path: string,
-  label: string,
-  reason: string,
-): Effect.Effect<void, AdapterFailed> => {
-  return Effect.tryPromise({
-    try: () => unlink(path).then(() => true),
-    catch: (error) =>
-      isMissingPath(error)
-        ? "missing"
-        : buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} could not start, because Hercule could not remove the ${label} ${path}: ${describeFileFailure(error)}`,
-          ),
-  }).pipe(
-    Effect.catch((failure) =>
-      failure === "missing" ? Effect.succeed(false) : Effect.fail(failure),
-    ),
-    Effect.flatMap((wasRemoved) =>
-      wasRemoved ? Effect.logWarning(`Removed the ${label} ${path}: ${reason}`) : Effect.void,
-    ),
+/**
+ * Makes `path` an empty regular file: writes an empty file beside it, then
+ * renames it over `path`, so a link or a file in its place is replaced and
+ * nothing is written through a link. Creates the folder when it is missing.
+ * Returns whether `path` held anything else than an empty regular file.
+ */
+const replaceWithEmptyFile = async (path: string): Promise<boolean> => {
+  const wasEmpty = await readRegularFile(path, 1).then(
+    ({ text }) => text === "",
+    () => false,
   );
+  if (wasEmpty) return false;
+  await mkdir(dirname(path), { recursive: true });
+  const next = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(next, "", { flag: "wx" });
+  await rename(next, path);
+  return true;
 };
 
 /**
@@ -697,8 +757,7 @@ export const openSignedInAgy = (
         : { cwd: options.cwd, mcpServers: [] };
 
     if (options.purpose.kind === "session") {
-      yield* removeHooksFile(ctx.home);
-      yield* removeSettingsFile(ctx.home);
+      yield* resetOwnedHomePaths(ctx.home);
     }
 
     const folder = yield* makeSessionLogFolder(ctx.home);
@@ -763,7 +822,7 @@ export const openSignedInAgy = (
     }
 
     // One check per optional field of the request that `agy` must announce
-    // support for. The check of `request.mcpServers` goes here, beside this one.
+    // support for.
     if (
       options.purpose.kind === "session" &&
       request.additionalDirectories !== undefined &&
@@ -772,6 +831,18 @@ export const openSignedInAgy = (
       return yield* Effect.fail(
         buildAdapterFailed(
           `${ANTIGRAVITY_NAME} did not confirm that it takes a session's skills folder (\`additionalDirectories\`), so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+        ),
+      );
+    }
+
+    if (
+      options.purpose.kind === "session" &&
+      request.mcpServers.length > 0 &&
+      !connection.harness.acceptsHttpMcpServers
+    ) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} did not confirm that it takes MCP servers over HTTP (\`acceptsHttpMcpServers\`), so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
         ),
       );
     }

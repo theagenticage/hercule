@@ -8,9 +8,11 @@
  */
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -924,84 +926,111 @@ describe("closing the scope", () => {
   });
 });
 
-describe("the hooks file of the Harness Home", () => {
+describe("the files of the Harness Home that Hercule owns", () => {
   const SESSION: AgyPurpose = {
     kind: "session",
     accessMode: "approval-required",
     request: { cwd: "/work", mcpServers: [] },
   };
-  const HOOKS = (home: string) => join(home, "config", "hooks.json");
+  const REMOVED = [
+    ["config", "hooks.json"],
+    ["antigravity-acp", "settings.json"],
+  ] as const;
+  const MCP_CONFIG = (home: string) => join(home, "config", "mcp_config.json");
 
-  it("is removed before agy starts for a session", async () => {
+  it.each(REMOVED)("removes %s/%s before agy starts for a session", async (folder, name) => {
     const { home, fake } = setUp();
-    mkdirSync(join(home, "config"));
-    writeFileSync(HOOKS(home), "{}");
+    mkdirSync(join(home, folder), { recursive: true });
+    writeFileSync(join(home, folder, name), "{}");
 
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
-    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(existsSync(join(home, folder, name))).toBe(false);
     expect(fake.spawns).toHaveLength(1);
   });
 
-  it("is removed as a link, and what it points to stays", async () => {
+  it.each(REMOVED)("removes %s/%s as a link, and what it points to stays", async (folder, name) => {
     const { home, fake } = setUp();
-    const target = join(createScratchHome("agy-target"), "hooks.json");
+    const target = join(createScratchHome("agy-target"), name);
     writeFileSync(target, "{}");
-    mkdirSync(join(home, "config"));
-    symlinkSync(target, HOOKS(home));
+    mkdirSync(join(home, folder), { recursive: true });
+    symlinkSync(target, join(home, folder, name));
 
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
-    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(existsSync(join(home, folder, name))).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("{}");
   });
 
-  it("is left alone when agy is opened for a probe", async () => {
+  it.each(REMOVED)("removes %s/%s when it is a whole folder", async (folder, name) => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, folder, name, "inner"), { recursive: true });
+    writeFileSync(join(home, folder, name, "inner", "file"), "x");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(join(home, folder, name))).toBe(false);
+  });
+
+  it.each(REMOVED)("removes %s/%s as a link to a folder, and the folder stays", async (folder, name) => {
+    const { home, fake } = setUp();
+    const target = createScratchHome("agy-target");
+    writeFileSync(join(target, "file"), "x");
+    mkdirSync(join(home, folder), { recursive: true });
+    symlinkSync(target, join(home, folder, name));
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(join(home, folder, name))).toBe(false);
+    expect(readFileSync(join(target, "file"), "utf8")).toBe("x");
+  });
+
+  it("empties the MCP servers file, also when it is a link, and leaves the link's target alone", async () => {
     const { home, fake } = setUp();
     mkdirSync(join(home, "config"));
-    writeFileSync(HOOKS(home), "{}");
+    writeFileSync(MCP_CONFIG(home), '{"mcpServers":{"x":{"url":"http://x"}}}');
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+
+    const target = join(createScratchHome("agy-target"), "mcp.json");
+    writeFileSync(target, "{}");
+    rmSync(MCP_CONFIG(home));
+    symlinkSync(target, MCP_CONFIG(home));
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+    expect(lstatSync(MCP_CONFIG(home)).isFile()).toBe(true);
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+    expect(readFileSync(target, "utf8")).toBe("{}");
+  });
+
+  it("creates the MCP servers file as an empty file when there is none", async () => {
+    const { home, fake } = setUp();
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+    expect(readdirSync(join(home, "config"))).toEqual(["mcp_config.json"]);
+  });
+
+  it("leaves all of them alone when agy is opened for a probe", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(join(home, "config", "hooks.json"), "{}");
+    writeFileSync(MCP_CONFIG(home), "{}");
 
     await Effect.runPromise(Effect.scoped(open(fake, home)));
 
-    expect(existsSync(HOOKS(home))).toBe(true);
+    expect(readFileSync(join(home, "config", "hooks.json"), "utf8")).toBe("{}");
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("{}");
   });
 
-  it("fails the start with AdapterFailed, and spawns nothing, when it cannot be removed", async () => {
+  it("fails the start with AdapterFailed naming the path, and spawns nothing, when one cannot be changed", async () => {
     const { home, fake } = setUp();
-    mkdirSync(join(HOOKS(home), "inner"), { recursive: true });
+    mkdirSync(join(MCP_CONFIG(home), "inner"), { recursive: true });
 
     const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
 
     expect(failure._tag).toBe("AdapterFailed");
-    expect(failure.message).toContain("hooks file");
-    expect(fake.spawns).toHaveLength(0);
-  });
-
-  it("removes the settings file in the app data folder too, and keeps what a link points to", async () => {
-    const { home, fake } = setUp();
-    const target = join(createScratchHome("agy-target"), "settings.json");
-    writeFileSync(target, "{}");
-    mkdirSync(join(home, "antigravity-acp"), { recursive: true });
-    symlinkSync(target, join(home, "antigravity-acp", "settings.json"));
-
-    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
-
-    expect(existsSync(join(home, "antigravity-acp", "settings.json"))).toBe(false);
-    expect(readFileSync(target, "utf8")).toBe("{}");
-  });
-
-  it("leaves the settings file alone for a probe, and fails a session start that cannot remove it", async () => {
-    const probe = setUp();
-    mkdirSync(join(probe.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(probe.home, "antigravity-acp", "settings.json"), "{}");
-    await Effect.runPromise(Effect.scoped(open(probe.fake, probe.home)));
-    expect(existsSync(join(probe.home, "antigravity-acp", "settings.json"))).toBe(true);
-
-    const { home, fake } = setUp();
-    mkdirSync(join(home, "antigravity-acp", "settings.json", "inner"), { recursive: true });
-    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
-    expect(failure._tag).toBe("AdapterFailed");
-    expect(failure.message).toContain("settings file");
+    expect(failure.message).toContain("mcp_config.json");
     expect(fake.spawns).toHaveLength(0);
   });
 });
