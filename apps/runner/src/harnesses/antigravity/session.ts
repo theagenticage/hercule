@@ -1197,7 +1197,7 @@ export const startAgySession = (
      */
     const endSubagentTurnsAfterCancel = Effect.gen(function* () {
       yield* readSessionFiles;
-      emitEvents(interruptSubagentTurns(subagentsState));
+      publishEvents(interruptSubagentTurns(subagentsState));
     });
 
     /**
