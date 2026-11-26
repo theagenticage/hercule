@@ -1,0 +1,324 @@
+/**
+ * `hercule antigravity-pre-tool-hook`: the pre-tool hook of an `agy` session
+ * (spec 06 section 8.1). The hooks file in the Harness Home runs it before
+ * every `run_command`, `edit_file`, `write_file` and `search_web`, and the
+ * tool waits for it. `agy` writes the call as one JSON document on stdin; the
+ * hook prints a denial as JSON, or nothing to let the call run. It always
+ * exits 0.
+ *
+ * It does two things, in this order:
+ * 1. It writes the edit-watch mark of the call (spec 19 section 4.1) into the
+ *    session's marks directory, for the three tools that start work. The mark
+ *    is best effort and never blocks a call.
+ * 2. It collects facts from the environment and the filesystem and passes
+ *    them to `decidePreToolHook`, which decides.
+ *
+ * This runs at every tool call, so startup time counts. The compiled binary
+ * starts this file without the dispatcher, so keep its imports to Node
+ * built-ins, `effect/Schema` and the small modules below. `pnpm dep-lint`
+ * checks this.
+ *
+ * The input is decoded from its top-level fields only (`cwd`, `toolCall.id`,
+ * `toolCall.name`, `toolCall.args`). The text of a command or a file is never
+ * searched, so a model cannot plant a field in it.
+ */
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  openSync,
+  readlinkSync,
+  readSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import * as Schema from "effect/Schema";
+import { SESSION_MARKS_DIR_VARIABLE, formatStartMark } from "../../edit-marks/mark-format";
+import {
+  CONFIG_FOLDER_NAMES,
+  DENY_WEB_SEARCH_VARIABLE,
+  EDIT_TOOL_NAMES,
+  GUARDED_CONFIG_FILES,
+  GUARD_VARIABLE,
+  PLUGINS_FOLDER_NAME,
+  SHELL_TOOL_NAME,
+  SKILLS_DIRECTORY_VARIABLE,
+  decidePreToolHook,
+} from "./pre-tool-hook-policy";
+import type { DecodedToolCall, EditTarget, GuardedPlace } from "./pre-tool-hook-policy";
+
+/** The most input the hook reads. A call larger than this counts as unreadable. */
+const MAX_INPUT_BYTES = 1024 * 1024;
+
+/** The most folders the hook walks up from the session's folder looking for the git root. */
+const MAX_WALK_DEPTH = 64;
+
+/** The most links the hook follows while it resolves one path, so a loop of links ends. */
+const MAX_LINKS = 40;
+
+/** The largest `plugins.json` the hook reads. A larger file adds no guarded folder. */
+const MAX_PLUGINS_FILE_BYTES = 64 * 1024;
+
+/** The tools whose calls get an edit-watch mark. */
+const MARKED_TOOL_NAMES: ReadonlyArray<string> = [SHELL_TOOL_NAME, ...EDIT_TOOL_NAMES];
+
+/** An id that is safe to use as a file name. Any other id gets no mark. */
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+const HookInput = Schema.Struct({
+  cwd: Schema.String,
+  toolCall: Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    args: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+  }),
+});
+
+const decodeHookInput = Schema.decodeUnknownOption(HookInput);
+
+const PluginsFile = Schema.Struct({ entries: Schema.Array(Schema.Unknown) });
+const decodePluginsFile = Schema.decodeUnknownOption(PluginsFile);
+const decodePluginsEntry = Schema.decodeUnknownOption(Schema.Struct({ path: Schema.String }));
+
+/** The call as the hook decoded it, with the fields the mark and the guard need. */
+interface HookCall extends DecodedToolCall {
+  readonly cwd: string;
+  readonly id: string;
+}
+
+/** Returns the decoded call, or undefined when `input` is missing, is not JSON, or lacks a top-level field. */
+const decodeCall = (input: string | undefined): HookCall | undefined => {
+  if (input === undefined) return undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(input);
+  } catch {
+    return undefined;
+  }
+  const decoded = decodeHookInput(json);
+  if (decoded._tag === "None") return undefined;
+  const { cwd, toolCall } = decoded.value;
+  return { cwd, id: toolCall.id, name: toolCall.name, args: toolCall.args ?? {} };
+};
+
+/**
+ * Writes the mark of the call into `marksDir`: the call's id as the file name,
+ * and for a shell command its text. Never overwrites a mark. Does nothing for
+ * an id that is not safe in a file name, and ignores any failure, because the
+ * edit watch is best effort.
+ */
+const writeMark = (marksDir: string, call: HookCall): void => {
+  if (!SAFE_ID.test(call.id)) return;
+  const command = call.args["CommandLine"];
+  const content =
+    call.name === SHELL_TOOL_NAME && typeof command === "string" && command !== ""
+      ? formatStartMark(call.id, command)
+      : formatStartMark(call.id);
+  try {
+    writeFileSync(join(marksDir, call.id), content, { flag: "wx" });
+  } catch {
+    // Best effort: the call runs without a mark.
+  }
+};
+
+/** Returns the device and inode of `path` as one text, following links, or undefined when it does not exist. */
+const readIdentity = (path: string): string | undefined => {
+  try {
+    const stats = statSync(path, { bigint: true });
+    return `${stats.dev}:${stats.ino}`;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Returns the absolute path `path` as the operating system resolves it: the
+ * longest part that exists is resolved with `realpath`, and the rest is
+ * appended as written. `path` may hold `..`, which the operating system
+ * applies after it has followed the links before it, so a path that was
+ * already cleaned of `..` as text gives another answer. A link that points nowhere is followed to its target,
+ * because a write through it creates the target.
+ */
+const resolveLikeOperatingSystem = (path: string): string => {
+  let head = path;
+  let rest: ReadonlyArray<string> = [];
+  let links = 0;
+  for (;;) {
+    try {
+      return join(realpathSync.native(head), ...rest);
+    } catch {
+      // head does not resolve: it is missing, a loop, or a link to nowhere.
+    }
+    let target: string | undefined;
+    try {
+      if (links < MAX_LINKS && lstatSync(head).isSymbolicLink()) {
+        links += 1;
+        target = readlinkSync(head);
+      }
+    } catch {
+      // Not a link, or gone since the check: handled as missing below.
+    }
+    if (target !== undefined) {
+      head = resolve(dirname(head), target);
+      continue;
+    }
+    const parent = dirname(head);
+    if (parent === head) return join(head, ...rest);
+    rest = [basename(head), ...rest];
+    head = parent;
+  }
+};
+
+/** Reads where an edit tool writes, with the identities of the existing part of the path and every folder above it. */
+const buildEditTarget = (cwd: string, path: string): EditTarget => {
+  const lexicalPath = resolve(cwd, path);
+  // Not `join`: it would clean `..` as text first.
+  const resolvedPath = resolveLikeOperatingSystem(isAbsolute(path) ? path : `${cwd}/${path}`);
+  const existingIdentities: Array<string> = [];
+  for (let at = resolvedPath; ; at = dirname(at)) {
+    const identity = readIdentity(at);
+    if (identity !== undefined) existingIdentities.push(identity);
+    if (dirname(at) === at) break;
+  }
+  return { lexicalPath, resolvedPath, existingIdentities };
+};
+
+/** Builds the guarded place at `path`, an absolute path. */
+const buildPlace = (path: string, isFolder: boolean): GuardedPlace => {
+  const lexicalPath = resolve(path);
+  return {
+    isFolder,
+    lexicalPath,
+    resolvedPath: resolveLikeOperatingSystem(lexicalPath),
+    identity: readIdentity(lexicalPath),
+  };
+};
+
+/**
+ * Returns the folders `agy` reads configuration from for a session in `cwd`:
+ * the folder itself and every folder above it up to the nearest one holding
+ * `.git`. Without a git root, or when the walk reaches `MAX_WALK_DEPTH`
+ * folders, only the session's folder.
+ */
+const listConfigRoots = (cwd: string): ReadonlyArray<string> => {
+  const start = resolveLikeOperatingSystem(resolve(cwd));
+  const roots: Array<string> = [];
+  for (let at = start; roots.length < MAX_WALK_DEPTH; at = dirname(at)) {
+    roots.push(at);
+    if (existsSync(join(at, ".git"))) return roots;
+    if (dirname(at) === at) break;
+  }
+  return [start];
+};
+
+/**
+ * Returns the folders listed in the `plugins.json` at `file`, as absolute
+ * paths (a relative one is relative to `root`, the folder that holds the
+ * configuration folder). An absent, unreadable, oversized or malformed file
+ * lists none.
+ */
+const readPluginFolders = (file: string, root: string): ReadonlyArray<string> => {
+  let text: string;
+  try {
+    const descriptor = openSync(file, "r");
+    try {
+      const buffer = Buffer.alloc(MAX_PLUGINS_FILE_BYTES + 1);
+      const count = readSync(descriptor, buffer, 0, buffer.length, 0);
+      if (count > MAX_PLUGINS_FILE_BYTES) return [];
+      text = buffer.toString("utf8", 0, count);
+    } finally {
+      closeSync(descriptor);
+    }
+    const decoded = decodePluginsFile(JSON.parse(text));
+    if (decoded._tag === "None") return [];
+    return decoded.value.entries.flatMap((entry) => {
+      const path = decodePluginsEntry(entry);
+      return path._tag === "Some" ? [resolve(root, path.value.path)] : [];
+    });
+  } catch {
+    return [];
+  }
+};
+
+/** Returns every place the agent may not change in a session in `cwd` (spec 06 section 8.1). */
+const buildGuardedPlaces = (
+  cwd: string,
+  skillsDirectory: string | undefined,
+): ReadonlyArray<GuardedPlace> => {
+  const places: Array<GuardedPlace> = [];
+  for (const root of listConfigRoots(cwd)) {
+    for (const name of CONFIG_FOLDER_NAMES) {
+      const folder = join(root, name);
+      for (const file of GUARDED_CONFIG_FILES) places.push(buildPlace(join(folder, file), false));
+      places.push(buildPlace(join(folder, PLUGINS_FOLDER_NAME), true));
+      for (const plugins of readPluginFolders(join(folder, "plugins.json"), root)) {
+        places.push(buildPlace(plugins, true));
+      }
+    }
+  }
+  if (skillsDirectory !== undefined) places.push(buildPlace(skillsDirectory, true));
+  return places;
+};
+
+/**
+ * Returns the text the hook prints for the tool call in `input`: one line of
+ * JSON for a denial, or an empty string to let the call run. Writes the
+ * edit-watch mark as a side effect. `input` is undefined when stdin could not
+ * be read in full.
+ */
+export const answerPreToolCall = (
+  input: string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+): string => {
+  const call = decodeCall(input);
+  const marksDir = env[SESSION_MARKS_DIR_VARIABLE];
+  if (call !== undefined && marksDir && MARKED_TOOL_NAMES.includes(call.name)) {
+    writeMark(marksDir, call);
+  }
+  const guardIsOn = !!env[GUARD_VARIABLE];
+  const path = call?.args["Path"];
+  let editTarget: EditTarget | undefined;
+  let guardedPlaces: ReadonlyArray<GuardedPlace> = [];
+  if (call !== undefined && guardIsOn && EDIT_TOOL_NAMES.includes(call.name)) {
+    try {
+      if (typeof path === "string") {
+        const target = buildEditTarget(call.cwd, path);
+        const places = buildGuardedPlaces(call.cwd, env[SKILLS_DIRECTORY_VARIABLE] || undefined);
+        editTarget = target;
+        guardedPlaces = places;
+      }
+    } catch {
+      // Both stay unset: the policy denies a call it cannot place.
+    }
+  }
+  const denial = decidePreToolHook({
+    guardIsOn,
+    deniesWebSearch: !!env[DENY_WEB_SEARCH_VARIABLE],
+    call,
+    editTarget,
+    guardedPlaces,
+  });
+  return denial === undefined ? "" : `${JSON.stringify(denial)}\n`;
+};
+
+/**
+ * Reads all of stdin, or returns undefined when it holds more than
+ * `MAX_INPUT_BYTES`, which counts as unreadable.
+ */
+const readBoundedStdin = async (): Promise<string | undefined> => {
+  const chunks: Array<Buffer> = [];
+  let size = 0;
+  for await (const chunk of process.stdin as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > MAX_INPUT_BYTES) return undefined;
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+};
+
+/** Runs the hook: reads the call from stdin, prints the answer on stdout, and exits 0. */
+export const runPreToolHook = async (): Promise<void> => {
+  process.stdout.write(answerPreToolCall(await readBoundedStdin(), process.env));
+};

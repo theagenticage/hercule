@@ -248,20 +248,21 @@ describe("a signed-in account", () => {
     const result = await Effect.runPromise(
       probeWith(home, fake).pipe(Effect.provide(Logger.layer([collecting]))),
     );
+    // The reset of the owned home paths logs its own warnings first.
+    const noticeWarnings = () => warnings.filter((line) => line.includes("vendor/unknown_notice"));
     await waitUntil(
       "answered the request and logged the message",
       () =>
         fake.spawns[0]!.harness.received.some((message) => message.id === 777) &&
-        warnings.length > 0,
+        noticeWarnings().length > 0,
     );
 
     expect(result.auth.status).toBe("ok");
     expect(fake.spawns[0]!.harness.received.find((message) => message.id === 777)?.result).toEqual({
       outcome: { outcome: "cancelled" },
     });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("vendor/unknown_notice");
-    expect(warnings[0]).not.toContain("hunter2");
+    expect(noticeWarnings()).toHaveLength(1);
+    expect(warnings.join("\n")).not.toContain("hunter2");
   });
 });
 

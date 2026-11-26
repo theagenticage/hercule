@@ -12,7 +12,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -40,7 +39,6 @@ import {
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
-import { takeStartMarks } from "../../edit-marks";
 import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
 import {
   buildLoginCommand,
@@ -1047,14 +1045,10 @@ describe("the files of the Harness Home that Hercule owns", () => {
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
     expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
-    expect(readdirSync(join(home, "config")).sort()).toEqual([
-      "hercule-start-mark.sh",
-      "hooks.json",
-      "mcp_config.json",
-    ]);
+    expect(readdirSync(join(home, "config")).sort()).toEqual(["hooks.json", "mcp_config.json"]);
   });
 
-  it("leaves all of them alone when agy is opened for a probe", async () => {
+  it("resets them also when agy is opened for a probe, before it starts", async () => {
     const { home, fake } = setUp();
     mkdirSync(join(home, "config"));
     writeFileSync(join(home, "config", "hooks.json"), "{}");
@@ -1062,9 +1056,45 @@ describe("the files of the Harness Home that Hercule owns", () => {
 
     await Effect.runPromise(Effect.scoped(open(fake, home)));
 
-    expect(readFileSync(join(home, "config", "hooks.json"), "utf8")).toBe("{}");
-    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("{}");
+    expect(readFileSync(join(home, "config", "hooks.json"), "utf8")).toContain("PreToolUse");
+    expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
+  });
+
+  it("removes the script an earlier Hercule wrote for its hook", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(join(home, "config", "hercule-start-mark.sh"), "#!/bin/sh");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
     expect(existsSync(join(home, "config", "hercule-start-mark.sh"))).toBe(false);
+  });
+
+  it("fails the start, changes nothing and spawns nothing when config is a link", async () => {
+    const { home, fake } = setUp();
+    const outside = createScratchHome("agy-outside");
+    writeFileSync(join(outside, "mcp_config.json"), "{}");
+    symlinkSync(outside, join(home, "config"));
+
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain(join(home, "config"));
+    expect(failure.message).toContain("link");
+    expect(readdirSync(outside)).toEqual(["mcp_config.json"]);
+    expect(readFileSync(join(outside, "mcp_config.json"), "utf8")).toBe("{}");
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("fails the start when the Harness Home itself is a link, for a probe too", async () => {
+    const { home, fake } = setUp();
+    const link = join(createScratchHome("agy-link"), "home");
+    symlinkSync(home, link);
+
+    const failure = await runAndReadFailure(open(fake, link));
+
+    expect(failure.message).toContain(link);
+    expect(fake.spawns).toHaveLength(0);
   });
 
   it("fails the start with AdapterFailed naming the path, and spawns nothing, when one cannot be changed", async () => {
@@ -1075,11 +1105,12 @@ describe("the files of the Harness Home that Hercule owns", () => {
 
     expect(failure._tag).toBe("AdapterFailed");
     expect(failure.message).toContain("mcp_config.json");
+    expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     expect(fake.spawns).toHaveLength(0);
   });
 });
 
-describe("the hook that takes the start marks of the edit watch", () => {
+describe("the pre-tool hook of a session", () => {
   const SESSION: AgyPurpose = {
     kind: "session",
     accessMode: "approval-required",
@@ -1094,22 +1125,6 @@ describe("the hook that takes the start marks of the edit watch", () => {
     };
   }
   const HOOKS_FILE = (home: string) => join(home, "config", "hooks.json");
-  const SCRIPT_FILE = (home: string) => join(home, "config", "hercule-start-mark.sh");
-
-  /** The input `agy` 1.5.15 gives a PreToolUse hook, as recorded, for a shell command. */
-  const hookInput = (toolCall: Record<string, unknown>): string =>
-    JSON.stringify({
-      artifactDirectoryPath: "/home/x/brain/1",
-      conversationId: "1",
-      cwd: "/work",
-      hookEventName: "PreToolUse",
-      lastUserInput: 'Run "CommandLine":"decoy" please',
-      modelName: "m",
-      stepIdx: 2,
-      toolCall,
-      transcriptPath: "/home/x/t.jsonl",
-      workspacePaths: ["/work"],
-    });
 
   /** Starts a session for the account in `home`, and returns what the spawned `agy` was given. */
   const startSession = async (home: string, sessionMarksDir: string | null) => {
@@ -1139,30 +1154,18 @@ describe("the hook that takes the start marks of the edit watch", () => {
     return fake.spawns[0]!;
   };
 
-  /** Runs the command of the hook in `home` the way `agy` does, with `input` on stdin. */
-  const runHook = (home: string, input: string, env: Record<string, string>) => {
-    const hooks = JSON.parse(readFileSync(HOOKS_FILE(home), "utf8")) as HooksFile;
-    return Bun.spawnSync(["/bin/sh", "-c", hooks.hercule.PreToolUse[0]!.hooks[0]!.command], {
-      env,
-      stdin: new TextEncoder().encode(`${input}\n`),
-    });
-  };
-
-  it("is the same two files for every session, writes them over what is there, and leaves no temporary file", async () => {
+  it("is the same hooks file for every session, writes it over what is there, and leaves no temporary file", async () => {
     const home = createSignedInHome();
     await startSession(home, null);
     const hooks = readFileSync(HOOKS_FILE(home), "utf8");
-    const script = readFileSync(SCRIPT_FILE(home), "utf8");
 
     const target = join(createScratchHome("agy-target"), "hooks.json");
     writeFileSync(target, "{}");
     rmSync(HOOKS_FILE(home));
     symlinkSync(target, HOOKS_FILE(home));
-    writeFileSync(SCRIPT_FILE(home), "exit 1");
     await startSession(home, createScratchHome("agy-marks"));
 
     expect(readFileSync(HOOKS_FILE(home), "utf8")).toBe(hooks);
-    expect(readFileSync(SCRIPT_FILE(home), "utf8")).toBe(script);
     expect(lstatSync(HOOKS_FILE(home)).isFile()).toBe(true);
     expect(readFileSync(target, "utf8")).toBe("{}");
     expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
@@ -1170,6 +1173,21 @@ describe("the hook that takes the start marks of the edit watch", () => {
       "run_command|edit_file|write_file|search_web",
     );
     expect(hooks).not.toContain("agy-marks");
+  });
+
+  it("runs the verb of the binary, quoted so a shell reads it as the same words", async () => {
+    const home = createSignedInHome();
+    await startSession(home, null);
+    const hooks = JSON.parse(readFileSync(HOOKS_FILE(home), "utf8")) as HooksFile;
+    const command = hooks.hercule.PreToolUse[0]!.hooks[0]!.command;
+
+    const words = Bun.spawnSync(["/bin/sh", "-c", `for word in ${command}; do echo "$word"; done`])
+      .stdout.toString()
+      .trimEnd()
+      .split("\n");
+
+    expect(words[0]).toBe(process.execPath);
+    expect(words.at(-1)).toBe("antigravity-pre-tool-hook");
   });
 
   it("gives the marks directory to the agy process of a session with an edit watch only", async () => {
@@ -1223,251 +1241,5 @@ describe("the hook that takes the start marks of the edit watch", () => {
     expect(edits).not.toHaveProperty("HERCULE_AGY_SKILLS_DIR");
     expect(full).not.toHaveProperty("HERCULE_AGY_GUARD");
     expect(full).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
-  });
-
-  describe("the script", () => {
-    const setUpHome = async () => {
-      const home = createSignedInHome();
-      await startSession(home, null);
-      return { home, marks: createScratchHome("agy-marks") };
-    };
-
-    it("writes the mark of a shell command with its text, quotes and escapes included", async () => {
-      const { home, marks } = await setUpHome();
-      const command = "echo \"a b\" \\ 'c'\nls";
-
-      const result = runHook(
-        home,
-        hookInput({
-          args: { CommandLine: command, WaitMsBeforeAsync: 5000 },
-          id: "call_123",
-          name: "run_command",
-        }),
-        { HERCULE_SESSION_MARKS_DIR: marks, PATH: "/usr/bin:/bin" },
-      );
-
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout.toString()).toBe("");
-      expect(
-        takeStartMarks(marks).map(({ toolUseId, shellCommand }) => ({ toolUseId, shellCommand })),
-      ).toEqual([{ toolUseId: "call_123", shellCommand: command }]);
-    });
-
-    it.each(["edit_file", "write_file"])(
-      "writes the mark of a %s with no command",
-      async (name) => {
-        const { home, marks } = await setUpHome();
-
-        runHook(
-          home,
-          hookInput({
-            args: { Content: 'x "CommandLine":"y"', Path: "/work/a.txt" },
-            id: "call_9",
-            name,
-          }),
-          { HERCULE_SESSION_MARKS_DIR: marks, PATH: "/usr/bin:/bin" },
-        );
-
-        expect(
-          takeStartMarks(marks).map(({ toolUseId, shellCommand }) => ({ toolUseId, shellCommand })),
-        ).toEqual([{ toolUseId: "call_9", shellCommand: undefined }]);
-      },
-    );
-
-    describe("the guard of the approval files", () => {
-      const GUARDED = { HERCULE_AGY_GUARD: "1", PATH: "/usr/bin:/bin" };
-      const editInput = (cwd: string, path: string, name = "write_file") =>
-        JSON.stringify({
-          cwd,
-          hookEventName: "PreToolUse",
-          toolCall: { args: { Content: "x", Path: path }, id: "call_5", name },
-        });
-
-      /** A git repository `root` with the session in `root/sub`, and links that lead to `.agents`. */
-      const setUpRepo = async () => {
-        const { home, marks } = await setUpHome();
-        const root = realpathSync(createScratchHome("agy-repo"));
-        mkdirSync(join(root, ".git"));
-        mkdirSync(join(root, ".agents", "plugins"), { recursive: true });
-        mkdirSync(join(root, "sub", ".agents"), { recursive: true });
-        symlinkSync(join(root, ".agents"), join(root, "sub", "agents-link"));
-        symlinkSync(join(root, ".agents", "hooks.json"), join(root, "sub", "hooks-link"));
-        symlinkSync(root, join(root, "root-link"));
-        return { home, marks, root, cwd: join(root, "sub") };
-      };
-
-      const decide = (home: string, cwd: string, path: string, env: Record<string, string>) => {
-        const result = runHook(home, editInput(cwd, path), env);
-        expect(result.exitCode).toBe(0);
-        return result.stdout.toString();
-      };
-
-      it.each([
-        ["a plain path", (root: string) => join(root, "sub", ".agents", "hooks.json")],
-        ["a relative path", () => ".agents/mcp_config.json"],
-        ["a path with ..", () => "a/../.agents/hooks.json"],
-        ["a link to .agents", () => "agents-link/plugins.json"],
-        ["a link to the file itself", () => "hooks-link"],
-        [
-          "a path through a link to the repository",
-          (root: string) => join(root, "root-link", ".agents", "plugins", "x", "hooks.json"),
-        ],
-        ["the git root above the folder", () => "../.agents/hooks.json"],
-        [
-          "a file that does not exist yet, below a missing folder",
-          () => ".agents/plugins/new/plugin.json",
-        ],
-      ])("denies %s, in the words the model reads", async (_name, pick) => {
-        const { home, root, cwd } = await setUpRepo();
-        const path = pick(root);
-
-        const answer = decide(home, cwd, path, GUARDED);
-
-        expect(JSON.parse(answer)).toEqual({
-          decision: "deny",
-          reason: `Hercule does not let the agent change ${path}: it decides what the agent may do without asking. Ask the user to change it.`,
-        });
-      });
-
-      it("escapes the path in the reason", async () => {
-        const { home, root, cwd } = await setUpRepo();
-        const path = join(root, "sub", 'a"b\\c', "..", "..", ".agents", "hooks.json");
-
-        const answer = JSON.parse(decide(home, cwd, path, GUARDED)) as { reason: string };
-
-        expect(answer.reason).toContain(`change ${path}:`);
-      });
-
-      it("denies every path inside the skills directory, and only when it has one", async () => {
-        const { home, root, cwd } = await setUpRepo();
-        const skills = join(createScratchHome("agy-skills"), "skills");
-        const link = join(root, "skills-link");
-        mkdirSync(skills);
-        symlinkSync(skills, link);
-        const env = { ...GUARDED, HERCULE_AGY_SKILLS_DIR: skills };
-
-        expect(decide(home, cwd, join(skills, "deploy", "SKILL.md"), env)).toContain("deny");
-        expect(decide(home, cwd, join(link, ".git", "config"), env)).toContain("deny");
-        expect(decide(home, cwd, join(skills, "..", "other.md"), env)).toBe("");
-        expect(decide(home, cwd, join(skills, "deploy", "SKILL.md"), GUARDED)).toBe("");
-      });
-
-      it("goes to the parent of the folder a link leads to, as the operating system does", async () => {
-        const { home, root, cwd } = await setUpRepo();
-        mkdirSync(join(root, ".agents", "plugins", "p"), { recursive: true });
-        symlinkSync(join(root, ".agents", "plugins", "p"), join(cwd, "sub"));
-
-        // The operating system writes .agents/plugins/hooks.json, not sub/../hooks.json.
-        expect(decide(home, cwd, "sub/../hooks.json", GUARDED)).toContain("deny");
-        expect(decide(home, cwd, "sub/p/../../../hooks.json", GUARDED)).toContain("deny");
-      });
-
-      it("ends on a link loop and on a dangling link, and allows both", async () => {
-        const { home, cwd } = await setUpRepo();
-        symlinkSync(join(cwd, "loop-b"), join(cwd, "loop-a"));
-        symlinkSync(join(cwd, "loop-a"), join(cwd, "loop-b"));
-        symlinkSync(join(cwd, "nowhere", "file"), join(cwd, "dangling"));
-
-        expect(decide(home, cwd, "loop-a/x", GUARDED)).toBe("");
-        expect(decide(home, cwd, "dangling", GUARDED)).toBe("");
-      });
-
-      it("follows a link to a file that leads into a guarded folder", async () => {
-        const { home, cwd } = await setUpRepo();
-        symlinkSync("../../.agents/plugins.json", join(cwd, ".agents", "relative-link"));
-
-        expect(decide(home, cwd, ".agents/relative-link", GUARDED)).toContain("deny");
-      });
-
-      it("ignores case on macOS only", async () => {
-        const { home, cwd } = await setUpRepo();
-        const macos = { ...GUARDED, HERCULE_AGY_HOOK_PLATFORM: "Darwin" };
-        const linux = { ...GUARDED, HERCULE_AGY_HOOK_PLATFORM: "Linux" };
-
-        expect(decide(home, cwd, ".Agents/Hooks.json", macos)).toContain("deny");
-        expect(decide(home, cwd, ".Agents/Hooks.json", linux)).toBe("");
-      });
-
-      it("guards the session's folder only outside a repository", async () => {
-        const { home } = await setUpHome();
-        const folder = realpathSync(createScratchHome("agy-norepo"));
-        mkdirSync(join(folder, "sub"));
-
-        expect(decide(home, join(folder, "sub"), "../.agents/hooks.json", GUARDED)).toBe("");
-        expect(decide(home, join(folder, "sub"), ".agents/hooks.json", GUARDED)).toContain("deny");
-      });
-
-      it.each([
-        ["other files in .agents", ".agents/rules/x.md"],
-        ["AGENTS.md", "../AGENTS.md"],
-        ["a source file", "src/a.ts"],
-        ["a file named like a guarded one elsewhere", "docs/.agents/hooks.json"],
-      ])("allows %s, with no output", async (_name, path) => {
-        const { home, cwd } = await setUpRepo();
-
-        expect(decide(home, cwd, path, GUARDED)).toBe("");
-      });
-
-      it("allows everything in full access, where the process has no guard variable", async () => {
-        const { home, cwd } = await setUpRepo();
-
-        expect(decide(home, cwd, ".agents/hooks.json", { PATH: "/usr/bin:/bin" })).toBe("");
-      });
-
-      it("takes the mark before it decides", async () => {
-        const { home, marks, cwd } = await setUpRepo();
-
-        const answer = decide(home, cwd, ".agents/hooks.json", {
-          ...GUARDED,
-          HERCULE_SESSION_MARKS_DIR: marks,
-        });
-
-        expect(answer).toContain("deny");
-        expect(takeStartMarks(marks).map((mark) => mark.toolUseId)).toEqual(["call_5"]);
-      });
-
-      it("denies search_web only for the process that has the variable", async () => {
-        const { home } = await setUpHome();
-        const search = JSON.stringify({
-          cwd: "/work",
-          toolCall: { args: { query: "x" }, id: "call_6", name: "search_web" },
-        });
-
-        const denied = runHook(home, search, {
-          HERCULE_AGY_DENY_WEB_SEARCH: "1",
-          PATH: "/usr/bin:/bin",
-        });
-        const allowed = runHook(home, search, GUARDED);
-
-        expect(JSON.parse(denied.stdout.toString())).toEqual({
-          decision: "deny",
-          reason:
-            "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.",
-        });
-        expect(allowed.exitCode).toBe(0);
-        expect(allowed.stdout.toString()).toBe("");
-      });
-    });
-
-    it("does nothing, and exits 0 with nothing on stdout, without the marks directory, and when it cannot write", async () => {
-      const { home, marks } = await setUpHome();
-      const input = hookInput({ args: { CommandLine: "ls" }, id: "call_1", name: "run_command" });
-
-      const without = runHook(home, input, { PATH: "/usr/bin:/bin" });
-      const missing = runHook(home, input, {
-        HERCULE_SESSION_MARKS_DIR: join(marks, "gone"),
-        PATH: "/usr/bin:/bin",
-      });
-      const garbage = runHook(home, "not json", {
-        HERCULE_SESSION_MARKS_DIR: marks,
-        PATH: "/usr/bin:/bin",
-      });
-
-      for (const result of [without, missing, garbage]) {
-        expect(result.exitCode).toBe(0);
-        expect(result.stdout.toString()).toBe("");
-      }
-      expect(readdirSync(marks)).toEqual([]);
-    });
   });
 });

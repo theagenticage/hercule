@@ -233,6 +233,26 @@ const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
     ],
   },
   {
+    layer: "Antigravity pre-tool hook",
+    entrypoint: "apps/runner/src/harnesses/antigravity/pre-tool-hook.ts",
+    target: "node",
+    bundler: "bun",
+    reason:
+      "`hercule antigravity-pre-tool-hook` runs before every tool call of an Antigravity session, so it\n" +
+      "must start fast. It may link Node built-ins, effect, its policy module and the mark format,\n" +
+      "which import nothing else at runtime.",
+    forbidden: [
+      {
+        what: "anything but Node built-ins, effect and the hook's own modules",
+        pattern: new RegExp(
+          `^(?!(${RUNTIME_BUILT_IN.source.slice(1, -1)}|effect(/.*)?|` +
+            "node_modules/\\.pnpm/effect@[^/]+/node_modules/effect/.*|" +
+            "apps/runner/src/(harnesses/antigravity/pre-tool-hook(-policy)?|edit-marks/mark-format)\\.ts)$)",
+        ),
+      },
+    ],
+  },
+  {
     layer: "desktop main",
     entrypoint: "apps/desktop/src/main/index.ts",
     target: "node",

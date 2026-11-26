@@ -32,11 +32,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { truncateFact } from "../harnesses/text";
 
-/**
- * The environment variable that holds a session's marks directory in the
- * process of a harness whose gate runs outside the runner (pi, Codex).
- */
-export const SESSION_MARKS_DIR_VARIABLE = "HERCULE_SESSION_MARKS_DIR";
+export { SESSION_MARKS_DIR_VARIABLE, formatStartMark } from "./mark-format";
 
 /** The fields of a mark file that the runner reads. */
 const MarkContent = Schema.Struct({
@@ -69,19 +65,6 @@ export const createSessionMarksDir = (editMarksDir: string, sessionId: string): 
   mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
   return mkdtempSync(join(sessionsDir, `${sessionId}-`));
 };
-
-/**
- * Returns the content of the mark file of one tool call. Pass `shellCommand`
- * for a shell command, and leave it out for any other tool. The function uses
- * nothing outside its body, because the pi extension embeds its source as it
- * is.
- */
-export const formatStartMark = (toolUseId: string, shellCommand?: string): string =>
-  JSON.stringify(
-    shellCommand === undefined
-      ? { tool_use_id: toolUseId }
-      : { tool_use_id: toolUseId, tool_name: "Bash", tool_input: { command: shellCommand } },
-  );
 
 /**
  * Returns the mark files in `dir` that name a tool call, and deletes each one

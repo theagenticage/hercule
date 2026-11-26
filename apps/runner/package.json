@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./antigravity-pre-tool-hook": "./src/harnesses/antigravity/pre-tool-hook.ts",
     "./github-token": "./src/credentials/github-token-client.ts",
     "./measure-disk-usage": "./src/disk-usage/measure-main.ts"
   },

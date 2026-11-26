@@ -26,7 +26,9 @@ import type {
 import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
 import { ResumeTranscriptMissing } from "@hercule/protocol";
 import type { AccessMode, AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
-import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
+import { locateCompiledBinary } from "@hercule/home";
+import { quoteShellWord } from "../../credentials";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks/mark-format";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
@@ -41,6 +43,13 @@ import type { CheckedFramedChild, FramedChild, Run } from "../process";
 import { describeFileFailure, isMissingPath } from "../session-files";
 import { truncateFact } from "../text";
 import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
+import {
+  DENY_WEB_SEARCH_VARIABLE,
+  GUARD_VARIABLE,
+  HOOK_MATCHER,
+  PRE_TOOL_HOOK_VERB,
+  SKILLS_DIRECTORY_VARIABLE,
+} from "./pre-tool-hook-policy";
 
 /** The name the user knows the harness by. */
 export const ANTIGRAVITY_NAME = "Antigravity";
@@ -76,234 +85,55 @@ type OwnedHomePath = {
     }
   | {
       /**
-       * Replaces the file with one that holds exactly `buildContent(home)`.
+       * Replaces the file with one that holds exactly `buildContent()`.
        * The file is written beside the path and renamed over it, so a session
        * that reads it while another one starts sees the old content or the
        * new, never half of it.
        */
       readonly whenStarting: "write";
-      readonly buildContent: (home: string) => string;
+      readonly buildContent: () => string;
     }
 );
 
-/** The file in the Harness Home that holds the script of the edit-watch gate. */
-const START_MARK_SCRIPT_PATH = join("config", "hercule-start-mark.sh");
+/** The file in the Harness Home that tells `agy` which hooks to run. */
+const HOOKS_FILE_PATH = join("config", "hooks.json");
+
+/** The file an earlier Hercule wrote as the script of its hook. The hook is now a verb of the binary, so the file is removed. */
+const OLD_HOOK_SCRIPT_PATH = join("config", "hercule-start-mark.sh");
 
 /**
- * The variable that is set on the `agy` process of every session that is not
- * in full access. Without it the guard of the hook script does nothing.
+ * Returns the command line `agy` runs as the pre-tool hook: the running
+ * executable, plus the entry script when running from source rather than the
+ * compiled binary, plus the hook's verb. `agy` runs it through a shell, so each
+ * word is quoted.
  */
-const GUARD_VARIABLE = "HERCULE_AGY_GUARD";
+const buildHookCommand = (): string =>
+  [
+    process.execPath,
+    ...(locateCompiledBinary() === undefined ? [Bun.main] : []),
+    PRE_TOOL_HOOK_VERB,
+  ]
+    .map(quoteShellWord)
+    .join(" ");
 
 /**
- * The variable that is set only on the `agy` process of a session in Approval
- * required. The hook script then denies `search_web`, because a search runs
- * without a card.
+ * Returns the hooks file of the Harness Home: one `PreToolUse` hook, for the
+ * tools in `HOOK_MATCHER`, that runs the pre-tool hook (`pre-tool-hook.ts`).
  */
-const DENY_WEB_SEARCH_VARIABLE = "HERCULE_AGY_DENY_WEB_SEARCH";
-
-/**
- * The variable that holds the session's additional skills directory, when it
- * has one. The guard of the hook script denies every change inside it.
- */
-const SKILLS_DIRECTORY_VARIABLE = "HERCULE_AGY_SKILLS_DIR";
-
-/**
- * The variable that replaces the answer of `uname` in the hook script. Only
- * the tests set it, to run the macOS case comparison on any machine.
- */
-const PLATFORM_VARIABLE = "HERCULE_AGY_HOOK_PLATFORM";
-
-/**
- * The script of the hook of an `agy` session (spec 19 section 4.1). `agy`
- * runs it before every `run_command`, `edit_file`, `write_file` and
- * `search_web`, and the tool waits for it. `agy` writes the hook's input to it
- * as one line of JSON, and its `toolCall.id` is the id of the call's item. The
- * script does two things, in this order.
- *
- * 1. It turns the call into a mark file in the session's marks directory, so
- *    the file's ctime is the start of the call:
- *    - The directory comes from the environment of the `agy` process of the
- *      session. The script is the same for every session of the account,
- *      because they share the Harness Home. A process without the variable
- *      gets no mark.
- *    - It extracts the fields with `sed` and no JSON parser, because the
- *      runner's machine may have no other tool. The command's text stays in
- *      the JSON escaped form it arrived in, so it goes into the mark as it is.
- *    - It never overwrites a mark (`set -C`), and an id with characters that
- *      are not safe in a file name gets none.
- *    - When it could not write the mark, the call still runs: watching edits
- *      is best effort and never blocks a session.
- * 2. It denies the calls Hercule does not allow, by printing
- *    `{"decision":"deny","reason":...}`. Every other call gets no output, so
- *    it runs unchanged. The script always exits 0.
- *    - `search_web` is denied when the process has `DENY_WEB_SEARCH_VARIABLE`.
- *    - `edit_file` and `write_file` are denied, when the process has
- *      `GUARD_VARIABLE`, for a file that `agy` loads approval rules from:
- *      `.agents/hooks.json`, `.agents/plugins.json`, `.agents/mcp_config.json`
- *      and everything below `.agents/plugins/`, in the session's folder and
- *      every folder above it up to the git root (the nearest folder holding
- *      `.git`; with none, the session's folder only). Also every path inside
- *      the folder in `SKILLS_DIRECTORY_VARIABLE`. A file in the first group
- *      could approve commands or start programs in the next turn.
- *
- * `agy` hands the hook the path as the model wrote it: it may be relative to
- * `cwd`, hold `..`, or go through links. The script resolves it the way the
- * operating system does before it compares: component by component from
- * `cwd`, `..` goes to the parent of the folder reached so far (not of the
- * written one, which differs after a link), a link is replaced by its target
- * (at most 40 links, so a loop ends), and a component that does not exist is
- * kept as written. The guarded paths are resolved the same way. On macOS
- * (`uname` is Darwin), whose default filesystem ignores case, both sides are
- * lowercased first.
- *
- * A call whose `Path` or `cwd` the script cannot read goes through. The guard
- * is best effort like the mark: a script that blocked on input it does not
- * understand could stop every edit of every session of the account after a
- * change of agy's hook input, and the guard is a check on a path, not a
- * sandbox.
- */
-const START_MARK_SCRIPT = `#!/bin/sh
-set -C
-dir="$${SESSION_MARKS_DIR_VARIABLE}"
-input=$(cat)
-
-take_mark() {
-  [ -n "$dir" ] || return 0
-  id=$(printf %s "$input" | sed -nE 's/.*"id":"([A-Za-z0-9_-]+)".*/\\1/p')
-  [ -n "$id" ] || return 0
-  command=$(printf %s "$input" | sed -nE 's/.*"CommandLine":"(([^"\\\\]|\\\\.)*)".*/\\1/p')
-  if [ -n "$command" ]; then
-    printf '{"tool_use_id":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$id" "$command" > "$dir/$id"
-  else
-    printf '{"tool_use_id":"%s"}' "$id" > "$dir/$id"
-  fi
-}
-
-# Turns the JSON escapes that a path can hold back into characters.
-unescape() {
-  ph=$(printf '\\001')
-  printf %s "$1" | sed -e 's/\\\\\\\\/'"$ph"'/g' -e 's/\\\\"/"/g' -e 's|\\\\/|/|g' -e 's/\\\\u0026/\\&/g' -e 's/\\\\u003[cC]/</g' -e 's/\\\\u003[eE]/>/g' -e 's/'"$ph"'/\\\\/g'
-}
-
-# Prints the absolute path of $1 (relative to the folder $2) the way the
-# operating system resolves it: component by component from the start folder,
-# ".." goes to the parent of the folder reached so far, a link is replaced by
-# its target, and a component that does not exist is kept as written. At most
-# 40 links are followed, so a loop ends.
-resolve_path() {
-  rest=$1
-  case $rest in
-    /*) cur=/ ;;
-    *) cur=$(cd -P "$2" 2>/dev/null && pwd -P) || cur=$2 ;;
-  esac
-  links=0
-  while [ -n "$rest" ]; do
-    part=\${rest%%/*}
-    case $rest in */*) rest=\${rest#*/} ;; *) rest= ;; esac
-    case $part in
-      ''|.) continue ;;
-      ..) cur=$(dirname "$cur"); continue ;;
-    esac
-    case $cur in /) next=/$part ;; *) next=$cur/$part ;; esac
-    if [ -L "$next" ]; then
-      links=$((links + 1))
-      if [ "$links" -gt 40 ]; then
-        cur=$next
-        continue
-      fi
-      target=$(readlink "$next") || { cur=$next; continue; }
-      case $target in /*) cur=/ ;; esac
-      rest=$target/$rest
-    elif [ -d "$next" ]; then
-      cur=$(cd -P "$next" 2>/dev/null && pwd -P) || cur=$next
-    else
-      cur=$next
-    fi
-  done
-  printf %s "$cur"
-}
-
-# Prints the path as it is compared: lowercased on macOS, whose default
-# filesystem ignores case, so ".Agents/Hooks.json" is the guarded file there.
-fold_case() {
-  if [ "\${${PLATFORM_VARIABLE}:-$(uname)}" = Darwin ]; then
-    printf %s "$1" | tr 'A-Z' 'a-z'
-  else
-    printf %s "$1"
-  fi
-}
-
-deny() {
-  reason=$(printf %s "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g')
-  printf '{"decision":"deny","reason":"%s"}\\n' "$reason"
-  exit 0
-}
-
-# Denies a change of a file that agy loads approval rules from.
-guard_edit() {
-  raw=$(printf %s "$input" | sed -nE 's/.*"Path":"(([^"\\\\]|\\\\.)*)".*/\\1/p')
-  cwd=$(printf %s "$input" | sed -nE 's/.*"cwd":"(([^"\\\\]|\\\\.)*)".*/\\1/p')
-  [ -n "$raw" ] && [ -n "$cwd" ] || return 0
-  path=$(unescape "$raw")
-  cwd=$(unescape "$cwd")
-  target=$(fold_case "$(resolve_path "$path" "$cwd")")
-  message="Hercule does not let the agent change $path: it decides what the agent may do without asking. Ask the user to change it."
-
-  skills=$${SKILLS_DIRECTORY_VARIABLE}
-  if [ -n "$skills" ]; then
-    skills=$(fold_case "$(resolve_path "$skills" /)")
-    case $target in "$skills"|"$skills"/*) deny "$message" ;; esac
-  fi
-
-  folder=$(resolve_path "$cwd" /)
-  top=$folder
-  while [ "$top" != / ] && [ ! -e "$top/.git" ]; do top=$(dirname "$top"); done
-  [ -e "$top/.git" ] || top=$folder
-  while :; do
-    for name in hooks.json plugins.json mcp_config.json; do
-      [ "$target" = "$(fold_case "$(resolve_path "$folder/.agents/$name" /)")" ] && deny "$message"
-    done
-    plugins=$(fold_case "$(resolve_path "$folder/.agents/plugins" /)")
-    case $target in "$plugins"|"$plugins"/*) deny "$message" ;; esac
-    [ "$folder" = "$top" ] && break
-    folder=$(dirname "$folder")
-  done
-}
-
-take_mark 2>/dev/null
-
-tool=$(printf %s "$input" | sed -nE 's/.*"name":"([a-z_]+)".*/\\1/p')
-case $tool in
-  search_web)
-    [ -z "$${DENY_WEB_SEARCH_VARIABLE}" ] || deny "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode."
-    ;;
-  edit_file|write_file)
-    [ -z "$${GUARD_VARIABLE}" ] || guard_edit 2>/dev/null
-    ;;
-esac
-exit 0
-`;
-
-/**
- * The hooks file of the Harness Home: one `PreToolUse` hook for the tools
- * that become `command_execution` and `file_change` items, and for
- * `search_web`, which runs `START_MARK_SCRIPT`. The path is quoted for the shell, because it holds the
- * account's folder.
- */
-const buildHooksFile = (home: string): string => {
-  const script = join(home, START_MARK_SCRIPT_PATH).replaceAll("'", "'\\''");
-  return JSON.stringify({
+const buildHooksFile = (): string =>
+  JSON.stringify({
     hercule: {
       PreToolUse: [
-        {
-          matcher: "run_command|edit_file|write_file|search_web",
-          hooks: [{ type: "command", command: `/bin/sh '${script}'` }],
-        },
+        { matcher: HOOK_MATCHER, hooks: [{ type: "command", command: buildHookCommand() }] },
       ],
     },
   });
-};
+
+/** Why Hercule owns each path that holds skills. */
+const SKILLS_REASON = `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`;
+
+/** Why Hercule owns each path that holds instructions. */
+const INSTRUCTIONS_REASON = `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`;
 
 /**
  * The paths of the Harness Home that Hercule owns. Every session of an account
@@ -313,11 +143,13 @@ const buildHooksFile = (home: string): string => {
  *
  * - `config/hooks.json`: `agy` runs the hooks in it at every tool call, so a
  *   hook that approves every command would loosen every later session. It
- *   holds the one hook of Hercule, which takes the start marks of the edit
- *   watch, and is never removed: a session without an edit watch has no marks
- *   directory, and the hook then does nothing.
- * - `config/hercule-start-mark.sh`: the script of that hook. It is written
- *   before the hooks file, so the hook never names a script that is missing.
+ *   holds the one hook of Hercule, the pre-tool hook, which takes the start
+ *   marks of the edit watch and denies what Hercule does not allow. It is
+ *   never removed. A session without an edit watch or a guard still runs the
+ *   hook, which then has nothing to do for it.
+ * - `config/hercule-start-mark.sh`: the script an earlier Hercule wrote for
+ *   the hook, which is now a verb of the binary. It is removed so an old copy
+ *   does not stay in the account's home.
  * - `antigravity-acp/settings.json`: `toolPermission` in it works under
  *   `agy acp`. `agy` does not create the file.
  * - `config/plugins`: `agy` loads a plugin from this folder live, and a
@@ -339,13 +171,12 @@ const buildHooksFile = (home: string): string => {
  */
 const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
   {
-    path: START_MARK_SCRIPT_PATH,
-    whenStarting: "write",
-    buildContent: () => START_MARK_SCRIPT,
-    reason: `Hercule gives ${ANTIGRAVITY_NAME} one hook, which takes the start of each command and edit for the edit watch.`,
+    path: OLD_HOOK_SCRIPT_PATH,
+    whenStarting: "remove",
+    reason: `An earlier Hercule wrote a script here for its hook. The hook is now part of the binary, and a file in this folder is not one Hercule reads.`,
   },
   {
-    path: join("config", "hooks.json"),
+    path: HOOKS_FILE_PATH,
     whenStarting: "write",
     buildContent: buildHooksFile,
     reason: `Hercule allows only its own hook in the Harness Home, because ${ANTIGRAVITY_NAME} runs the hooks in it for every session of the account.`,
@@ -363,17 +194,17 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
   {
     path: join("skills"),
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`,
+    reason: SKILLS_REASON,
   },
   {
     path: join("config", "skills"),
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`,
+    reason: SKILLS_REASON,
   },
   {
     path: join(APP_DATA_DIR, "skills"),
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the skills in it load into every session of the account and are read again at each prompt.`,
+    reason: SKILLS_REASON,
   },
   {
     path: join("config", "skills.json"),
@@ -383,22 +214,22 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
   {
     path: "GEMINI.md",
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+    reason: INSTRUCTIONS_REASON,
   },
   {
     path: "AGENTS.md",
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+    reason: INSTRUCTIONS_REASON,
   },
   {
     path: join("config", "GEMINI.md"),
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+    reason: INSTRUCTIONS_REASON,
   },
   {
     path: join("config", "AGENTS.md"),
     whenStarting: "remove",
-    reason: `Hercule owns this path of the Harness Home, because ${ANTIGRAVITY_NAME} reads it in every session: the instructions in it are added to every session of the account and read again at each prompt.`,
+    reason: INSTRUCTIONS_REASON,
   },
   {
     path: join("config", "rules"),
@@ -413,11 +244,63 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
 ];
 
 /**
+ * Returns the folders that hold the owned paths, from the Harness Home `home`
+ * down: the home itself and every folder between it and an owned path.
+ */
+const listOwnedHomeFolders = (home: string): ReadonlyArray<string> => {
+  const folders = new Set([home]);
+  for (const owned of OWNED_HOME_PATHS) {
+    for (let at = dirname(owned.path); at !== "."; at = dirname(at)) folders.add(join(home, at));
+  }
+  return [...folders];
+};
+
+/**
+ * Fails with `AdapterFailed` naming the folder when the Harness Home `home`,
+ * or a folder between it and an owned path, is a link or a file instead of a
+ * real folder. Changing an owned path through a link would change a file
+ * outside the Harness Home. A folder that does not exist yet passes: it is
+ * created as a real folder.
+ *
+ * This is a check made before the changes. A process of the same user that
+ * swaps a folder for a link while the changes run is not prevented.
+ */
+const checkOwnedHomeFolders = (home: string): Effect.Effect<void, AdapterFailed> =>
+  Effect.forEach(
+    listOwnedHomeFolders(home),
+    (folder) =>
+      Effect.tryPromise({
+        try: async () => {
+          try {
+            return (await lstat(folder)).isDirectory();
+          } catch (error) {
+            if (isMissingPath(error)) return true;
+            throw error;
+          }
+        },
+        catch: (error) =>
+          buildAdapterFailed(
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not check ${folder}: ${describeFileFailure(error)}`,
+          ),
+      }).pipe(
+        Effect.filterOrFail(
+          (isRealFolder) => isRealFolder,
+          () =>
+            buildAdapterFailed(
+              `${ANTIGRAVITY_NAME} could not start, because ${folder} is a link or a file, not a folder. Hercule changes files in it that ${ANTIGRAVITY_NAME} reads in every session, and through a link it would change files outside the Harness Home. Remove it, and the account starts again.`,
+            ),
+        ),
+      ),
+    { discard: true },
+  );
+
+/**
  * Applies `OWNED_HOME_PATHS` to the Harness Home `home`, and logs each path it
  * had to change. A path that is already as wanted (missing for `remove`, an
  * empty file for `empty`, a file with the wanted content for `write`) is left
- * alone and not logged. A link is removed or
- * replaced, never followed. Fails with `AdapterFailed` naming the path when it
+ * alone and not logged. A link at an owned path is removed or replaced, never
+ * followed. Before any change, `checkOwnedHomeFolders` checks the folders
+ * above the owned paths. Fails with `AdapterFailed` naming the path when it
  * cannot be changed, because then Hercule cannot tell what `agy` would load.
  *
  * What stays possible: a session that writes one of these paths while another
@@ -425,33 +308,37 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
  * user, which already reaches everything this user can.
  */
 const resetOwnedHomePaths = (home: string): Effect.Effect<void, AdapterFailed> =>
-  Effect.forEach(
-    OWNED_HOME_PATHS,
-    (owned) => {
-      const path = join(home, owned.path);
-      const [verb, past] = describeOwnedAction(owned.whenStarting);
-      return Effect.tryPromise({
-        try: () => {
-          switch (owned.whenStarting) {
-            case "remove":
-              return removePath(path);
-            case "empty":
-              return replaceWithFile(path, "");
-            case "write":
-              return replaceWithFile(path, owned.buildContent(home));
-          }
+  checkOwnedHomeFolders(home).pipe(
+    Effect.andThen(
+      Effect.forEach(
+        OWNED_HOME_PATHS,
+        (owned) => {
+          const path = join(home, owned.path);
+          const [verb, past] = describeOwnedAction(owned.whenStarting);
+          return Effect.tryPromise({
+            try: () => {
+              switch (owned.whenStarting) {
+                case "remove":
+                  return removePath(path);
+                case "empty":
+                  return replaceWithFile(path, "");
+                case "write":
+                  return replaceWithFile(path, owned.buildContent());
+              }
+            },
+            catch: (error) =>
+              buildAdapterFailed(
+                `${ANTIGRAVITY_NAME} could not start, because Hercule could not ${verb} ${path}: ${describeFileFailure(error)}`,
+              ),
+          }).pipe(
+            Effect.flatMap((wasChanged) =>
+              wasChanged ? Effect.logWarning(`${past} ${path}: ${owned.reason}`) : Effect.void,
+            ),
+          );
         },
-        catch: (error) =>
-          buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} could not start, because Hercule could not ${verb} ${path}: ${describeFileFailure(error)}`,
-          ),
-      }).pipe(
-        Effect.flatMap((wasChanged) =>
-          wasChanged ? Effect.logWarning(`${past} ${path}: ${owned.reason}`) : Effect.void,
-        ),
-      );
-    },
-    { discard: true },
+        { discard: true },
+      ),
+    ),
   );
 
 /** Returns the verb and the past tense that name what `whenStarting` does to a path. */
@@ -485,7 +372,8 @@ const removePath = async (path: string): Promise<boolean> => {
  * Makes `path` a regular file that holds exactly `content`: writes the content
  * to a file beside it, then renames that file over `path`, so a link or a file
  * in its place is replaced and nothing is written through a link. Creates the
- * folder when it is missing. Returns whether `path` held anything else.
+ * folder when it is missing. Removes the temporary file when the write or the
+ * rename fails. Returns whether `path` held anything else.
  */
 const replaceWithFile = async (path: string, content: string): Promise<boolean> => {
   const isAsWanted = await readRegularFile(path, Buffer.byteLength(content)).then(
@@ -495,8 +383,13 @@ const replaceWithFile = async (path: string, content: string): Promise<boolean> 
   if (isAsWanted) return false;
   await mkdir(dirname(path), { recursive: true });
   const next = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(next, content, { flag: "wx" });
-  await rename(next, path);
+  try {
+    await writeFile(next, content, { flag: "wx" });
+    await rename(next, path);
+  } catch (error) {
+    await rm(next, { force: true });
+    throw error;
+  }
   return true;
 };
 
@@ -1106,9 +999,9 @@ export const openSignedInAgy = (
         ? options.purpose.request
         : { cwd: options.cwd, mcpServers: [] };
 
-    if (options.purpose.kind === "session") {
-      yield* resetOwnedHomePaths(ctx.home);
-    }
+    // A probe resets them too, so no `agy` process ever starts on a home that
+    // holds a file that would loosen it.
+    yield* resetOwnedHomePaths(ctx.home);
 
     const folder = yield* makeSessionLogFolder(ctx.home);
     const command = [
