@@ -370,10 +370,13 @@ const decodeCall = (input: RawInput): DecodedCall | undefined => {
  * bounds that window. Without a mark the observer would not know where the
  * window starts.
  */
-const takeMark = (call: DecodedCall, env: Readonly<Record<string, string | undefined>>): void => {
+const takeMark = (
+  call: DecodedCall,
+  kind: ToolKind | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+): void => {
   try {
     const marksDir = env[SESSION_MARKS_DIR_VARIABLE];
-    const kind = classifyTool(call.name);
     if (!marksDir || (kind !== "shell" && kind !== "edit") || !SAFE_ID.test(call.id)) {
       return;
     }
@@ -741,8 +744,7 @@ const isTargetInPlace = (target: EditTarget, place: GuardedPlace): boolean => {
  * because `agy` may do any of these (not measured). `Role` is free text the
  * model writes, so it is never read.
  */
-const isBrowserCall = (call: DecodedCall): boolean => {
-  const kind = classifyTool(call.name);
+const isBrowserCall = (call: DecodedCall, kind: ToolKind | undefined): boolean => {
   if (kind === "browser") return true;
   const typeName = call.args["TypeName"];
   return (
@@ -811,21 +813,21 @@ const decideEdit = (
  */
 const decide = (
   call: DecodedCall | undefined,
+  kind: ToolKind | undefined,
   input: RawInput,
   rules: HookRules | undefined,
   env: Readonly<Record<string, string | undefined>>,
 ): HookDenial | undefined => {
   if (rules?.accessMode === "full-access") return undefined;
-  const kind = call === undefined ? undefined : classifyTool(call.name);
   if (rules === undefined) {
-    return call === undefined || kind === "edit" || kind === "search" || isBrowserCall(call)
+    return call === undefined || kind === "edit" || kind === "search" || isBrowserCall(call, kind)
       ? deny(BAD_RULES_REASON)
       : undefined;
   }
   if (call === undefined) {
     return deny(input === INPUT_TOO_LARGE ? TOO_LARGE_REASON : UNREADABLE_REASON);
   }
-  if (isBrowserCall(call)) return deny(buildBrowserReason(rules.accessMode));
+  if (isBrowserCall(call, kind)) return deny(buildBrowserReason(rules.accessMode));
   if (kind === "search") {
     return rules.accessMode === "approval-required" ? deny(WEB_SEARCH_REASON) : undefined;
   }
@@ -855,8 +857,9 @@ export const answerPreToolCall = (
     const encoded = env[HOOK_RULES_VARIABLE];
     rules = encoded ? decodeHookRules(encoded) : undefined;
     const call = decodeCall(input);
-    if (call !== undefined) takeMark(call, env);
-    return formatAnswer(decide(call, input, rules, env));
+    const kind = call === undefined ? undefined : classifyTool(call.name);
+    if (call !== undefined) takeMark(call, kind, env);
+    return formatAnswer(decide(call, kind, input, rules, env));
   } catch {
     return formatAnswer(
       rules?.accessMode === "full-access" ? undefined : deny(CHECK_FAILED_REASON),
