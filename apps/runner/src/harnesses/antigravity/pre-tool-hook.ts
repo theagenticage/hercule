@@ -50,7 +50,13 @@ import {
   decideAfterHookFailure,
   decidePreToolHook,
 } from "./pre-tool-hook-policy";
-import type { DecodedToolCall, EditTarget, GuardedPlace, HookDenial } from "./pre-tool-hook-policy";
+import type {
+  DecodedToolCall,
+  EditTarget,
+  GuardedPlace,
+  GuardedPlacesFailure,
+  HookDenial,
+} from "./pre-tool-hook-policy";
 
 /** The most input the hook reads. A call larger than this counts as unreadable. */
 const MAX_INPUT_BYTES = 1024 * 1024;
@@ -174,6 +180,16 @@ const resolveLikeOperatingSystem = (path: string): string => {
   }
 };
 
+/** Thrown while listing the guarded places, when the cause is one the model can be told about. */
+class GuardedPlacesError extends Error {
+  readonly failure: GuardedPlacesFailure;
+
+  constructor(failure: GuardedPlacesFailure) {
+    super(failure.kind === "manifest" ? failure.file : "walk");
+    this.failure = failure;
+  }
+}
+
 /** Reads where an edit tool writes, with the identities of the existing part of the path and every folder above it. */
 const buildEditTarget = (cwd: string, path: string): EditTarget => {
   const lexicalPath = resolve(cwd, path);
@@ -205,7 +221,7 @@ const buildPlace = (path: string, isFolder: boolean): GuardedPlace => {
  * `.git`. Without a git root, only the session's folder. Throws when the walk
  * reaches `MAX_WALK_DEPTH` folders before it finds a git root or the top,
  * because `agy` walks without a limit, so the guard cannot say which folders
- * it reads.
+ * it reads. The error is a `GuardedPlacesError`.
  */
 const listConfigRoots = (cwd: string): ReadonlyArray<string> => {
   const start = resolveLikeOperatingSystem(resolve(cwd));
@@ -215,7 +231,7 @@ const listConfigRoots = (cwd: string): ReadonlyArray<string> => {
     if (existsSync(join(at, ".git"))) return roots;
     if (dirname(at) === at) return [start];
     if (roots.length >= MAX_WALK_DEPTH) {
-      throw new Error(`More than ${String(MAX_WALK_DEPTH)} folders above ${start}.`);
+      throw new GuardedPlacesError({ kind: "walk", limit: MAX_WALK_DEPTH });
     }
   }
 };
@@ -269,9 +285,14 @@ const buildGuardedPlaces = (
       const folder = join(root, name);
       for (const file of GUARDED_CONFIG_FILES) places.push(buildPlace(join(folder, file), false));
       places.push(buildPlace(join(folder, PLUGINS_FOLDER_NAME), true));
-      for (const plugins of readPluginFolders(join(folder, "plugins.json"), root)) {
-        places.push(buildPlace(plugins, true));
+      const manifest = join(folder, "plugins.json");
+      let listed: ReadonlyArray<string>;
+      try {
+        listed = readPluginFolders(manifest, root);
+      } catch {
+        throw new GuardedPlacesError({ kind: "manifest", file: manifest });
       }
+      for (const plugins of listed) places.push(buildPlace(plugins, true));
     }
   }
   if (skillsDirectory !== undefined) places.push(buildPlace(skillsDirectory, true));
@@ -299,6 +320,7 @@ export const answerPreToolCall = (
     const path = call?.args["Path"];
     let editTarget: EditTarget | undefined;
     let guardedPlaces: ReadonlyArray<GuardedPlace> = [];
+    let guardedPlacesFailure: GuardedPlacesFailure | undefined;
     if (call !== undefined && guardIsOn && EDIT_TOOL_NAMES.includes(call.name)) {
       try {
         if (typeof path === "string") {
@@ -307,12 +329,21 @@ export const answerPreToolCall = (
           editTarget = target;
           guardedPlaces = places;
         }
-      } catch {
-        // Both stay unset: the policy denies a call it cannot place.
+      } catch (error) {
+        // With no target the policy denies a call it cannot place. A failure
+        // it can name is passed on, so the denial says what to fix.
+        if (error instanceof GuardedPlacesError) guardedPlacesFailure = error.failure;
       }
     }
     return formatAnswer(
-      decidePreToolHook({ guardIsOn, deniesWebSearch, call, editTarget, guardedPlaces }),
+      decidePreToolHook({
+        guardIsOn,
+        deniesWebSearch,
+        call,
+        editTarget,
+        guardedPlaces,
+        guardedPlacesFailure,
+      }),
     );
   } catch {
     // `agy` stops the tool when the hook fails, so any unexpected error still

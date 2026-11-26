@@ -104,6 +104,16 @@ export interface EditTarget {
   readonly existingIdentities: ReadonlyArray<string>;
 }
 
+/**
+ * Why the hook could not list the places it guards for a call it did read:
+ * - `manifest`: a `plugins.json` exists at `file` and could not be checked.
+ * - `walk`: the folders above the session's folder reached `limit` before a
+ *   git root or the top of the file system.
+ */
+export type GuardedPlacesFailure =
+  | { readonly kind: "manifest"; readonly file: string }
+  | { readonly kind: "walk"; readonly limit: number };
+
 /** What `decidePreToolHook` decides from. */
 export interface PreToolFacts {
   readonly guardIsOn: boolean;
@@ -113,6 +123,8 @@ export interface PreToolFacts {
   /** Present when the call is an edit tool with a text `Path` and the guard is on. */
   readonly editTarget: EditTarget | undefined;
   readonly guardedPlaces: ReadonlyArray<GuardedPlace>;
+  /** Present when the places could not be listed. An edit is then denied, with a reason that names the cause. */
+  readonly guardedPlacesFailure?: GuardedPlacesFailure | undefined;
 }
 
 const WEB_SEARCH_REASON =
@@ -120,6 +132,12 @@ const WEB_SEARCH_REASON =
 
 const UNREADABLE_REASON =
   "Hercule could not read this tool call, so it cannot check it. Ask the user, or switch the thread to Full access.";
+
+/** Returns the reason for an edit denied because the guarded places could not be listed. */
+const buildPlacesFailureReason = (failure: GuardedPlacesFailure): string =>
+  failure.kind === "manifest"
+    ? `Hercule could not check ${failure.file}, which lists plugin folders, so it cannot tell which files the agent may not change. Repair or remove the file, or ask the user, or switch the thread to Full access.`
+    : `This folder is more than ${String(failure.limit)} folders below the top of the file system and no git root is above it, so Hercule cannot tell which configuration folders the agent reads and cannot check the change. Work in a less deep folder, or ask the user, or switch the thread to Full access.`;
 
 const CHECK_FAILED_REASON =
   "Hercule's check of this tool call failed, so it cannot allow it. Ask the user, or switch the thread to Full access.";
@@ -165,7 +183,8 @@ const isTargetInPlace = (target: EditTarget, place: GuardedPlace): boolean => {
  * let the call run. It fails closed. When the guard or the web search denial
  * is on and the call could not be decoded, or an edit tool has no text
  * `Path`, the call is denied, because the hook cannot tell what it would
- * change.
+ * change. An edit is also denied, with its own reason, when the guarded
+ * places could not be listed (`guardedPlacesFailure`).
  */
 export const decidePreToolHook = (facts: PreToolFacts): HookDenial | undefined => {
   const { call } = facts;
@@ -179,10 +198,12 @@ export const decidePreToolHook = (facts: PreToolFacts): HookDenial | undefined =
   }
   if (!EDIT_TOOL_NAMES.includes(call.name) || !facts.guardIsOn) return undefined;
   const path = call.args["Path"];
-  if (typeof path !== "string" || facts.editTarget === undefined) {
-    return { decision: "deny", reason: UNREADABLE_REASON };
+  if (typeof path !== "string") return { decision: "deny", reason: UNREADABLE_REASON };
+  if (facts.guardedPlacesFailure !== undefined) {
+    return { decision: "deny", reason: buildPlacesFailureReason(facts.guardedPlacesFailure) };
   }
   const { editTarget } = facts;
+  if (editTarget === undefined) return { decision: "deny", reason: UNREADABLE_REASON };
   return facts.guardedPlaces.some((place) => isTargetInPlace(editTarget, place))
     ? {
         decision: "deny",

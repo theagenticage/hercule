@@ -307,11 +307,15 @@ describe("the guard of the approval files", () => {
         "a file larger than the limit",
         JSON.stringify({ entries: [{ path: "myplugins" }], pad: "x".repeat(70_000) }),
       ],
-    ])("denies every edit as unreadable when the manifest is %s", (_name, content) => {
+    ])("denies every edit, naming the manifest, when the manifest is %s", (_name, content) => {
       const { root, cwd } = setUpRepo();
       writePluginsFile(root, content);
 
-      expect(readReason(decide(cwd, "src/a.ts"))).toContain("could not read");
+      const reason = readReason(decide(cwd, "src/a.ts"));
+
+      expect(reason).toContain(join(root, ".agents", "plugins.json"));
+      expect(reason).toContain("Repair or remove the file");
+      expect(reason).not.toContain("could not read this tool call");
     });
 
     it.each(CONFIG_FOLDERS)(
@@ -321,7 +325,7 @@ describe("the guard of the approval files", () => {
         mkdirSync(join(root, name), { recursive: true });
         mkdirSync(join(root, name, "plugins.json"));
 
-        expect(readReason(decide(cwd, "src/a.ts"))).toContain("could not read");
+        expect(readReason(decide(cwd, "src/a.ts"))).toContain(join(root, name, "plugins.json"));
       },
     );
 
@@ -330,16 +334,20 @@ describe("the guard of the approval files", () => {
       mkdirSync(join(root, "_agents"));
       expect(Bun.spawnSync(["mkfifo", join(root, "_agents", "plugins.json")]).exitCode).toBe(0);
 
-      expect(readReason(decide(cwd, "src/a.ts"))).toContain("could not read");
+      expect(readReason(decide(cwd, "src/a.ts"))).toContain(join(root, "_agents", "plugins.json"));
     });
   });
 
-  it("denies an edit as unreadable when the walk to the git root passes the folder limit", () => {
+  it("denies an edit, saying the folder is too deep, when the walk to the git root passes the folder limit", () => {
     const folder = realpathSync(createScratchHome("hook-deep"));
     const deep = join(folder, ...Array.from({ length: 70 }, () => "d"));
     mkdirSync(deep, { recursive: true });
 
-    expect(readReason(decide(deep, "a.ts"))).toContain("could not read");
+    const reason = readReason(decide(deep, "a.ts"));
+
+    expect(reason).toContain("more than 64 folders");
+    expect(reason).toContain("Full access");
+    expect(reason).not.toContain("could not read this tool call");
   });
 
   it.each([

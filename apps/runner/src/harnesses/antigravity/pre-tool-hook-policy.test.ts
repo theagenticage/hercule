@@ -136,6 +136,22 @@ describe("decidePreToolHook", () => {
     );
   });
 
+  it("denies an edit whose places could not be listed, with a reason for each cause", () => {
+    const manifest = decidePreToolHook({
+      ...editFacts("/r/a.ts", undefined, []),
+      guardedPlacesFailure: { kind: "manifest", file: "/r/.agents/plugins.json" },
+    });
+    const walk = decidePreToolHook({
+      ...editFacts("/r/a.ts", undefined, []),
+      guardedPlacesFailure: { kind: "walk", limit: 64 },
+    });
+
+    expect(manifest?.reason).toContain("/r/.agents/plugins.json");
+    expect(manifest?.reason).toContain("Repair or remove the file");
+    expect(walk?.reason).toContain("more than 64 folders");
+    expect(walk?.reason).toContain("Full access");
+  });
+
   it("allows every edit when the guard is off", () => {
     expect(
       decidePreToolHook({
