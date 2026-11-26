@@ -1,8 +1,8 @@
 /**
  * Builds the model catalog of an Antigravity account from the settings `agy`
- * sends when a session starts (spec 06 section 3.3). The catalog needs no
- * second source: `agy` lists its models in the `model` config option and their
- * effort levels as extra model ids.
+ * sends when a conversation is opened or resumed (spec 06 section 3.3). The
+ * catalog needs no second source: `agy` lists its models in the `model` config
+ * option and their effort levels as extra model ids.
  */
 import type { ConfigOption, SessionSettings } from "@hercule/acp";
 import type { ModelDescriptor, ModelOption } from "@hercule/protocol";
@@ -106,7 +106,7 @@ const buildEffortOption = (
 };
 
 /**
- * Builds the catalog from the settings `agy` sent for a new session. Returns
+ * Builds the catalog from the settings `agy` sent for a new or resumed conversation. Returns
  * an empty list when `agy` sent no `model` option. A model whose value or
  * name is empty is left out, because the protocol refuses it.
  *

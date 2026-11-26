@@ -217,10 +217,8 @@ describe("installing Antigravity", () => {
 
         const outcome = await Effect.runPromise(makeAntigravityInstall(runProcess)(environment()));
 
-        expect(outcome).toMatchObject({
-          ok: false,
-          message: expect.stringContaining("does not match the checksum pinned"),
-        });
+        expect(outcome.ok).toBe(false);
+        expect(outcome.message).toContain("does not match the checksum pinned");
       });
     });
   }
@@ -282,10 +280,8 @@ describe("installing Antigravity", () => {
     it("keeps the existing agy when the download does not match its checksum", async () => {
       const outcome = await install({ agy_cli_mac_arm64: "0".repeat(64) });
 
-      expect(outcome).toMatchObject({
-        ok: false,
-        message: expect.stringContaining("does not match the checksum pinned"),
-      });
+      expect(outcome.ok).toBe(false);
+      expect(outcome.message).toContain("does not match the checksum pinned");
       expectOldAgyKept();
     });
 
@@ -303,10 +299,8 @@ describe("installing Antigravity", () => {
 
       const outcome = await install();
 
-      expect(outcome).toMatchObject({
-        ok: false,
-        message: expect.stringContaining("not a regular file"),
-      });
+      expect(outcome.ok).toBe(false);
+      expect(outcome.message).toContain("not a regular file");
       expectOldAgyKept();
     });
   });
@@ -327,7 +321,8 @@ describe("installing Antigravity", () => {
 
         const outcome = await install();
 
-        expect(outcome).toMatchObject({ ok: false, message: expect.stringContaining("folder") });
+        expect(outcome.ok).toBe(false);
+        expect(outcome.message).toContain("folder");
         expect(readdirSync(bin())).toEqual(["agy"]);
         expect(readdirSync(kind === "a folder" ? join(bin(), "agy") : target)).toEqual([]);
       },
@@ -343,7 +338,8 @@ describe("installing Antigravity", () => {
     const outcome = await install();
 
     expect(outcome.ok).toBe(false);
-    expect(outcome).toMatchObject({ message: expect.stringContaining(`${kernel} ${machine}`) });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toContain(`${kernel} ${machine}`);
     expect(readLines("urls")).toEqual([]);
     expect(existsSync(join(bin(), "agy"))).toBe(false);
   });

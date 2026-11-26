@@ -14,8 +14,8 @@
  * against stale or misplaced links only. It does not protect against another
  * process of the same user that swaps paths while this code runs.
  */
-import { constants } from "node:fs";
-import { lstat, mkdir, mkdtemp, open, rm } from "node:fs/promises";
+import { constants, mkdtempSync } from "node:fs";
+import { lstat, mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -25,10 +25,12 @@ import { buildAdapterFailed } from "../adapter-error-builders";
 import { writeFileAtomically } from "../atomic-file";
 import {
   describeFileFailure,
+  isMissingPath,
   isRealFolder,
   removeSessionFiles,
   UUID_PATTERN,
 } from "../session-files";
+import { ANTIGRAVITY_NAME } from "./harness-name";
 
 /** The folder in the Harness Home where `agy` keeps its own data. */
 export const APP_DATA_DIR = "antigravity-acp";
@@ -54,11 +56,6 @@ const PROBE_CONVERSATION_FILE_LIMIT = 128;
 const TokenFile = Schema.fromJsonString(Schema.Struct({ id_token_email: Schema.NonEmptyString }));
 const decodeTokenFile = Schema.decodeUnknownSync(TokenFile);
 
-const isMissing = (error: unknown): boolean => {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
-
 /**
  * Reads at most `limit` bytes from the start of the regular file at `path`,
  * and returns them as UTF-8 text. `isTruncated` is true when the file has more
@@ -77,7 +74,14 @@ export const readRegularFile = async (
   path: string,
   limit: number,
 ): Promise<{ readonly text: string; readonly isTruncated: boolean }> => {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const file = await open(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch((error: unknown) => {
+    // Opening a link with O_NOFOLLOW fails with a message about "too many
+    // symbolic links", which names the cause badly.
+    throw (error as NodeJS.ErrnoException).code === "ELOOP" ? new Error("it is a link") : error;
+  });
   try {
     if (!(await file.stat()).isFile()) throw new Error("it is not a regular file");
     const chunks: Array<Buffer> = [];
@@ -97,27 +101,35 @@ export const readRegularFile = async (
 };
 
 /**
- * Checks whether the account has an Antigravity login file. Returns true only
- * when `<home>/antigravity-acp` is a real folder and the token file in it is
- * a regular file. A missing file, a link, a folder or a FIFO gives false.
- * Fails with an `AdapterFailed` for any other I/O error, such as permission
- * denied: the runner cannot tell whether the user is signed in, and "not
- * signed in" would send the user to a login that is not needed.
+ * Checks whether the account has an Antigravity login file. Returns false only
+ * when `<home>/antigravity-acp` or the token file in it does not exist. Fails
+ * with an `AdapterFailed` that says what is wrong when either exists but is
+ * not what `agy` writes (a link, a FIFO, a folder where a file should be), and
+ * for any I/O error, such as a token file nobody may read. The runner cannot
+ * tell whether the user is signed in then, and "not signed in" would send the
+ * user to a login that is not needed.
+ *
+ * The token is opened and its first byte read, nothing more, so the file's
+ * secrets stay out of memory. See `readRegularFile` for how it is opened.
  */
 export const hasTokenFile = (home: string): Effect.Effect<boolean, AdapterFailed> =>
   Effect.tryPromise({
     try: async () => {
-      if (!(await isRealFolder(join(home, APP_DATA_DIR)))) return false;
+      const appData = join(home, APP_DATA_DIR);
       try {
-        return (await lstat(join(home, APP_DATA_DIR, TOKEN_FILE))).isFile();
+        if (!(await lstat(appData)).isDirectory()) {
+          throw new Error(`${APP_DATA_DIR} is not a real folder`);
+        }
+        await readRegularFile(join(appData, TOKEN_FILE), 0);
+        return true;
       } catch (error) {
-        if (isMissing(error)) return false;
+        if (isMissingPath(error)) return false;
         throw error;
       }
     },
     catch: (error) =>
       buildAdapterFailed(
-        `Could not look for the Antigravity login on this runner: ${describeFileFailure(error)}`,
+        `Could not look for the ${ANTIGRAVITY_NAME} login on this runner: ${describeFileFailure(error)}`,
       ),
   });
 
@@ -146,35 +158,43 @@ export const readSignedInEmail = (home: string): Effect.Effect<string | undefine
     }
   });
 
+/** The start of the name of a log folder, directly in the Harness Home. */
+const LOG_FOLDER_PREFIX = "hercule-log-";
+
 /**
- * Makes an empty folder, readable by the runner's user only (mode 0700),
- * directly in the Harness Home, and returns its path. Removes the folder with
- * everything in it when the scope closes. A failed removal is logged as a
- * warning with the reason the operating system gave and nothing of the
- * folder's contents. Fails with an `AdapterFailed` when the folder cannot be
- * made.
+ * Makes an empty folder for the log of one `agy` process, readable by the
+ * runner's user only (mode 0700), directly in the Harness Home, and returns
+ * its path. Throws when the folder cannot be made.
  *
- * The folder is in the Harness Home, not in the system's temporary folder,
+ * `agy` writes its log where `--log-file` says. Without it the log goes to
+ * `antigravity-acp/log/` and stays there for good, with the account's email in
+ * it. The folder is in the Harness Home, not in the system's temporary folder,
  * because the `agy` processes of an account keep nothing outside its Harness
- * Home. A runner that crashes leaves the folder behind, and nothing removes
- * it later.
+ * Home.
  */
-export const makeScratchFolder = (
-  home: string,
-): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+export const createLogFolder = (home: string): string => mkdtempSync(join(home, LOG_FOLDER_PREFIX));
+
+/**
+ * Makes a log folder with `createLogFolder` and removes it, with everything in
+ * it, when the scope closes. A failed removal is logged as a warning with the
+ * reason the operating system gave and nothing of the folder's contents. Fails
+ * with an `AdapterFailed` when the folder cannot be made. A runner that
+ * crashes leaves the folder behind, and nothing removes it later.
+ */
+export const makeLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
   Effect.acquireRelease(
-    Effect.tryPromise({
-      try: () => mkdtemp(join(home, "hercule-scratch-")),
+    Effect.try({
+      try: () => createLogFolder(home),
       catch: (error) =>
         buildAdapterFailed(
-          `Could not make a scratch folder for Antigravity on this runner: ${describeFileFailure(error)}`,
+          `Could not make a log folder for ${ANTIGRAVITY_NAME} on this runner: ${describeFileFailure(error)}`,
         ),
     }),
     (folder) =>
       Effect.tryPromise(() => rm(folder, { recursive: true, force: true })).pipe(
         Effect.catch((error) =>
           Effect.logWarning(
-            `Could not remove a scratch folder of Antigravity: ${describeFileFailure(error.cause)}`,
+            `Could not remove a log folder of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}`,
           ),
         ),
       ),
@@ -203,47 +223,66 @@ export const makeProbeFolder = (home: string): Effect.Effect<string, AdapterFail
     },
     catch: (error) =>
       buildAdapterFailed(
-        `Could not make the working folder for the Antigravity check on this runner: ${describeFileFailure(error)}`,
+        `Could not make the working folder for the ${ANTIGRAVITY_NAME} check on this runner: ${describeFileFailure(error)}`,
       ),
   });
 
 /**
- * Returns the id of the probe's conversation, or undefined when there is
- * none. Never fails: a missing file, a link, a file that is not a regular
- * file, a file that is too long, text that is not a UUID and any I/O error all
- * give undefined, and the probe then starts a new conversation.
+ * Returns the id of the probe's conversation, or undefined when there is none
+ * to use. A missing file, and a regular file whose text is not exactly one
+ * UUID (empty, too long, anything else), mean none: the probe then makes a new
+ * conversation and its id replaces the file. Fails with an `AdapterFailed` for
+ * everything else: a folder, a link or a FIFO in the file's place, and any I/O
+ * error such as permission denied. The probe could not store a new id over
+ * those either, and would make a conversation every time it runs.
  */
-export const readProbeConversationId = (home: string): Effect.Effect<string | undefined> =>
-  Effect.promise(async (): Promise<string | undefined> => {
-    try {
-      const { text, isTruncated } = await readRegularFile(
-        join(home, PROBE_CONVERSATION_FILE),
-        PROBE_CONVERSATION_FILE_LIMIT,
-      );
-      const id = text.trim();
-      return isTruncated || !UUID_PATTERN.test(id) ? undefined : id;
-    } catch {
-      return undefined;
-    }
+export const readProbeConversationId = (
+  home: string,
+): Effect.Effect<string | undefined, AdapterFailed> =>
+  Effect.tryPromise({
+    try: async () => {
+      try {
+        const { text, isTruncated } = await readRegularFile(
+          join(home, PROBE_CONVERSATION_FILE),
+          PROBE_CONVERSATION_FILE_LIMIT,
+        );
+        const id = text.trim();
+        return isTruncated || !UUID_PATTERN.test(id) ? undefined : id;
+      } catch (error) {
+        if (isMissingPath(error)) return undefined;
+        throw error;
+      }
+    },
+    catch: (error) =>
+      buildAdapterFailed(
+        `Could not read the conversation of the ${ANTIGRAVITY_NAME} check on this runner: ${describeFileFailure(error)}`,
+      ),
   });
 
 /**
  * Stores `id` as the id of the probe's conversation, replacing the one there.
  * The file is written to a temporary file in the Harness Home and then
  * renamed, so a reader never sees half of it. Fails with an `AdapterFailed`
- * when the file cannot be written.
+ * when `id` is not a UUID, before anything is written, or when the file cannot
+ * be written.
  */
 export const writeProbeConversationId = (
   home: string,
   id: string,
 ): Effect.Effect<void, AdapterFailed> =>
-  Effect.try({
-    try: () => writeFileAtomically(join(home, PROBE_CONVERSATION_FILE), `${id}\n`),
-    catch: (error) =>
-      buildAdapterFailed(
-        `Could not remember the conversation of the Antigravity check on this runner: ${describeFileFailure(error)}`,
-      ),
-  });
+  UUID_PATTERN.test(id)
+    ? Effect.try({
+        try: () => writeFileAtomically(join(home, PROBE_CONVERSATION_FILE), `${id}\n`),
+        catch: (error) =>
+          buildAdapterFailed(
+            `Could not remember the conversation of the ${ANTIGRAVITY_NAME} check on this runner: ${describeFileFailure(error)}`,
+          ),
+      })
+    : Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} gave a conversation id that is not a UUID, so the check cannot keep that conversation`,
+        ),
+      );
 
 /**
  * Deletes the files of one Antigravity conversation: `conversations/<id>.db`

@@ -3,168 +3,55 @@
  * uses: the command, the working folder and the environment, the sign-in over
  * ACP and how its failures are told apart, the check that the process uses the
  * account's own login, and the cleanup when the scope closes. A fake harness
- * answers over the pipes behind a spawn the test writes, and it writes the
- * worker logs the way `agy` does. The real `agy` is never started.
+ * (`fake-agy.testing.ts`) answers over the pipes behind a spawn, and it writes
+ * the worker logs the way `agy` does. The real `agy` is never started.
  */
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
+import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
-import type { AcpHandlers, SessionSettings } from "@hercule/acp";
-import {
-  answerWith,
-  readRecording,
-  startFakeHarness,
-  type FakeHarness,
-  type HarnessScript,
-} from "@hercule/acp/testing";
+import { answerWith } from "@hercule/acp/testing";
 import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercule/protocol";
-import type { AdapterError } from "@hercule/protocol";
-import type { HarnessRunnerContext } from "../index";
+import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
+import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
+import { buildLoginCommand, checkAccountUsable, openSignedInAgy, readAgyVersion } from "./agy";
 import {
-  cleanupHomes,
-  createLines,
-  createScratchHome,
-  NO_CONTROLLER_UPLOADER,
-  waitUntil,
-} from "../testing";
-import {
-  buildLoginCommand,
-  buildNotSignedIn,
-  readUsablePlan,
-  isSignInRequired,
-  openSignedInAgy,
-  readAgyVersion,
-  type AgySpawn,
-} from "./agy";
-import { APP_DATA_DIR } from "./harness-home";
+  BINARY,
+  FILE_STORAGE_LINE,
+  KEYRING_LINE,
+  NETWORK_ERROR_LINE,
+  NO_HANDLERS,
+  PLAN_LABEL,
+  buildContext,
+  buildFakeAgy,
+  createSignedInHome,
+  refuse,
+  type FakeAgy,
+  type FakeAgyOptions,
+} from "./fake-agy.testing";
 
 afterEach(() => {
   cleanupHomes();
 });
 
-const BINARY = "/opt/agy/agy";
-
-/** What a worker of a process that uses the account's own login writes in its log. */
-const FILE_STORAGE = 'level=info msg="Using file-based token storage because SSH session detected"';
-/** What a worker writes when it kept looking for the login in the keychain. */
-const KEYRING = 'level=warn msg="Failed to load stored token from keyring, falling back to file"';
-/** What a worker writes when it could not reach Google to check an expired login. */
-const NETWORK_ERROR =
-  'level=warn msg="token validation failed due to network error (token may still be valid)"';
-
-/** The context of a runner: an environment with variables `agy` must not inherit. */
-const buildContext = (
-  home: string,
-  env: HarnessRunnerContext["env"] = {},
-): HarnessRunnerContext => ({
-  cwd: null,
-  attachmentsDir: null,
-  editMarks: null,
-  attachmentUploader: NO_CONTROLLER_UPLOADER,
-  home,
-  binary: BINARY,
-  env,
-  modelArgument: "{model}",
-  credentialVariables: [],
-  herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
-});
-
-/** Makes a Harness Home with the token file of a signed-in account. */
-const createSignedInHome = (): string => {
-  const home = createScratchHome("agy");
-  mkdirSync(join(home, APP_DATA_DIR), { recursive: true });
-  writeFileSync(join(home, APP_DATA_DIR, "antigravity-oauth-token"), "{}");
-  return home;
-};
-
-const NO_HANDLERS: AcpHandlers = {
-  onSessionUpdate: () => undefined,
-  onApprovalRequest: () => Effect.succeed({ outcome: "cancelled" }),
-  onElicitation: () => Effect.succeed({ action: "cancel" }),
-  onUnhandledMessage: () => undefined,
-};
-
-/** A reply of the harness that refuses the call with a JSON-RPC error. */
-const refuse =
-  (code: number, message: string): HarnessScript =>
-  ({ id }) => [{ jsonrpc: "2.0", id, error: { code, message } }];
-
 /** The words `agy` answers `authenticate` with when it has no login it can use. */
-const RUN_LOGIN = refuse(
-  -32603,
-  "No browser is available here (this is a remote (SSH) session). Run `agy acp --login` to sign in.",
-);
+const RUN_LOGIN_TEXT =
+  "No browser is available here (this is a remote (SSH) session). Run `agy acp --login` to sign in.";
+const RUN_LOGIN = refuse(-32603, RUN_LOGIN_TEXT);
 
-interface Spawned {
-  readonly command: ReadonlyArray<string>;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly cwd: string;
-  readonly harness: FakeHarness;
-  /** The signals the runner sent, in order. */
-  readonly signals: Array<string | undefined>;
-  hasExited: boolean;
-}
-
-interface FakeAgy {
-  readonly spawn: AgySpawn;
-  readonly spawns: Array<Spawned>;
-}
-
-/**
- * Builds a spawn that starts a fake harness, and writes the logs a real `agy`
- * writes next to the path of `--log-file`: the front process's own log and
- * one log per worker. By default the harness answers from the recording of a
- * signed-in account, and there is one worker that uses file storage.
- */
-const buildFakeAgy = (
-  options: {
-    readonly scripts?: Readonly<Record<string, HarnessScript>>;
-    readonly workerLogs?: ReadonlyArray<string>;
-    readonly frontLog?: string;
-    readonly stderrLines?: ReadonlyArray<string>;
-    readonly throws?: Error;
-  } = {},
-): FakeAgy => {
-  const { scripts = {}, workerLogs = [FILE_STORAGE], frontLog = "", stderrLines = [] } = options;
-  const spawns: Array<Spawned> = [];
-  const spawn: AgySpawn = (command, env, cwd) => {
-    if (options.throws !== undefined) throw options.throws;
-    const logFile = command[command.indexOf("--log-file") + 1]!;
-    writeFileSync(logFile, frontLog);
-    workerLogs.forEach((text, index) => {
-      writeFileSync(`${logFile}.${4000 + index}`, text);
-    });
-    const stderr = createLines();
-    for (const line of stderrLines) stderr.push(line);
-    stderr.end();
-    const harness = startFakeHarness({ recording: readRecording("cancel"), scripts });
-    const signals: Array<string | undefined> = [];
-    const spawned: Spawned = { command, env, cwd, harness, signals, hasExited: false };
-    void harness.exited.then(() => {
-      spawned.hasExited = true;
-    });
-    spawns.push(spawned);
-    return {
-      write: harness.write,
-      stdout: harness.stdout,
-      stderr: stderr.iterable,
-      end: harness.end,
-      kill: (signal) => {
-        signals.push(signal);
-        harness.kill();
-      },
-      exited: harness.exited,
-    };
-  };
-  return { spawn, spawns };
+/** A fake `agy` for a new signed-in Harness Home, and the home. */
+const setUp = (options: FakeAgyOptions = {}): { readonly home: string; readonly fake: FakeAgy } => {
+  const home = createSignedInHome();
+  return { home, fake: buildFakeAgy(home, options) };
 };
 
 /** Runs the effect in a scope that closes when it ends, and returns what it failed with. */
@@ -179,13 +66,9 @@ const failureOf = (
 const open = (
   fake: FakeAgy,
   home: string,
-  options: {
-    readonly env?: HarnessRunnerContext["env"];
-    readonly cwd?: string;
-    readonly binary?: string;
-  } = {},
+  options: { readonly env?: Record<string, string>; readonly cwd?: string } = {},
 ) =>
-  openSignedInAgy(fake.spawn, buildContext(home, options.env), options.binary ?? BINARY, {
+  openSignedInAgy(fake.spawn, buildContext(home, BINARY, options.env), BINARY, {
     cwd: options.cwd ?? createScratchHome("agy-work"),
     handlers: NO_HANDLERS,
   });
@@ -196,12 +79,12 @@ const openAndReadPlan = (fake: FakeAgy, home: string): Promise<string | undefine
 
 /** The folders the runner made in the Harness Home for a process's log. */
 const listLogFolders = (home: string): ReadonlyArray<string> =>
-  readdirSync(home).filter((name) => name.startsWith("hercule-scratch-"));
+  readdirSync(home).filter((name) => name.startsWith("hercule-log-"));
 
 describe("a home with no login", () => {
   it("fails as not signed in and spawns nothing", async () => {
     const home = createScratchHome("agy");
-    const fake = buildFakeAgy();
+    const fake = buildFakeAgy(home);
 
     const error = await failureOf(open(fake, home));
 
@@ -234,8 +117,7 @@ describe("how the process is started", () => {
   };
 
   it("runs the exact command in the working folder, with a log of its own in the Harness Home", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy();
+    const { home, fake } = setUp();
     const cwd = createScratchHome("agy-work");
 
     await Effect.runPromise(Effect.scoped(open(fake, home, { cwd })));
@@ -253,23 +135,14 @@ describe("how the process is started", () => {
       "--log-file",
     ]);
     const logFile = spawned.command.at(-1)!;
-    expect(logFile.startsWith(join(home, "hercule-scratch-"))).toBe(true);
+    expect(logFile.startsWith(join(home, "hercule-log-"))).toBe(true);
     expect(logFile.endsWith("/agy.log")).toBe(true);
     expect(spawned.cwd).toBe(cwd);
   });
 
-  it("keeps the home and the path, drops the runner's own agy settings and credentials, and sets the two variables", async () => {
-    const fake = buildFakeAgy();
-
-    await Effect.runPromise(Effect.scoped(open(fake, createSignedInHome(), { env: RUNNER_ENV })));
-
-    expect(fake.spawns[0]!.env).toEqual(AGY_ENV);
-  });
-
-  it("gives the login command, the version command and a session the same environment", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy();
-    const ctx = buildContext(home, RUNNER_ENV);
+  it("gives the sign-in, the version command and a session the same environment: the runner's own agy settings and credentials dropped, the two variables set", async () => {
+    const { home, fake } = setUp();
+    const ctx = buildContext(home, BINARY, RUNNER_ENV);
     const versionEnvs: Array<Readonly<Record<string, string | undefined>>> = [];
     const run: Run = (_command, env) => {
       versionEnvs.push(env);
@@ -285,36 +158,36 @@ describe("how the process is started", () => {
       ),
     );
     await Effect.runPromise(readAgyVersion(run, ctx, BINARY));
+    const login = buildLoginCommand(ctx, BINARY);
 
-    expect(buildLoginCommand(ctx, BINARY).env).toEqual(AGY_ENV);
-    expect(versionEnvs).toEqual([AGY_ENV]);
     expect(fake.spawns[0]!.env).toEqual(AGY_ENV);
+    expect(versionEnvs).toEqual([AGY_ENV]);
+    expect(login.env).toEqual(AGY_ENV);
   });
 });
 
 describe("the login command", () => {
-  it("signs in to the Harness Home with a login that works on plain pipes", () => {
-    const command = buildLoginCommand(buildContext("/homes/google-1"), BINARY);
+  it("signs in to the Harness Home on plain pipes, logging to a folder of its own that the login removes", () => {
+    const home = createScratchHome("agy");
 
-    expect(command.command).toEqual([
+    const login = buildLoginCommand(buildContext(home), BINARY);
+
+    const folder = login.scratchFolder!;
+    expect(dirname(folder)).toBe(home);
+    expect(folder.slice(home.length + 1).startsWith("hercule-log-")).toBe(true);
+    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    expect(login.command).toEqual([
       BINARY,
       "acp",
       "--login",
       "--gemini-dir",
-      "/homes/google-1",
+      home,
       "--app-data-dir",
       "antigravity-acp",
+      "--log-file",
+      join(folder, "agy.log"),
     ]);
-    expect(command.terminal).toBeUndefined();
-  });
-
-  it("recognises the line where agy refuses a code, and no other line", () => {
-    const { refusal } = buildLoginCommand(buildContext("/homes/google-1"), BINARY);
-
-    expect(refusal?.test(`couldn't log in: token exchange failed: oauth2: "invalid_grant"`)).toBe(
-      true,
-    );
-    expect(refusal?.test("Logged in as someone@example.com.")).toBe(false);
+    expect(login.terminal).toBeUndefined();
   });
 });
 
@@ -345,9 +218,9 @@ describe("the version", () => {
 
 describe("the plan", () => {
   it("is the tier name in the reply to authenticate", async () => {
-    const home = createSignedInHome();
+    const { home, fake } = setUp();
 
-    expect(await openAndReadPlan(buildFakeAgy(), home)).toBe("Antigravity Starter Quota");
+    expect(await openAndReadPlan(fake, home)).toBe(PLAN_LABEL);
   });
 
   it.each([
@@ -356,87 +229,61 @@ describe("the plan", () => {
     ["a tier with no name", { _meta: { antigravity: { tier: { id: "free-tier" } } } }],
     ["an empty name", { _meta: { antigravity: { tier: { name: "  " } } } }],
   ])("is undefined for a reply with %s", async (_what, reply) => {
-    const fake = buildFakeAgy({ scripts: { authenticate: answerWith(reply) } });
+    const { home, fake } = setUp({ scripts: { authenticate: answerWith(reply) } });
 
-    expect(await openAndReadPlan(fake, createSignedInHome())).toBeUndefined();
+    expect(await openAndReadPlan(fake, home)).toBeUndefined();
   });
 });
 
-describe("readUsablePlan", () => {
-  const listing = (...values: ReadonlyArray<string>): SessionSettings => ({
-    configOptions: [
-      {
-        id: "model",
-        name: "Model",
-        type: "select",
-        currentValue: values[0] ?? "",
-        options: values.map((value) => ({ value, name: value })),
-      },
-    ],
-  });
+describe("checkAccountUsable", () => {
+  const model: ModelDescriptor = {
+    slug: "gemini-4-hydrogen",
+    name: "Gemini 4 Hydrogen",
+    imageInput: null,
+    options: [],
+  };
+  const failureOf = (plan: string | undefined, models: ReadonlyArray<ModelDescriptor>) =>
+    Option.getOrUndefined(Result.getFailure(checkAccountUsable(plan, models)));
 
   it("returns the plan of an account that has a plan and models", () => {
-    expect(readUsablePlan("Antigravity Starter Quota", listing("gemini-4-hydrogen"))).toEqual(
-      Result.succeed("Antigravity Starter Quota"),
-    );
+    expect(checkAccountUsable(PLAN_LABEL, [model])).toEqual(Result.succeed(PLAN_LABEL));
   });
 
   it("says Google holds an account that lists models but has no plan, and that signing in again does not help", () => {
-    const failure = Result.getFailure(readUsablePlan(undefined, listing("gemini-3.8-flash")));
+    const failure = failureOf(undefined, [model]);
 
-    expect(Option.getOrUndefined(failure)).toBeInstanceOf(AdapterFailed);
-    expect(Option.getOrUndefined(failure)?.message).toBe(
+    expect(failure).toBeInstanceOf(AdapterFailed);
+    expect(failure?.message).toBe(
       'Google is holding this account until it is verified ("Verify your account to continue."), so Antigravity cannot use it. Sign in to this Google account in a browser and follow Google\'s steps; Google explains them at https://support.google.com/accounts?p=al_alert. The sign-in in Hercule is fine and need not be repeated.',
     );
   });
 
-  it.each([
-    ["no config options", { configOptions: [] }],
-    ["a model option with no choices", listing()],
-    [
-      "only a thought level",
-      {
-        configOptions: [
-          {
-            id: "thought_level",
-            name: "Level",
-            type: "select" as const,
-            currentValue: "low",
-            options: [{ value: "low", name: "Low" }],
-          },
-        ],
-      },
-    ],
-  ])("says the runner may be offline when the settings have %s, plan or not", (_what, settings) => {
+  it("says the runner may be offline when no model is listed, plan or not", () => {
     const message =
       "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.";
 
-    for (const plan of ["Antigravity Starter Quota", undefined]) {
-      const failure = Result.getFailure(readUsablePlan(plan, settings));
-      expect(Option.getOrUndefined(failure)?.message).toBe(message);
-    }
+    expect(failureOf(PLAN_LABEL, [])?.message).toBe(message);
+    expect(failureOf(undefined, [])?.message).toBe(message);
   });
 });
 
 describe("a refused authenticate", () => {
   it("is not signed in when agy asks for the login and its log has no network error", async () => {
-    const fake = buildFakeAgy({
-      scripts: { authenticate: RUN_LOGIN },
-      workerLogs: [`${FILE_STORAGE}\n`],
-    });
+    const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN } });
 
-    const error = await failureOf(open(fake, createSignedInHome()));
+    const error = await failureOf(open(fake, home));
 
-    expect(error).toEqual(buildNotSignedIn());
+    expect(error).toBeInstanceOf(HarnessLoginMissing);
+    expect(error.message).toBe("Antigravity is not signed in on this runner.");
   });
 
   it("is a network failure when a worker's log holds the network error", async () => {
-    const fake = buildFakeAgy({
+    const { home, fake } = setUp({
       scripts: { authenticate: RUN_LOGIN },
-      workerLogs: [`${FILE_STORAGE}\n${NETWORK_ERROR}\n`],
+      workerLogs: [`${FILE_STORAGE_LINE}\n${NETWORK_ERROR_LINE}\n`],
     });
 
-    const error = await failureOf(open(fake, createSignedInHome()));
+    const error = await failureOf(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(
@@ -445,24 +292,35 @@ describe("a refused authenticate", () => {
   });
 
   it("does not read the network error from the log of the front process", async () => {
-    const fake = buildFakeAgy({
+    const { home, fake } = setUp({
       scripts: { authenticate: RUN_LOGIN },
-      workerLogs: [FILE_STORAGE],
-      frontLog: NETWORK_ERROR,
+      frontLog: NETWORK_ERROR_LINE,
     });
 
-    expect(await failureOf(open(fake, createSignedInHome()))).toBeInstanceOf(HarnessLoginMissing);
+    expect(await failureOf(open(fake, home))).toBeInstanceOf(HarnessLoginMissing);
   });
 
-  it("fails with agy's own words when it is any other refusal", async () => {
-    const fake = buildFakeAgy({
-      scripts: { authenticate: refuse(-32603, "quota service unavailable") },
-    });
+  it("cannot tell why when there is no worker log at all, and does not call it signed out", async () => {
+    const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN }, workerLogs: [] });
 
-    const error = await failureOf(open(fake, createSignedInHome()));
+    const error = await failureOf(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
-    expect(error.message).toContain("quota service unavailable");
+    expect(error.message).toBe(
+      "Could not tell why Antigravity refused the sign-in of this account.",
+    );
+  });
+
+  it.each([
+    ["another error code with the same words", refuse(-32000, RUN_LOGIN_TEXT)],
+    ["the same code with other words", refuse(-32603, "quota service unavailable")],
+  ])("is a start failure with agy's own words for %s", async (_what, script) => {
+    const { home, fake } = setUp({ scripts: { authenticate: script } });
+
+    const error = await failureOf(open(fake, home));
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain("Antigravity could not be started on this runner");
   });
 });
 
@@ -470,32 +328,54 @@ describe("the sign that the process uses the account's own login", () => {
   const NOT_THIS_ACCOUNT = "Antigravity is signed in, but not with a login of this account.";
 
   it("passes when every worker log has it", async () => {
-    const fake = buildFakeAgy({ workerLogs: [FILE_STORAGE, `${FILE_STORAGE}\nmore`] });
+    const { home, fake } = setUp({
+      workerLogs: [FILE_STORAGE_LINE, `${FILE_STORAGE_LINE}\nmore`],
+    });
 
-    expect(await openAndReadPlan(fake, createSignedInHome())).toBe("Antigravity Starter Quota");
+    expect(await openAndReadPlan(fake, home)).toBe(PLAN_LABEL);
   });
 
   it.each([
     ["there is no worker log", { workerLogs: [] }],
-    ["the only worker log lacks it", { workerLogs: [KEYRING] }],
-    ["one of two worker logs lacks it", { workerLogs: [FILE_STORAGE, KEYRING] }],
-    ["only the log of the front process has it", { workerLogs: [], frontLog: FILE_STORAGE }],
+    ["the only worker log lacks it", { workerLogs: [KEYRING_LINE] }],
+    ["one of two worker logs lacks it", { workerLogs: [FILE_STORAGE_LINE, KEYRING_LINE] }],
+    ["only the log of the front process has it", { workerLogs: [], frontLog: FILE_STORAGE_LINE }],
     [
       "the front process has it and the only worker does not",
-      { workerLogs: [KEYRING], frontLog: FILE_STORAGE },
+      { workerLogs: [KEYRING_LINE], frontLog: FILE_STORAGE_LINE },
     ],
   ])("fails when %s", async (_what, logs) => {
-    const error = await failureOf(open(buildFakeAgy(logs), createSignedInHome()));
+    const { home, fake } = setUp(logs);
+
+    const error = await failureOf(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(NOT_THIS_ACCOUNT);
+  });
+
+  it("can be checked again later, and fails when a worker started since then lacks it", async () => {
+    const { home, fake } = setUp();
+
+    const failure = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const signedIn = yield* open(fake, home);
+          yield* signedIn.confirmOwnLogin;
+          // A worker started by session/new that kept looking for the keychain.
+          writeFileSync(`${fake.spawns[0]!.command.at(-1)!}.4001`, KEYRING_LINE);
+          return yield* Effect.flip(signedIn.confirmOwnLogin);
+        }),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(AdapterFailed);
+    expect(failure.message).toBe(NOT_THIS_ACCOUNT);
   });
 });
 
 describe("a process that cannot be started", () => {
   it("is not installed when the binary does not exist", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy({
+    const { home, fake } = setUp({
       throws: Object.assign(new Error("spawn failed"), { code: "ENOENT" }),
     });
 
@@ -506,33 +386,31 @@ describe("a process that cannot be started", () => {
     expect(listLogFolders(home)).toEqual([]);
   });
 
-  it("is installed but cannot be run for any other reason", async () => {
-    const fake = buildFakeAgy({ throws: new Error("permission denied") });
+  it("is a start failure with the reason for any other error", async () => {
+    const { home, fake } = setUp({ throws: new Error("permission denied") });
 
-    const error = await failureOf(open(fake, createSignedInHome()));
+    const error = await failureOf(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
-    expect(error.message).toContain("installed on this runner but could not be run");
-    expect(error.message).toContain("permission denied");
+    expect(error.message).toBe(
+      "Antigravity could not be started on this runner: permission denied.",
+    );
   });
 
-  it("is installed but cannot be run when the working folder is missing too", async () => {
+  it("is not called not installed when the working folder is missing too", async () => {
     // With the folder gone, ENOENT may be about the folder, so it does not show the binary is missing.
-    const fake = buildFakeAgy({
+    const { home, fake } = setUp({
       throws: Object.assign(new Error("spawn failed"), { code: "ENOENT" }),
     });
 
-    const error = await failureOf(
-      open(fake, createSignedInHome(), { cwd: "/nonexistent/work-folder" }),
-    );
+    const error = await failureOf(open(fake, home, { cwd: "/nonexistent/work-folder" }));
 
     expect(error).toBeInstanceOf(AdapterFailed);
-    expect(error.message).toContain("could not be run");
+    expect(error.message).toContain("could not be started");
   });
 
   it("names what the process wrote on stderr when it closes its output during initialize", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy({
+    const { home, fake } = setUp({
       scripts: {
         initialize: (_call, harness) => {
           harness.end();
@@ -550,12 +428,37 @@ describe("a process that cannot be started", () => {
     expect(fake.spawns[0]!.hasExited).toBe(true);
     expect(listLogFolders(home)).toEqual([]);
   });
+
+  it("does not wait for good for a stderr that a descendant of the process holds open", async () => {
+    const { home, fake } = setUp({
+      scripts: {
+        initialize: (_call, harness) => {
+          harness.end();
+          return [];
+        },
+      },
+      stderrLines: ["panic: could not open the database"],
+      holdStderrOpen: true,
+    });
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const opening = yield* Effect.forkChild(Effect.scoped(Effect.flip(open(fake, home))));
+        yield* Effect.promise(() => waitUntil("exited", () => fake.spawns[0]?.hasExited === true));
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust(Duration.seconds(1));
+        return yield* Fiber.join(opening);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain("panic: could not open the database");
+  });
 });
 
 describe("closing the scope", () => {
   it("closes the connection, stops the process and waits for its exit, then removes the log folder", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy();
+    const { home, fake } = setUp();
     const scope = Effect.runSync(Scope.make());
 
     const signedIn = await Effect.runPromise(
@@ -576,8 +479,7 @@ describe("closing the scope", () => {
   });
 
   it("does the same when the start fails", async () => {
-    const home = createSignedInHome();
-    const fake = buildFakeAgy({ workerLogs: [] });
+    const { home, fake } = setUp({ workerLogs: [] });
 
     await failureOf(open(fake, home));
 
@@ -587,9 +489,8 @@ describe("closing the scope", () => {
   });
 
   it("does the same when the start is interrupted", async () => {
-    const home = createSignedInHome();
     // agy never answers authenticate.
-    const fake = buildFakeAgy({ scripts: { authenticate: () => [] } });
+    const { home, fake } = setUp({ scripts: { authenticate: () => [] } });
 
     const fiber = Effect.runFork(Effect.scoped(open(fake, home)));
     await waitUntil(
@@ -604,25 +505,5 @@ describe("closing the scope", () => {
     expect(fake.spawns[0]!.signals).toEqual(["SIGTERM"]);
     expect(fake.spawns[0]!.hasExited).toBe(true);
     expect(listLogFolders(home)).toEqual([]);
-  });
-});
-
-describe("isSignInRequired", () => {
-  const refused = (code: number, harnessMessage: string): AcpError =>
-    new AcpError({ reason: "refused", message: "The call failed.", code, harnessMessage });
-
-  it("is true for the -32000 that session/new answers when the account is not signed in", () => {
-    expect(isSignInRequired(refused(-32000, "Authentication required"))).toBe(true);
-  });
-
-  it("is false for another refusal, and for a failure that is not a refusal", () => {
-    expect(isSignInRequired(refused(-32602, "Unknown model ID: x"))).toBe(false);
-    expect(isSignInRequired(refused(-32000, "Something else broke"))).toBe(false);
-    expect(isSignInRequired(refused(-32603, "Authentication required"))).toBe(false);
-    expect(
-      isSignInRequired(
-        new AcpError({ reason: "closed", message: "The harness closed its output." }),
-      ),
-    ).toBe(false);
   });
 });

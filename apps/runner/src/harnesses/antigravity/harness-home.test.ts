@@ -1,6 +1,7 @@
 /**
  * Tests the files of an Antigravity account in its Harness Home: finding the
- * login, reading the signed-in email, the scratch folder, and deleting one
+ * login, reading the signed-in email, the log folder, the files the probe keeps,
+ * and deleting one
  * conversation's files. Each test uses a real temporary folder laid out the
  * way `agy` lays out its files.
  */
@@ -9,12 +10,11 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -25,7 +25,7 @@ import {
   deleteSessionFiles,
   hasTokenFile,
   makeProbeFolder,
-  makeScratchFolder,
+  makeLogFolder,
   readProbeConversationId,
   readSignedInEmail,
   writeProbeConversationId,
@@ -85,29 +85,67 @@ describe("hasTokenFile", () => {
     expect(await Effect.runPromise(hasTokenFile(createHome()))).toBe(false);
   });
 
-  it("is false when the token file is a link, a folder or a FIFO", async () => {
-    const link = createHome();
-    createFile(join(link, "real-token"));
-    mkdirSync(join(link, APP_DATA_DIR));
-    symlinkSync(join(link, "real-token"), tokenPath(link));
-    const folder = createHome();
-    mkdirSync(tokenPath(folder), { recursive: true });
-    const fifo = createHome();
-    createFifo(tokenPath(fifo));
+  it("is false when only the app data folder is missing, or only the token file is", async () => {
+    const withFolder = createHome();
+    mkdirSync(join(withFolder, APP_DATA_DIR));
 
-    const answers = await Promise.all(
-      [link, folder, fifo].map((home) => Effect.runPromise(hasTokenFile(home))),
-    );
-
-    expect(answers).toEqual([false, false, false]);
+    expect(await Effect.runPromise(hasTokenFile(withFolder))).toBe(false);
   });
 
-  it("is false when the app data folder is a link to a folder with a token", async () => {
+  it.each([
+    [
+      "a link",
+      (home: string) => {
+        createFile(join(home, "real-token"));
+        mkdirSync(join(home, APP_DATA_DIR));
+        symlinkSync(join(home, "real-token"), tokenPath(home));
+      },
+      "it is a link",
+    ],
+    [
+      "a folder",
+      (home: string) => mkdirSync(tokenPath(home), { recursive: true }),
+      "it is not a regular file",
+    ],
+    ["a FIFO", (home: string) => createFifo(tokenPath(home)), "it is not a regular file"],
+  ])("fails, and does not say false, when the token file is %s", async (_what, prepare, reason) => {
+    const home = createHome();
+    prepare(home);
+
+    const error = await Effect.runPromise(Effect.flip(hasTokenFile(home)));
+
+    expect(error._tag).toBe("AdapterFailed");
+    expect(error.message).toBe(
+      `Could not look for the Antigravity login on this runner: ${reason}.`,
+    );
+  });
+
+  it("fails when the app data folder is a link to a folder with a token", async () => {
     const home = createHome();
     linkAppDataDir(home);
 
-    expect(await Effect.runPromise(hasTokenFile(home))).toBe(false);
+    const error = await Effect.runPromise(Effect.flip(hasTokenFile(home)));
+
+    expect(error._tag).toBe("AdapterFailed");
+    expect(error.message).toContain("antigravity-acp is not a real folder");
   });
+
+  it.skipIf(isRoot)(
+    "fails, and does not say false, when nobody may read the token file",
+    async () => {
+      const home = createHome();
+      createToken(home, tokenText("a@example.com"));
+      chmodSync(tokenPath(home), 0o000);
+
+      const error = await Effect.runPromise(Effect.flip(hasTokenFile(home)));
+
+      chmodSync(tokenPath(home), 0o600);
+      expect(error._tag).toBe("AdapterFailed");
+      expect(error.message).toBe(
+        "Could not look for the Antigravity login on this runner: permission denied.",
+      );
+    },
+  );
 
   it.skipIf(isRoot)(
     "fails, and does not say false, when the folder cannot be searched",
@@ -197,20 +235,21 @@ describe("readSignedInEmail", () => {
   });
 });
 
-describe("makeScratchFolder", () => {
+describe("makeLogFolder", () => {
   it("makes an empty folder in the Harness Home that only the user can enter", async () => {
     const home = createHome();
 
     const [folder, entries, mode] = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const made = yield* makeScratchFolder(home);
+          const made = yield* makeLogFolder(home);
           return [made, readdirSync(made), statSync(made).mode & 0o777] as const;
         }),
       ),
     );
 
     expect(dirname(folder)).toBe(home);
+    expect(basename(folder).startsWith("hercule-log-")).toBe(true);
     expect(entries).toEqual([]);
     expect(mode).toBe(0o700);
   });
@@ -218,7 +257,7 @@ describe("makeScratchFolder", () => {
   it("removes the folder and what is in it when the scope closes, and not before", async () => {
     const home = createHome();
     const scope = await Effect.runPromise(Scope.make());
-    const folder = await Effect.runPromise(makeScratchFolder(home).pipe(Scope.provide(scope)));
+    const folder = await Effect.runPromise(makeLogFolder(home).pipe(Scope.provide(scope)));
     createFile(join(folder, "deep", "note.txt"));
 
     expect(existsSync(folder)).toBe(true);
@@ -230,10 +269,10 @@ describe("makeScratchFolder", () => {
   it("fails with a sentence for the user when the Harness Home does not exist", async () => {
     const home = join(createHome(), "missing");
 
-    const error = await Effect.runPromise(Effect.flip(Effect.scoped(makeScratchFolder(home))));
+    const error = await Effect.runPromise(Effect.flip(Effect.scoped(makeLogFolder(home))));
 
     expect(error._tag).toBe("AdapterFailed");
-    expect(error.message).toMatch(/^Could not make a scratch folder for Antigravity .*\.$/);
+    expect(error.message).toMatch(/^Could not make a log folder for Antigravity .*\.$/);
   });
 });
 
@@ -378,24 +417,60 @@ describe("the probe's conversation", () => {
     expect(readdirSync(home)).toEqual(["hercule-probe-conversation"]);
   });
 
-  it("reads no id from a missing file, a link, a FIFO, a long file or text that is not a UUID", async () => {
+  it("reads no id from a missing file, and none from a regular file that is not one UUID", async () => {
     const home = createHome();
     const path = join(home, "hercule-probe-conversation");
     const read = () => Effect.runPromise(readProbeConversationId(home));
 
     expect(await read()).toBeUndefined();
-    createFile(path, "../../etc/passwd\n");
-    expect(await read()).toBeUndefined();
-    createFile(path, `${ID}${" ".repeat(200)}`);
-    expect(await read()).toBeUndefined();
-    rmSync(path);
-    createFile(join(home, "elsewhere"), `${ID}\n`);
-    symlinkSync(join(home, "elsewhere"), path);
-    expect(await read()).toBeUndefined();
-    rmSync(path);
-    createFifo(path);
-    expect(await read()).toBeUndefined();
+    for (const content of ["", "../../etc/passwd\n", `${ID}\n${ID}\n`, `${ID}${" ".repeat(200)}`]) {
+      createFile(path, content);
+      expect(await read()).toBeUndefined();
+    }
   });
+
+  it.each([
+    ["a folder", (path: string) => mkdirSync(path)],
+    ["a link", (path: string) => symlinkSync(join(dirname(path), "elsewhere"), path)],
+    ["a FIFO", (path: string) => createFifo(path)],
+  ])(
+    "fails when %s is in the file's place, so the probe makes no conversation",
+    async (_what, prepare) => {
+      const home = createHome();
+      createFile(join(home, "elsewhere"), "33333333-3333-4333-8333-333333333333\n");
+      prepare(join(home, "hercule-probe-conversation"));
+
+      const error = await Effect.runPromise(Effect.flip(readProbeConversationId(home)));
+
+      expect(error._tag).toBe("AdapterFailed");
+      expect(error.message).toMatch(
+        /^Could not read the conversation of the Antigravity check on this runner: /,
+      );
+    },
+  );
+
+  it.skipIf(isRoot)("fails when nobody may read the file", async () => {
+    const home = createHome();
+    const path = createFile(join(home, "hercule-probe-conversation"), `${ID}\n`);
+    chmodSync(path, 0o000);
+
+    const error = await Effect.runPromise(Effect.flip(readProbeConversationId(home)));
+
+    chmodSync(path, 0o600);
+    expect(error.message).toMatch(/permission denied\.$/);
+  });
+
+  it.each(["", "not-a-uuid", "../brain/x", `${ID}\n${ID}`])(
+    "refuses to store the id %j, and writes nothing",
+    async (id) => {
+      const home = createHome();
+
+      const error = await Effect.runPromise(Effect.flip(writeProbeConversationId(home, id)));
+
+      expect(error._tag).toBe("AdapterFailed");
+      expect(readdirSync(home)).toEqual([]);
+    },
+  );
 
   it("fails with a sentence for the user when the id cannot be stored", async () => {
     const home = join(createHome(), "missing");

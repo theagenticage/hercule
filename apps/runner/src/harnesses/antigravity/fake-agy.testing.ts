@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
+import type { AcpHandlers } from "@hercule/acp";
 import {
   answerWith,
   readRecording,
@@ -18,7 +19,7 @@ import {
 } from "@hercule/acp/testing";
 import type { HarnessRunnerContext } from "../index";
 import type { Run } from "../process";
-import { createScratchHome } from "../testing";
+import { createLines, createScratchHome, NO_CONTROLLER_UPLOADER } from "../testing";
 import type { AgySpawn } from "./agy";
 import { APP_DATA_DIR } from "./harness-home";
 
@@ -39,21 +40,41 @@ export const CONVERSATION = "558eccc9-5c63-48a1-bf9f-14edaf5a58a5";
 const tokenPath = (home: string): string => join(home, APP_DATA_DIR, "antigravity-oauth-token");
 
 /** What a worker of a process that uses the account's own login writes in its log. */
-const FILE_STORAGE_LINE =
+export const FILE_STORAGE_LINE =
   'level=info msg="Using file-based token storage because SSH session detected"';
 
+/** What a worker writes when it kept looking for the login in the keychain. */
+export const KEYRING_LINE =
+  'level=warn msg="Failed to load stored token from keyring, falling back to file"';
+
+/** What a worker writes when it could not reach Google to check an expired login. */
+export const NETWORK_ERROR_LINE =
+  'level=warn msg="token validation failed due to network error (token may still be valid)"';
+
+/** Handlers for a connection in a test that expects nothing from `agy` but answers. */
+export const NO_HANDLERS: AcpHandlers = {
+  onSessionUpdate: () => undefined,
+  onApprovalRequest: () => Effect.succeed({ outcome: "cancelled" }),
+  onElicitation: () => Effect.succeed({ action: "cancel" }),
+  onUnhandledMessage: () => undefined,
+};
+
 /** Returns the context of a runner for the account in `home`. */
-export const buildContext = (home: string, binary: string = BINARY): HarnessRunnerContext => ({
+export const buildContext = (
+  home: string,
+  binary: string = BINARY,
+  env: HarnessRunnerContext["env"] = { PATH: "/usr/bin" },
+): HarnessRunnerContext => ({
   cwd: null,
   home,
   binary,
-  env: { PATH: "/usr/bin" },
+  env,
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
   attachmentsDir: null,
   editMarks: null,
-  attachmentUploader: { upload: () => Effect.die("a probe uploads nothing") },
+  attachmentUploader: NO_CONTROLLER_UPLOADER,
 });
 
 /** Writes the token file of `agy` with `email`, or with no email field when it is `undefined`. */
@@ -139,6 +160,7 @@ export const answerNewSession =
 
 export interface Spawned {
   readonly command: ReadonlyArray<string>;
+  readonly env: Readonly<Record<string, string | undefined>>;
   readonly cwd: string;
   readonly harness: FakeHarness;
   /** The signals the runner sent, in order. */
@@ -154,16 +176,32 @@ export interface FakeAgy {
   readonly run: Run;
 }
 
+export interface FakeAgyOptions {
+  /** Scripts for methods of the process. They win over the defaults. */
+  readonly scripts?: Readonly<Record<string, HarnessScript>>;
+  /** The text of each worker's log. The default is one worker that uses file storage. */
+  readonly workerLogs?: ReadonlyArray<string>;
+  /** The text of the log of the front process. */
+  readonly frontLog?: string;
+  /** What the process writes on stderr. */
+  readonly stderrLines?: ReadonlyArray<string>;
+  /** Keeps stderr open after the process exited, as a descendant that holds the pipe does. */
+  readonly holdStderrOpen?: boolean;
+  /** Makes the spawn throw this, as a binary that cannot be started does. */
+  readonly throws?: Error;
+  /** What `agy --version` prints. `null` makes the command fail. */
+  readonly version?: string | null;
+}
+
 /**
  * Builds a fake `agy` for the Harness Home `home`. Its process answers from
  * the recording, with `session/new`, `session/resume` and `session/close`
- * answered as `agy` does unless `scripts` says otherwise. A spawn writes the logs of a process
- * that uses file storage next to the path of `--log-file`.
+ * answered as `agy` does unless `scripts` says otherwise. A spawn writes the
+ * logs of a real `agy` next to the path of `--log-file`: the front process's
+ * own log and one log per worker.
  */
-export const buildFakeAgy = (
-  home: string,
-  options: { readonly scripts?: Readonly<Record<string, HarnessScript>> } = {},
-): FakeAgy => {
+export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAgy => {
+  const { workerLogs = [FILE_STORAGE_LINE], frontLog = "", stderrLines = [] } = options;
   const scripts = {
     "session/new": answerNewSession(home),
     "session/resume": answerResume(home),
@@ -172,13 +210,19 @@ export const buildFakeAgy = (
   };
   const spawns: Array<Spawned> = [];
   const ran: Array<ReadonlyArray<string>> = [];
-  const spawn: AgySpawn = (command, _env, cwd) => {
+  const spawn: AgySpawn = (command, env, cwd) => {
+    if (options.throws !== undefined) throw options.throws;
     const logFile = command[command.indexOf("--log-file") + 1]!;
-    writeFileSync(logFile, "");
-    writeFileSync(`${logFile}.4000`, FILE_STORAGE_LINE);
+    writeFileSync(logFile, frontLog);
+    workerLogs.forEach((text, index) => {
+      writeFileSync(`${logFile}.${4000 + index}`, text);
+    });
+    const stderr = createLines();
+    for (const line of stderrLines) stderr.push(line);
+    if (options.holdStderrOpen !== true) stderr.end();
     const harness = startFakeHarness({ recording: readRecording("cancel"), scripts });
     const signals: Array<string | undefined> = [];
-    const spawned: Spawned = { command, cwd, harness, signals, hasExited: false };
+    const spawned: Spawned = { command, env, cwd, harness, signals, hasExited: false };
     void harness.exited.then(() => {
       spawned.hasExited = true;
     });
@@ -186,7 +230,7 @@ export const buildFakeAgy = (
     return {
       write: harness.write,
       stdout: harness.stdout,
-      stderr: harness.stderr,
+      stderr: stderr.iterable,
       end: harness.end,
       kill: (signal) => {
         signals.push(signal);
@@ -197,7 +241,11 @@ export const buildFakeAgy = (
   };
   const run: Run = (command) => {
     ran.push(command);
-    return Effect.succeed({ code: 0, stdout: `${AGY_VERSION}\n`, stderr: "" });
+    return Effect.succeed(
+      options.version === null
+        ? { code: 1, stdout: "", stderr: "agy: broken" }
+        : { code: 0, stdout: `${options.version ?? AGY_VERSION}\n`, stderr: "" },
+    );
   };
   return { spawn, spawns, ran, run };
 };

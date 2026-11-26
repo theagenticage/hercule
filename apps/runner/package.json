@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@hercule/contract": "workspace:*",
+    "@hercule/plugin-antigravity": "workspace:*",
     "@hercule/plugin-google": "workspace:*"
   }
 }

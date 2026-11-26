@@ -289,6 +289,9 @@ importers:
       '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@hercule/plugin-antigravity':
+        specifier: workspace:*
+        version: link:../../plugins/antigravity
       '@hercule/plugin-google':
         specifier: workspace:*
         version: link:../../plugins/google

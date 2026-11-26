@@ -13,15 +13,14 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { openAcpConnection } from "@hercule/acp";
-import type { AcpConnection, AcpError, AcpHandlers, SessionSettings } from "@hercule/acp";
+import type { AcpConnection, AcpError, AcpHandlers } from "@hercule/acp";
 import { VERSION } from "@hercule/home/version";
 import { HarnessLoginMissing } from "@hercule/protocol";
-import type { AdapterError, AdapterFailed } from "@hercule/protocol";
+import type { AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
   buildHarnessNotInstalled,
-  buildHarnessNotRunnable,
   buildStartFailure,
 } from "../adapter-error-builders";
 import type { HarnessRunnerContext } from "../index";
@@ -30,10 +29,14 @@ import { isExecutableNotFound, stopChild } from "../process";
 import type { FramedChild, Run } from "../process";
 import { describeFileFailure } from "../session-files";
 import { truncateFact } from "../text";
-import { APP_DATA_DIR, hasTokenFile, makeScratchFolder, readRegularFile } from "./harness-home";
-
-/** The name the user knows the harness by. */
-export const ANTIGRAVITY_NAME = "Antigravity";
+import {
+  APP_DATA_DIR,
+  createLogFolder,
+  hasTokenFile,
+  makeLogFolder,
+  readRegularFile,
+} from "./harness-home";
+import { ANTIGRAVITY_NAME } from "./harness-name";
 
 /** Spawns an `agy` process in the folder `cwd`. */
 export type AgySpawn = (
@@ -42,11 +45,24 @@ export type AgySpawn = (
   cwd: string,
 ) => FramedChild;
 
+/** What the adapter needs from the machine: how to start `agy`, and how to run a command to its end. */
+export interface AgySeam {
+  readonly spawn: AgySpawn;
+  readonly run: Run;
+}
+
 /** An open connection to the `agy` process of an account that is signed in. */
 export interface SignedInAgy {
   readonly connection: AcpConnection;
   /** The name of the account's plan, such as "Antigravity Starter Quota". Undefined when `agy` gave none. */
   readonly planLabel: string | undefined;
+  /**
+   * Checks again that every worker process this `agy` has started uses the
+   * account's own login, and fails with an `AdapterFailed` when one does not
+   * or when there is none. `session/new` and `session/resume` each start a
+   * worker, so the caller runs it after opening a conversation.
+   */
+  readonly confirmOwnLogin: Effect.Effect<void, AdapterError>;
 }
 
 /**
@@ -105,16 +121,39 @@ const buildAgyEnv = (ctx: HarnessRunnerContext): Record<string, string | undefin
   return env;
 };
 
+/** The name of the process's own log. `agy` writes each worker's log to `<LOG_NAME>.<pid>`. */
+const LOG_NAME = "agy.log";
+
 /**
  * Builds the command that signs the account in. `agy` prints a link, reads the
  * code from stdin, and on a wrong code prints "couldn't log in: ..." on
  * stdout and exits with 1.
+ *
+ * The command logs to a folder of its own in the Harness Home, which is the
+ * command's `scratchFolder`. Without `--log-file`, `agy` keeps its log in the
+ * Harness Home for good, with the account's email address in it. The caller
+ * must start the command, which removes the folder when the login ends. Throws
+ * when the folder cannot be made.
  */
-export const buildLoginCommand = (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
-  command: [binary, "acp", "--login", "--gemini-dir", ctx.home, "--app-data-dir", APP_DATA_DIR],
-  env: buildAgyEnv(ctx),
-  refusal: /^couldn't log in:/,
-});
+export const buildLoginCommand = (ctx: HarnessRunnerContext, binary: string): LoginCommand => {
+  const logFolder = createLogFolder(ctx.home);
+  return {
+    command: [
+      binary,
+      "acp",
+      "--login",
+      "--gemini-dir",
+      ctx.home,
+      "--app-data-dir",
+      APP_DATA_DIR,
+      "--log-file",
+      join(logFolder, LOG_NAME),
+    ],
+    env: buildAgyEnv(ctx),
+    refusal: /^couldn't log in:/,
+    scratchFolder: logFolder,
+  };
+};
 
 /**
  * Returns the version `agy --version` prints, or null when the command fails
@@ -133,7 +172,7 @@ export const readAgyVersion = (
   });
 
 /** Builds the failure for an account with no usable login in its Harness Home. */
-export const buildNotSignedIn = (): HarnessLoginMissing =>
+const buildNotSignedIn = (): HarnessLoginMissing =>
   new HarnessLoginMissing({ message: `${ANTIGRAVITY_NAME} is not signed in on this runner.` });
 
 /**
@@ -146,11 +185,11 @@ export const isSignInRequired = (error: AcpError): boolean =>
   (error.harnessMessage ?? "").includes("Authentication required");
 
 /**
- * Checks that the account that opened a session can be used, from the plan
- * `authenticate` gave and the settings `session/new` or `session/resume`
- * returned. Returns the plan name when it can, and the failure that says why
- * when it cannot. Two cases look alike from outside, and the user must do
- * something different in each:
+ * Checks that the account that opened a conversation can be used, from the
+ * plan `authenticate` gave and the model catalog built from the settings of
+ * `session/new` or `session/resume`. Returns the plan name when it can, and
+ * the failure that says why when it cannot. Two cases look alike from outside,
+ * and the user must do something different in each:
  *
  * - No model is listed: `agy` could not reach Google, or Google refused the
  *   login. With a token that has not expired yet, `agy` answers `authenticate`
@@ -159,17 +198,11 @@ export const isSignInRequired = (error: AcpError): boolean =>
  *   is verified. `agy` lists the free models, and then answers every prompt
  *   with "Verification Required". Signing in again does not help.
  */
-export const readUsablePlan = (
+export const checkAccountUsable = (
   planLabel: string | undefined,
-  settings: SessionSettings,
+  models: ReadonlyArray<ModelDescriptor>,
 ): Result.Result<string, AdapterFailed> => {
-  const modelOption = settings.configOptions.find(
-    (option) => option.id === "model" && option.type === "select",
-  );
-  const hasModels =
-    modelOption?.type === "select" &&
-    modelOption.options.some((choice) => !("options" in choice) || choice.options.length > 0);
-  if (!hasModels) {
+  if (models.length === 0) {
     return Result.fail(
       buildAdapterFailed(
         `${ANTIGRAVITY_NAME} listed no models for this account. The runner may be offline, or Google may have refused the sign-in.`,
@@ -203,9 +236,6 @@ const readPlanLabel = (meta: unknown): string | undefined => {
   const label = truncateFact(plan.value.antigravity.tier.name.trim());
   return label === "" ? undefined : label;
 };
-
-/** The name of the process's own log. `agy` writes each worker's log to `<LOG_NAME>.<pid>`. */
-const LOG_NAME = "agy.log";
 
 /**
  * Reads the log of every worker process of the `agy` that logs in `folder`,
@@ -263,45 +293,61 @@ const drainStderr = (
 /**
  * Sends `authenticate` and returns the reply. Fails with the error `failOpening`
  * builds for any failure, except the refusal that tells the user to run
- * `agy acp --login`. `agy` gives that exact reply for no login, a login Google
- * refused, and an expired login with no network. The worker logs in `folder`
- * tell the last apart: it fails with an `AdapterFailed` asking the user to
- * check the network, and the others with `HarnessLoginMissing`.
+ * `agy acp --login`: the error -32603 with that text. `agy` gives that exact
+ * reply for no login, a login Google refused, and an expired login with no
+ * network. The worker logs in `folder` tell them apart:
+ *
+ * - A log with the network error: an `AdapterFailed` asking the user to check
+ *   the network.
+ * - No worker log at all: an `AdapterFailed` that says the reason is unknown,
+ *   because with no log nothing separates the cases, and "not signed in" would
+ *   send the user to a sign-in they may not need.
+ * - Otherwise `HarnessLoginMissing`.
  */
 const authenticateAccount = (
   connection: AcpConnection,
   folder: string,
   failOpening: (error: AcpError) => Effect.Effect<never, AdapterError>,
 ) =>
-  connection
-    .authenticate("oauth-personal")
-    .pipe(
-      Effect.catch((error) =>
-        error.reason === "refused" && (error.harnessMessage ?? "").includes("agy acp --login")
-          ? Effect.flatMap(readWorkerLogs(folder), (logs) =>
-              Effect.fail(
-                logs.some((log) => log.includes(NETWORK_ERROR_LINE))
-                  ? buildAdapterFailed(
-                      `${ANTIGRAVITY_NAME} could not reach Google to check the sign-in of this account. Check the network of this runner.`,
-                    )
-                  : buildNotSignedIn(),
-              ),
-            )
-          : failOpening(error),
-      ),
-    );
+  connection.authenticate("oauth-personal").pipe(
+    Effect.catch((error) =>
+      error.reason === "refused" &&
+      error.code === -32603 &&
+      (error.harnessMessage ?? "").includes("agy acp --login")
+        ? Effect.flatMap(readWorkerLogs(folder), (logs) => {
+            if (logs.length === 0) {
+              return Effect.fail(
+                buildAdapterFailed(
+                  `Could not tell why ${ANTIGRAVITY_NAME} refused the sign-in of this account.`,
+                ),
+              );
+            }
+            return Effect.fail(
+              logs.some((log) => log.includes(NETWORK_ERROR_LINE))
+                ? buildAdapterFailed(
+                    `${ANTIGRAVITY_NAME} could not reach Google to check the sign-in of this account. Check the network of this runner.`,
+                  )
+                : buildNotSignedIn(),
+            );
+          })
+        : failOpening(error),
+    ),
+  );
 
 /**
  * Starts the `agy` process of an account and signs it in over ACP. Returns the
- * open connection and the account's plan name. Fails with:
+ * open connection, the account's plan name and a check of the workers' login
+ * (`SignedInAgy`). Fails with:
  *
  * - `HarnessLoginMissing` when the Harness Home has no token file (nothing is
  *   spawned), or when `agy` says there is no usable login, or Google refused
  *   the one there is.
  * - `HarnessNotInstalled` when the binary does not exist, and `AdapterFailed`
- *   when it cannot be run, when `agy` cannot be reached over ACP, when it
- *   cannot reach Google to check the login, when its answer is not one of
- *   these, and when the process does not use this account's own login.
+ *   when the Harness Home's login file is not a regular file, when `agy`
+ *   cannot be run, cannot be reached over ACP, or cannot reach Google to check
+ *   the login, when the reason for a refused sign-in cannot be told, when its
+ *   answer is not one of these, and when the process does not use this
+ *   account's own login.
  *
  * The process runs in `options.cwd`, with its own log in a private folder of
  * the Harness Home. When the scope closes, the connection is closed first, then
@@ -322,7 +368,7 @@ export const openSignedInAgy = (
   Effect.gen(function* () {
     if (!(yield* hasTokenFile(ctx.home))) return yield* Effect.fail(buildNotSignedIn());
 
-    const folder = yield* makeScratchFolder(ctx.home);
+    const folder = yield* makeLogFolder(ctx.home);
     const command = [
       binary,
       "acp",
@@ -341,14 +387,16 @@ export const openSignedInAgy = (
         catch: (error) =>
           isExecutableNotFound(error, { binary, cwd: options.cwd })
             ? buildHarnessNotInstalled(ANTIGRAVITY_NAME)
-            : buildHarnessNotRunnable(ANTIGRAVITY_NAME, describeError(error)),
+            : buildStartFailure(ANTIGRAVITY_NAME, describeError(error)),
       }),
       (spawned) => stopChild(spawned),
     );
     const stderr = drainStderr(child);
 
-    // A connection that closed means the process died, and its last words on
-    // stderr are the best reason there is.
+    // Covers the failures of opening the connection and of `authenticate`, the
+    // two calls made while the process may still be starting up. A connection
+    // that closed then means the process died, and its last words on stderr
+    // are the best reason there is. Later calls report their own errors.
     const failOpening = (error: AcpError): Effect.Effect<never, AdapterError> =>
       Effect.gen(function* () {
         if (error.reason === "closed") {
@@ -376,14 +424,16 @@ export const openSignedInAgy = (
 
     const reply = yield* authenticateAccount(connection, folder, failOpening);
 
-    const workerLogs = yield* readWorkerLogs(folder);
-    if (workerLogs.length === 0 || !workerLogs.every((log) => log.includes(FILE_STORAGE_LINE))) {
-      return yield* Effect.fail(
-        buildAdapterFailed(
-          `${ANTIGRAVITY_NAME} is signed in, but not with a login of this account.`,
-        ),
-      );
-    }
+    const confirmOwnLogin = Effect.flatMap(readWorkerLogs(folder), (logs) =>
+      logs.length > 0 && logs.every((log) => log.includes(FILE_STORAGE_LINE))
+        ? Effect.void
+        : Effect.fail(
+            buildAdapterFailed(
+              `${ANTIGRAVITY_NAME} is signed in, but not with a login of this account.`,
+            ),
+          ),
+    );
+    yield* confirmOwnLogin;
 
-    return { connection, planLabel: readPlanLabel(reply.meta) };
+    return { connection, planLabel: readPlanLabel(reply.meta), confirmOwnLogin };
   });

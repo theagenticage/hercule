@@ -13,9 +13,10 @@ import {
 } from "../adapter-error-builders";
 import type { HarnessAdapter } from "../index";
 import { buildFailedProbe } from "../probe";
-import { runProcess, spawnAgy, type Run } from "../process";
-import { ANTIGRAVITY_NAME, buildLoginCommand, type AgySpawn } from "./agy";
+import { runProcess, spawnAgy } from "../process";
+import { buildLoginCommand, type AgySeam } from "./agy";
 import { deleteSessionFiles } from "./harness-home";
+import { ANTIGRAVITY_NAME } from "./harness-name";
 import { makeAntigravityInstall } from "./install";
 import { makeProbe } from "./probe";
 
@@ -24,17 +25,11 @@ export const ANTIGRAVITY = "antigravity/antigravity";
 
 const ANTIGRAVITY_BINARY = "agy";
 
-/** What the adapter needs from the machine: how to start `agy`, and how to run a command to its end. */
-export interface AntigravitySeam {
-  readonly spawn: AgySpawn;
-  readonly run: Run;
-}
-
 /**
  * Builds the Antigravity adapter on `seam`. Tests pass a fake `agy` process
  * and a fake command runner.
  */
-export const makeAntigravityAdapter = (seam: AntigravitySeam): HarnessAdapter => {
+export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
   const probe = makeProbe(seam);
   return {
     harnessId: ANTIGRAVITY,
@@ -53,7 +48,7 @@ export const makeAntigravityAdapter = (seam: AntigravitySeam): HarnessAdapter =>
     // This build runs no Antigravity sessions, so no caller can wait for one.
     startSession: () =>
       Effect.fail(
-        buildAdapterFailed("This version of Hercule cannot run Antigravity sessions yet"),
+        buildAdapterFailed(`This version of Hercule cannot run ${ANTIGRAVITY_NAME} sessions yet`),
       ),
     sendInput: () => Effect.fail(buildSessionNotRunning()),
     respondToQuestion: () =>
@@ -66,7 +61,9 @@ export const makeAntigravityAdapter = (seam: AntigravitySeam): HarnessAdapter =>
     deleteSessionFiles,
 
     generateText: () =>
-      Effect.fail("Antigravity runs no text generations. Pick another model for it in Settings."),
+      Effect.fail(
+        `${ANTIGRAVITY_NAME} runs no text generations. Pick another model for it in Settings.`,
+      ),
 
     login: (ctx, binary, method) =>
       method === "sign-in" ? buildLoginCommand(ctx, binary) : undefined,

@@ -1,7 +1,7 @@
 /**
- * Probes an Antigravity account without running a session: the version of
- * `agy`, whether the account is signed in, who it is, its plan and its models
- * (spec 06 section 3.2).
+ * Probes an Antigravity account: the version of `agy`, whether the account is
+ * signed in, who it is, its plan and its models (spec 06 section 3.2). The
+ * probe opens or resumes a conversation but sends no prompt, so no model runs.
  *
  * `agy models` cannot run in a Harness Home, so the models come from the reply
  * to `session/new` or `session/resume`. Both need a conversation, and `agy`
@@ -22,15 +22,16 @@ import type { AdapterError, ProbeResult } from "@hercule/protocol";
 import { buildAdapterFailed } from "../adapter-error-builders";
 import type { HarnessRunnerContext } from "../index";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
-import type { Run } from "../process";
 import { truncateFact } from "../text";
 import {
+  checkAccountUsable,
   isSignInRequired,
   openSignedInAgy,
   readAgyVersion,
-  readUsablePlan,
+  type AgySeam,
   type AgySpawn,
 } from "./agy";
+import { ANTIGRAVITY_NAME } from "./harness-name";
 import {
   makeProbeFolder,
   readProbeConversationId,
@@ -67,52 +68,47 @@ const buildDecliningHandlers = Effect.map(Effect.context<never>(), (services): A
   onUnhandledMessage: ({ method, reason }) => {
     void Effect.runForkWith(services)(
       Effect.logWarning(
-        `Antigravity sent a message while its account was checked, and it was not used: ${method}: ${reason}`,
+        `${ANTIGRAVITY_NAME} sent a message while its account was checked, and it was not used: ${method}: ${reason}`,
       ),
     );
   },
 }));
 
 /**
- * Resumes the conversation whose id is stored in the Harness Home. Returns
- * undefined when none is stored, or when `agy` cannot resume it for any reason
- * but a missing sign-in, for example because its files are gone. That is logged,
- * and the caller makes a new conversation. Fails only with the `AcpError` that
- * means the account is not signed in: a failed resume must never make a signed-in
- * account read as signed out.
+ * Resumes the conversation `storedId`. Returns undefined when `agy` refuses to
+ * resume it, for example because its files are gone, and logs that: the caller
+ * makes a new conversation. Fails with the error for every other failure. A
+ * refusal that means the account is not signed in must not make a signed-in
+ * account look signed out, and a resume that is unreadable, times out or ends
+ * with the connection is not known to have failed for good, so none of them
+ * replaces the stored conversation.
  */
-const resumeStoredConversation = (
+const resumeConversation = (
   connection: AcpConnection,
-  home: string,
+  storedId: string,
   folder: string,
 ): Effect.Effect<ProbeConversation | undefined, AcpError> =>
-  Effect.gen(function* () {
-    const id = yield* readProbeConversationId(home);
-    if (id === undefined) return undefined;
-    return yield* connection
-      .resumeSession({ nativeSessionId: id, cwd: folder, mcpServers: [] })
-      .pipe(
-        Effect.map((settings) => ({ id, settings })),
-        Effect.catch((error) =>
-          isSignInRequired(error)
-            ? Effect.fail(error)
-            : Effect.as(
-                Effect.logWarning(
-                  `Could not resume the conversation of the Antigravity check, so a new one is made: ${error.message}`,
-                ),
-                undefined,
-              ),
-        ),
-      );
-  });
+  connection.resumeSession({ nativeSessionId: storedId, cwd: folder, mcpServers: [] }).pipe(
+    Effect.map((settings) => ({ id: storedId, settings })),
+    Effect.catch((error) =>
+      error.reason === "refused" && !isSignInRequired(error)
+        ? Effect.as(
+            Effect.logWarning(
+              `${ANTIGRAVITY_NAME} refused to resume the conversation of its check, so a new one is made: ${error.message}`,
+            ),
+            undefined,
+          )
+        : Effect.fail(error),
+    ),
+  );
 
 /**
  * Makes a new conversation and stores its id in the Harness Home, replacing
  * the id there. The reply and the store are one step that cannot be
  * interrupted, so an interruption never leaves a conversation whose id is
  * lost. Fails with the error of `session/new`, or with an `AdapterFailed` when
- * the id cannot be stored: a probe that forgot its conversation would make a
- * new one every time.
+ * the id is not a UUID or cannot be stored: a probe that forgot its
+ * conversation would make a new one every time.
  */
 const makeConversation = (
   connection: AcpConnection,
@@ -137,7 +133,9 @@ const closeConversation = (connection: AcpConnection, id: string): Effect.Effect
  * conversation. The last id written wins, and the other conversation stays in
  * `agy`'s files. There is no locking, because it costs one conversation, once.
  *
- * The scope owns the `agy` process, and closing it stops the process.
+ * The stored id is read before `agy` starts, so a stored file that cannot be
+ * read fails the probe before it can make a conversation. The scope owns the
+ * `agy` process, and closing it stops the process.
  */
 const readSettings = (
   spawn: AgySpawn,
@@ -149,15 +147,18 @@ const readSettings = (
   Scope.Scope
 > =>
   Effect.gen(function* () {
+    const storedId = yield* readProbeConversationId(ctx.home);
     const folder = yield* makeProbeFolder(ctx.home);
     const handlers = yield* buildDecliningHandlers;
-    const { connection, planLabel } = yield* openSignedInAgy(spawn, ctx, binary, {
+    const { connection, planLabel, confirmOwnLogin } = yield* openSignedInAgy(spawn, ctx, binary, {
       cwd: folder,
       handlers,
     });
-    const conversation =
-      (yield* resumeStoredConversation(connection, ctx.home, folder)) ??
-      (yield* makeConversation(connection, ctx.home, folder));
+    const resumed =
+      storedId === undefined ? undefined : yield* resumeConversation(connection, storedId, folder);
+    const conversation = resumed ?? (yield* makeConversation(connection, ctx.home, folder));
+    // `session/new` and `session/resume` start a new worker process.
+    yield* confirmOwnLogin;
     yield* closeConversation(connection, conversation.id);
     return { settings: conversation.settings, planLabel };
   });
@@ -165,7 +166,7 @@ const readSettings = (
 /**
  * Reads the signed-in account's email, plan and models. Fails with a typed
  * error for every outcome that is not a result: a missing login, a refused
- * `session/new`, an account `agy` cannot use (see `readUsablePlan`), no
+ * `session/new`, an account `agy` cannot use (see `checkAccountUsable`), no
  * email, or a second person who signed in while the check ran. Fails when it
  * takes longer than `PROBE_DEADLINE`.
  *
@@ -181,18 +182,19 @@ const readAccount = (
   Effect.gen(function* () {
     const emailBefore = yield* readSignedInEmail(ctx.home);
     const { settings, planLabel } = yield* Effect.scoped(readSettings(spawn, ctx, binary));
-    const usable = readUsablePlan(planLabel, settings);
+    const models = buildModelCatalog(settings);
+    const usable = checkAccountUsable(planLabel, models);
     if (Result.isFailure(usable)) return yield* Effect.fail(usable.failure);
     const emailAfter = yield* readSignedInEmail(ctx.home);
     if (emailAfter === undefined) {
       return yield* Effect.fail(
-        buildAdapterFailed("Could not read who is signed in to Antigravity."),
+        buildAdapterFailed(`Could not read who is signed in to ${ANTIGRAVITY_NAME}.`),
       );
     }
     if (emailAfter !== emailBefore) {
       return yield* Effect.fail(
         buildAdapterFailed(
-          "Someone signed in to Antigravity while the account was checked. Check it again.",
+          `Someone signed in to ${ANTIGRAVITY_NAME} while the account was checked. Check it again.`,
         ),
       );
     }
@@ -202,7 +204,7 @@ const readAccount = (
         identity: truncateFact(emailAfter),
         planLabel: usable.success,
       },
-      models: buildModelCatalog(settings),
+      models,
     };
     return findings;
   }).pipe(
@@ -212,7 +214,7 @@ const readAccount = (
         onNone: () =>
           Effect.fail(
             buildAdapterFailed(
-              `Antigravity did not answer within ${String(Duration.toSeconds(PROBE_DEADLINE))} seconds`,
+              `${ANTIGRAVITY_NAME} did not answer within ${String(Duration.toSeconds(PROBE_DEADLINE))} seconds`,
             ),
           ),
         onSome: Effect.succeed,
@@ -244,12 +246,15 @@ const buildProbeResult = (
  * The probe never fails: every error becomes a probe result, and every result
  * carries the version of `agy` when it was read in time.
  *
- * The version and the account are read at the same time, each inside
- * `PROBE_DEADLINE`. Stopping the process, which has a grace period of its own,
- * comes after it, inside the 20 seconds the controller waits.
+ * The version and the account are read at the same time, and each gets
+ * `PROBE_DEADLINE` (15 seconds) for its work. That is not a wall for the whole
+ * probe. When the work ends or is interrupted, the process is stopped the
+ * normal way: SIGTERM, and SIGKILL after the grace of `stopChild` (2 seconds).
+ * That comes on top of the 15 seconds, inside the 20 seconds the controller
+ * waits.
  */
 export const makeProbe =
-  (seam: { readonly spawn: AgySpawn; readonly run: Run }) =>
+  (seam: AgySeam) =>
   (ctx: HarnessRunnerContext, binary: string): Effect.Effect<ProbeResult> =>
     Effect.all(
       [
