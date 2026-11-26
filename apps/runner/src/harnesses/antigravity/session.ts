@@ -185,23 +185,20 @@ const buildInstructions = (
     spec.memory,
   ]);
 
-/** Removes the session token from text. */
-type HideInText = (text: string) => string;
-
 /** Returns text `agy` sent, escaped and cut, for a message the user reads. */
 const escapeReportedText = (text: string): string => truncateFact(escapeControlCharacters(text));
 
 /** Returns the failure of a start when the model or level change did not work. */
-const buildStartConfigFailure = (failure: ApplyFailure, hideInText: HideInText) => {
+const buildStartConfigFailure = (failure: ApplyFailure) => {
   const what = describeSetting(failure.change);
   switch (failure.kind) {
     case "failed":
       return buildAdapterFailed(
-        `${ANTIGRAVITY_NAME} did not accept ${what}, so the session was not started: ${hideInText(failure.error.harnessMessage ?? failure.error.message)}`,
+        `${ANTIGRAVITY_NAME} did not accept ${what}, so the session was not started: ${failure.error.harnessMessage ?? failure.error.message}`,
       );
     case "other":
       return buildAdapterFailed(
-        `${ANTIGRAVITY_NAME} did not confirm ${what}: it reports ${escapeReportedText(hideInText(failure.named))}, so the session was not started.`,
+        `${ANTIGRAVITY_NAME} did not confirm ${what}: it reports ${escapeReportedText(failure.named)}, so the session was not started.`,
       );
     case "unconfirmed":
       return buildAdapterFailed(
@@ -218,7 +215,6 @@ const buildStartConfigFailure = (failure: ApplyFailure, hideInText: HideInText) 
  */
 const buildInputConfigFailure = (
   outcome: ApplyFailure | { readonly kind: "cancelled" },
-  hideInText: HideInText,
 ): AdapterError => {
   if (outcome.kind === "cancelled") return buildInputStopped();
   const change = `switch to ${describeSetting(outcome.change)}`;
@@ -229,20 +225,19 @@ const buildInputConfigFailure = (
         return buildModelChangeRefused(
           ANTIGRAVITY_NAME,
           change,
-          hideInText(error.harnessMessage ?? error.message),
+          error.harnessMessage ?? error.message,
         );
       }
-      if (error.reason === "closed")
-        return buildModelChangeLost(ANTIGRAVITY_NAME, hideInText(error.message));
+      if (error.reason === "closed") return buildModelChangeLost(ANTIGRAVITY_NAME, error.message);
       return buildHarnessProtocolError(
-        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${hideInText(error.message)}`,
+        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${error.message}`,
       );
     }
     case "other":
       return buildModelChangeRefused(
         ANTIGRAVITY_NAME,
         change,
-        `${ANTIGRAVITY_NAME} reports the ${outcome.change.kind} ${escapeReportedText(hideInText(outcome.named))} instead.`,
+        `${ANTIGRAVITY_NAME} reports the ${outcome.change.kind} ${escapeReportedText(outcome.named)} instead.`,
       );
     case "unconfirmed":
       return buildHarnessProtocolError(
@@ -279,8 +274,21 @@ export const startAgySession = (
   spec: SessionSpec,
   ctx: SessionStartContext,
   emit: (events: ReadonlyArray<HarnessEvent>) => void,
-): Effect.Effect<AgySession, AdapterError, Scope.Scope> =>
-  Effect.gen(function* () {
+): Effect.Effect<AgySession, AdapterError, Scope.Scope> => {
+  // The token is read once. It goes to `agy` in the MCP servers' headers, over stdin, and `agy` may echo it, so every event is cleaned of it (`emitEvents`), and so is every error of a start or an input (`hideTokenInError`).
+  const token = ctx.env[SESSION_TOKEN_VARIABLE];
+  /**
+   * Returns `error` with the token hidden in its message, as a copy of the same
+   * class. A message can quote what `agy` wrote on stderr or in an error, which
+   * may echo the token. Every error that leaves a start or an input goes through this.
+   */
+  const hideTokenInError = <E extends AdapterError>(error: E): E => {
+    if (token === undefined || token === "" || !("message" in error)) return error;
+    if (!error.message.includes(token)) return error;
+    const copy = Object.create(Object.getPrototypeOf(error) as object) as E;
+    return Object.assign(copy, error, { message: hideSecret(error.message, token) });
+  };
+  return Effect.gen(function* () {
     const binary = ctx.binary;
     if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(ANTIGRAVITY_NAME));
     const accessMode = spec.accessMode;
@@ -295,8 +303,6 @@ export const startAgySession = (
       return yield* Effect.die(new Error("Antigravity declares fork unsupported."));
     }
 
-    // The token is read once. It goes to `agy` in the MCP servers' headers, over stdin, and `agy` may echo it, so every event is cleaned of it (`emitEvents`).
-    const token = ctx.env[SESSION_TOKEN_VARIABLE];
     // The controller gives every session of a native harness exactly one entry, the Hercule tools. An empty list means the runner dropped it or the controller is older. Another name would mean a server of the repository stands in for it, so both fail the start.
     if (ctx.mcpServers.length !== 1 || ctx.mcpServers[0]?.name !== MCP_GATEWAY_ENTRY_NAME) {
       return yield* Effect.fail(
@@ -318,8 +324,6 @@ export const startAgySession = (
       headers: [{ name: "Authorization", value: `Bearer ${token}` }],
     }));
     const hideEventSecret = makeEventSecretHider(token);
-    /** Hides the token in text from `agy` that goes into a message for the user. */
-    const hideInText = (text: string): string => hideSecret(text, token);
 
     const scope = yield* Scope.Scope;
     // The process has a scope of its own, so that a stop can close it while the
@@ -624,13 +628,7 @@ export const startAgySession = (
         cwd,
         handlers,
         purpose: { kind: "session", accessMode, request },
-      }).pipe(
-        Scope.provide(processScope),
-        // The message holds what `agy` wrote on stderr, which may echo the token.
-        Effect.mapError((error) =>
-          error._tag === "AdapterFailed" ? buildAdapterFailed(hideInText(error.message)) : error,
-        ),
-      );
+      }).pipe(Scope.provide(processScope));
       const connection: AcpConnection = agy.connection;
 
       // From the reply on, updates are the session's own. Before it, they are a resume's replay.
@@ -653,9 +651,7 @@ export const startAgySession = (
           : agy.resumeConversation(spec.continue.nativeSessionId, startReading)
       ).pipe(
         Effect.mapError((error) =>
-          error._tag === "AcpError"
-            ? buildStartFailure(ANTIGRAVITY_NAME, hideInText(error.message))
-            : error,
+          error._tag === "AcpError" ? buildStartFailure(ANTIGRAVITY_NAME, error.message) : error,
         ),
       );
       const { settings } = conversation;
@@ -683,8 +679,7 @@ export const startAgySession = (
       if (applied.kind === "cancelled") {
         return yield* Effect.die(new Error("A start never cancels the change of its model."));
       }
-      if (applied.kind !== "applied")
-        return yield* Effect.fail(buildStartConfigFailure(applied, hideInText));
+      if (applied.kind !== "applied") return yield* Effect.fail(buildStartConfigFailure(applied));
 
       // Then the mode. `full-access` has none: it is a flag of the process.
       const modeId = chooseAgyMode(accessMode);
@@ -810,7 +805,7 @@ export const startAgySession = (
             isVoided(inputGeneration),
           );
           if (changed.kind !== "applied")
-            return yield* Effect.fail(buildInputConfigFailure(changed, hideInText));
+            return yield* Effect.fail(buildInputConfigFailure(changed));
         }
         const { text, skillReferences, skipped } = buildAgyPrompt(input);
         // The last wait before the write is over, so an interrupt that came during it is checked here.
@@ -896,11 +891,11 @@ export const startAgySession = (
             if (outcome.kind === "proven")
               return { turnId: turn.id, delivery: "opened" } satisfies SendResult;
             if (outcome.kind === "unknown")
-              return yield* Effect.fail(buildHarnessProtocolError(hideInText(outcome.message)));
+              return yield* Effect.fail(buildHarnessProtocolError(outcome.message));
             return yield* Effect.fail(
               isVoided(inputGeneration)
                 ? buildInputStopped()
-                : buildInputNotWritten(ANTIGRAVITY_NAME, hideInText(outcome.message)),
+                : buildInputNotWritten(ANTIGRAVITY_NAME, outcome.message),
             );
           }),
         );
@@ -917,7 +912,7 @@ export const startAgySession = (
         // The wait lets an input open its own Turn, which this interrupt must not close.
         return withDeadline(connection.cancel(nativeId), CANCEL_DEADLINE, "cancel").pipe(
           Effect.catch((error) =>
-            Effect.logWarning(`session/cancel was not sent: ${error.message}`),
+            Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
           ),
           Effect.andThen(
             Effect.sync(() =>
@@ -957,4 +952,5 @@ export const startAgySession = (
       stop: (reason) => exitSession(reason),
       exited: Deferred.await(exitedSignal),
     } satisfies AgySession;
-  });
+  }).pipe(Effect.mapError(hideTokenInError));
+};
