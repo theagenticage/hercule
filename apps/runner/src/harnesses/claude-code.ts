@@ -2054,6 +2054,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
      * browser opened, the CLI would switch to a `localhost` callback, which a
      * browser on another machine cannot reach.
      */
+    loginMethods: ["sign-in", "create-token"],
     login: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod): LoginCommand =>
       method === "sign-in"
         ? {

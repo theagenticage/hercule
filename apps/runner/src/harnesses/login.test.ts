@@ -256,6 +256,32 @@ describe("starting a login", () => {
     expect(second).toEqual({ _tag: "loginUrl", url: URL_TWO });
   });
 
+  it("leaves a running login alone when the request asks for a method the harness does not support", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+    const signInOnly: HarnessAdapter = { ...claudeCode, loginMethods: ["sign-in"] };
+
+    const answer = await run(
+      Effect.gen(function* () {
+        const first = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, signInOnly, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(first);
+
+        return yield* driver.start(REQUEST, ACCOUNT_ID, signInOnly, CONTEXT, "create-token");
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginFailed",
+      message: "The harness claude-code/claude-code cannot create a token in this runner build",
+    });
+    expect(children).toHaveLength(1);
+    expect(children[0]!.killed()).toBe(false);
+  });
+
   it("fails with the child's stderr output when it exits without printing a URL", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);

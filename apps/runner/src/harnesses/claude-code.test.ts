@@ -547,7 +547,7 @@ describe("the runner's own sign-in variables", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, { ...WORKING, env: AMBIENT }));
     const sessionEnv = run.options[0]?.env ?? {};
 
-    const signIn = claudeCode.login!(context, "/usr/local/bin/claude", "sign-in")!;
+    const signIn = claudeCode.login!(context, "/usr/local/bin/claude", "sign-in");
 
     for (const env of [probeEnv, sessionEnv, signIn.env]) {
       for (const name of AMBIENT_NAMES) expect(Object.keys(env)).not.toContain(name);

@@ -578,6 +578,13 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         if (binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);
         }
+        // Before the running login is stopped: a request this harness cannot
+        // serve must leave it alone.
+        if (adapter.loginMethods?.includes(method) !== true) {
+          return buildLoginFailed(
+            `The harness ${adapter.harnessId} cannot ${method === "create-token" ? "create a token" : "sign in"} in this runner build`,
+          );
+        }
         // A pasted code only works with the URL of the child that printed it,
         // so only one login per Provider Account can be waiting. Stopping the
         // old login returns only once its process has exited and released its
@@ -600,12 +607,6 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
               Effect.onError(() => Effect.sync(() => lease?.release())),
               Effect.orDie,
             );
-            if (command === undefined) {
-              lease?.release();
-              return buildLoginFailed(
-                `The harness ${adapter.harnessId} cannot ${method === "create-token" ? "create a token" : "sign in"} in this runner build`,
-              );
-            }
             return yield* openLogin(requestId, providerAccountId, command, lease);
           }),
         );

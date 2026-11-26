@@ -202,7 +202,7 @@ describe("making a token", () => {
     const narrow: HarnessAdapter = {
       ...claudeCode,
       login: (ctx, binary, method) => ({
-        ...claudeCode.login!(ctx, binary, method)!,
+        ...claudeCode.login!(ctx, binary, method),
         terminal: { cols: 20, rows: 60 },
       }),
     };
@@ -356,7 +356,7 @@ describe("making a token", () => {
 describe("the Claude Code token login command", () => {
   it("runs setup-token in a wide terminal and a folder of its own", () => {
     const ctx = contextFor("success");
-    const command = claudeCode.login!(ctx, fakeClaude, "create-token")!;
+    const command = claudeCode.login!(ctx, fakeClaude, "create-token");
     try {
       expect(command.command).toEqual([fakeClaude, "setup-token"]);
       expect(command.terminal).toEqual({ cols: 1000, rows: 60 });
@@ -374,7 +374,7 @@ describe("the Claude Code token login command", () => {
 
   it("keeps the sign-in command as it was", () => {
     const ctx = contextFor("success");
-    const command = claudeCode.login!(ctx, fakeClaude, "sign-in")!;
+    const command = claudeCode.login!(ctx, fakeClaude, "sign-in");
     expect(command.command).toEqual([fakeClaude, "auth", "login"]);
     expect(command.terminal).toBeUndefined();
     expect(command.scratchFolder).toBeUndefined();

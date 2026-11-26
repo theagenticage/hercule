@@ -22,7 +22,6 @@ import type {
   AccessMode,
   ApprovalDecision,
   ExitReason,
-  LoginMethod,
   ModelSelection,
   ProbeResult,
   HarnessEvent,
@@ -2055,14 +2054,12 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
      * account's own home directories, like a session does, so the credential
      * is saved where the app-server looks for it.
      */
-    login: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod) =>
-      method === "sign-in"
-        ? ({
-            command: [binary, "login", "--device-auth"],
-            env: prepareEnv(ctx),
-            userCode: USER_CODE,
-          } satisfies LoginCommand)
-        : undefined,
+    loginMethods: ["sign-in"],
+    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
+      command: [binary, "login", "--device-auth"],
+      env: prepareEnv(ctx),
+      userCode: USER_CODE,
+    }),
 
     install: makeCodexInstall(seam.run),
   };

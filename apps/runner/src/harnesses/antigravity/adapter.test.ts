@@ -90,8 +90,8 @@ describe("signing in", () => {
     const home = createSignedInHome();
     const adapter = buildAdapter(home);
 
+    expect(adapter.loginMethods).toEqual(["sign-in"]);
     expect(adapter.login?.(buildContext(home), BINARY, "sign-in")).toBeDefined();
-    expect(adapter.login?.(buildContext(home), BINARY, "create-token")).toBeUndefined();
   });
 });
 

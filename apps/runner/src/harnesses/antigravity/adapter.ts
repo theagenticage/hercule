@@ -186,8 +186,8 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
         `${ANTIGRAVITY_NAME} runs no text generations. Pick another model for it in Settings.`,
       ),
 
-    login: (ctx, binary, method) =>
-      method === "sign-in" ? buildLoginCommand(ctx, binary) : undefined,
+    loginMethods: ["sign-in"],
+    login: buildLoginCommand,
     acquireLoginLease: (ctx) => leases.acquireExclusive(ctx.home),
 
     install: makeAntigravityInstall(seam.run),

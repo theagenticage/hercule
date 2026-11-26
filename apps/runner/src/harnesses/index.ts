@@ -354,17 +354,19 @@ export interface HarnessAdapter {
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
   /**
-   * Returns the command that makes the login `method` for the account in `ctx`,
-   * or `undefined` when this harness has no such login. Takes the binary
+   * The login methods `login` supports. A request for another method is
+   * refused before anything else happens, so it cannot stop a login that is
+   * running. Set whenever `login` is.
+   */
+  readonly loginMethods?: ReadonlyArray<LoginMethod>;
+  /**
+   * Returns the command that makes the login `method` for the account in `ctx`.
+   * Only called with a method in `loginMethods`. Takes the binary
    * separately, because a login needs a machine that already has the harness.
    * The command may name a scratch folder it made; the caller must then
    * start the command, which removes the folder when the login ends.
    */
-  readonly login?: (
-    ctx: HarnessRunnerContext,
-    binary: string,
-    method: LoginMethod,
-  ) => LoginCommand | undefined;
+  readonly login?: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod) => LoginCommand;
   /**
    * Set by a harness whose sign-in must not run beside its other processes on
    * the same Harness Home (see `antigravity/harness-home-leases.ts`). Takes the exclusive
