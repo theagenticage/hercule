@@ -268,48 +268,47 @@ export interface FakeAgyOptions {
   readonly withoutAdditionalDirectoriesCapability?: boolean;
 }
 
-/** Returns the recording without `additionalDirectories` in the session capabilities of the reply to `initialize`. */
-const removeAdditionalDirectoriesCapability = (
+/**
+ * Returns the recording without the capabilities the options name, in the
+ * reply to `initialize`: `antigravity.systemPrompt` and
+ * `sessionCapabilities.additionalDirectories`.
+ */
+const removeCapabilities = (
   recording: ReadonlyArray<RecordedMessage>,
+  options: Pick<
+    FakeAgyOptions,
+    "withoutSystemPromptCapability" | "withoutAdditionalDirectoriesCapability"
+  >,
 ): ReadonlyArray<RecordedMessage> =>
   recording.map((entry) => {
     const result = entry.message.result as
-      | { agentCapabilities?: { sessionCapabilities?: Record<string, unknown> } }
+      | {
+          agentCapabilities?: {
+            _meta?: { antigravity?: Record<string, unknown> };
+            sessionCapabilities?: Record<string, unknown>;
+          };
+        }
       | undefined;
     const capabilities = result?.agentCapabilities;
-    if (entry.direction !== "in" || capabilities?.sessionCapabilities === undefined) return entry;
-    const sessionCapabilities = { ...capabilities.sessionCapabilities };
-    delete sessionCapabilities["additionalDirectories"];
+    if (entry.direction !== "in" || capabilities === undefined) return entry;
+    const { _meta, sessionCapabilities } = capabilities;
+    const kept = { ...capabilities };
+    if (options.withoutSystemPromptCapability === true && _meta?.antigravity !== undefined) {
+      const antigravity = { ..._meta.antigravity };
+      delete antigravity["systemPrompt"];
+      kept._meta = { ..._meta, antigravity };
+    }
+    if (
+      options.withoutAdditionalDirectoriesCapability === true &&
+      sessionCapabilities !== undefined
+    ) {
+      const withoutDirectories = { ...sessionCapabilities };
+      delete withoutDirectories["additionalDirectories"];
+      kept.sessionCapabilities = withoutDirectories;
+    }
     return {
       ...entry,
-      message: {
-        ...entry.message,
-        result: { ...result, agentCapabilities: { ...capabilities, sessionCapabilities } },
-      },
-    };
-  });
-
-/** Returns the recording without `antigravity.systemPrompt` in the capabilities of the reply to `initialize`. */
-const removeSystemPromptCapability = (
-  recording: ReadonlyArray<RecordedMessage>,
-): ReadonlyArray<RecordedMessage> =>
-  recording.map((entry) => {
-    const result = entry.message.result as
-      | { agentCapabilities?: { _meta?: { antigravity?: object } } }
-      | undefined;
-    const meta = result?.agentCapabilities?._meta;
-    if (entry.direction !== "in" || meta?.antigravity === undefined) return entry;
-    const antigravity = { ...(meta.antigravity as Record<string, unknown>) };
-    delete antigravity["systemPrompt"];
-    return {
-      ...entry,
-      message: {
-        ...entry.message,
-        result: {
-          ...result,
-          agentCapabilities: { ...result!.agentCapabilities, _meta: { ...meta, antigravity } },
-        },
-      },
+      message: { ...entry.message, result: { ...result, agentCapabilities: kept } },
     };
   });
 
@@ -362,15 +361,8 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
       options.recording === undefined || typeof options.recording === "string"
         ? readRecording(recordingName)
         : options.recording;
-    const withSystemPrompt =
-      options.withoutSystemPromptCapability === true
-        ? removeSystemPromptCapability(recording)
-        : recording;
     const harness = startFakeHarness({
-      recording:
-        options.withoutAdditionalDirectoriesCapability === true
-          ? removeAdditionalDirectoriesCapability(withSystemPrompt)
-          : withSystemPrompt,
+      recording: removeCapabilities(recording, options),
       scripts: harnessScripts,
     });
     const signals: Array<string | undefined> = [];

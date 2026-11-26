@@ -16,7 +16,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import { cleanupHomes, createScratchHome } from "../testing";
-import { stageAgySkills, type SkillsContext } from "./skills";
+import { stageAgySkills } from "./skills";
+
+/** The runner context fields that say which skills a session has. */
+type SkillsContext = Parameters<typeof stageAgySkills>[0];
 
 afterEach(cleanupHomes);
 

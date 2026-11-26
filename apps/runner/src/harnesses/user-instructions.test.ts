@@ -41,15 +41,6 @@ describe("readUserInstructions", () => {
     expect(readCapturingWarnings([])).toEqual({ text: undefined, warnings: [] });
   });
 
-  it("reads the file again on every call, so a resumed Thread gets the current text", () => {
-    const path = writeFile("changing.md", "The old text.");
-    expect(readCapturingWarnings([path]).text).toBe("The old text.");
-
-    writeFileSync(path, "The new text.");
-
-    expect(readCapturingWarnings([path]).text).toBe("The new text.");
-  });
-
   it("leaves out a file with only white space", () => {
     const blank = writeFile("blank.md", "  \n");
     const real = writeFile("real.md", "Be terse.");

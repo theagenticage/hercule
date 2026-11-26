@@ -12,12 +12,6 @@ import { buildAdapterFailed } from "../adapter-error-builders";
 import type { HarnessRunnerContext } from "../index";
 import { describeFileFailure, readFolderNames } from "../session-files";
 
-/** The parts of the runner context that say which skills a session has. */
-export type SkillsContext = Pick<
-  HarnessRunnerContext,
-  "sessionSkillsFolder" | "librarySkillsFolder" | "repositorySkillsFolders"
->;
-
 /**
  * Links every skill of the session into `<sessionSkillsFolder>/.agents/skills`
  * and returns the folders to pass to `agy` as additional directories: the
@@ -45,7 +39,10 @@ export type SkillsContext = Pick<
  * session skills folder, so there is nothing to merge with.
  */
 export const stageAgySkills = (
-  ctx: SkillsContext,
+  ctx: Pick<
+    HarnessRunnerContext,
+    "sessionSkillsFolder" | "librarySkillsFolder" | "repositorySkillsFolders"
+  >,
 ): Effect.Effect<ReadonlyArray<string>, AdapterFailed> => {
   const { sessionSkillsFolder } = ctx;
   if (sessionSkillsFolder === undefined) return Effect.succeed([]);

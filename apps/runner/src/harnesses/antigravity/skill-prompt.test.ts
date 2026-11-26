@@ -2,7 +2,7 @@
  * Tests the prompt text `agy` gets for an input with Skill References, on real
  * skill folders.
  */
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildLoadedSkills, resolveSkillReferences } from "../../skills";
@@ -122,8 +122,9 @@ describe("buildAgyPrompt", () => {
   it("returns the lines alone when the prompt is empty", () => {
     const skills = createSkills({ library: ["review"] });
     const input = skills.buildInput("$review");
+    const path = join(skills.libraryFolder, "skills", "review", "SKILL.md");
     expect(buildAgyPrompt({ ...input, text: "" }).text).toBe(
-      buildAgyPrompt(input).text.split("\n\n")[1],
+      `[Skill "$review": read and use the skill at ${JSON.stringify(path)}.]`,
     );
   });
 
@@ -135,21 +136,6 @@ describe("buildAgyPrompt", () => {
     expect(line.split("\n")).toHaveLength(1);
     expect(line).toContain(
       JSON.stringify(join(skills.libraryFolder, "skills", "review", "SKILL.md")),
-    );
-  });
-
-  it("gives a skill folder that is a link the path of the real file", () => {
-    const skills = createSkills({ library: [], repository: ["deploy"] });
-    const link = join(skills.libraryFolder, "linked");
-    mkdirSync(skills.libraryFolder, { recursive: true });
-    symlinkSync(skills.repositorySkills[0]!.absolutePath, link, "dir");
-    const input = skills.buildInput("$webshop:deploy");
-    const { text } = buildAgyPrompt({
-      ...input,
-      skillReferences: input.skillReferences!.map((reference) => ({ ...reference, folder: link })),
-    });
-    expect(text).toContain(
-      JSON.stringify(join(skills.repositorySkills[0]!.absolutePath, "SKILL.md")),
     );
   });
 

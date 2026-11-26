@@ -243,6 +243,30 @@ describe("what the process is opened for", () => {
     expect(methods).not.toContain("authenticate");
   });
 
+  it("fails a session start with a skills folder before authenticate when agy does not take additional directories", async () => {
+    const { home, fake } = setUp({ withoutAdditionalDirectoriesCapability: true });
+
+    const error = await runAndReadFailure(
+      open(fake, home, { purpose: { ...FULL_ACCESS, hasSkillsFolder: true } }),
+    );
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain("additionalDirectories");
+    const methods = fake.spawns[0]!.harness.received.map((message) => message.method);
+    expect(methods).toContain("initialize");
+    expect(methods).not.toContain("authenticate");
+  });
+
+  it("opens a session without a skills folder when agy does not take additional directories", async () => {
+    const { home, fake } = setUp({ withoutAdditionalDirectoriesCapability: true });
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: FULL_ACCESS })));
+
+    expect(fake.spawns[0]!.harness.received.map((message) => message.method)).toContain(
+      "authenticate",
+    );
+  });
+
   it("still reads a signed-out home as not signed in when the capability is there", async () => {
     const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN } });
 
