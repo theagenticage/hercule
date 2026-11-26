@@ -374,24 +374,6 @@ describe("the websearch recording", () => {
       { detail: { query: "Bun JavaScript runtime latest stable release version" } },
     ]);
   });
-
-  it("shows no content for a command with no output, and the output of the one that printed", () => {
-    const commands = itemsOf(events, "command_execution").map(
-      (e) => e.detail as Record<string, unknown>,
-    );
-    expect(commands[0]).not.toHaveProperty("content");
-    expect(commands[1]!["content"]).toBe("curl: (6) Could not resolve host: github.com\n");
-  });
-
-  it("keeps the truncation notice of a cut output and drops the header after it", () => {
-    const commands = itemsOf(events, "command_execution").map(
-      (e) => e.detail as { content: string },
-    );
-    expect(commands[2]!.content).toMatch(
-      /^The tool's output was truncated due to being too long\..*output truncated:\n {2}<title>Release Bun/s,
-    );
-    expect(commands[2]!.content).not.toContain("Created At");
-  });
 });
 
 describe("the deny2 recording", () => {

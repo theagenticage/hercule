@@ -34,7 +34,6 @@ import {
   buildLoginCommand,
   checkAccountUsable,
   openSignedInAgy,
-  readAgyModeId,
   readAgyVersion,
   type AgyPurpose,
   type SignedInAgy,
@@ -242,17 +241,6 @@ describe("what the process is opened for", () => {
     const { home, fake } = setUp({ withoutSystemPromptCapability: true });
 
     expect(await openAndReadPlan(fake, home)).toBe(PLAN_LABEL);
-  });
-});
-
-describe("readAgyModeId", () => {
-  it("maps each Access Mode to the mode of agy, and full-access to none", () => {
-    expect([
-      readAgyModeId("approval-required"),
-      readAgyModeId("auto-accept-edits"),
-      readAgyModeId("auto"),
-      readAgyModeId("full-access"),
-    ]).toEqual(["default", "accept-edits", "auto", undefined]);
   });
 });
 

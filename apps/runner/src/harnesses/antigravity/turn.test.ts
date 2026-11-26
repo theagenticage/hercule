@@ -691,9 +691,11 @@ describe("the end of a turn and its Requests", () => {
         yield* h.reply(0, "end_turn");
         yield* Effect.yieldNow;
         expect(h.completed(), "the turn waits for the answer").toBeUndefined();
+        expect(h.turn.hasEnded(), "the input is still held").toBe(false);
         yield* Deferred.succeed(sent.written, undefined);
         yield* Fiber.join(answering);
         yield* h.turn.ended;
+        expect(h.turn.hasEnded()).toBe(true);
         expect(order(h)).toEqual(["request.resolved", "turn.completed"]);
       }),
     ));
@@ -726,26 +728,6 @@ describe("the end of a turn and its Requests", () => {
         expect(h.tags("runtime.warning")).toMatchObject([
           { turnId: TURN, message: expect.stringContaining("may not have reached") as unknown },
         ]);
-      }),
-    ));
-
-  it("holds the place of the input until turn.completed was emitted", () =>
-    run((h) =>
-      Effect.gen(function* () {
-        const sent = buildQuestion();
-        const asking = yield* Effect.forkChild(h.turn.openQuestion(sent.request, itemOf("call-q")));
-        yield* h.until(() => h.tags("request.opened").length === 1);
-        const answering = yield* Effect.forkChild(
-          h.turn.answer(h.idOf(sent.request.requestId), { Question: "Red" }),
-        );
-        yield* Fiber.join(asking);
-        yield* h.reply(0, "end_turn");
-        yield* Effect.yieldNow;
-        expect(h.turn.hasEnded(), "still waiting for the answer").toBe(false);
-        yield* Deferred.succeed(sent.written, undefined);
-        yield* Fiber.join(answering);
-        yield* h.turn.ended;
-        expect(h.turn.hasEnded()).toBe(true);
       }),
     ));
 

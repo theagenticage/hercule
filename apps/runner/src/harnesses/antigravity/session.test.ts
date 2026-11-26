@@ -650,6 +650,22 @@ describe("the mode of a start", () => {
       ));
   }
 
+  it.each([
+    ["auto-accept-edits", "accept-edits"],
+    ["auto", "auto"],
+  ] as const)("asks agy for the mode of the %s Access Mode: %s", (accessMode, modeId) =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start({ accessMode });
+
+          expect(h.received("session/set_mode")[0]?.params).toMatchObject({ modeId });
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      { fake: { scripts: { "session/set_mode": confirmMode(modeId) } } },
+    ),
+  );
+
   it("fails the start when a contrary mode update follows the confirming one before the reply", () =>
     run(
       (h) =>
@@ -1304,50 +1320,6 @@ describe("a Request and the end of its turn", () => {
   const isAccept = (message: JsonRpcMessage) =>
     (message as { result?: { action?: string } }).result?.action === "accept";
 
-  it("emits request.resolved of an answered question before turn.completed", () =>
-    Effect.gen(function* () {
-      const gate = Promise.withResolvers<void>();
-      yield* Effect.promise(() =>
-        run(
-          (h) =>
-            Effect.gen(function* () {
-              yield* h.start();
-              yield* h.adapter.sendInput(SESSION, buildInput());
-              yield* h.until("a question opened", () => h.tags("request.opened").length === 1);
-              const opened = h.tags("request.opened")[0]!.request;
-
-              const answering = yield* Effect.forkChild(
-                h.adapter.respondToQuestion(
-                  SESSION,
-                  opened.requestId,
-                  { Question: "Red" },
-                  SPEC.modelSelection,
-                ),
-              );
-              // `agy` ends the prompt while the write of the answer is not acknowledged yet.
-              yield* h.until(
-                "the prompt was answered",
-                () => h.received("session/prompt").length === 1,
-              );
-              yield* Effect.promise(settle);
-              gate.resolve();
-              yield* Fiber.join(answering);
-              yield* h.until("the turn completed", () => h.tags("turn.completed").length === 1);
-
-              expect(
-                h.seen
-                  .filter((e) => e._tag === "request.resolved" || e._tag === "turn.completed")
-                  .map((e) => e._tag),
-              ).toEqual(["request.resolved", "turn.completed"]);
-            }),
-          {
-            fake: { recording: "question-elicit" },
-            holdAcknowledgement: (message) => (isAccept(message) ? gate.promise : undefined),
-          },
-        ),
-      );
-    }).pipe(Effect.runPromise));
-
   it("gives the first Request of a resumed session an id that differs from the earlier one", () =>
     run(
       (h) =>
@@ -1370,7 +1342,7 @@ describe("a Request and the end of its turn", () => {
       { fake: { recording: "question-elicit" } },
     ));
 
-  it("refuses a new input until turn.completed was emitted", () =>
+  it("refuses a new input until turn.completed was emitted, after request.resolved", () =>
     Effect.gen(function* () {
       const gate = Promise.withResolvers<void>();
       yield* Effect.promise(() =>
@@ -1402,6 +1374,11 @@ describe("a Request and the end of its turn", () => {
               yield* Fiber.join(answering);
               yield* h.until("the turn completed", () => h.tags("turn.completed").length === 1);
               expect(h.tags("turn.completed")).toHaveLength(1);
+              expect(
+                h.seen
+                  .filter((e) => e._tag === "request.resolved" || e._tag === "turn.completed")
+                  .map((e) => e._tag),
+              ).toEqual(["request.resolved", "turn.completed"]);
             }),
           {
             fake: { recording: "question-elicit" },
