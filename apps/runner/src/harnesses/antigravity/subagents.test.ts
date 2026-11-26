@@ -92,7 +92,12 @@ const buildStateWithChild = () => {
   const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
   introduceSubagent(
     state,
-    { conversationId: "A", parentConversationId: "root", brief: "Do it" },
+    {
+      conversationId: "A",
+      parentConversationId: "root",
+      launchToolCallId: "call_0",
+      brief: "Do it",
+    },
     findNothing,
   );
   return state;
@@ -332,7 +337,13 @@ describe("which subagent a step belongs to", () => {
 
     const started = introduceSubagent(
       state,
-      { conversationId: "B", parentConversationId: "A", role: "Helper", launchStepIndex: 2 },
+      {
+        conversationId: "B",
+        parentConversationId: "A",
+        launchToolCallId: "call_b",
+        role: "Helper",
+        launchStepIndex: 2,
+      },
       findNothing,
     );
     expect(started[0]).toMatchObject({
@@ -347,7 +358,12 @@ describe("which subagent a step belongs to", () => {
     const state = buildStateWithChild();
     const started = introduceSubagent(
       state,
-      { conversationId: "B", parentConversationId: "A", launchStepIndex: 9 },
+      {
+        conversationId: "B",
+        parentConversationId: "A",
+        launchToolCallId: "call_b",
+        launchStepIndex: 9,
+      },
       findNothing,
     );
     expect(started[0]).not.toHaveProperty("itemId");
@@ -369,7 +385,12 @@ describe("which subagent a step belongs to", () => {
       nativeSessionId: "root",
       known: [{ subagentId: "A", parentSubagentId: "P" }],
     });
-    const link = { conversationId: "A", parentConversationId: "root", brief: "old brief" };
+    const link = {
+      conversationId: "A",
+      parentConversationId: "root",
+      launchToolCallId: "call_0",
+      brief: "old brief",
+    };
     expect(introduceSubagent(state, link, findNothing)[0]).toMatchObject({
       _tag: "subagent.started",
       subagentId: "A",

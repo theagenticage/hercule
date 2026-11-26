@@ -55,13 +55,13 @@ import type * as Schema from "effect/Schema";
 import { ensureId } from "../events";
 import { buildEnvelope, buildRaw, clampCount } from "../normalize";
 import { parseAgyErrorNotice } from "./agy";
-import { LAUNCH_TOOL_NAMES } from "./session-files";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
 import {
   buildApprovalDescription,
   buildFailedToolItem,
   buildToolItem,
+  LAUNCH_TOOL_NAME,
   type ApprovalDescription,
   type ToolCallFields,
 } from "./tool-items";
@@ -141,9 +141,7 @@ const ENDED_TOOL: EndedTool = { ended: true };
  * are read.
  */
 const buildEndedTool = (record: RunningTool): EndedTool =>
-  LAUNCH_TOOL_NAMES.includes(record.call.name ?? "")
-    ? { ended: true, itemId: record.itemId }
-    : ENDED_TOOL;
+  record.call.name === LAUNCH_TOOL_NAME ? { ended: true, itemId: record.itemId } : ENDED_TOOL;
 
 type ToolRecord = RunningTool | EndedTool;
 

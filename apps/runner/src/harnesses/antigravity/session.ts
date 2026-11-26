@@ -93,12 +93,11 @@ import { openSessionFiles } from "./session-files";
 import type { SessionFileObservation, SessionFiles } from "./session-files";
 import {
   buildSubagentsState,
-  findSubagentLaunchItem,
   hasOpenSubagentTurn,
   interruptSubagentTurns,
   introduceSubagent,
   normalizeSubagentStep,
-  readSubagentUsage,
+  sumSubagentUsage,
 } from "./subagents";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
 import type { Turn } from "./turn";
@@ -857,23 +856,11 @@ export const startAgySession = (
             observation.conversationId,
             observation.step,
           );
-        case "subagent": {
-          const { link } = observation;
-          // The parent is the session's own agent, whose call is known by `agy`'s call id, or a subagent, whose call is known by the step that holds its result.
-          const itemId =
-            link.parentConversationId === nativeId
-              ? link.launchToolCallId === undefined
-                ? undefined
-                : findLaunchItem(state, link.launchToolCallId)
-              : link.launchStepIndex === undefined
-                ? undefined
-                : findSubagentLaunchItem(
-                    subagentsState,
-                    link.parentConversationId,
-                    link.launchStepIndex,
-                  );
-          return introduceSubagent(subagentsState, link, itemId);
-        }
+        case "subagent":
+          // The parent's launch item is found by `introduceSubagent`: by `agy`'s call id for the session's own agent, else by the step that holds the call's result.
+          return introduceSubagent(subagentsState, observation.link, (toolCallId) =>
+            findLaunchItem(state, toolCallId),
+          );
         case "unreadable":
           return recordUnreadableFiles(observation.conversationId, observation.reason);
       }
@@ -885,7 +872,8 @@ export const startAgySession = (
       if (reader === undefined) return Effect.void;
       return Effect.map(reader.read, (observations) => {
         for (const observation of observations) emitEvents(routeObservation(observation));
-        emitEvents(setSubagentUsage(state, readSubagentUsage(subagentsState), filesWereUnreadable));
+        const { usage, hasIncompleteCount } = sumSubagentUsage(subagentsState);
+        emitEvents(setSubagentUsage(state, usage, filesWereUnreadable || hasIncompleteCount));
       });
     });
 
