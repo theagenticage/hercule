@@ -94,6 +94,12 @@ const playProcess = (messages: ReadonlyArray<RecordedMessage>): PlayedProcess =>
   };
   for (const { direction, message } of messages) {
     if (direction === "out" && message.method === "session/prompt") {
+      // A prompt that agy refused with an error never started a turn.
+      const refused = messages.some(
+        (entry) =>
+          entry.direction === "in" && entry.message.id === message.id && entry.message.error,
+      );
+      if (refused) continue;
       holdTurn(state);
       openPrompts.add(message.id!);
       push(openTurn(state, promptTurnId(message.id!)));

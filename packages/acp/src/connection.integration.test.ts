@@ -427,6 +427,10 @@ const replayRecording = (name: RecordingName) =>
  *   from the harness.
  * - `stop-bg` ends with the recorder stopping the harness process while a
  *   prompt was open, so the prompt's error reply comes from the recorder.
+ * - `steer-during-request` sends a second prompt while a permission request is
+ *   open, and `agy` refuses it before the request is answered. The replay
+ *   answers every request the moment it arrives, so the refusal never meets an
+ *   open request.
  * - `stop-cancel` sends `session/cancel` twice, once as a request and once as a
  *   notification, to measure what the harness answers; no single script
  *   reproduces that.
@@ -438,6 +442,7 @@ const RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY: ReadonlyArray<RecordingName> = 
   "skills-additional-directory",
   "skills-git-walk",
   "skills-resume",
+  "steer-during-request",
   "stop-bg",
   "stop-cancel",
   "subagent-approval2",
