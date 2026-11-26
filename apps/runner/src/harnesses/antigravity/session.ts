@@ -91,7 +91,7 @@ import {
 } from "./normalize";
 import type { NormalizerState } from "./normalize";
 import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
-import { openSessionFiles } from "./session-files";
+import { openSessionFiles, readRootConversationFact } from "./session-files";
 import type { SessionFileObservation, SessionFiles } from "./session-files";
 import {
   buildSubagentsState,
@@ -513,7 +513,7 @@ export const startAgySession = (
         exitReason = reason;
         const procedure = Effect.gen(function* () {
           const runningTurn = readRunningTurn();
-          if (runningTurn !== undefined && options.stopTurn) yield* runningTurn.stop;
+          if (runningTurn !== undefined && options.stopTurn) yield* runningTurn.stop(reason);
           yield* Scope.close(processScope, Exit.void);
           if (runningTurn !== undefined) {
             // A Turn that does not end by itself is ended here, so no event of it follows `session.exited`.
@@ -911,7 +911,8 @@ export const startAgySession = (
         case "step":
           if (observation.conversationId === nativeId) {
             hasSeenOwnStep = true;
-            readRunningTurn()?.observeRootStep(observation.step);
+            const fact = readRootConversationFact(observation.step);
+            if (fact !== undefined) readRunningTurn()?.recordRootConversationFact(fact);
             return [];
           }
           return normalizeSubagentStep(

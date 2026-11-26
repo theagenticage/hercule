@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect";
 import { TestClock } from "effect/testing";
 import { cleanupHomes, createScratchHome } from "../testing";
 import { APP_DATA_DIR } from "./harness-home";
-import { openSessionFiles, readStepErrorText } from "./session-files";
+import { openSessionFiles, readRootConversationFact, readStepErrorText } from "./session-files";
 import type { AgyStep } from "./session-files";
 import type { SessionFileObservation, SessionFiles } from "./session-files";
 
@@ -242,6 +242,28 @@ describe("readStepErrorText", () => {
     ["nothing when both are missing", {}, undefined],
   ])("returns %s", (_name, fields, expected) => {
     expect(readStepErrorText(build(fields))).toBe(expected);
+  });
+});
+
+describe("readRootConversationFact", () => {
+  const build = (fields: Partial<AgyStep>): AgyStep => ({
+    index: 0,
+    type: "GENERIC",
+    toolCalls: [],
+    ...fields,
+  });
+
+  it.each([
+    ["an input for a USER_INPUT step", { type: "USER_INPUT", content: "go" }, { kind: "input" }],
+    [
+      "a provider error with the error text for an ERROR_MESSAGE step",
+      { type: "ERROR_MESSAGE", error: "503 no capacity" },
+      { kind: "provider-error", words: "503 no capacity" },
+    ],
+    ["nothing for an ERROR_MESSAGE step without text", { type: "ERROR_MESSAGE" }, undefined],
+    ["nothing for any other step", { type: "GENERIC", content: "x" }, undefined],
+  ])("returns %s", (_name, fields, expected) => {
+    expect(readRootConversationFact(build(fields))).toEqual(expected);
   });
 });
 

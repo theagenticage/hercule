@@ -40,6 +40,7 @@ import type {
 import type {
   AnswerNotDelivered,
   ApprovalDecision,
+  ExitReason,
   HarnessEvent,
   QuestionAnswers,
   TurnState,
@@ -51,7 +52,7 @@ import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
 import type { ResolvedSkillReference } from "../../skills";
 import { ANTIGRAVITY_NAME, isQuotaError } from "./agy";
-import { readStepErrorText, type AgyStep } from "./session-files";
+import type { RootConversationFact } from "./session-files";
 import {
   addPromptUsage,
   closeTurn,
@@ -81,17 +82,11 @@ const INTERRUPT_DEADLINE = Duration.seconds(5);
 /** How long a reply may take to be written to `agy` before it counts as not written. */
 const REPLY_WRITE_DEADLINE = Duration.seconds(5);
 
-/**
- * How long a steer waits for `agy` to refuse it after the prompt it supersedes
- * has replied. `agy` refuses a steer within about 1 ms, so a refusal that
- * follows the reply of the old prompt comes well within this time. Without the
- * wait, a turn that ended by itself just as the steer was written would let the
- * Turn acknowledge a steer that `agy` then refuses.
- */
-const STEER_REFUSAL_GRACE = Duration.millis(500);
+/** What happens to a message a Turn refused, said at the end of every refusal. */
+const STAYS_QUEUED = "Your message stays queued and is sent when the turn ends.";
 
-/** What happens to an input a Turn refused, said at the end of every refusal. */
-const STAYS_QUEUED = "The input stays queued and is sent when the turn ends.";
+/** Starts every message that tells a delivery is not known, so the user reads one wording for it. */
+const CANNOT_TELL = "Hercule cannot tell whether Antigravity took the message";
 
 /** A tool name that may appear in the follow-up prompt. Anything else could carry text meant for the model. */
 const SAFE_TOOL_NAME = /^[A-Za-z0-9_]{1,64}$/;
@@ -200,13 +195,14 @@ export interface Turn {
    * steer. Otherwise the steer is reserved before the write, so a second one
    * is refused while this one is open.
    *
-   * `agy` has taken the steer when its own prompt replies, or when the prompt
-   * it supersedes replies and no refusal follows within a short time. It
-   * refuses at once with a JSON-RPC error while a Request is open. The steer
-   * is `unknown` when the budget runs out or the connection closes. What `agy`
-   * does with a steer written after the old prompt ended by itself is not
-   * measured. The Turn shows such a steer like any other, as one Turn that
-   * the newest prompt's reply ends.
+   * `agy` has taken the steer when the prompt it supersedes replies, or when
+   * its own prompt replies, whichever comes first. It refuses with a JSON-RPC
+   * error at once, so the steer is refused when that error comes first. The
+   * steer is `unknown` when the budget runs out or the connection closes. A
+   * refusal that comes after the steer was accepted is not special: it fails
+   * the Turn like any prompt that fails. What `agy` does with a steer written
+   * after the old prompt ended by itself is not measured. The Turn shows such
+   * a steer like any other, as one Turn that the newest prompt's reply ends.
    *
    * The `user_message` of the input is emitted only on acceptance.
    */
@@ -258,11 +254,15 @@ export interface Turn {
    */
   readonly interrupt: Effect.Effect<InterruptResult>;
   /**
-   * Prepares for the end of the session: cancels every open Request, and makes
-   * the Turn end `interrupted` instead of `failed` or `completed`. Sends
-   * nothing to `agy`.
+   * Prepares for the end of the session, which ends for `reason`: cancels
+   * every open Request, and makes the Turn end `interrupted` instead of
+   * `failed` or `completed`. The one exception is the reason
+   * `inactivity_timeout` after the transcript showed a provider error: the
+   * Turn then ends `failed` with the provider's words, because a silent
+   * session that the model service refused did not stop by the user's will.
+   * Sends nothing to `agy`.
    */
-  readonly stop: Effect.Effect<void>;
+  readonly stop: (reason: ExitReason) => Effect.Effect<void>;
   /**
    * Ends the Turn at once as `interrupted`, for a Turn that did not end by
    * itself: stops its fibers and emits `turn.completed` unless it was already
@@ -277,13 +277,15 @@ export interface Turn {
    */
   readonly hasEnded: () => boolean;
   /**
-   * Shows a provider error that `agy` wrote to the transcript of the root
-   * conversation: an `ERROR_MESSAGE` step becomes one `runtime.warning` per
-   * Turn, in the provider's words. It ends nothing, because `agy` may retry
-   * and recover; a step of another type, a second error, and a step that
-   * arrives after the Turn ended do nothing.
+   * Takes a fact that the transcript of the session's own conversation tells.
+   * An `input` fact marks that `agy` wrote the Turn's prompt, and a
+   * `provider-error` fact after it becomes one `runtime.warning` per Turn, in
+   * the provider's words. It ends nothing, because `agy` may retry and
+   * recover. A fact that arrives before the Turn is published or after it
+   * ended does nothing, and so does a provider error before the first input
+   * and a second one.
    */
-  readonly observeRootStep: (step: AgyStep) => void;
+  readonly recordRootConversationFact: (fact: RootConversationFact) => void;
   /** Waits until the Turn has ended, which is after it emitted `turn.completed`. */
   readonly ended: Effect.Effect<void>;
 }
@@ -312,44 +314,26 @@ type PromptResult =
   | { readonly kind: "failed"; readonly error: AcpError };
 
 /** One `session/prompt` written to `agy`. Prompts are told apart by identity. */
-interface Prompt {
-  /** The order the prompts were made in, for reading a failing test. */
-  readonly index: number;
-}
+type Prompt = symbol;
 
-/** What the loop of a Turn reacts to. It reads them one at a time, in the order they happened. */
-type TurnEvent =
-  | { readonly kind: "prompt-settled"; readonly prompt: Prompt; readonly result: PromptResult }
-  | { readonly kind: "steer-written"; readonly own: Prompt }
-  | { readonly kind: "steer-not-written"; readonly own: Prompt; readonly error: AcpError }
-  | { readonly kind: "steer-given-up"; readonly own: Prompt }
-  | { readonly kind: "steer-grace-over"; readonly own: Prompt };
+const buildPrompt = (): Prompt => Symbol("prompt");
 
 /**
- * A steer that was accepted. The Turn keeps it while its prompt is the newest,
- * because `agy` may still refuse the prompt after it confirmed the steer. The
- * Turn then ends by the reply of the prompt the steer superseded.
+ * What wakes the loop of a Turn. It reads them one at a time, in the order they
+ * happened, and looks at the state they changed.
  */
-interface AcceptedSteer {
-  readonly own: Prompt;
-  /** The reply of the superseded prompt, when it had come by the time the steer was accepted. */
-  readonly supersededResult: PromptResult | undefined;
-  /** The text of the steered input, for the warning when `agy` refuses it. */
-  readonly text: string;
-}
+type TurnEvent =
+  | { readonly kind: "prompt-settled"; readonly prompt: Prompt; readonly result: PromptResult }
+  | { readonly kind: "steer-decided" };
 
 /** The steer a Turn is taking: reserved before the write, until it is decided. */
 interface OpenSteer {
-  /** The steer's own prompt. */
-  readonly own: Prompt;
+  /** The prompt written for the steer. */
+  readonly steerPrompt: Prompt;
   /** The newest prompt when the steer was reserved: the one `agy` answers when it takes the steer. */
-  readonly superseded: Prompt;
+  readonly supersededPrompt: Prompt;
   readonly prepared: PreparedInput;
   readonly decision: Deferred.Deferred<SteerOutcome>;
-  /** Whether the write of the steer's prompt has finished. */
-  isWritten: boolean;
-  /** The reply of the superseded prompt, when it came before the steer was decided. */
-  supersededResult: PromptResult | undefined;
 }
 
 /**
@@ -460,6 +444,8 @@ export const startTurn = (
     let phase: "handoff" | "running" | "ending" | "closed" = "handoff";
     /** Whether the session is ending, so a reply that cannot be written is no news to the user. */
     let isStopped = false;
+    /** Whether the session is ending because it had no activity for too long. */
+    let isInactivityTimeout = false;
     /** The interrupt that was sent and waits for its result, shared with a second caller. */
     let pendingInterrupt: Deferred.Deferred<InterruptResult> | undefined;
     /**
@@ -471,11 +457,13 @@ export const startTurn = (
     /** The fibers that resolve the Requests since the last follow-up, so the end of a prompt waits for them. */
     let pendingResolutions: Array<Fiber.Fiber<unknown>> = [];
     const events = yield* Queue.unbounded<TurnEvent>();
-    /** The prompt whose reply ends the Turn. Undefined until the first prompt is written. */
-    let newest: Prompt | undefined;
-    let steering: OpenSteer | undefined;
-    let acceptedSteer: AcceptedSteer | undefined;
-    let promptCount = 0;
+    /** The prompt whose reply ends the Turn. It starts as the first prompt, which is written before anything reads it. */
+    let newestPrompt = buildPrompt();
+    let openSteer: OpenSteer | undefined;
+    /** The fiber that waits for the reply of each prompt written, by prompt. */
+    const waitingReplies = new Map<Prompt, Fiber.Fiber<PromptResult>>();
+    /** The result of every prompt whose reply was read. The Turn ends by the one of the newest prompt, once no steer is open. */
+    const results = new Map<Prompt, PromptResult>();
 
     const buildEvent = (toolCallId?: string, acpRequestId?: string) =>
       buildEnvelope(sessionId, {
@@ -770,11 +758,27 @@ export const startTurn = (
       return yield* Deferred.await(pendingInterrupt);
     });
 
-    const stop: Turn["stop"] = Effect.suspend(() => {
-      interrupted = true;
-      isStopped = true;
-      return cancelOpenRequests;
-    });
+    const stop: Turn["stop"] = (reason) =>
+      Effect.suspend(() => {
+        interrupted = true;
+        isStopped = true;
+        isInactivityTimeout = reason === "inactivity_timeout";
+        return cancelOpenRequests;
+      });
+
+    /**
+     * Ends the Turn the user or the session stopped: `interrupted`, except when
+     * the inactivity timeout stopped a Turn that saw a provider error. That
+     * Turn failed because of the error, so it ends `failed` with the provider's
+     * words.
+     */
+    const finishStopped = (): Effect.Effect<void> =>
+      isInactivityTimeout && newestProviderError !== undefined
+        ? finish("failed", {
+            class: isQuotaError(newestProviderError) ? "usage_limit" : "provider_error",
+            message: newestProviderError,
+          })
+        : finish("interrupted");
 
     /** Emits what ends the Turn: an error, when there is one, and `turn.completed`. */
     const finish = (state: TurnState, error?: TurnError): Effect.Effect<void> =>
@@ -837,7 +841,7 @@ export const startTurn = (
       if (Option.isNone(written)) {
         refuseHandoff({
           kind: "unknown",
-          message: "Antigravity did not take the input in time, so it may or may not have arrived.",
+          message: `${CANNOT_TELL}, because it did not answer in time.`,
         });
         return undefined;
       }
@@ -848,7 +852,7 @@ export const startTurn = (
             ? { kind: "not-sent", message }
             : {
                 kind: "unknown",
-                message: `Antigravity lost its connection while the input was handed over, so it may or may not have arrived: ${message}`,
+                message: `${CANNOT_TELL}, because its connection ended while the message was handed over: ${message}`,
               },
         );
         return undefined;
@@ -881,80 +885,67 @@ export const startTurn = (
       Queue.offerUnsafe(events, event);
     };
 
-    const buildPrompt = (): Prompt => ({ index: promptCount++ });
-
-    /** Forks a fiber of the scope that waits for the reply of `prompt`, adds its usage, and posts what it came to. */
+    /**
+     * Forks a fiber of the scope that waits for the reply of `prompt`, adds its
+     * usage, and posts what it came to. Returns the fiber, which ends with that
+     * result.
+     */
     const watchReply = (
       prompt: Prompt,
       waiting: Effect.Effect<PromptReply, AcpError>,
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<Fiber.Fiber<PromptResult>> =>
       Effect.forkIn(
         Effect.map(awaitReply(waiting), (result) => {
           // Every reply adds its usage when it arrives, whatever the Turn is doing, so a reply that comes after the Turn ended is counted too.
           if (result.kind === "replied")
             emit(addPromptUsage(normalizing, result.reply.usage, turnId));
           postTurnEvent({ kind: "prompt-settled", prompt, result });
+          return result;
         }),
         scope,
-      ).pipe(Effect.asVoid);
-
-    /** Starts the wait after which the steer `own` counts as taken, unless a refusal came first. */
-    const startGrace = (own: Prompt): Effect.Effect<void> =>
-      Effect.forkIn(
-        Effect.sleep(STEER_REFUSAL_GRACE).pipe(
-          Effect.andThen(
-            Effect.sync(() => {
-              postTurnEvent({ kind: "steer-grace-over", own });
-            }),
-          ),
+      ).pipe(
+        Effect.tap((fiber) =>
+          Effect.sync(() => {
+            waitingReplies.set(prompt, fiber);
+          }),
         ),
-        scope,
-      ).pipe(Effect.asVoid);
-
-    /** Ends the steer as `outcome` and returns the reply of the prompt it superseded, when that came earlier. */
-    const endSteer = (outcome: Exclude<SteerOutcome, { readonly kind: "accepted" }>) => {
-      const current = steering;
-      steering = undefined;
-      if (current === undefined) return undefined;
-      Deferred.doneUnsafe(current.decision, Effect.succeed(outcome));
-      return current.supersededResult;
-    };
+      );
 
     /**
-     * Accepts the steer: its prompt becomes the newest, and the input is shown
-     * as a steered `user_message`.
+     * Decides the open steer `steerPrompt` as `outcome`, once: a second decision
+     * of the same steer does nothing. An accepted steer makes its prompt the
+     * newest and shows its input as a steered `user_message`. Wakes the loop,
+     * which may hold a reply that now ends the Turn.
      */
-    const acceptSteer = (): void => {
-      const current = steering;
-      if (current === undefined) return;
-      steering = undefined;
-      newest = current.own;
-      const { input, skillReferences, skippedSkills } = current.prepared;
-      acceptedSteer = {
-        own: current.own,
-        supersededResult: current.supersededResult,
-        text: input.text,
-      };
-      emit(
-        buildUserMessage({
-          sessionId,
-          turnId,
-          text: input.text,
-          attachments: input.attachments,
-          skillReferences,
-          skippedSkills: { harnessName: ANTIGRAVITY_NAME, names: skippedSkills },
-          senderSessionId: input.senderSessionId,
-          steered: true,
-          harnessRefs: { nativeSessionId },
-        }),
-      );
-      Deferred.doneUnsafe(current.decision, Effect.succeed({ kind: "accepted" }));
+    const decideSteer = (steerPrompt: Prompt, outcome: SteerOutcome): void => {
+      const current = openSteer;
+      if (current === undefined || current.steerPrompt !== steerPrompt) return;
+      openSteer = undefined;
+      if (outcome.kind === "accepted") {
+        newestPrompt = steerPrompt;
+        const { input, skillReferences, skippedSkills } = current.prepared;
+        emit(
+          buildUserMessage({
+            sessionId,
+            turnId,
+            text: input.text,
+            attachments: input.attachments,
+            skillReferences,
+            skippedSkills: { harnessName: ANTIGRAVITY_NAME, names: skippedSkills },
+            senderSessionId: input.senderSessionId,
+            steered: true,
+            harnessRefs: { nativeSessionId },
+          }),
+        );
+      }
+      Deferred.doneUnsafe(current.decision, Effect.succeed(outcome));
+      postTurnEvent({ kind: "steer-decided" });
     };
 
     /** Returns why the Turn cannot take a steer now, or undefined when it can. */
     const findSteerRefusal = (): string | undefined => {
       if (phase !== "running" || !promptInFlight) {
-        return `Antigravity cannot take a message at this point of the turn, because it is starting, between two prompts or ending. ${STAYS_QUEUED}`;
+        return `Antigravity cannot take a message while the turn is starting or ending. ${STAYS_QUEUED}`;
       }
       if (interrupted) {
         return `The turn is being stopped, so the message was not sent to Antigravity. ${STAYS_QUEUED}`;
@@ -962,164 +953,97 @@ export const startTurn = (
       if (open.size > 0) {
         return `Antigravity is waiting for your answer to a request, and takes no message before it. Answer the request first. ${STAYS_QUEUED}`;
       }
-      if (steering !== undefined) {
-        return `Antigravity is still taking another message. ${STAYS_QUEUED}`;
+      if (openSteer !== undefined) {
+        return `Antigravity is still taking your previous message. ${STAYS_QUEUED}`;
       }
       return undefined;
     };
 
+    /** Returns what a failed write of the steer's prompt means for the steer. */
+    const decideFailedWrite = (error: AcpError): SteerOutcome =>
+      error.reason === "not-sent"
+        ? {
+            kind: "refused",
+            message: `Antigravity did not get your message: ${error.message} ${STAYS_QUEUED}`,
+          }
+        : {
+            kind: "unknown",
+            message: `${CANNOT_TELL}, because its connection ended while the message was handed over: ${error.message}`,
+          };
+
+    /** Returns what the reply or the failure of the steer's own prompt means for the steer. */
+    const decideSteerPromptResult = (result: PromptResult): SteerOutcome => {
+      if (result.kind === "replied") return { kind: "accepted" };
+      const { error } = result;
+      return error.reason === "refused"
+        ? {
+            kind: "refused",
+            message: `Antigravity did not take your message: ${truncateFact(error.harnessMessage ?? error.message)} ${STAYS_QUEUED}`,
+          }
+        : { kind: "unknown", message: `${CANNOT_TELL}: ${error.message}` };
+    };
+
+    /**
+     * Returns what the reply or the failure of the prompt the steer supersedes
+     * means for the steer: `agy` answers that prompt at once when it takes the
+     * steer. A failure means the connection is gone, and the steer with it.
+     */
+    const decideSupersededResult = (result: PromptResult): SteerOutcome =>
+      result.kind === "replied"
+        ? { kind: "accepted" }
+        : { kind: "unknown", message: `${CANNOT_TELL}, because its connection ended.` };
+
     const steer: Turn["steer"] = (prepared) =>
       Effect.suspend(() => {
         const refusal = findSteerRefusal();
-        if (refusal !== undefined || newest === undefined) {
-          return Effect.succeed<SteerOutcome>({
-            kind: "refused",
-            message: refusal ?? "Antigravity has no prompt to steer.",
-          });
-        }
+        if (refusal !== undefined)
+          return Effect.succeed<SteerOutcome>({ kind: "refused", message: refusal });
         // Reserved before the write, so a second steer is refused and a reply of the old prompt cannot end the Turn meanwhile.
-        const own = buildPrompt();
+        const steerPrompt = buildPrompt();
+        const supersededPrompt = newestPrompt;
         const decision = Deferred.makeUnsafe<SteerOutcome>();
-        steering = {
-          own,
-          superseded: newest,
-          prepared,
-          decision,
-          isWritten: false,
-          supersededResult: undefined,
+        openSteer = { steerPrompt, supersededPrompt, prepared, decision };
+        const notTakenInTime: SteerOutcome = {
+          kind: "unknown",
+          message: `${CANNOT_TELL}, because it did not answer in time.`,
         };
-        const handOver = Effect.gen(function* () {
+        const decideAlone = Effect.gen(function* () {
           const written = yield* Effect.result(
             connection.sendPrompt(nativeSessionId, prepared.prompt),
           );
           if (Result.isFailure(written)) {
-            postTurnEvent({ kind: "steer-not-written", own, error: written.failure });
-          } else {
-            // Posted before the reply can be, so the loop sees the write first.
-            postTurnEvent({ kind: "steer-written", own });
-            yield* watchReply(own, written.success);
+            decideSteer(steerPrompt, decideFailedWrite(written.failure));
+            return;
           }
-          return yield* Deferred.await(decision);
+          const steerReply = yield* watchReply(steerPrompt, written.success);
+          const supersededReply = waitingReplies.get(supersededPrompt);
+          const outcome = yield* Effect.raceFirst(
+            Effect.map(Fiber.join(steerReply), decideSteerPromptResult),
+            supersededReply === undefined
+              ? Effect.never
+              : Effect.map(Fiber.join(supersededReply), decideSupersededResult),
+          );
+          decideSteer(steerPrompt, outcome);
         });
-        return handOver.pipe(
+        return decideAlone.pipe(
           Effect.timeoutOption(prepared.handoffBudget),
-          Effect.flatMap((outcome) =>
-            Option.isSome(outcome)
-              ? Effect.succeed(outcome.value)
-              : Effect.suspend(() => {
-                  // The loop may have decided in the moment the budget ran out.
-                  if (Deferred.isDoneUnsafe(decision)) return Deferred.await(decision);
-                  postTurnEvent({ kind: "steer-given-up", own });
-                  return Effect.succeed<SteerOutcome>({
-                    kind: "unknown",
-                    message:
-                      "Antigravity did not take the message in time, so it may or may not have arrived.",
-                  });
-                }),
+          Effect.flatMap((finished) =>
+            Option.isNone(finished)
+              ? Effect.sync(() => {
+                  decideSteer(steerPrompt, notTakenInTime);
+                })
+              : Effect.void,
           ),
           // A caller that is gone while `agy` may be reading the prompt leaves the same doubt as a timeout.
           Effect.onInterrupt(() =>
             Effect.sync(() => {
               if (Deferred.isDoneUnsafe(decision)) return;
-              postTurnEvent({ kind: "steer-given-up", own });
+              decideSteer(steerPrompt, notTakenInTime);
               onDeliveryUnknown();
             }),
           ),
+          Effect.andThen(Deferred.await(decision)),
         );
-      });
-
-    /**
-     * Reads one event of `events` while a steer is open and returns the reply
-     * that now ends the Turn, or undefined when the Turn goes on. The rules:
-     *
-     * - the steer's own reply means `agy` took it;
-     * - the reply of the superseded prompt means `agy` took it too, once no
-     *   refusal follows within `STEER_REFUSAL_GRACE`;
-     * - a refusal or a failed write ends the steer, and a reply of the old
-     *   prompt that came meanwhile then ends the Turn by its own rules.
-     *
-     * Usage is not added here: the fiber that waits for a reply adds it.
-     */
-    const readSteerEvent = (event: TurnEvent): Effect.Effect<PromptResult | undefined> =>
-      Effect.gen(function* () {
-        const current = steering;
-        if (current === undefined) return undefined;
-        switch (event.kind) {
-          case "steer-written":
-            if (event.own !== current.own) return undefined;
-            current.isWritten = true;
-            if (current.supersededResult !== undefined) yield* startGrace(current.own);
-            return undefined;
-          case "steer-not-written":
-            if (event.own !== current.own) return undefined;
-            return endSteer(
-              event.error.reason === "not-sent"
-                ? {
-                    kind: "refused",
-                    message: `Antigravity did not get the message: ${event.error.message} ${STAYS_QUEUED}`,
-                  }
-                : {
-                    kind: "unknown",
-                    message: `Antigravity lost its connection while the message was handed over, so it may or may not have arrived: ${event.error.message}`,
-                  },
-            );
-          case "steer-given-up":
-            if (event.own !== current.own) return undefined;
-            return endSteer({
-              kind: "unknown",
-              message:
-                "Antigravity did not take the message in time, so it may or may not have arrived.",
-            });
-          case "steer-grace-over":
-            if (event.own === current.own) acceptSteer();
-            return undefined;
-          case "prompt-settled": {
-            const { prompt, result } = event;
-            if (prompt === current.own) {
-              if (result.kind === "replied") {
-                acceptSteer();
-                return result;
-              }
-              const { error } = result;
-              return endSteer(
-                error.reason === "refused"
-                  ? {
-                      kind: "refused",
-                      message: `Antigravity did not take the message: ${truncateFact(error.harnessMessage ?? error.message)} ${STAYS_QUEUED}`,
-                    }
-                  : {
-                      kind: "unknown",
-                      message: `Antigravity could not tell whether it took the message: ${error.message}`,
-                    },
-              );
-            }
-            if (prompt !== current.superseded) {
-              // An even older prompt: ends nothing.
-              return undefined;
-            }
-            // The superseded prompt is still the newest, so what its reply means depends on the steer.
-            if (
-              result.kind === "failed" &&
-              result.error.reason === "refused" &&
-              acceptedSteer?.own === prompt
-            ) {
-              // A late refusal of an accepted steer is definite, not a lost connection. The Turn goes on, and the open steer waits for its own decision.
-              warnSteerRefusedLate(acceptedSteer);
-              return undefined;
-            }
-            current.supersededResult = result;
-            if (result.kind === "failed") {
-              // A prompt that failed means the connection is gone, and the steer is lost with it.
-              return endSteer({
-                kind: "unknown",
-                message:
-                  "Antigravity's connection ended while the message was handed over, so it may or may not have arrived.",
-              });
-            }
-            if (current.isWritten) yield* startGrace(current.own);
-            return undefined;
-          }
-        }
       });
 
     /** Whether this Turn already showed an `ERROR_MESSAGE` step of the transcript. */
@@ -1130,13 +1054,18 @@ export const startTurn = (
      * earlier belongs to the Turn before.
      */
     let hasSeenRootUserInput = false;
+    /** The words of the newest provider error the transcript showed since the first input, for a Turn that the inactivity timeout ends. */
+    let newestProviderError: string | undefined;
 
-    const observeRootStep: Turn["observeRootStep"] = (step) => {
+    const recordRootConversationFact: Turn["recordRootConversationFact"] = (fact) => {
       if (!isPublished || phase === "closed") return;
-      if (step.type === "USER_INPUT") hasSeenRootUserInput = true;
-      if (step.type !== "ERROR_MESSAGE" || hasShownRootError || !hasSeenRootUserInput) return;
-      const words = readStepErrorText(step);
-      if (words === undefined || words === "") return;
+      if (fact.kind === "input") {
+        hasSeenRootUserInput = true;
+        return;
+      }
+      if (!hasSeenRootUserInput) return;
+      newestProviderError = fact.words;
+      if (hasShownRootError) return;
       hasShownRootError = true;
       emit([
         {
@@ -1144,62 +1073,23 @@ export const startTurn = (
           ...buildEvent(),
           turnId,
           message: truncateMessage(
-            `Google's model service answered with an error, and Antigravity may try again: ${words}`,
+            `Google's model service answered with an error, and Antigravity may try again: ${fact.words}`,
           ),
         },
       ]);
-    };
-
-    /** Warns that `agy` refused a steer after it had confirmed it, so the user sends the message again. */
-    const warnSteerRefusedLate = (accepted: AcceptedSteer): void => {
-      emit([
-        {
-          _tag: "runtime.warning",
-          ...buildEvent(),
-          turnId,
-          message: truncateMessage(
-            `Antigravity refused a message after it had confirmed it, so the message did not reach the agent. Send it again: "${truncateFact(accepted.text)}"`,
-          ),
-        },
-      ]);
-    };
-
-    /**
-     * Returns the result that ends the Turn for the reply of the newest prompt
-     * `prompt`. It is `result` itself, except when `agy` refuses a steer after
-     * it confirmed it: the Turn then ends by the reply of the superseded
-     * prompt, which it holds, and warns that the message did not arrive, so
-     * the user sends it again.
-     */
-    const decideNewestResult = (prompt: Prompt, result: PromptResult): PromptResult => {
-      const accepted = acceptedSteer;
-      if (
-        result.kind !== "failed" ||
-        result.error.reason !== "refused" ||
-        accepted?.own !== prompt ||
-        accepted.supersededResult?.kind !== "replied"
-      ) {
-        return result;
-      }
-      warnSteerRefusedLate(accepted);
-      return accepted.supersededResult;
     };
 
     const runTurn = Effect.gen(function* () {
       const waiting = yield* writeFirstPrompt;
       if (waiting === undefined) return;
-      newest = buildPrompt();
       promptInFlight = true;
-      yield* watchReply(newest, waiting);
+      yield* watchReply(newestPrompt, waiting);
       for (;;) {
         const event = yield* Queue.take(events);
-        let result: PromptResult | undefined;
-        if (steering !== undefined) {
-          result = yield* readSteerEvent(event);
-        } else if (event.kind === "prompt-settled" && event.prompt === newest) {
-          // A reply of an older prompt ends nothing: only the newest prompt's reply ends the Turn.
-          result = decideNewestResult(event.prompt, event.result);
-        }
+        if (event.kind === "prompt-settled") results.set(event.prompt, event.result);
+        // While a steer is open, the reply of the prompt it supersedes is held: it ends the Turn only if the steer is refused. A reply of an older prompt ends nothing.
+        if (openSteer !== undefined) continue;
+        const result = results.get(newestPrompt);
         if (result === undefined) continue;
         promptInFlight = false;
 
@@ -1208,7 +1098,7 @@ export const startTurn = (
           emit(addPromptUsage(normalizing, undefined, turnId));
           if (result.error.reason === "closed") {
             return yield* interrupted
-              ? finish("interrupted")
+              ? finishStopped()
               : finish("failed", {
                   class: "unknown",
                   message:
@@ -1226,7 +1116,7 @@ export const startTurn = (
 
         const { stopReason } = result.reply;
         if (stopReason === "end_turn") {
-          if (interrupted) return yield* finish("interrupted");
+          if (interrupted) return yield* finishStopped();
           const notice = takeErrorNotice(normalizing);
           if (notice !== undefined) {
             return yield* finish("failed", {
@@ -1245,15 +1135,15 @@ export const startTurn = (
           if (interrupted) return yield* finish("interrupted");
           deniedToolNames = [];
           pendingResolutions = [];
-          newest = buildPrompt();
+          newestPrompt = buildPrompt();
           promptInFlight = true;
           yield* watchReply(
-            newest,
+            newestPrompt,
             Effect.flatten(connection.sendPrompt(nativeSessionId, followUp)),
           );
           continue;
         }
-        if (stopReason === "cancelled") return yield* finish("interrupted");
+        if (stopReason === "cancelled") return yield* finishStopped();
         const known = STOP_REASON_FAILURES[stopReason];
         return yield* finish(
           "failed",
@@ -1271,15 +1161,15 @@ export const startTurn = (
           // A Turn that is interrupted while its prompt is written has no outcome yet.
           refuseHandoff({
             kind: "unknown",
-            message:
-              "Antigravity was stopped while the input was handed over, so it may or may not have arrived.",
+            message: `${CANNOT_TELL}, because the session was stopped while the message was handed over.`,
           });
           // A steer still open when the Turn is over is not decided: `agy` may have it.
-          endSteer({
-            kind: "unknown",
-            message:
-              "The turn ended before Antigravity confirmed that it took the message, so it may or may not have arrived.",
-          });
+          if (openSteer !== undefined) {
+            decideSteer(openSteer.steerPrompt, {
+              kind: "unknown",
+              message: `${CANNOT_TELL}, because the turn ended first.`,
+            });
+          }
           Deferred.doneUnsafe(ended, Effect.void);
         }),
       ),
@@ -1318,7 +1208,7 @@ export const startTurn = (
       stop,
       abandon,
       hasEnded: () => phase === "closed",
-      observeRootStep,
+      recordRootConversationFact,
       ended: Deferred.await(ended),
     };
   });

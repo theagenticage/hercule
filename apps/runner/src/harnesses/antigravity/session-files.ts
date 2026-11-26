@@ -285,6 +285,25 @@ const readTokenCount = (value: unknown): number | undefined =>
 export const readStepErrorText = (step: AgyStep): string | undefined =>
   [step.error, step.content].find((text) => text !== undefined && text !== "");
 
+/** What the transcript of the session's own conversation tells the running Turn. */
+export type RootConversationFact =
+  /** `agy` wrote a prompt of the user. */
+  | { readonly kind: "input" }
+  /** `agy` wrote the error of the model service, in `words`. */
+  | { readonly kind: "provider-error"; readonly words: string };
+
+/**
+ * Returns the fact that a step of the session's own conversation tells the
+ * Turn: `input` for a `USER_INPUT` step, `provider-error` for an
+ * `ERROR_MESSAGE` step with error text. Returns undefined for any other step.
+ */
+export const readRootConversationFact = (step: AgyStep): RootConversationFact | undefined => {
+  if (step.type === "USER_INPUT") return { kind: "input" };
+  if (step.type !== "ERROR_MESSAGE") return undefined;
+  const words = readStepErrorText(step);
+  return words === undefined ? undefined : { kind: "provider-error", words };
+};
+
 /** Returns the step a transcript line records. */
 const buildStep = (line: Schema.Schema.Type<typeof TranscriptLine>): AgyStep => {
   const error = line.error;
