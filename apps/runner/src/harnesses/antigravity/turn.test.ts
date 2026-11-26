@@ -109,6 +109,8 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
     let deliveryUnknown = 0;
     /** Makes the write of the next prompt fail, as the test says. */
     let nextWriteFailure: AcpError | undefined;
+    /** Holds the write of the next prompt until the test completes it. */
+    let nextWriteGate: Deferred.Deferred<void> | undefined;
     /** Makes the next `session/cancel` fail to be written. */
     let isCancelFailing = false;
     // The session holds the output from the admission of the input on.
@@ -127,6 +129,11 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
             Effect.gen(function* () {
               if (prompts.length === 0 && firstWrite !== undefined)
                 yield* Deferred.await(firstWrite);
+              if (nextWriteGate !== undefined) {
+                const gate = nextWriteGate;
+                nextWriteGate = undefined;
+                yield* Deferred.await(gate);
+              }
               if (nextWriteFailure !== undefined) {
                 const failure = nextWriteFailure;
                 nextWriteFailure = undefined;
@@ -224,6 +231,10 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
       deliveryUnknown: () => deliveryUnknown,
       failCancels: (): void => {
         isCancelFailing = true;
+      },
+      holdNextWrite: (): Deferred.Deferred<void> => {
+        nextWriteGate = Deferred.makeUnsafe<void>();
+        return nextWriteGate;
       },
       failNextWrite: (error: AcpError): void => {
         nextWriteFailure = error;
@@ -1284,10 +1295,12 @@ describe("a steer", () => {
       }),
     ));
 
-  it("is refused with the interrupt that comes while it is open, and is not shown after the old prompt replies cancelled", () =>
+  it("is refused by an interrupt that comes before its prompt was written", () =>
     run((h) =>
       Effect.gen(function* () {
-        const steering = yield* startSteer(h);
+        const gate = h.holdNextWrite();
+        const steering = yield* Effect.forkChild(h.turn.steer(STEER));
+        yield* letTurnRead;
 
         const interrupting = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 1);
@@ -1299,6 +1312,28 @@ describe("a steer", () => {
         expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.completed()).toMatchObject({ state: "interrupted" });
         expect(steeredMessages(h)).toHaveLength(0);
+        yield* Deferred.succeed(gate, undefined);
+      }),
+    ));
+
+  it("is accepted and shown inside the turn when an interrupt comes after its prompt was written", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+        yield* h.reply(0, "cancelled");
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        yield* h.reply(1, "cancelled");
+
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(steeredMessages(h)).toHaveLength(1);
+        const tagsInOrder = h.events.map((event) => event._tag);
+        expect(tagsInOrder.lastIndexOf("item.completed")).toBeLessThan(
+          tagsInOrder.indexOf("turn.completed"),
+        );
       }),
     ));
 

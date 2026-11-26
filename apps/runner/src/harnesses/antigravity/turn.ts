@@ -334,6 +334,8 @@ interface OpenSteer {
   readonly supersededPrompt: Prompt;
   readonly prepared: PreparedInput;
   readonly decision: Deferred.Deferred<SteerOutcome>;
+  /** Whether the write of the steer's prompt has finished: `agy` may then have the message, so only its own reply decides the steer. */
+  isWritten: boolean;
 }
 
 /**
@@ -945,12 +947,13 @@ export const startTurn = (
     };
 
     /**
-     * Refuses the open steer, if there is one, because an interrupt or a stop
-     * ends the Turn. Without it, the reply `cancelled` of the old prompt would
-     * accept the steer and show its message after the interrupt.
+     * Refuses the open steer when its prompt is not written yet, because an
+     * interrupt or a stop ends the Turn and `agy` never got the message. A
+     * written steer is left to its own reply, because `agy` may have the
+     * message, and refusing it would let the controller send it twice.
      */
     const refuseOpenSteer = (): void => {
-      if (openSteer === undefined) return;
+      if (openSteer === undefined || openSteer.isWritten) return;
       decideSteer(openSteer.steerPrompt, {
         kind: "refused",
         message: `The turn was stopped before Antigravity took the message. ${STAYS_QUEUED}`,
@@ -1017,7 +1020,14 @@ export const startTurn = (
         const steerPrompt = buildPrompt();
         const supersededPrompt = newestPrompt;
         const decision = Deferred.makeUnsafe<SteerOutcome>();
-        openSteer = { steerPrompt, supersededPrompt, prepared, decision };
+        const current: OpenSteer = {
+          steerPrompt,
+          supersededPrompt,
+          prepared,
+          decision,
+          isWritten: false,
+        };
+        openSteer = current;
         const notTakenInTime: SteerOutcome = {
           kind: "unknown",
           message: `${CANNOT_TELL}, because it did not answer in time.`,
@@ -1030,6 +1040,7 @@ export const startTurn = (
             decideSteer(steerPrompt, decideFailedWrite(written.failure));
             return;
           }
+          current.isWritten = true;
           const steerReply = yield* watchReply(steerPrompt, written.success);
           const supersededReply = waitingReplies.get(supersededPrompt);
           const outcome = yield* Effect.raceFirst(
@@ -1040,7 +1051,7 @@ export const startTurn = (
           );
           decideSteer(steerPrompt, outcome);
         });
-        return decideAlone.pipe(
+        const decideWithinBudget = decideAlone.pipe(
           Effect.timeoutOption(prepared.handoffBudget),
           Effect.flatMap((finished) =>
             Option.isNone(finished)
@@ -1049,6 +1060,9 @@ export const startTurn = (
                 })
               : Effect.void,
           ),
+        );
+        // The steer can also be decided from outside (an interrupt refuses it before its write finished), and then the caller does not wait for the write.
+        return Effect.raceFirst(decideWithinBudget, Deferred.await(decision)).pipe(
           // A caller that is gone while `agy` may be reading the prompt leaves the same doubt as a timeout.
           Effect.onInterrupt(() =>
             Effect.sync(() => {
