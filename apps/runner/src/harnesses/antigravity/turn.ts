@@ -41,16 +41,20 @@ import { truncateFact, truncateMessage } from "../text";
 import {
   addPromptUsage,
   closeTurn,
+  describeRequestItem,
+  findRequestOwner,
   markDeclined,
   type Normalizing,
-  type RequestItem,
-  type RequestOwner,
 } from "./normalize";
 import {
+  buildApprovalDecisions,
   buildApprovalOutcome,
   buildElicitationReply,
-  readApprovalDecisions,
-  readQuestionForm,
+  buildOrphanMessage,
+  buildQuestionNotOpen,
+  CANCELLED_APPROVAL,
+  CANCELLED_QUESTION,
+  parseQuestionForm,
   type QuestionForm,
 } from "./requests";
 
@@ -62,9 +66,6 @@ const REPLY_WRITE_DEADLINE = Duration.seconds(5);
 
 /** A tool name that may appear in the follow-up prompt. Anything else could carry text meant for the model. */
 const SAFE_TOOL_NAME = /^[A-Za-z0-9_]{1,64}$/;
-
-const CANCELLED_APPROVAL: ApprovalOutcome = { outcome: "cancelled" };
-const CANCELLED_QUESTION: ElicitationReply = { action: "cancel" };
 
 /** An error that ends a Turn: the `class` of its `runtime.error`, and the message for the user. */
 interface TurnError {
@@ -95,23 +96,19 @@ export type InterruptResult = "stopped" | "unresponsive";
 export interface Turn {
   readonly id: string;
   /**
-   * Opens an approval Request of this Turn and waits for its decision. Returns
-   * the ACP outcome to send to `agy`: the user's decision, or `cancelled` when
-   * the Turn is interrupted before or while it waits.
+   * Opens an approval Request and waits for its decision. Returns the ACP
+   * outcome to send to `agy`: the user's decision, or `cancelled` when the
+   * Turn is interrupted before or while it waits, or when the call the Request
+   * is about is not a running item of this Turn (the Turn then warns).
    */
-  readonly openApproval: (
-    request: ApprovalRequest,
-    item: RequestItem,
-  ) => Effect.Effect<ApprovalOutcome>;
+  readonly openApproval: (request: ApprovalRequest) => Effect.Effect<ApprovalOutcome>;
   /**
-   * Opens a question Request of this Turn and waits for its answers. Returns
-   * the ACP reply to send: the answers, or `cancel` when the form cannot be
-   * read or the Turn is interrupted.
+   * Opens a question Request and waits for its answers. Returns the ACP reply
+   * to send: the answers, or `cancel` when the form cannot be read, the Turn
+   * is interrupted, or the question's call is not a running item of this Turn
+   * (the Turn then warns).
    */
-  readonly openQuestion: (
-    request: ElicitationRequest,
-    owner: RequestOwner,
-  ) => Effect.Effect<ElicitationReply>;
+  readonly openQuestion: (request: ElicitationRequest) => Effect.Effect<ElicitationReply>;
   /**
    * Applies the user's decision to an open approval. Does nothing when the
    * Request is not an open approval. The decision `cancel` also interrupts the
@@ -226,11 +223,15 @@ export const startTurn = (
     let interrupted = false;
     /** Whether a Request was answered `cancel`. `agy` then replies `end_turn`, so the reply alone does not show it. */
     let answeredCancel = false;
-    /** Whether the Turn started to end: no new Request opens and no interrupt is sent from then on. */
-    let isEnding = false;
-    /** Whether `turn.completed` was emitted. */
-    let isClosed = false;
-    let interruption: Deferred.Deferred<InterruptResult> | undefined;
+    /**
+     * Where the Turn is in its life. From `ending` on, no new Request opens and
+     * no interrupt is sent. `closed` is from the moment `turn.completed` was emitted.
+     */
+    let phase: "running" | "ending" | "closed" = "running";
+    /** Whether the session is ending, so a reply that cannot be written is no news to the user. */
+    let isStopped = false;
+    /** The interrupt that was sent and waits for its result, shared with a second caller. */
+    let pendingInterrupt: Deferred.Deferred<InterruptResult> | undefined;
     /** The tool names of the Denies the current prompt got, counted once their reply was written. */
     let deniedToolNames: Array<string | null | undefined> = [];
     /** The fibers that resolve the Requests of the current prompt, so the prompt's end waits for them. */
@@ -275,7 +276,7 @@ export const startTurn = (
         ),
         Effect.tap((written) =>
           Effect.sync(() => {
-            if (!written) {
+            if (!written && !isStopped) {
               emit([
                 {
                   _tag: "runtime.warning",
@@ -356,9 +357,32 @@ export const startTurn = (
       ),
     );
 
-    const openApproval: Turn["openApproval"] = (request, item) =>
+    /** Warns that a Request belongs to no running item of this Turn. */
+    const warnOrphan = (what: string, toolCallId: string | null | undefined): void => {
+      emit([
+        {
+          _tag: "runtime.warning",
+          ...buildEvent(toolCallId ?? undefined),
+          turnId: input.turnId,
+          message: buildOrphanMessage(what),
+        },
+      ]);
+    };
+
+    const openApproval: Turn["openApproval"] = (request) =>
       Effect.gen(function* () {
-        if (interrupted || isEnding) {
+        const item = describeRequestItem(
+          normalizing,
+          request.toolCall.toolCallId,
+          request.toolCall,
+        );
+        if (item === undefined || item.turnId !== input.turnId) {
+          // A call that is shown as cancelled, not as failed, because nobody ran it.
+          markDeclined(normalizing, request.toolCall.toolCallId);
+          warnOrphan("for approval of a call", request.toolCall.toolCallId);
+          return CANCELLED_APPROVAL;
+        }
+        if (interrupted || phase !== "running") {
           markDeclined(normalizing, request.toolCall.toolCallId);
           return CANCELLED_APPROVAL;
         }
@@ -374,17 +398,25 @@ export const startTurn = (
               requestId,
               itemId: item.itemId,
               ...item.description,
-              decisions: readApprovalDecisions(request.options),
+              decisions: buildApprovalDecisions(request.options),
             },
           },
         ]);
         return yield* Deferred.await(outcome);
       });
 
-    const openQuestion: Turn["openQuestion"] = (request, owner) =>
+    const openQuestion: Turn["openQuestion"] = (request) =>
       Effect.gen(function* () {
-        if (interrupted || isEnding) return CANCELLED_QUESTION;
-        const form = readQuestionForm(request);
+        const owner =
+          request.toolCallId == null
+            ? undefined
+            : findRequestOwner(normalizing, request.toolCallId);
+        if (owner === undefined || owner.turnId !== input.turnId) {
+          warnOrphan("a question", request.toolCallId);
+          return CANCELLED_QUESTION;
+        }
+        if (interrupted || phase !== "running") return CANCELLED_QUESTION;
+        const form = parseQuestionForm(request);
         if (form === undefined) {
           emit([
             {
@@ -428,11 +460,7 @@ export const startTurn = (
       Effect.gen(function* () {
         const park = open.get(requestId);
         if (park?.kind !== "question") {
-          return yield* Effect.fail(
-            buildAnswerNotDelivered(
-              "This question is not open anymore. Nothing was sent to Antigravity.",
-            ),
-          );
+          return yield* Effect.fail(buildQuestionNotOpen());
         }
         const built = buildElicitationReply(park.form, answers);
         if (built.kind === "refused") {
@@ -473,12 +501,12 @@ export const startTurn = (
     });
 
     const interrupt: Turn["interrupt"] = Effect.gen(function* () {
-      if (interruption === undefined) {
-        if (Deferred.isDoneUnsafe(ended) || isEnding) return "stopped";
+      if (pendingInterrupt === undefined) {
+        if (Deferred.isDoneUnsafe(ended) || phase !== "running") return "stopped";
         // Marked before the first yield, so a Request that opens from now on is cancelled.
         interrupted = true;
         const result = Deferred.makeUnsafe<InterruptResult>();
-        interruption = result;
+        pendingInterrupt = result;
         yield* cancelOpenRequests;
         // A fiber of the scope runs the wait, so a caller that is interrupted cannot leave a second caller waiting for ever.
         yield* Effect.forkIn(
@@ -486,18 +514,19 @@ export const startTurn = (
           scope,
         );
       }
-      return yield* Deferred.await(interruption);
+      return yield* Deferred.await(pendingInterrupt);
     });
 
     const stop: Turn["stop"] = Effect.suspend(() => {
       interrupted = true;
+      isStopped = true;
       return cancelOpenRequests;
     });
 
     /** Emits what ends the Turn: an error, when there is one, and `turn.completed`. */
     const finish = (state: TurnState, error?: TurnError): Effect.Effect<void> =>
       Effect.gen(function* () {
-        isEnding = true;
+        phase = "ending";
         // A Request still open here belongs to a prompt that is over.
         yield* cancelOpenRequests;
         // The controller closes the Requests of a Turn when it completes, so a
@@ -522,7 +551,7 @@ export const startTurn = (
             ...(error === undefined ? {} : { error: error.message }),
           }),
         );
-        isClosed = true;
+        phase = "closed";
       });
 
     /** Waits for the reply to a prompt, and turns a failure into a result. */
@@ -595,16 +624,16 @@ export const startTurn = (
     const runFiber = yield* Effect.forkIn(runTurn, scope, { startImmediately: true });
 
     const abandon: Turn["abandon"] = Effect.suspend(() => {
-      if (isClosed) return Effect.void;
+      if (phase === "closed") return Effect.void;
       interrupted = true;
-      isEnding = true;
+      phase = "ending";
       const fibers: Array<Fiber.Fiber<unknown>> = [...pendingResolutions, runFiber];
       return Fiber.interruptAll(fibers).pipe(
         Effect.andThen(
           Effect.sync(() => {
-            if (!isClosed) {
+            if (phase !== "closed") {
               emit(closeTurn(normalizing, { state: "interrupted", turnId: input.turnId }));
-              isClosed = true;
+              phase = "closed";
             }
             Deferred.doneUnsafe(ended, Effect.void);
           }),
@@ -621,7 +650,7 @@ export const startTurn = (
       interrupt,
       stop,
       abandon,
-      hasEnded: () => isClosed,
+      hasEnded: () => phase === "closed",
       ended: Deferred.await(ended),
     };
   });

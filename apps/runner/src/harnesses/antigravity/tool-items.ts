@@ -29,7 +29,7 @@ export type ToolCallFields = {
 };
 
 /** The kind and detail of the item an Antigravity tool call is shown as. */
-export interface ToolItem {
+interface ToolItem {
   readonly kind: ItemKind;
   readonly detail: Schema.Json;
 }

@@ -19,7 +19,22 @@ import {
   type Question,
   type QuestionAnswers,
 } from "@hercule/protocol";
+import { buildAnswerNotDelivered } from "../adapter-error-builders";
 import { truncateFact, truncateMessage } from "../text";
+
+/** The reply to an approval Request that nobody can decide: `agy` does not run the call. */
+export const CANCELLED_APPROVAL: ApprovalOutcome = { outcome: "cancelled" };
+
+/** The reply to a question Request that nobody can answer. */
+export const CANCELLED_QUESTION: ElicitationReply = { action: "cancel" };
+
+/** Returns the failure of an answer to a question that is not open anymore. */
+export const buildQuestionNotOpen = () =>
+  buildAnswerNotDelivered("This question is not open anymore. Nothing was sent to Antigravity.");
+
+/** Returns the warning for a Request that no running Turn owns. `what` completes "Antigravity asked ...", such as "a question". */
+export const buildOrphanMessage = (what: string): string =>
+  `Antigravity asked ${what} that no running turn owns, so Hercule cancelled it.`;
 
 const ALLOW_ONCE = "allow_once";
 const REJECT_ONCE = "reject_once";
@@ -31,7 +46,7 @@ const REJECT_ONCE = "reject_once";
  * can refuse. `allow_always` is never offered, because nothing yet confirms
  * that `agy` forgets such an answer when its process ends.
  */
-export const readApprovalDecisions = (
+export const buildApprovalDecisions = (
   options: ReadonlyArray<ApprovalOption>,
 ): NonEmptyReadonlyArray<ApprovalDecision> =>
   options.some((option) => option.kind === ALLOW_ONCE)
@@ -163,7 +178,7 @@ const readChoices = (
  * - a `qN_other` is not a string field;
  * - it holds no question (a `qN_other` with no `qN` beside it is ignored).
  */
-export const readQuestionForm = (request: ElicitationRequest): QuestionForm | undefined => {
+export const parseQuestionForm = (request: ElicitationRequest): QuestionForm | undefined => {
   const properties = Object.entries(request.requestedSchema.properties ?? {});
   const questionFields: Array<{ readonly name: string; readonly field: ElicitationField }> = [];
   const otherFields = new Set<string>();
@@ -216,7 +231,7 @@ export const readQuestionForm = (request: ElicitationRequest): QuestionForm | un
 };
 
 /** The result of turning answers into a reply: the reply, or why the answers cannot be sent. */
-export type ElicitationAnswerResult =
+type ElicitationAnswerResult =
   | { readonly kind: "reply"; readonly reply: ElicitationReply }
   | { readonly kind: "refused"; readonly message: string };
 

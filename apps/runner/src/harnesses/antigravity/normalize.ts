@@ -884,6 +884,18 @@ export const findRequestOwner = (
 };
 
 /**
+ * Returns true when an update about the call `toolCallId` waits in the buffer
+ * of a held turn. A Request about such a call is early, not orphaned: its item
+ * appears when the input's turn opens.
+ */
+export const isCallBuffered = (state: Normalizing, toolCallId: string): boolean =>
+  state.buffered.some(
+    (message) =>
+      message.type === "update" &&
+      readToolCall(message.notification.update)?.toolCallId === toolCallId,
+  );
+
+/**
  * Returns the owner of an approval Request, as `findRequestOwner` does, with
  * the Request's kind and detail built from the call. The approval's own
  * `snapshot` of the tool call is read over the fields the item last had.
@@ -892,13 +904,12 @@ export const findRequestOwner = (
 export const describeRequestItem = (
   state: Normalizing,
   toolCallId: string,
-  snapshot?: ToolCall,
+  snapshot: ToolCall,
 ): RequestItem | undefined => {
   const owner = findRequestOwner(state, toolCallId);
   const record = state.tools.get(toolCallId);
   if (owner === undefined || record === undefined || record.ended) return undefined;
-  const call = snapshot === undefined ? record.call : mergeCall(record.call, snapshot);
-  return { ...owner, description: buildApprovalDescription(call) };
+  return { ...owner, description: buildApprovalDescription(mergeCall(record.call, snapshot)) };
 };
 
 // ---- Public: usage ----

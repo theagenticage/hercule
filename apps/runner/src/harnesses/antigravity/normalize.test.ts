@@ -88,7 +88,7 @@ const playRecording = (name: RecordingName): Played => {
       events.push(...normalizeUpdate(state, buildNotification(params)));
     } else if (direction === "in" && message.method === "session/request_permission") {
       callOfRequest.set(message.id!, params.toolCall!.toolCallId);
-      requests.push(describeRequestItem(state, params.toolCall!.toolCallId, params.toolCall));
+      requests.push(describeRequestItem(state, params.toolCall!.toolCallId, params.toolCall!));
     } else if (direction === "out" && message.id !== undefined && "result" in message) {
       const answer = (message.result as { outcome?: { optionId?: string } }).outcome;
       const callId = callOfRequest.get(message.id);
@@ -488,12 +488,12 @@ describe("tool items", () => {
       itemId: "c1",
       description: { kind: "command_approval", detail: { command: "ls -la" } },
     });
-    expect(describeRequestItem(state, "c1")).toMatchObject({
+    expect(describeRequestItem(state, "c1", { toolCallId: "c1" })).toMatchObject({
       description: { detail: { command: "ls" } },
     });
-    expect(describeRequestItem(state, "nope")).toBeUndefined();
+    expect(describeRequestItem(state, "nope", { toolCallId: "nope" })).toBeUndefined();
     closeTurn(state, { state: "completed" });
-    expect(describeRequestItem(state, "c1")).toBeUndefined();
+    expect(describeRequestItem(state, "c1", { toolCallId: "c1" })).toBeUndefined();
   });
 
   it("finds the owner of a Request without describing the call", () => {

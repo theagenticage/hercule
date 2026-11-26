@@ -54,6 +54,10 @@ export type AgyPurpose =
  * undefined for `full-access`, which `agy` has no mode for: a session in it
  * starts `agy` with `--dangerously-skip-permissions` instead (see
  * `openSignedInAgy`) and keeps the default mode.
+ *
+ * The `auto` case is not reachable today: the plugin declares the Access Mode
+ * `auto` unsupported, so no session asks for it. The mapping stays so that
+ * supporting it later needs no change here.
  */
 export const readAgyModeId = (accessMode: AccessMode): string | undefined => {
   switch (accessMode) {
@@ -264,7 +268,7 @@ const createLoginLogFolder = (home: string): string => mkdtempSync(join(home, LO
  * `AdapterFailed` that names `what` when the folder cannot be made. A runner
  * that crashes leaves the folder behind, and nothing removes it later.
  */
-const makeRemovedFolder = (
+const makeScopedFolder = (
   prefix: string,
   what: string,
 ): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
@@ -289,10 +293,10 @@ const makeRemovedFolder = (
 /**
  * Makes an empty folder for the log of a session or probe process, like
  * `createLoginLogFolder`, and removes it when the scope closes (see
- * `makeRemovedFolder`).
+ * `makeScopedFolder`).
  */
 const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
-  makeRemovedFolder(join(home, LOG_FOLDER_PREFIX), "a log folder");
+  makeScopedFolder(join(home, LOG_FOLDER_PREFIX), "a log folder");
 
 /**
  * Makes the temporary folder of one `agy` process and removes it with
@@ -305,7 +309,7 @@ const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed
  * macOS, where the system's temporary folder is already long.
  */
 const makeAgyTempFolder = (): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
-  makeRemovedFolder(join(tmpdir(), "hercule-agy-"), "a temporary folder");
+  makeScopedFolder(join(tmpdir(), "hercule-agy-"), "a temporary folder");
 
 /**
  * Builds the command that signs the account in. `agy` prints a link, reads one
@@ -504,7 +508,7 @@ const drainStderr = (
     try {
       for await (const line of child.stderr) {
         if (line.trim() === "") continue;
-        lines.push(line.trim());
+        lines.push(truncateFact(line.trim()));
         if (lines.length > STDERR_LINES) lines.shift();
       }
     } catch {

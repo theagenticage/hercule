@@ -10,9 +10,9 @@ import { MAX_FACT_ITEMS, MAX_FACT_LENGTH, type QuestionAnswers } from "@hercule/
 import {
   buildApprovalOutcome,
   buildElicitationReply,
-  readApprovalDecisions,
+  buildApprovalDecisions,
   type QuestionForm,
-  readQuestionForm,
+  parseQuestionForm,
 } from "./requests";
 
 const RECORDED_OPTIONS = [
@@ -22,13 +22,13 @@ const RECORDED_OPTIONS = [
 
 describe("approvals", () => {
   it("offers allow, deny and cancel when the request has an allow_once option", () => {
-    expect(readApprovalDecisions(RECORDED_OPTIONS)).toEqual(["allow", "deny", "cancel"]);
+    expect(buildApprovalDecisions(RECORDED_OPTIONS)).toEqual(["allow", "deny", "cancel"]);
   });
 
   it("offers no allow, and never allow_always, without an allow_once option", () => {
     const options = [{ optionId: "always", name: "Always", kind: "allow_always" }];
-    expect(readApprovalDecisions(options)).toEqual(["deny", "cancel"]);
-    expect(readApprovalDecisions(RECORDED_OPTIONS)).not.toContain("allow_always");
+    expect(buildApprovalDecisions(options)).toEqual(["deny", "cancel"]);
+    expect(buildApprovalDecisions(RECORDED_OPTIONS)).not.toContain("allow_always");
   });
 
   it("selects options by kind, the first of that kind, whatever their id or label", () => {
@@ -91,7 +91,7 @@ const readForm = (
   properties: Record<string, ElicitationField>,
   required?: ReadonlyArray<string>,
 ) => {
-  const form = readQuestionForm(buildRequest(properties, required));
+  const form = parseQuestionForm(buildRequest(properties, required));
   if (form === undefined) throw new Error("expected a readable form");
   return form;
 };
@@ -217,9 +217,9 @@ describe("a form too big for the protocol", () => {
         buildSelect("Pick?", "A"),
       ]),
     );
-    expect(readQuestionForm(buildRequest(properties))).toBeDefined();
+    expect(parseQuestionForm(buildRequest(properties))).toBeDefined();
     expect(
-      readQuestionForm(buildRequest({ q1: buildSelect("Pick?", ...choices(MAX_FACT_ITEMS)) })),
+      parseQuestionForm(buildRequest({ q1: buildSelect("Pick?", ...choices(MAX_FACT_ITEMS)) })),
     ).toBeDefined();
   });
 
@@ -230,12 +230,12 @@ describe("a form too big for the protocol", () => {
         buildSelect("Pick?", "A"),
       ]),
     );
-    expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+    expect(parseQuestionForm(buildRequest(properties))).toBeUndefined();
   });
 
   it("is undefined for too many choices", () => {
     const properties = { q1: buildSelect("Pick?", ...choices(MAX_FACT_ITEMS + 1)) };
-    expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+    expect(parseQuestionForm(buildRequest(properties))).toBeUndefined();
   });
 
   it("is undefined when the text of all of it would not fit one frame", () => {
@@ -249,7 +249,7 @@ describe("a form too big for the protocol", () => {
         ),
       ]),
     );
-    expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+    expect(parseQuestionForm(buildRequest(properties))).toBeUndefined();
   });
 });
 
@@ -340,7 +340,7 @@ describe("a form that cannot be read", () => {
   };
   for (const [name, properties] of Object.entries(cases)) {
     it(`is undefined for ${name}`, () => {
-      expect(readQuestionForm(buildRequest(properties))).toBeUndefined();
+      expect(parseQuestionForm(buildRequest(properties))).toBeUndefined();
     });
   }
 });

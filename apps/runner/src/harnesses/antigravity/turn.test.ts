@@ -20,7 +20,7 @@ import {
   type PromptReply,
 } from "@hercule/acp";
 import type { HarnessEvent } from "@hercule/protocol";
-import { buildNormalizingState, normalizeUpdate, openTurn, type RequestItem } from "./normalize";
+import { buildNormalizingState, normalizeUpdate, openTurn } from "./normalize";
 import { startTurn } from "./turn";
 
 const TURN = "turn-1";
@@ -81,6 +81,7 @@ const buildQuestion = (): Sent<ElicitationRequest> => {
     written,
     request: {
       requestId: "request-question",
+      toolCallId: "call-q",
       message: "The agent has a question.",
       requestedSchema: QUESTION_FORM,
       raw: {},
@@ -88,12 +89,6 @@ const buildQuestion = (): Sent<ElicitationRequest> => {
     },
   };
 };
-
-const itemOf = (toolCallId: string): RequestItem => ({
-  turnId: TURN,
-  itemId: toolCallId,
-  description: { kind: "command_approval", detail: { command: "ls" } },
-});
 
 /** Starts a Turn on a fake connection and returns it with what the test needs to drive and read it. */
 const startHarness = Effect.gen(function* () {
@@ -149,8 +144,33 @@ const startHarness = Effect.gen(function* () {
       (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
         event._tag === "turn.completed",
     );
+  /** Makes a call known to the normalizing state, as the `tool_call` update that precedes a Request about it does. */
+  const announceCall = (toolCallId: string): void => {
+    events.push(
+      ...normalizeUpdate(normalizing, {
+        nativeSessionId: "native",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          name: "run_command",
+          kind: "execute",
+          rawInput: { CommandLine: "ls" },
+          status: "pending",
+        },
+        raw: {},
+      }),
+    );
+  };
+  const openApproval = (request: ApprovalRequest) => {
+    announceCall(request.toolCall.toolCallId);
+    return turn.openApproval(request);
+  };
+  const openQuestion = (request: ElicitationRequest) => {
+    if (request.toolCallId != null) announceCall(request.toolCallId);
+    return turn.openQuestion(request);
+  };
   /** Returns the id Hercule gave the Request that `agy` sent with the ACP id `acpRequestId`. */
-  const idOf = (acpRequestId: string): string => {
+  const findRequestId = (acpRequestId: string): string => {
     const opened = events.find(
       (event): event is Extract<HarnessEvent, { _tag: "request.opened" }> =>
         event._tag === "request.opened" && event.harnessRefs?.["acpRequestId"] === acpRequestId,
@@ -158,7 +178,21 @@ const startHarness = Effect.gen(function* () {
     expect(opened, `a Request opened for ${acpRequestId}`).toBeDefined();
     return opened!.request.requestId;
   };
-  return { turn, events, prompts, cancels, normalizing, until, reply, tags, completed, idOf };
+  return {
+    turn,
+    events,
+    prompts,
+    cancels,
+    normalizing,
+    until,
+    reply,
+    tags,
+    completed,
+    findRequestId,
+    openApproval,
+    openQuestion,
+    announceCall,
+  };
 });
 
 type Harness = Effect.Success<typeof startHarness>;
@@ -170,16 +204,14 @@ const run = (test: (harness: Harness) => Effect.Effect<void, unknown, Scope.Scop
 
 /** Opens an approval, decides it, and finishes its reply write. Returns the ACP outcome. */
 const askAndDecide = (
-  h: Pick<Harness, "turn" | "idOf">,
+  h: Pick<Harness, "turn" | "findRequestId" | "openApproval">,
   sent: Sent<ApprovalRequest>,
   decision: "allow" | "deny" | "cancel",
 ) =>
   Effect.gen(function* () {
-    const asking = yield* Effect.forkChild(
-      h.turn.openApproval(sent.request, itemOf(sent.request.toolCall.toolCallId)),
-    );
+    const asking = yield* Effect.forkChild(h.openApproval(sent.request));
     yield* Effect.yieldNow;
-    yield* h.turn.decide(h.idOf(sent.request.requestId), decision);
+    yield* h.turn.decide(h.findRequestId(sent.request.requestId), decision);
     const outcome = yield* Fiber.join(asking);
     yield* Deferred.succeed(sent.written, undefined);
     return outcome;
@@ -204,9 +236,9 @@ describe("a plain turn", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* Effect.yieldNow;
-        yield* h.turn.decide(h.idOf(sent.request.requestId), "deny");
+        yield* h.turn.decide(h.findRequestId(sent.request.requestId), "deny");
         yield* Fiber.join(asking);
         yield* Deferred.succeed(sent.written, undefined);
         yield* Effect.yieldNow;
@@ -222,7 +254,7 @@ describe("approvals", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
         expect(h.tags("request.opened")[0]).toMatchObject({
           request: {
@@ -232,7 +264,7 @@ describe("approvals", () => {
             decisions: ["allow", "deny", "cancel"],
           },
         });
-        yield* h.turn.decide(h.idOf("request-call-1"), "allow");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "allow");
         expect(yield* Fiber.join(asking)).toEqual({ outcome: "selected", optionId: "allow" });
         yield* Effect.yieldNow;
         expect(h.tags("request.resolved"), "not before the write").toHaveLength(0);
@@ -240,7 +272,7 @@ describe("approvals", () => {
         yield* h.until(() => h.tags("request.resolved").length === 1);
         expect(h.tags("request.resolved")[0]).toMatchObject({ decision: "allow" });
         // A second decision for the same Request does nothing.
-        yield* h.turn.decide(h.idOf("request-call-1"), "deny");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "deny");
         yield* Effect.yieldNow;
         expect(h.tags("request.resolved")).toHaveLength(1);
       }),
@@ -250,9 +282,9 @@ describe("approvals", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* Effect.yieldNow;
-        yield* h.turn.decide(h.idOf("request-call-1"), "allow");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "allow");
         yield* Fiber.join(asking);
         yield* Deferred.fail(sent.written, closedError);
         yield* h.until(() => h.tags("request.resolved").length === 1);
@@ -285,6 +317,33 @@ describe("approvals", () => {
     ));
 });
 
+describe("a Request about a call that is not a running item of the turn", () => {
+  it("cancels an approval, shows the call as declined, and warns", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const sent = buildTool("run_command", "call-unknown");
+
+        // The call was never announced, so no item of this turn exists for it.
+        expect(yield* h.turn.openApproval(sent.request)).toEqual({ outcome: "cancelled" });
+
+        expect(h.tags("request.opened")).toEqual([]);
+        expect(h.tags("runtime.warning")).toHaveLength(1);
+      }),
+    ));
+
+  it("cancels a question, and warns", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const sent = buildQuestion();
+
+        expect(yield* h.turn.openQuestion(sent.request)).toEqual({ action: "cancel" });
+
+        expect(h.tags("request.opened")).toEqual([]);
+        expect(h.tags("runtime.warning")).toHaveLength(1);
+      }),
+    ));
+});
+
 describe("the follow-up after a deny", () => {
   it("sends one follow-up in the same turn, makes no user_message, and sums the usage", () =>
     run((h) =>
@@ -312,9 +371,9 @@ describe("the follow-up after a deny", () => {
       Effect.gen(function* () {
         const sent = buildTool("run_command");
         const request = { ...sent.request, options: ALLOW_ONLY };
-        const asking = yield* Effect.forkChild(h.turn.openApproval(request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(request));
         yield* Effect.yieldNow;
-        yield* h.turn.decide(h.idOf(request.requestId), "deny");
+        yield* h.turn.decide(h.findRequestId(request.requestId), "deny");
         expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
         yield* Deferred.succeed(sent.written, undefined);
         yield* h.reply(0, "end_turn");
@@ -354,9 +413,9 @@ describe("the follow-up after a deny", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* Effect.yieldNow;
-        yield* h.turn.decide(h.idOf("request-call-1"), "deny");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "deny");
         yield* Fiber.join(asking);
         yield* Deferred.fail(sent.written, closedError);
         yield* h.reply(0, "end_turn");
@@ -370,9 +429,11 @@ describe("the follow-up after a deny", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* Effect.yieldNow;
-        const result = yield* Effect.forkChild(h.turn.decide(h.idOf("request-call-1"), "cancel"));
+        const result = yield* Effect.forkChild(
+          h.turn.decide(h.findRequestId("request-call-1"), "cancel"),
+        );
         expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
         yield* Deferred.succeed(sent.written, undefined);
         // `agy` answers end_turn to a prompt whose Request was cancelled.
@@ -390,13 +451,13 @@ describe("interrupt", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
         const interrupting = yield* Effect.forkChild(h.turn.interrupt);
         expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
         yield* Deferred.succeed(sent.written, undefined);
         yield* h.until(() => h.cancels.length === 1);
-        yield* h.turn.decide(h.idOf("request-call-1"), "allow");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "allow");
         yield* h.reply(0, "cancelled");
         expect(yield* Fiber.join(interrupting)).toBe("stopped");
         expect(h.tags("request.resolved")).toMatchObject([{ decision: "cancel" }]);
@@ -437,11 +498,11 @@ describe("interrupt", () => {
         yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 1);
         const sent = buildTool("run_command");
-        expect(yield* h.turn.openApproval(sent.request, itemOf("call-1"))).toEqual({
+        expect(yield* h.openApproval(sent.request)).toEqual({
           outcome: "cancelled",
         });
         const question = buildQuestion();
-        expect(yield* h.turn.openQuestion(question.request, itemOf("call-2"))).toEqual({
+        expect(yield* h.openQuestion(question.request)).toEqual({
           action: "cancel",
         });
         expect(h.tags("request.opened")).toHaveLength(0);
@@ -465,7 +526,7 @@ describe("interrupt", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
         yield* h.turn.stop;
         expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
@@ -481,7 +542,7 @@ describe("interrupt", () => {
 describe("questions", () => {
   const openQuestion = (h: Harness, sent: Sent<ElicitationRequest>) =>
     Effect.gen(function* () {
-      const asking = yield* Effect.forkChild(h.turn.openQuestion(sent.request, itemOf("call-q")));
+      const asking = yield* Effect.forkChild(h.openQuestion(sent.request));
       yield* h.until(() => h.tags("request.opened").length === 1);
       return asking;
     });
@@ -501,7 +562,7 @@ describe("questions", () => {
           },
         });
         const answering = yield* Effect.forkChild(
-          h.turn.answer(h.idOf(sent.request.requestId), { Question: "Green" }),
+          h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Green" }),
         );
         expect(yield* Fiber.join(asking)).toEqual({ action: "accept", content: { q1: "2" } });
         yield* Effect.yieldNow;
@@ -518,12 +579,12 @@ describe("questions", () => {
         const sent = buildQuestion();
         const asking = yield* openQuestion(h, sent);
         const refused = yield* Effect.flip(
-          h.turn.answer(h.idOf(sent.request.requestId), { Colour: "Red" }),
+          h.turn.answer(h.findRequestId(sent.request.requestId), { Colour: "Red" }),
         );
         expect(refused._tag).toBe("AnswerNotDelivered");
         expect(h.tags("request.resolved")).toHaveLength(0);
         yield* Deferred.succeed(sent.written, undefined);
-        yield* h.turn.answer(h.idOf(sent.request.requestId), { Question: "Red" });
+        yield* h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Red" });
         expect(yield* Fiber.join(asking)).toMatchObject({ action: "accept" });
       }),
     ));
@@ -535,7 +596,7 @@ describe("questions", () => {
         yield* openQuestion(h, sent);
         yield* Deferred.fail(sent.written, closedError);
         const failure = yield* Effect.flip(
-          h.turn.answer(h.idOf(sent.request.requestId), { Question: "Red" }),
+          h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Red" }),
         );
         expect(failure.message).toContain("not known whether");
         expect(h.tags("request.resolved")).toMatchObject([{ decision: "cancel" }]);
@@ -548,7 +609,7 @@ describe("questions", () => {
         const sent = buildQuestion();
         yield* openQuestion(h, sent);
         const answering = yield* Effect.forkChild(
-          Effect.flip(h.turn.answer(h.idOf(sent.request.requestId), { Question: "Red" })),
+          Effect.flip(h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Red" })),
         );
         yield* Effect.yieldNow;
         yield* TestClock.adjust(Duration.seconds(5));
@@ -563,10 +624,11 @@ describe("questions", () => {
         const sent = buildQuestion();
         yield* openQuestion(h, sent);
         yield* Deferred.succeed(sent.written, undefined);
-        yield* h.turn.answer(h.idOf(sent.request.requestId), { Question: "Red" });
+        yield* h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Red" });
         expect(
-          (yield* Effect.flip(h.turn.answer(h.idOf(sent.request.requestId), { Question: "Green" })))
-            ._tag,
+          (yield* Effect.flip(
+            h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Green" }),
+          ))._tag,
         ).toBe("AnswerNotDelivered");
         expect(
           (yield* Effect.flip(h.turn.answer("request-call-9", { Question: "Red" })))._tag,
@@ -582,7 +644,7 @@ describe("questions", () => {
           ...sent.request,
           requestedSchema: { properties: { other: { type: "string" } } },
         };
-        expect(yield* h.turn.openQuestion(unreadable, itemOf("call-q"))).toEqual({
+        expect(yield* h.openQuestion(unreadable)).toEqual({
           action: "cancel",
         });
         expect(h.tags("request.opened")).toHaveLength(0);
@@ -669,7 +731,7 @@ describe("the end of a turn and its Requests", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        yield* Effect.forkChild(h.openApproval(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
         const opened = h.tags("request.opened")[0];
         expect(opened?.request.requestId).not.toBe(sent.request.requestId);
@@ -681,10 +743,10 @@ describe("the end of a turn and its Requests", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildQuestion();
-        const asking = yield* Effect.forkChild(h.turn.openQuestion(sent.request, itemOf("call-q")));
+        const asking = yield* Effect.forkChild(h.openQuestion(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
         const answering = yield* Effect.forkChild(
-          h.turn.answer(h.idOf(sent.request.requestId), { Question: "Red" }),
+          h.turn.answer(h.findRequestId(sent.request.requestId), { Question: "Red" }),
         );
         yield* Fiber.join(asking);
         // `agy` ends the prompt while the answer is still being written.
@@ -704,7 +766,7 @@ describe("the end of a turn and its Requests", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildQuestion();
-        yield* Effect.forkChild(h.turn.openQuestion(sent.request, itemOf("call-q")));
+        yield* Effect.forkChild(h.openQuestion(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
         yield* Deferred.fail(h.prompts[0]?.reply as PromptCall["reply"], closedError);
         yield* Effect.yieldNow;
@@ -719,9 +781,9 @@ describe("the end of a turn and its Requests", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* Effect.yieldNow;
-        yield* h.turn.decide(h.idOf("request-call-1"), "allow");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "allow");
         yield* Fiber.join(asking);
         yield* Deferred.fail(sent.written, closedError);
         yield* h.until(() => h.tags("request.resolved").length === 1);
@@ -735,9 +797,9 @@ describe("the end of a turn and its Requests", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildTool("run_command");
-        const asking = yield* Effect.forkChild(h.turn.openApproval(sent.request, itemOf("call-1")));
+        const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* Effect.yieldNow;
-        yield* h.turn.decide(h.idOf("request-call-1"), "deny");
+        yield* h.turn.decide(h.findRequestId("request-call-1"), "deny");
         yield* Fiber.join(asking);
         // The prompt has its reply, so no prompt is open when the interrupt comes.
         yield* h.reply(0, "end_turn");
@@ -755,7 +817,7 @@ describe("the end of a turn and its Requests", () => {
     run((h) =>
       Effect.gen(function* () {
         const sent = buildQuestion();
-        yield* Effect.forkChild(h.turn.openQuestion(sent.request, itemOf("call-q")));
+        yield* Effect.forkChild(h.openQuestion(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
 
         yield* h.turn.abandon;

@@ -123,7 +123,7 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
       Effect.suspend(() => {
         const entry = readHosted(sessionId);
         return entry === undefined
-          ? Effect.fail(buildAnswerNotDelivered("This session is not running on this runner"))
+          ? Effect.fail(buildAnswerNotDelivered("This session is not running on this runner."))
           : entry.session.answer(requestId, answers);
       }),
     // The entry goes as soon as the exit is complete, so the same id can start again right after.

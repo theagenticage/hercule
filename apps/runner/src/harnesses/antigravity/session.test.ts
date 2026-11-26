@@ -7,6 +7,8 @@
  * `TestClock`.
  */
 import { lstatSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -364,14 +366,14 @@ describe("starting a session", () => {
 });
 
 describe("the temporary folder of a process", () => {
-  it("is private, short, the process's TMPDIR, and removed when the session ends", () =>
+  it("is private, directly in the system's temporary folder, the process's TMPDIR, and removed when the session ends", () =>
     run((h) =>
       Effect.gen(function* () {
         yield* h.start();
         const folder = h.fake.spawns[0]?.env["TMPDIR"];
 
-        expect(folder).toMatch(/hercule-agy-/);
-        expect(folder!.length).toBeLessThanOrEqual(30);
+        expect(dirname(folder!)).toBe(tmpdir());
+        expect(basename(folder!).startsWith("hercule-agy-")).toBe(true);
         expect(lstatSync(folder!).mode & 0o777).toBe(0o700);
 
         yield* h.adapter.stopSession(SESSION, "stopped");
@@ -518,13 +520,14 @@ describe("the confirmation of a model or level", () => {
       { fake: { scripts: { "session/set_config_option": answerWith(() => undefined) } } },
     ));
 
-  it("takes a config_option_update before the reply as the confirmation", () =>
+  it("does not take a config_option_update as the confirmation", () =>
     run(
       (h) =>
         Effect.gen(function* () {
-          yield* h.start({ modelSelection: FLASH });
+          const failure = yield* Effect.flip(h.start({ modelSelection: FLASH }));
 
-          expect(h.tags("session.started")).toHaveLength(1);
+          expect(failure).toMatchObject({ _tag: "AdapterFailed" });
+          expect(failure.message).toContain("did not confirm");
         }),
       {
         fake: {
@@ -540,6 +543,50 @@ describe("the confirmation of a model or level", () => {
                 reply!,
               ];
             },
+          },
+        },
+      },
+    ));
+
+  it("sets the model again when agy reports by itself that it holds another one", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sameModel = { modelSelection: SPEC.modelSelection };
+
+          h.harness().sendLine(
+            JSON.stringify(
+              buildUpdate({
+                sessionUpdate: "config_option_update",
+                configOptions: [
+                  {
+                    id: "model",
+                    name: "Model",
+                    category: "model",
+                    type: "select",
+                    currentValue: FLASH.model,
+                    options: [{ value: FLASH.model, name: "Flash" }],
+                  },
+                ],
+              }),
+            ),
+          );
+          yield* Effect.promise(settle);
+          yield* Effect.exit(h.adapter.sendInput(SESSION, buildInput("b", sameModel)));
+
+          expect(
+            h
+              .received("session/set_config_option")
+              .map((message) => (message.params as { configId: string }).configId),
+          ).toEqual(["model"]);
+        }),
+      {
+        fake: {
+          recording: readRecordedSetup("cancel"),
+          scripts: {
+            "session/set_config_option": answerWith(({ value }) => value),
+            "session/prompt": noAnswer,
           },
         },
       },
@@ -1488,7 +1535,7 @@ describe("the write of the first prompt of an input", () => {
       },
     ));
 
-  it("fails the input with HarnessProtocolError when the write is still pending after the budget", () =>
+  it("fails the input with HarnessProtocolError when the write is still pending after the budget, and ends the process so no second prompt follows", () =>
     run(
       (h) =>
         Effect.gen(function* () {
@@ -1502,10 +1549,300 @@ describe("the write of the first prompt of an input", () => {
 
           expect(yield* Fiber.join(sending)).toMatchObject({ _tag: "HarnessProtocolError" });
           expect(h.tags("turn.started")).toEqual([]);
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+          expect(h.tags("runtime.error")).toMatchObject([{ class: "delivery_unknown" }]);
+          expect(h.tags("session.exited")).toMatchObject([{ reason: "crash" }]);
+          const next = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("Second.")));
+          expect(next._tag).not.toBe("InputNotDelivered");
+          expect(h.received("session/prompt")).toHaveLength(1);
         }),
       {
         fake: { recording: readRecordedSetup("cancel"), scripts: { "session/prompt": noAnswer } },
         holdAcknowledgement: (message) => (isPrompt(message) ? new Promise(() => {}) : undefined),
+      },
+    ));
+
+  it("fails the input with HarnessProtocolError when the connection ends while the write is pending", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          const sending = yield* Effect.forkChild(
+            Effect.flip(h.adapter.sendInput(SESSION, buildInput())),
+          );
+          yield* h.untilReceived("session/prompt");
+          h.harness().end();
+
+          expect(yield* Fiber.join(sending)).toMatchObject({ _tag: "HarnessProtocolError" });
+        }),
+      {
+        fake: { recording: readRecordedSetup("cancel"), scripts: { "session/prompt": noAnswer } },
+        holdAcknowledgement: (message) => (isPrompt(message) ? new Promise(() => {}) : undefined),
+      },
+    ));
+
+  it("ends the process when the caller is interrupted while the write is pending, so no second prompt follows", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          const sending = yield* Effect.forkChild(h.adapter.sendInput(SESSION, buildInput()));
+          yield* h.untilReceived("session/prompt");
+          yield* Fiber.interrupt(sending);
+
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+          yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("Second.")));
+          expect(h.received("session/prompt")).toHaveLength(1);
+        }),
+      {
+        fake: { recording: readRecordedSetup("cancel"), scripts: { "session/prompt": noAnswer } },
+        holdAcknowledgement: (message) => (isPrompt(message) ? new Promise(() => {}) : undefined),
+      },
+    ));
+
+  it("sends no prompt when an interrupt came while the level was changed", () => {
+    let levelReply: ReturnType<HarnessScript>[number] | undefined;
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sending = yield* Effect.forkChild(
+            Effect.flip(
+              h.adapter.sendInput(
+                SESSION,
+                buildInput("Work.", {
+                  modelSelection: { model: SPEC.modelSelection.model, options: { effort: "low" } },
+                }),
+              ),
+            ),
+          );
+          yield* h.until("the level change was received", () => levelReply !== undefined);
+          yield* h.adapter.interrupt(SESSION);
+          h.harness().sendLine(JSON.stringify(levelReply));
+
+          expect((yield* Fiber.join(sending))._tag).toBe("InputNotDelivered");
+          expect(h.received("session/prompt")).toHaveLength(0);
+        }),
+      {
+        fake: {
+          scripts: {
+            // The reply is held back, so the test can interrupt before it arrives.
+            "session/set_config_option": (call, harness) => {
+              levelReply = answerConfigChange("cancel")(call, harness)[0];
+              return [];
+            },
+          },
+        },
+      },
+    );
+  });
+});
+
+describe("a Request that comes while the prompt is handed over", () => {
+  const isPrompt = (message: JsonRpcMessage) => message.method === "session/prompt";
+
+  it("is presented in the Turn the input opens, after the turn's own start and message", () => {
+    const acknowledged = Promise.withResolvers<void>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sending = yield* Effect.forkChild(
+            h.adapter.sendInput(SESSION, buildInput("Ask a question.")),
+          );
+          yield* h.untilReceived("session/prompt");
+          yield* Effect.promise(settle);
+          acknowledged.resolve();
+          yield* Fiber.join(sending);
+          yield* h.until("the question opened", () => h.tags("request.opened").length === 1);
+
+          expect(h.tags("runtime.warning")).toEqual([]);
+          const order = h.seen.map((event) => event._tag);
+          expect(order.indexOf("request.opened")).toBeGreaterThan(order.indexOf("turn.started"));
+          expect(h.received("elicitation/create")).toEqual([]);
+        }),
+      {
+        fake: { recording: "question-elicit" },
+        holdAcknowledgement: (message) => (isPrompt(message) ? acknowledged.promise : undefined),
+      },
+    );
+  });
+
+  it("is cancelled with a warning when the input is refused", () => {
+    const acknowledged = Promise.withResolvers<void>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sending = yield* Effect.forkChild(
+            Effect.flip(h.adapter.sendInput(SESSION, buildInput("Ask a question."))),
+          );
+          yield* h.untilReceived("session/prompt");
+          yield* Effect.promise(settle);
+          acknowledged.reject(new Error("stdin is closed"));
+
+          expect((yield* Fiber.join(sending))._tag).toBe("InputNotDelivered");
+          yield* h.until("the warning", () => h.tags("runtime.warning").length === 1);
+          expect(h.tags("request.opened")).toEqual([]);
+        }),
+      {
+        fake: { recording: "question-elicit" },
+        holdAcknowledgement: (message) => (isPrompt(message) ? acknowledged.promise : undefined),
+      },
+    );
+  });
+});
+
+describe("the output that comes before a start is ready", () => {
+  const CHUNK = buildUpdate({
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "Startup output." },
+  });
+  const FLASH = { model: "gemini-3.8-flash", options: {} };
+
+  it("is published nowhere when the start fails", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* Effect.flip(h.start({ modelSelection: FLASH }));
+          yield* Effect.promise(settle);
+
+          expect(h.seen).toEqual([]);
+        }),
+      {
+        fake: {
+          scripts: {
+            "session/set_config_option": ({ id }) => [
+              CHUNK,
+              { jsonrpc: "2.0", id, error: { code: -32602, message: "Unknown model" } },
+            ],
+          },
+        },
+      },
+    ));
+
+  it("is published after session.started, as output with no input, when the start succeeds", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start({ modelSelection: FLASH });
+          yield* h.until("the output", () => h.tags("item.started").length === 1);
+
+          expect(h.seen.map((event) => event._tag)[0]).toBe("session.started");
+          expect(h.tags("item.started")).toMatchObject([{ kind: "assistant_message" }]);
+        }),
+      {
+        fake: {
+          scripts: {
+            "session/set_config_option": (call, harness) => [
+              CHUNK,
+              ...answerConfigChange("cancel")(call, harness),
+            ],
+          },
+        },
+      },
+    ));
+});
+
+describe("the mode that agy reports as a config option", () => {
+  const buildModeOptionUpdate = (modeId: string) =>
+    buildUpdate({
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        { id: "mode", name: "Mode", type: "select", currentValue: modeId, options: [] },
+      ],
+    });
+
+  it("does not stop the session for a notification that names a stale mode", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          // As in modes.jsonl: the notification names the mode before the one just set.
+          h.harness().sendLine(JSON.stringify(buildModeOptionUpdate("accept-edits")));
+          h.harness().sendLine(JSON.stringify(buildModeUpdate("default")));
+          yield* Effect.promise(settle);
+
+          expect(h.tags("runtime.error")).toEqual([]);
+          expect(h.tags("session.exited")).toEqual([]);
+        }),
+      { fake: { recording: readRecordedSetup("cancel") } },
+    ));
+
+  it("stops the session when the reply to a change of the model reports another mode", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          yield* Effect.exit(
+            h.adapter.sendInput(
+              SESSION,
+              buildInput("Hi.", { modelSelection: { model: "gemini-3.8-flash", options: {} } }),
+            ),
+          );
+
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+          expect(h.tags("runtime.error")).toMatchObject([{ class: "mode_changed" }]);
+        }),
+      {
+        fake: {
+          recording: readRecordedSetup("cancel"),
+          scripts: {
+            "session/set_config_option": (call, harness) => {
+              const lines = answerConfigChange("cancel")(call, harness);
+              const result = (lines[0] as { result: { configOptions: Array<{ id: string }> } })
+                .result;
+              result.configOptions = result.configOptions.map((option) =>
+                option.id === "mode" ? { ...option, currentValue: "accept-edits" } : option,
+              );
+              return lines;
+            },
+          },
+        },
+      },
+    ));
+
+  it("writes the mode in the message with control characters escaped", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          h.harness().sendLine(JSON.stringify(buildModeUpdate("evil\nmode")));
+
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+          const [error] = h.tags("runtime.error");
+          expect(error?.message).toContain("evil\\u{a}mode");
+          expect(error?.message).not.toContain("\n");
+        }),
+      { fake: { recording: readRecordedSetup("cancel") } },
+    ));
+});
+
+describe("a stop with a Request open", () => {
+  it("does not warn that the reply may not have reached agy", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* h.adapter.sendInput(SESSION, buildInput());
+          yield* h.until("a request opened", () => h.tags("request.opened").length === 1);
+
+          yield* h.adapter.stopSession(SESSION, "stopped");
+
+          expect(h.tags("runtime.warning")).toEqual([]);
+          expect(h.tags("request.resolved")).toMatchObject([{ decision: "cancel" }]);
+        }),
+      {
+        fake: { recording: "edit-shell" },
+        holdAcknowledgement: (message) =>
+          message.method === undefined && message.id !== undefined
+            ? new Promise(() => {})
+            : undefined,
       },
     ));
 });

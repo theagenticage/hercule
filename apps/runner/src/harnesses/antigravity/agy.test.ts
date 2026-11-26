@@ -743,6 +743,23 @@ describe("a process that cannot be started", () => {
     expect(listLogFolders(home)).toEqual([]);
   });
 
+  it("cuts each stderr line it names in the failure", async () => {
+    const { home, fake } = setUp({
+      scripts: {
+        initialize: (_call, harness) => {
+          harness.end();
+          return [];
+        },
+      },
+      stderrLines: ["x".repeat(5_000)],
+    });
+
+    const error = await runAndReadFailure(open(fake, home));
+
+    expect(error.message).toContain("…");
+    expect(error.message.length).toBeLessThan(1_000);
+  });
+
   it("does not wait for good for a stderr that a descendant of the process holds open", async () => {
     const { home, fake } = setUp({
       scripts: {
