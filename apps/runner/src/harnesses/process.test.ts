@@ -12,7 +12,9 @@ import { Duration, Effect } from "effect";
 import {
   isExecutableNotFound,
   killProcessesHolding,
+  MAX_LINE_LENGTH,
   spawnCheckedFramed,
+  splitLines,
   stopChild,
   type StopSignal,
 } from "./process";
@@ -209,5 +211,62 @@ describe("recognising a spawn of a missing executable", () => {
     ).toBe(false);
     expect(isExecutableNotFound(new Error("boom"), spawn)).toBe(false);
     expect(isExecutableNotFound("ENOENT", spawn)).toBe(false);
+  });
+});
+
+/** Builds a byte stream that delivers each of `chunks` as one read. */
+const streamOf = (chunks: ReadonlyArray<Uint8Array | string>): ReadableStream<Uint8Array> => {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start: (controller) => {
+      for (const chunk of chunks) {
+        controller.enqueue(typeof chunk === "string" ? encoder.encode(chunk) : chunk);
+      }
+      controller.close();
+    },
+  });
+};
+
+const readLines = async (stream: ReadableStream<Uint8Array>): Promise<Array<string>> => {
+  const lines: Array<string> = [];
+  for await (const line of splitLines(stream)) lines.push(line);
+  return lines;
+};
+
+describe("splitting a stream into lines", () => {
+  it("returns whole lines in order, joins a line split over chunks, and keeps a trailing partial line", async () => {
+    const lines = await readLines(streamOf(["one\ntw", "o\n\nthr", "ee\nfo", "ur"]));
+    expect(lines).toEqual(["one", "two", "", "three", "four"]);
+  });
+
+  it("keeps the carriage return of a CRLF line", async () => {
+    expect(await readLines(streamOf(["a\r\nb\r", "\n"]))).toEqual(["a\r", "b\r"]);
+  });
+
+  it("joins a multi-byte character split between two chunks", async () => {
+    const bytes = new TextEncoder().encode("é€\n");
+    // Cuts inside the three bytes of the euro sign.
+    expect(await readLines(streamOf([bytes.slice(0, 3), bytes.slice(3)]))).toEqual(["é€"]);
+  });
+
+  it("returns a long line that arrives in many small chunks", async () => {
+    const chunks = Array.from({ length: 2000 }, () => "x".repeat(1000));
+    const lines = await readLines(streamOf([...chunks, "\nnext\n"]));
+    expect(lines.map((line) => line.length)).toEqual([2_000_000, 4]);
+  });
+
+  it("fails with the limit when a line without a newline grows past it", async () => {
+    const chunk = "x".repeat(MAX_LINE_LENGTH / 4);
+    await expect(readLines(streamOf([chunk, chunk, chunk, chunk, "x"]))).rejects.toThrow(
+      `longer than ${MAX_LINE_LENGTH} characters`,
+    );
+  });
+
+  it("fails when a complete line is over the limit, and accepts one exactly at it", async () => {
+    const atLimit = "x".repeat(MAX_LINE_LENGTH);
+    expect((await readLines(streamOf([atLimit, "\n"]))).map((line) => line.length)).toEqual([
+      MAX_LINE_LENGTH,
+    ]);
+    await expect(readLines(streamOf([atLimit, "x\n"]))).rejects.toThrow("longer than");
   });
 });
