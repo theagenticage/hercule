@@ -29,6 +29,7 @@ const definition: HarnessDefinition = {
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
   // The login of a per-machine Claude subscription lives in the Harness Home,
   // so that kind has no credential variable. A subscription token and an API

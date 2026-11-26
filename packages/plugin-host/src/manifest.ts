@@ -31,8 +31,11 @@ import { withPluginColor } from "./drawing";
  *   takes GitHub releases, and added the optional `defaultSelectionMaker` of
  *   `ProviderDefinition`. A host that does not read them cannot run a plugin
  *   that uses them.
+ * - Version 11 made `textGeneration` required in the `declared` capabilities of
+ *   `HarnessDefinition`. A harness plugin built against version 10 declares
+ *   none, so the host refuses it at load.
  */
-export const HOST_API = 10;
+export const HOST_API = 11;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

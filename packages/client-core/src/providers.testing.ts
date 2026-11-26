@@ -89,6 +89,7 @@ const DECLARED: Harness["declared"] = {
   mcpPassthrough: "native",
   disallowedTools: "native",
   structuredOutput: "supported",
+  textGeneration: "supported",
 };
 
 /** The providers of the shipped plugins, as `provider.query` lists them. */

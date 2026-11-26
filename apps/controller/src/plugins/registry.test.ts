@@ -53,6 +53,7 @@ const SHIPPED = [
         mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
       runs: [
         {
@@ -92,6 +93,7 @@ const SHIPPED = [
         mcpPassthrough: "native",
         disallowedTools: "unsupported",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
       runs: [
         {
@@ -126,6 +128,7 @@ const SHIPPED = [
         mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
       runs: [
         {
@@ -227,6 +230,7 @@ const SHIPPED = [
         mcpPassthrough: "native",
         disallowedTools: "unsupported",
         structuredOutput: "unsupported",
+        textGeneration: "unsupported",
       },
       runs: [
         {

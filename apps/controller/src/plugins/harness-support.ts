@@ -132,3 +132,35 @@ export const decideProviderAccountHarness = (
     },
   };
 };
+
+/**
+ * Decides whether a Provider Account can make text generations in a harness.
+ * Takes the same parameters as `decideProviderAccountHarness` and returns the
+ * same result. Returns that decision's refusal unchanged, and refuses when the
+ * chosen harness declares `textGeneration: "unsupported"`; the refusal's
+ * `field` follows the same rule (`harnessId` when the caller named the
+ * harness, else `providerAccountId`). Otherwise returns the choice.
+ *
+ * It is the one place that decides this, so `settings.update`, Automatic,
+ * `controller.read` and the Model Profile entries cannot disagree.
+ */
+export const decideTextGenerationHarness = (
+  providers: ReadonlyArray<RegisteredProvider>,
+  harnesses: ReadonlyArray<RegisteredHarness>,
+  account: {
+    readonly providerId: string;
+    readonly kind: string;
+    readonly defaultHarnessId: string;
+  },
+  harnessId?: string | null,
+): HarnessChoice | HarnessRefusal => {
+  const decision = decideProviderAccountHarness(providers, harnesses, account, harnessId);
+  if (decision._tag === "refused" || decision.harness.declared.textGeneration === "supported") {
+    return decision;
+  }
+  return {
+    _tag: "refused",
+    field: harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId",
+    reason: `${decision.harness.displayName} runs no text generations; pick a model of an account that runs in another harness, or Automatic`,
+  };
+};

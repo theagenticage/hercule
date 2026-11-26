@@ -22,6 +22,7 @@ const definition: HarnessDefinition = {
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
   runs: [],
 };

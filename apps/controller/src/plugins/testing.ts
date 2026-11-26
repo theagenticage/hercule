@@ -75,6 +75,7 @@ export const buildHarnessDefinition = (
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
     ...declared,
   },
   runs,

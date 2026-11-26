@@ -13,7 +13,11 @@ export {
 } from "./ingest";
 export type { RegisteredHarness } from "./harnesses";
 export type { RegisteredMcpServer } from "./mcp-servers";
-export { decideProviderAccountHarness, listCredentialVariables } from "./harness-support";
+export {
+  decideProviderAccountHarness,
+  decideTextGenerationHarness,
+  listCredentialVariables,
+} from "./harness-support";
 export { findAccountKind, findCredentialSecretName, type RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";

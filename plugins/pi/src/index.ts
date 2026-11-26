@@ -34,6 +34,7 @@ const definition: HarnessDefinition = {
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
   // pi runs the keys of several providers. It names a model `<provider>/<id>`,
   // runs only the ones in its own list (but see OpenRouter below), and reads
