@@ -59,6 +59,10 @@ Move away from it when the loud failures keep coming: a harness release that we 
 
 The interface in `index.ts` stays the same, so nothing outside `connection.ts` changes.
 
+## Recordings of `agy`
+
+`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 (not in this repository) added 46 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more. Personal values were replaced: the Linux user name with `user`, and the controller's address with `controller.example`. No email address or token appears in them.
+
 ## Lint, formatting and tests
 
 The copy is excluded from eslint, oxlint and oxfmt (`eslint.config.js`, `.oxlintrc.json`, `.oxfmtrc.json`), so that a sync is a plain copy. Its own tests run in our suite (`pnpm test:node packages/acp`). They need `@effect/platform-node`, which is why it is a dev dependency.
