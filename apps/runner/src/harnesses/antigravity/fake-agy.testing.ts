@@ -19,7 +19,9 @@ import {
   type RecordedMessage,
   type RecordingName,
 } from "@hercule/acp/testing";
-import type { HarnessRunnerContext } from "../index";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
+import type { HarnessRunnerContext, SessionStartContext } from "../index";
 import type { Run } from "../process";
 import { createLines, createScratchHome, NO_CONTROLLER_UPLOADER } from "../testing";
 import type { AgySpawn } from "./agy";
@@ -81,6 +83,23 @@ export const buildContext = (
   attachmentsDir: null,
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
+});
+
+/** The session token a test session gets, in its environment and in the header of its MCP server. */
+export const TEST_SESSION_TOKEN = "sess-tok-7f3a91c2e8";
+
+/** The one MCP server every session gets: the Hercule tools. */
+export const GATEWAY_ENTRY = { name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:4000/mcp" };
+
+/** Returns the context to start a session in `cwd`, with the session token and the Hercule tools every start has. */
+export const buildStartContext = (
+  home: string,
+  cwd: string,
+  binary: string = BINARY,
+): SessionStartContext => ({
+  ...buildContext(home, binary, { PATH: "/usr/bin", [SESSION_TOKEN_VARIABLE]: TEST_SESSION_TOKEN }),
+  cwd,
+  mcpServers: [GATEWAY_ENTRY],
 });
 
 /** Writes the token file of `agy` with `email`, or with no email field when it is `undefined`. */

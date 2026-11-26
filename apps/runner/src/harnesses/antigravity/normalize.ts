@@ -227,6 +227,71 @@ export const hideSecret = <T>(value: T, secret: string): T => {
   return hide(value) as T;
 };
 
+/**
+ * Makes a function that applies `hideSecret` to a sequence of events, and also
+ * hides a `secret` that `agy` split across several `content.delta` events of
+ * one text stream (one item and stream kind). The function must see every
+ * event of a session, in order.
+ *
+ * Per text stream, it holds back the longest end of the text so far that could
+ * be the start of the secret, and joins it to the next delta. A held end is
+ * released as its own delta before the event that closes its item
+ * (`item.completed`), and before `turn.completed` and `session.exited`. An
+ * interrupt, a stop and a lost connection all end in one of these, so no held
+ * end stays behind. A released end is not scrubbed again: it is shorter than
+ * the secret, so it cannot hold the secret.
+ *
+ * Only the `delta` of a `content.delta` changes (a delta left empty is
+ * dropped). Ids and every other field pass through `hideSecret` as before.
+ */
+export const makeEventSecretHider = (secret: string) => {
+  type Delta = Extract<HarnessEvent, { readonly _tag: "content.delta" }>;
+  /** Per stream: the last delta event, holding the withheld end in its `delta`. */
+  const held = new Map<string, Delta>();
+
+  const readStreamKey = (event: Delta): string => `${event.itemId}\u0000${event.streamKind}`;
+
+  /** Returns how many characters at the end of `text` are the start of the secret, but not all of it. */
+  const countSecretStart = (text: string): number => {
+    for (let length = Math.min(secret.length - 1, text.length); length > 0; length -= 1) {
+      if (secret.startsWith(text.slice(-length))) return length;
+    }
+    return 0;
+  };
+
+  /** Removes and returns the held ends that `isReleased` selects, as events. */
+  const releaseHeld = (isReleased: (delta: Delta) => boolean): HarnessEvent[] => {
+    const released: HarnessEvent[] = [];
+    for (const [key, delta] of held) {
+      if (!isReleased(delta)) continue;
+      held.delete(key);
+      released.push(delta);
+    }
+    return released;
+  };
+
+  const hideOne = (event: HarnessEvent): HarnessEvent[] => {
+    if (event._tag === "content.delta") {
+      const key = readStreamKey(event);
+      const text = `${held.get(key)?.delta ?? ""}${event.delta}`.replaceAll(secret, "[hidden]");
+      const tail = countSecretStart(text);
+      if (tail > 0) held.set(key, { ...event, delta: text.slice(-tail) });
+      else held.delete(key);
+      const delta = text.slice(0, text.length - tail);
+      return delta === "" ? [] : [hideSecret({ ...event, delta }, secret)];
+    }
+    const released =
+      event._tag === "item.completed"
+        ? releaseHeld((delta) => delta.itemId === event.itemId)
+        : event._tag === "turn.completed" || event._tag === "session.exited"
+          ? releaseHeld(() => true)
+          : [];
+    return [...released, hideSecret(event, secret)];
+  };
+
+  return (events: ReadonlyArray<HarnessEvent>): HarnessEvent[] => events.flatMap(hideOne);
+};
+
 /** Returns the `raw` field for an event built from `message`, or nothing when there is none. */
 const buildMessageRaw = (message: { readonly raw: unknown } | undefined) =>
   message === undefined ? {} : buildRaw(ANTIGRAVITY_MESSAGE, message.raw);

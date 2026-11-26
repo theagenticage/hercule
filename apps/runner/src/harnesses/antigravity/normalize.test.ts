@@ -19,6 +19,7 @@ import {
   describeRequestItem,
   findRequestOwner,
   holdTurn,
+  makeEventSecretHider,
   markDeclined,
   normalizeUnhandled,
   normalizeUpdate,
@@ -1066,5 +1067,77 @@ describe("buildProcessEndEvents", () => {
     expect(
       normalizeUpdate(state, buildToolUpdate({ ...runCall("a"), status: "completed" })),
     ).toEqual([]);
+  });
+});
+
+describe("makeEventSecretHider", () => {
+  const SECRET = "sess-tok-7f3a91c2e8";
+  const fields = { sessionId: "s", turnId: "t1", itemId: "i1" } as never;
+  const delta = (text: string, itemId = "i1"): HarnessEvent =>
+    ({
+      _tag: "content.delta",
+      ...(fields as object),
+      itemId,
+      streamKind: "assistant_text",
+      delta: text,
+    }) as HarnessEvent;
+  const closing = (tag: "item.completed" | "turn.completed" | "session.exited"): HarnessEvent =>
+    ({ _tag: tag, ...(fields as object) }) as HarnessEvent;
+  const textOf = (events: ReadonlyArray<HarnessEvent>): string =>
+    events
+      .map((event) => (event._tag === "content.delta" ? event.delta : `<${event._tag}>`))
+      .join("");
+
+  it("hides the token however it is split over two deltas", () => {
+    for (let at = 1; at < SECRET.length; at += 1) {
+      const hide = makeEventSecretHider(SECRET);
+      const events = [
+        ...hide([delta(`before ${SECRET.slice(0, at)}`)]),
+        ...hide([delta(`${SECRET.slice(at)} after`)]),
+        ...hide([closing("item.completed")]),
+      ];
+      expect(textOf(events)).toBe("before [hidden] after<item.completed>");
+    }
+  });
+
+  it("hides the token split over every number of deltas", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const events = [
+      ...[...SECRET].flatMap((character) => hide([delta(character)])),
+      ...hide([closing("item.completed")]),
+    ];
+    expect(textOf(events)).toBe("[hidden]<item.completed>");
+  });
+
+  it("releases the held start of a token before the end of its item, unchanged", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const first = hide([delta(`ends with ${SECRET.slice(0, 5)}`)]);
+    expect(textOf(first)).toBe("ends with ");
+    expect(textOf(hide([closing("item.completed")]))).toBe(`${SECRET.slice(0, 5)}<item.completed>`);
+  });
+
+  it.each(["turn.completed", "session.exited"] as const)(
+    "releases every held start before %s",
+    (tag) => {
+      const hide = makeEventSecretHider(SECRET);
+      hide([delta(SECRET.slice(0, 3), "i1"), delta(SECRET.slice(0, 4), "i2")]);
+      expect(textOf(hide([closing(tag)]))).toBe(
+        `${SECRET.slice(0, 3)}${SECRET.slice(0, 4)}<${tag}>`,
+      );
+    },
+  );
+
+  it("keeps the held start of one item when another item closes", () => {
+    const hide = makeEventSecretHider(SECRET);
+    hide([delta(SECRET.slice(0, 3), "i1")]);
+    expect(textOf(hide([{ ...closing("item.completed"), itemId: "i2" } as HarnessEvent]))).toBe(
+      "<item.completed>",
+    );
+  });
+
+  it("leaves ids and other events as they are", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const event = closing("turn.completed");
+    expect(hide([event])).toEqual([event]);
   });
 });

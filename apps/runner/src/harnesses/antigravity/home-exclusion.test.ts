@@ -15,6 +15,7 @@ import { makeAntigravityAdapter } from "./adapter";
 import {
   BINARY,
   buildContext,
+  buildStartContext,
   buildFakeAgy,
   createSignedInHome,
   noAnswer,
@@ -82,7 +83,7 @@ describe("a sign-in while sessions and probes run", () => {
     const adapter = makeAntigravityAdapter(fake);
     const machine = buildLoginMachine(0);
     const logins = makeLogins(machine.spawn);
-    const ctx = { ...buildContext(home, BINARY), cwd: CWD, mcpServers: [] };
+    const ctx = buildStartContext(home, CWD);
 
     await run(adapter.startSession(SESSION, SPEC, ctx));
     const refused = await run(logins.start(REQUEST, ACCOUNT, adapter, ctx, "sign-in"));
@@ -127,13 +128,7 @@ describe("a sign-in while sessions and probes run", () => {
     const adapter = makeAntigravityAdapter(buildFakeAgy(running));
     const logins = makeLogins(buildLoginMachine(0).spawn);
 
-    await run(
-      adapter.startSession(SESSION, SPEC, {
-        ...buildContext(running, BINARY),
-        cwd: CWD,
-        mcpServers: [],
-      }),
-    );
+    await run(adapter.startSession(SESSION, SPEC, buildStartContext(running, CWD)));
     const answer = await run(
       logins.start(REQUEST, ACCOUNT, adapter, buildContext(other, BINARY), "sign-in"),
     );
@@ -150,7 +145,7 @@ describe("a session start and a probe during a sign-in", () => {
     const adapter = makeAntigravityAdapter(fake);
     const machine = buildLoginMachine(1);
     const logins = makeLogins(machine.spawn);
-    const ctx = { ...buildContext(home, BINARY), cwd: CWD, mcpServers: [] };
+    const ctx = buildStartContext(home, CWD);
 
     await run(logins.start(REQUEST, ACCOUNT, adapter, ctx, "sign-in"));
     const start = await run(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
@@ -188,7 +183,7 @@ describe("a sign-in that succeeded", () => {
     const home = createSignedInHome();
     const adapter = makeAntigravityAdapter(buildFakeAgy(home));
     const logins = makeLogins(buildLoginMachine(0).spawn);
-    const ctx = { ...buildContext(home, BINARY), cwd: CWD, mcpServers: [] };
+    const ctx = buildStartContext(home, CWD);
     await run(logins.start(REQUEST, ACCOUNT, adapter, ctx, "sign-in"));
 
     const answer = await run(logins.submit(ACCOUNT, "right"));
@@ -205,7 +200,7 @@ describe("a sign-in that succeeded", () => {
 
 describe("the sign-in's lease", () => {
   const holdsHome = async (adapter: ReturnType<typeof makeAntigravityAdapter>, home: string) => {
-    const ctx = { ...buildContext(home, BINARY), cwd: CWD, mcpServers: [] };
+    const ctx = buildStartContext(home, CWD);
     const result = await run(Effect.result(adapter.startSession(SESSION, SPEC, ctx)));
     if (result._tag === "Success") await run(adapter.stopSession(SESSION, "stopped"));
     return result._tag === "Failure";

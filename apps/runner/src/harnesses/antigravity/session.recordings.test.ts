@@ -30,7 +30,7 @@ import type { ApprovalDecision } from "@hercule/protocol";
 import { cleanupHomes, CWD, settle, waitUntil } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import { expectEventStreamToHoldTogether } from "./event-stream.testing";
-import { BINARY, buildContext, buildFakeAgy, createSignedInHome } from "./fake-agy.testing";
+import { buildFakeAgy, buildStartContext, createSignedInHome } from "./fake-agy.testing";
 
 afterEach(cleanupHomes);
 
@@ -212,7 +212,7 @@ const play = (scenario: Scenario) =>
     );
     yield* Effect.promise(settle);
     yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
-    const context = { ...buildContext(home, BINARY), cwd: CWD, mcpServers: [] };
+    const context = buildStartContext(home, CWD);
     yield* adapter.startSession(
       SESSION,
       { ...SPEC, accessMode: scenario.accessMode ?? SPEC.accessMode },
