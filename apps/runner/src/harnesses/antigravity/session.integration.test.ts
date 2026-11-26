@@ -44,6 +44,7 @@ import type {
   HarnessEvent,
   ModelDescriptor,
   SessionSpec,
+  Usage,
 } from "@hercule/protocol";
 import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
@@ -1265,6 +1266,219 @@ describe.skipIf(skipReason !== undefined)(
           const mark: unknown = JSON.parse(readFileSync(join(sessionMarksDir, marks[0]!), "utf8"));
           expect(typeof (mark as { tool_use_id?: unknown }).tool_use_id, why).toBe("string");
           expect(turn.completed.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+    });
+
+    /*
+     * Subagents and steering, as `agy` writes them in its own session files
+     * (spec 06 sections 6.2, 13.5 to 13.7). A turn that fails because the
+     * network is cut has no test here: it needs a proxy between `agy` and
+     * Google, and the recording `failed-turn-network-watch.jsonl`, replayed in
+     * `session.recordings.test.ts`, already covers it.
+     */
+    describe("subagents and steering", () => {
+      const sum = (usage: Usage): number =>
+        usage.inputTokens +
+        usage.outputTokens +
+        (usage.cacheReadTokens ?? 0) +
+        (usage.cacheWriteTokens ?? 0);
+
+      /** Returns the id of the subagent an event belongs to, or `undefined` for the session's own agent or an event with no owner. */
+      const subagentOf = (event: HarnessEvent): string | undefined =>
+        "subagentId" in event ? event.subagentId : undefined;
+
+      /** Returns the items of `kind` that completed in `events`. */
+      const completedItems = (events: ReadonlyArray<HarnessEvent>, kind: string) =>
+        events.filter(
+          (event): event is Event<"item.completed"> =>
+            event._tag === "item.completed" && event.kind === kind,
+        );
+
+      it(
+        "shows a subagent as a subagent in Full access: its turn, its command, its tokens (spec 06 section 13.5)",
+        async () => {
+          const session = await startLiveSession({ accessMode: "full-access" });
+          const marker = `SUBMARK${String(Date.now())}`;
+          const sent = await run(
+            adapter.sendInput(session.id, {
+              text: `Start exactly one subagent with your invoke_subagent tool. Its task: run the shell command \`echo ${marker} > sub.txt && cat sub.txt\` and report what it printed. When the subagent has reported back, reply with the single word DONE.`,
+            }),
+          );
+          const isChildTurnEnd = (event: HarnessEvent): event is Event<"turn.completed"> =>
+            event._tag === "turn.completed" && event.subagentId !== undefined;
+          const childEnd = await waitFor(session.id, "ended a subagent's turn", (events) =>
+            events.find(isChildTurnEnd),
+          );
+          const rootEnd = await waitFor(session.id, "ended the root turn", (events) =>
+            findTurnEnd(events, sent.turnId),
+          );
+          const events = eventsOf(session.id);
+          const why = dumpEvents(session.id);
+
+          const started = events.filter(
+            (event): event is Event<"subagent.started"> => event._tag === "subagent.started",
+          );
+          expect(started, why).toHaveLength(1);
+          const subagentId = started[0]!.subagentId;
+          expect(childEnd.subagentId, why).toBe(subagentId);
+          const launch = events.find(
+            (event): event is Event<"item.started"> =>
+              event._tag === "item.started" &&
+              event.kind === "subagent" &&
+              event.subagentId === undefined,
+          );
+          expect(started[0]!.itemId, why).toBe(launch?.itemId);
+
+          const own = events.filter((event) => subagentOf(event) === subagentId);
+          const turnStarted = own.find(
+            (event): event is Event<"turn.started"> => event._tag === "turn.started",
+          );
+          expect(turnStarted?.model, why).toBeTruthy();
+          const brief = own.find(
+            (event): event is Event<"item.started"> =>
+              event._tag === "item.started" && event.kind === "user_message",
+          );
+          expect(JSON.stringify(brief?.detail), why).toContain(marker);
+          const command = completedItems(own, "command_execution")[0];
+          expect(command?.status, why).toBe("completed");
+          expect(JSON.stringify(command?.detail), why).toContain(marker);
+          expect(childEnd.state, why).toBe("completed");
+          expect(childEnd.usage, why).toBeDefined();
+          expect(readFileSync(join(session.cwd, "sub.txt"), "utf8"), why).toContain(marker);
+
+          // The child's tokens are in no reply of `agy` to a prompt, so a snapshot above the root's own total holds them.
+          const rootUsage = events
+            .filter(
+              (event): event is Event<"turn.completed"> =>
+                event._tag === "turn.completed" && event.subagentId === undefined,
+            )
+            .reduce(
+              (total, event) => total + (event.usage === undefined ? 0 : sum(event.usage)),
+              0,
+            );
+          const snapshot = events
+            .filter(
+              (event): event is Event<"session.usage.updated"> =>
+                event._tag === "session.usage.updated" && event.subagentId === undefined,
+            )
+            .at(-1);
+          expect(snapshot?.usage, why).toBeDefined();
+          expect(sum(snapshot!.usage!), why).toBeGreaterThan(rootUsage);
+          expect(rootEnd.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+
+      it(
+        "refuses a subagent's command in Approval required with the reason, and neither hangs nor opens a Request (spec 06 section 13.6)",
+        async () => {
+          const session = await startLiveSession({ accessMode: "approval-required" });
+          const sent = await run(
+            adapter.sendInput(session.id, {
+              text: "Start exactly one subagent with your invoke_subagent tool. Its task: run the shell command `echo SUBMARK > sub.txt` and report the result. When the subagent has reported back, reply with the single word DONE. Do not run any command yourself.",
+            }),
+          );
+          const rootEnd = await waitFor(
+            session.id,
+            "ended the root turn",
+            (events) => findTurnEnd(events, sent.turnId),
+            90_000,
+          );
+          const events = eventsOf(session.id);
+          const why = dumpEvents(session.id);
+
+          expect(
+            events.filter((event) => event._tag === "request.opened"),
+            why,
+          ).toEqual([]);
+          const refused = completedItems(
+            events.filter((event) => subagentOf(event) !== undefined),
+            "command_execution",
+          );
+          expect(
+            refused.map((event) => event.status),
+            why,
+          ).toEqual(["failed"]);
+          expect(JSON.stringify(refused[0]?.detail), why).toContain(
+            "refused this subagent's command",
+          );
+          expect(existsSync(join(session.cwd, "sub.txt")), why).toBe(false);
+          expect(rootEnd.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+
+      it(
+        "takes a second input into the running turn as a steer (spec 06 section 6.2)",
+        async () => {
+          const session = await startLiveSession({ accessMode: "full-access" });
+          const first = await run(
+            adapter.sendInput(session.id, {
+              text: "Run the shell command `sleep 8`, then reply with the single word ALPHA.",
+            }),
+          );
+          await waitFor(session.id, "started a command", (events) =>
+            events.find(
+              (event) => event._tag === "item.started" && event.kind === "command_execution",
+            ),
+          );
+          const second = await run(
+            adapter.sendInput(session.id, {
+              text: "Also add the word BRAVO at the end of your reply.",
+            }),
+          );
+          const rootEnd = await waitFor(session.id, "ended the turn", (events) =>
+            findTurnEnd(events, first.turnId),
+          );
+          const events = eventsOf(session.id);
+          const why = dumpEvents(session.id);
+
+          expect(second, why).toEqual({ turnId: first.turnId, delivery: "steered" });
+          const steered = completedItems(events, "user_message").filter(
+            (event) => (event.detail as { steered?: boolean } | undefined)?.steered === true,
+          );
+          expect(steered, why).toHaveLength(1);
+          expect(
+            events.filter((event) => event._tag === "turn.completed"),
+            why,
+          ).toHaveLength(1);
+          expect(rootEnd.state, why).toBe("completed");
+          const endAt = events.indexOf(rootEnd);
+          expect(assistantText(events.slice(0, endAt)), why).toContain("BRAVO");
+        },
+        TEST_MS,
+      );
+
+      it(
+        "refuses a steer while a Request is open, and the turn goes on to complete once the Request is allowed (spec 06 section 6.2)",
+        async () => {
+          const session = await startLiveSession({ accessMode: "approval-required" });
+          const first = await run(
+            adapter.sendInput(session.id, {
+              text: "Run the shell command `touch steer.txt`, then reply with the single word DONE.",
+            }),
+          );
+          const request = await waitFor(session.id, "opened a Request", (events) =>
+            findOpenedRequest(events, "command_approval"),
+          );
+
+          const failure = await run(
+            Effect.flip(adapter.sendInput(session.id, { text: "Also say BRAVO." })),
+          );
+          expect(failure._tag, dumpEvents(session.id)).toBe("SteerRefused");
+          expect(
+            eventsOf(session.id).some((event) => event._tag === "turn.completed"),
+            dumpEvents(session.id),
+          ).toBe(false);
+
+          await run(adapter.respondToApprovalRequest(session.id, request.requestId, "allow"));
+          const rootEnd = await waitFor(session.id, "ended the turn", (events) =>
+            findTurnEnd(events, first.turnId),
+          );
+          expect(rootEnd.state, dumpEvents(session.id)).toBe("completed");
+          expect(existsSync(join(session.cwd, "steer.txt")), dumpEvents(session.id)).toBe(true);
         },
         TEST_MS,
       );
