@@ -49,7 +49,6 @@ import {
   buildStartFailure,
 } from "../adapter-error-builders";
 import { readAttachmentBase64 } from "../attachments";
-import { buildSkippedSkillsWarning } from "../events";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
 import { joinInstructions } from "../prompt";
@@ -762,12 +761,12 @@ export const startAgySession = (
           if (changed.kind !== "applied")
             return yield* Effect.fail(buildInputConfigFailure(changed));
         }
-        const { text, translated, skipped } = buildAgyPrompt(input);
+        const { text, skillReferences, skipped } = buildAgyPrompt(input);
         // The last wait before the write is over, so an interrupt that came during it is checked here.
         if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
         return {
           prompt: [{ type: "text", text } as const, ...images],
-          skillReferences: translated,
+          skillReferences,
           skippedSkills: skipped,
         };
       }).pipe(
@@ -819,7 +818,6 @@ export const startAgySession = (
               }
               return yield* Effect.fail(buildInputStopped());
             }
-            const { skippedSkills, ...forTurn } = prepared.value;
             // The Turn reserves the place for the input and writes its prompt. It is
             // published only when `agy` is known to have the prompt, so a prompt that
             // could not be written leaves no Turn at all.
@@ -832,7 +830,7 @@ export const startAgySession = (
                 emit: emitEvents,
                 onDeliveryUnknown: endForUnknownDelivery,
               },
-              { input, ...forTurn },
+              { input, ...prepared.value },
             ).pipe(Scope.provide(scope));
             current = turn;
             preparing = false;
@@ -844,17 +842,8 @@ export const startAgySession = (
             }
             const outcome = handoff.value;
             // A proven handoff opens the input even when a stop came meanwhile: failing it would let the controller send it again. The stop then ends the Turn as interrupted.
-            if (outcome.kind === "proven") {
-              // After the `user_message`, which the Turn published before it proved the handoff.
-              const warning = buildSkippedSkillsWarning({
-                sessionId,
-                turnId: turn.id,
-                harnessName: ANTIGRAVITY_NAME,
-                skippedNames: skippedSkills,
-              });
-              if (warning !== undefined) emitEvents([warning]);
+            if (outcome.kind === "proven")
               return { turnId: turn.id, delivery: "opened" } satisfies SendResult;
-            }
             if (outcome.kind === "unknown")
               return yield* Effect.fail(buildHarnessProtocolError(outcome.message));
             return yield* Effect.fail(

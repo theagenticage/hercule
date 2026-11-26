@@ -17,7 +17,7 @@ import { lstatSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { AdapterTurnInput } from "../index";
 import { buildHarnessPrompt } from "../prompt";
-import { resolveSkillFile, type ResolvedSkillReference } from "../../skills/references";
+import { resolveSkillFiles, type ResolvedSkillReference } from "../../skills/references";
 
 /**
  * Returns the folder of the skill pi loads under `name`, or undefined when
@@ -59,18 +59,6 @@ const removeReference = (text: string, reference: ResolvedSkillReference): strin
 };
 
 /**
- * Returns the line that points the model at a skill pi does not run itself,
- * or undefined when `resolveSkillFile` finds no usable `SKILL.md` for it. It
- * has the same bracket form as the line for an attached image.
- */
-const buildSkillPointer = (reference: ResolvedSkillReference): string | undefined => {
-  const skillFile = resolveSkillFile(reference.folder);
-  return skillFile === undefined
-    ? undefined
-    : `[Skill "$${reference.referenceName}" is at ${skillFile}. Read it with the read tool and follow it.]`;
-};
-
-/**
  * Returns the message text to send pi for an input, and the names of the
  * skills that got a pointer line in no form: their `SKILL.md` is missing or
  * leads outside the skill's folder. The caller tells the user about those. The
@@ -105,31 +93,24 @@ export const buildPiPrompt = (
 ): { readonly text: string; readonly skipped: ReadonlyArray<string> } => {
   const references = input.skillReferences ?? [];
   if (references.length === 0) return { text: buildHarnessPrompt(input), skipped: [] };
-  // One skill is referenced by one name, so the first token of each name is
-  // enough to decide the leading skill and to build the pointers. This keeps
-  // the folder lookups to one per skill, however often the text repeats it.
-  const firstTokens = new Map<string, ResolvedSkillReference>();
-  for (const reference of references) {
-    if (!firstTokens.has(reference.referenceName)) {
-      firstTokens.set(reference.referenceName, reference);
-    }
-  }
-  const leading = [...firstTokens.values()].find(
+  const leading = references.find(
     (reference) => findLoadedSkillFolder(stagedFolders, reference.skillName) === reference.folder,
   );
   const prompt = buildHarnessPrompt(
     input,
     leading === undefined ? input.text : removeReference(input.text, leading),
   );
-  const lines: Array<string> = [];
-  const skipped: Array<string> = [];
-  for (const reference of firstTokens.values()) {
-    if (reference === leading) continue;
-    const line = buildSkillPointer(reference);
-    if (line === undefined) skipped.push(reference.referenceName);
-    else lines.push(line);
-  }
-  const pointers = lines.join("\n");
+  // A second token of the leading skill is left out as well: pi already
+  // expanded that skill, so it gets no pointer.
+  const { found, skipped } = resolveSkillFiles(
+    references.filter((reference) => reference.folder !== leading?.folder),
+  );
+  const pointers = found
+    .map(
+      ({ reference, skillFile }) =>
+        `[Skill "$${reference.referenceName}" is at ${skillFile}. Read it with the read tool and follow it.]`,
+    )
+    .join("\n");
   const body = pointers === "" ? prompt : prompt === "" ? pointers : `${prompt}\n\n${pointers}`;
   if (leading === undefined) return { text: body, skipped };
   const command = `/skill:${leading.skillName}`;

@@ -540,7 +540,7 @@ describe("an input with Skill References", () => {
             {
               turnId: sent.turnId,
               message:
-                "Hercule could not give Antigravity the skill $gone: its SKILL.md is missing or leads outside the skill's folder. The message was sent without it.",
+                "Hercule could not give Antigravity the skill $gone: its SKILL.md is missing, is not a regular file, or leads outside the skill's folder. The message was sent without it. Check the skill's folder, then send the message again.",
             },
           ]);
           const tags = h.seen.map((event) => event._tag);

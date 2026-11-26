@@ -136,6 +136,7 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
         input: { text: "go" },
         prompt: FIRST_PROMPT,
         skillReferences: [],
+        skippedSkills: [],
         handoffBudget: Duration.seconds(8),
       },
     );

@@ -3,7 +3,7 @@
  * staged skill folders, and through the adapter for both ways an input
  * reaches pi.
  */
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -161,19 +161,6 @@ describe("building the prompt for pi", () => {
     );
   });
 
-  it("points at a skill that pi does not run once, however often it is named", () => {
-    const staged = stageSkills({
-      library: ["release"],
-      repositories: [{ checkout: "webshop", skills: ["release"] }],
-    });
-
-    const prompt = staged.buildPrompt(
-      staged.buildInput("$webshop:release, I said $webshop:release"),
-    );
-
-    expect(prompt.match(/\[Skill /g)).toHaveLength(1);
-  });
-
   it("points at the library skill that lost its name and leads with the next skill", () => {
     const staged = stageSkills({
       library: [],
@@ -219,17 +206,6 @@ describe("a skill pi is only pointed at", () => {
     );
     expect(staged.buildSkipped(input)).toEqual(["deploy"]);
   });
-
-  it("gets no pointer line when its SKILL.md is a folder", () => {
-    const staged = stageSkills({ library: ["review", "deploy"], repositories: [] });
-    const input = staged.buildInput("$review then $deploy");
-    const file = join(staged.findSkillFolder("deploy"), "SKILL.md");
-    rmSync(file);
-    mkdirSync(file);
-
-    expect(staged.buildPrompt(input)).toBe("/skill:review then $deploy");
-    expect(staged.buildSkipped(input)).toEqual(["deploy"]);
-  });
 });
 
 describe("sending an input with Skill References to pi", () => {
@@ -249,7 +225,7 @@ describe("sending an input with Skill References to pi", () => {
       expect.objectContaining({
         turnId: sent.turnId,
         message:
-          "Hercule could not give pi the skill $gone: its SKILL.md is missing or leads outside the skill's folder. The message was sent without it.",
+          "Hercule could not give pi the skill $gone: its SKILL.md is missing, is not a regular file, or leads outside the skill's folder. The message was sent without it. Check the skill's folder, then send the message again.",
       }),
     ]);
     const tags = run.seen.map((event) => event._tag);

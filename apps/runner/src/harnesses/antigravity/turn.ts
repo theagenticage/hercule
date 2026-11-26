@@ -45,6 +45,7 @@ import type { AdapterTurnInput } from "../index";
 import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
 import type { ResolvedSkillReference } from "../../skills";
+import { ANTIGRAVITY_NAME } from "./agy";
 import {
   addPromptUsage,
   closeTurn,
@@ -297,7 +298,8 @@ export const cancelOrphanQuestion = (
  * scope interrupts it.
  *
  * The Turn is published only when the handoff is proven: it emits
- * `turn.started`, the input's `user_message`, the held output and then lets the
+ * `turn.started`, the input's `user_message` (with the skipped-skills warning when
+ * a skill was skipped), the held output and then lets the
  * Requests that waited go on. When the prompt is not delivered, or it is not
  * known whether it was, the Turn emits nothing of its own and releases the held
  * output as output with no input (see `Handoff`).
@@ -309,6 +311,8 @@ export const startTurn = (
     readonly prompt: ReadonlyArray<PromptContent>;
     /** The Skill References the prompt got a pointer line for, recorded on the `user_message`. */
     readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
+    /** The names of the skills the prompt got no line for, told to the user right after the `user_message`. */
+    readonly skippedSkills: ReadonlyArray<string>;
     readonly handoffBudget: Duration.Duration;
   },
 ): Effect.Effect<Turn, never, Scope.Scope> =>
@@ -719,6 +723,7 @@ export const startTurn = (
             text: input.input.text,
             attachments: input.input.attachments,
             skillReferences: input.skillReferences,
+            skippedSkills: { harnessName: ANTIGRAVITY_NAME, names: input.skippedSkills },
             senderSessionId: input.input.senderSessionId,
             steered: false,
             harnessRefs: { nativeSessionId },

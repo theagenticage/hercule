@@ -1249,36 +1249,6 @@ describe("what an input does to a Codex session", () => {
       expect(new Set(input.slice(1).map((item) => item.path)).size).toBe(2);
     });
 
-    it("adds one item for a skill referenced twice", async () => {
-      const review = stageLibrarySkill("review");
-
-      const input = await sendWithSkills([review, { ...review, start: 20, end: 27 }]);
-
-      expect(input).toHaveLength(2);
-    });
-
-    it("leaves out a skill whose SKILL.md is gone, and keeps the text", async () => {
-      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
-
-      const input = await sendWithSkills([gone]);
-
-      expect(input).toHaveLength(1);
-    });
-
-    it("leaves out a skill whose SKILL.md resolves outside the skill folder", async () => {
-      const secret = join(scratch, "secret.txt");
-      writeFileSync(secret, "not a skill");
-      const swapped = stageLibrarySkill("swapped");
-      const target = join(realpathSync(swapped.folder), "SKILL.md");
-      rmSync(target);
-      symlinkSync(secret, target);
-
-      const input = await sendWithSkills([swapped]);
-
-      expect(input).toHaveLength(1);
-      expect(JSON.stringify(input)).not.toContain(secret);
-    });
-
     it("records on the user message only the skills it gave Codex an item for", async () => {
       const review = stageLibrarySkill("review");
       const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
@@ -1317,7 +1287,7 @@ describe("what an input does to a Codex session", () => {
         expect.objectContaining({
           turnId: sent.turnId,
           message:
-            "Hercule could not give Codex the skill $gone: its SKILL.md is missing or leads outside the skill's folder. The message was sent without it.",
+            "Hercule could not give Codex the skill $gone: its SKILL.md is missing, is not a regular file, or leads outside the skill's folder. The message was sent without it. Check the skill's folder, then send the message again.",
         }),
       ]);
       const tags = run.seen.map((event) => event._tag);

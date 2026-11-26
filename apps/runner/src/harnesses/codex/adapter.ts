@@ -56,9 +56,9 @@ import type {
   SessionUsageReport,
   TextGenerationContext,
 } from "../index";
-import { resolveSkillFile, type ResolvedSkillReference } from "../../skills";
+import { resolveSkillFiles, type FoundSkillFile } from "../../skills";
 import { buildFailedProbe } from "../probe";
-import { buildSkippedSkillsWarning, buildUserMessage } from "../events";
+import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { readUserInstructions } from "../user-instructions";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
@@ -608,62 +608,32 @@ const buildDeveloperInstructions = (
     spec.memory,
   ]) ?? "";
 
-/** The `skill` items for a turn, and the references they were built from. */
-interface SkillInputs {
-  readonly items: ReadonlyArray<UserInput>;
-  /** One reference per item, in text order. A reference that got no item is not here. */
-  readonly translated: ReadonlyArray<ResolvedSkillReference>;
-  /** The names, as typed, of the skills that got no item, once each in text order. */
-  readonly skipped: ReadonlyArray<string>;
-}
-
 /**
- * Builds one `skill` item per distinct skill the turn's text references, and
- * returns the references that got an item and the names of the skills that
- * got none. Codex ignores a plain `$name` in
- * the text for a name that has an item, so the item decides which skill the
- * name stands for: the library skill `release` or the repository skill
- * `webshop:release`, which Codex also knows as `release`.
+ * Builds one `skill` item per skill file `resolveSkillFiles` found. Codex
+ * ignores a plain `$name` in the text for a name that has an item, so the item
+ * decides which skill the name stands for: the library skill `release` or the
+ * repository skill `webshop:release`, which Codex also knows as `release`.
  *
  * Codex finds the skill by comparing the item's `path` with the SKILL.md path
- * it reported in `skills/list`, without resolving links itself. That path has
- * its symbolic links resolved, so this resolves them too. A skill gets no
- * item, and is not in `translated`, when:
- *
- * - its SKILL.md no longer exists on disk: Codex would drop an item with a
- *   path it does not know anyway;
- * - its SKILL.md now resolves to a file outside the skill folder, such as a
- *   link to another file the user can read: the item would hand that path to
- *   Codex.
- *
- * A skill folder staged as a link is fine, because the check compares
- * against the resolved folder.
+ * it reported in `skills/list`, without resolving links itself. The file
+ * `resolveSkillFiles` returns has its symbolic links resolved, as that path
+ * does. A skill whose SKILL.md is gone, or leads outside the skill folder, has
+ * no item: Codex would drop an item with a path it does not know, and an item
+ * with a path outside the folder would hand that path to Codex.
  */
-const buildSkillInputs = (references: ReadonlyArray<ResolvedSkillReference>): SkillInputs => {
-  const seen = new Set<string>();
-  const items: Array<UserInput> = [];
-  const translated: Array<ResolvedSkillReference> = [];
-  const skipped: Array<string> = [];
-  for (const reference of references) {
-    if (seen.has(reference.folder)) continue;
-    seen.add(reference.folder);
-    const path = resolveSkillFile(reference.folder);
-    if (path === undefined) {
-      skipped.push(reference.referenceName);
-      continue;
-    }
-    items.push({ type: "skill", name: reference.skillName, path });
-    translated.push(reference);
-  }
-  return { items, translated, skipped };
-};
+const buildSkillItems = (found: ReadonlyArray<FoundSkillFile>): ReadonlyArray<UserInput> =>
+  found.map(({ reference, skillFile }): UserInput => ({
+    type: "skill",
+    name: reference.skillName,
+    path: skillFile,
+  }));
 
 /**
  * Builds the items Codex takes as a turn's input: the prompt
  * `buildHarnessPrompt` builds first (the sender header when another agent
  * sent the input, the text, and a line per image naming the file it is saved
  * in), then one `localImage` item per image, then the `skill` items
- * (`buildSkillInputs`). Codex reads each image from that file itself, so its
+ * (`buildSkillItems`). Codex reads each image from that file itself, so its
  * bytes never cross the app-server's pipe. Item order does not matter to
  * Codex: it collects the `skill` items from the whole list.
  */
@@ -1552,7 +1522,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   const deliverInput = (
     held: Held,
     input: AdapterTurnInput,
-    skills: SkillInputs,
+    skillItems: ReadonlyArray<UserInput>,
   ): Effect.Effect<SendResult, AdapterError> =>
     Effect.gen(function* () {
       const ticket = held.threads.beginInput();
@@ -1564,18 +1534,16 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           // does not load the skill, so the chip would show a skill that
           // never ran. Refuse before the input is submitted, so it stays
           // queued and runs normally when this turn ends.
-          if (running !== undefined && skills.translated.length > 0)
+          if (running !== undefined && skillItems.length > 0)
             return yield* Effect.fail(
               new SteerRefused({ message: buildSkillSteerRefusedMessage(CODEX_NAME) }),
             );
           yield* held.threads.submitInput(ticket, running);
           const steered =
-            running === undefined
-              ? undefined
-              : yield* steerTurn(held, input, skills.items, running);
+            running === undefined ? undefined : yield* steerTurn(held, input, skillItems, running);
           if (steered !== undefined) return steered;
           yield* held.threads.submitInput(ticket);
-          return yield* startTurn(held, input, skills.items);
+          return yield* startTurn(held, input, skillItems);
         }),
         () => Effect.sync(() => held.threads.finishInput(ticket)),
       );
@@ -1637,7 +1605,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         sessions.get(sessionId) === held &&
         held.asyncQuestions.get(question.requestId) === question;
       return Effect.uninterruptible(
-        Effect.matchEffect(deliverInput(held, input, { items: [], translated: [], skipped: [] }), {
+        Effect.matchEffect(deliverInput(held, input, []), {
           onFailure: (failure) => {
             // Only a failure of the connection leaves it unknown whether Codex took the input.
             const maybeDelivered = failure._tag === "HarnessProtocolError";
@@ -1945,8 +1913,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
-        const skills = buildSkillInputs(input.skillReferences ?? []);
-        const sent = yield* deliverInput(held, input, skills);
+        const { found, skipped } = resolveSkillFiles(input.skillReferences ?? []);
+        const sent = yield* deliverInput(held, input, buildSkillItems(found));
         for (const event of sessions.get(sessionId) !== held
           ? []
           : buildUserMessage({
@@ -1954,24 +1922,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               turnId: sent.turnId,
               text: input.text,
               attachments: input.attachments,
-              skillReferences: skills.translated,
+              skillReferences: found.map(({ reference }) => reference),
+              skippedSkills: { harnessName: CODEX_NAME, names: skipped },
               senderSessionId: input.senderSessionId,
               steered: sent.delivery === "steered",
               harnessRefs: { threadId: held.binding.nativeSessionId },
             })) {
           emit(event);
         }
-        // After the user's message, in the turn the input opened or steered.
-        const warning =
-          sessions.get(sessionId) !== held
-            ? undefined
-            : buildSkippedSkillsWarning({
-                sessionId,
-                turnId: sent.turnId,
-                harnessName: CODEX_NAME,
-                skippedNames: skills.skipped,
-              });
-        if (warning !== undefined) emit(warning);
         return sent;
       }),
 

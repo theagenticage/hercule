@@ -65,7 +65,7 @@ describe("buildAgyPrompt", () => {
     ]) {
       expect(buildAgyPrompt(input)).toEqual({
         text: buildHarnessPrompt(input),
-        translated: [],
+        skillReferences: [],
         skipped: [],
       });
     }
@@ -74,12 +74,12 @@ describe("buildAgyPrompt", () => {
   it("adds one pointer line with the exact path after the prompt and keeps the token", () => {
     const skills = createSkills({ library: ["review"] });
     const input = skills.buildInput("please $review this");
-    const { text, translated } = buildAgyPrompt(input);
+    const { text, skillReferences } = buildAgyPrompt(input);
     const path = join(skills.libraryFolder, "skills", "review", "SKILL.md");
     expect(text).toBe(
       `please $review this\n\n[Skill "$review": read and use the skill at ${JSON.stringify(path)}.]`,
     );
-    expect(translated).toEqual(input.skillReferences);
+    expect(skillReferences).toEqual(input.skillReferences);
   });
 
   it("names a repository skill by its reference and points at the file in the checkout", () => {
@@ -89,21 +89,6 @@ describe("buildAgyPrompt", () => {
     expect(buildAgyPrompt(input).text).toBe(
       `$webshop:deploy\n\n[Skill "$webshop:deploy": read and use the skill at ${JSON.stringify(path)}.]`,
     );
-  });
-
-  it("gives one line per skill, in order of first reference, and translates every token", () => {
-    const skills = createSkills({ library: ["review", "release"] });
-    const input = skills.buildInput("$release then $review then $release again");
-    const { text, translated } = buildAgyPrompt(input);
-    const lines = text.split("\n\n")[1]!.split("\n");
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('"$release"');
-    expect(lines[1]).toContain('"$review"');
-    expect(translated.map((reference) => reference.referenceName)).toEqual([
-      "release",
-      "review",
-      "release",
-    ]);
   });
 
   it("puts the pointer lines after the sender header and the image lines", () => {
@@ -142,10 +127,10 @@ describe("buildAgyPrompt", () => {
   it("leaves out a skill whose SKILL.md is missing, and its references", () => {
     const skills = createSkills({ library: ["review", "gone"], missingFile: ["gone"] });
     const input = skills.buildInput("$gone and $review");
-    const { text, translated, skipped } = buildAgyPrompt(input);
+    const { text, skillReferences, skipped } = buildAgyPrompt(input);
     expect(text).not.toContain('"$gone"');
     expect(text).toContain('"$review"');
-    expect(translated.map((reference) => reference.referenceName)).toEqual(["review"]);
+    expect(skillReferences.map((reference) => reference.referenceName)).toEqual(["review"]);
     expect(skipped).toEqual(["gone"]);
   });
 
@@ -154,27 +139,25 @@ describe("buildAgyPrompt", () => {
     const input = skills.buildInput("run $gone");
     expect(buildAgyPrompt(input)).toEqual({
       text: "run $gone",
-      translated: [],
+      skillReferences: [],
       skipped: ["gone"],
     });
   });
 
-  it("sends a user's input that starts with a slash as typed, whatever references it has", () => {
+  it("keeps the text first and unchanged, so a slash command the user typed stays one", () => {
     const skills = createSkills({ library: ["review"] });
     const input = skills.buildInput("/compact $review");
-    expect(buildAgyPrompt(input)).toEqual({
-      text: "/compact $review",
-      translated: [],
-      skipped: [],
-    });
+    const { text, skillReferences } = buildAgyPrompt(input);
+    expect(text.startsWith('/compact $review\n\n[Skill "$review"')).toBe(true);
+    expect(skillReferences).toEqual(input.skillReferences);
   });
 
-  it("gives an input another session sent its pointer lines, because the header comes first", () => {
+  it("gives a skill reference in a text that starts with a path its pointer line", () => {
     const skills = createSkills({ library: ["review"] });
-    const input = skills.buildInput("/compact $review", { senderSessionId: SENDER });
-    const { text, translated } = buildAgyPrompt(input);
-    expect(buildHarnessPrompt(input).startsWith("/")).toBe(false);
-    expect(text).toContain('[Skill "$review"');
-    expect(translated).toEqual(input.skillReferences);
+    const input = skills.buildInput("/tmp/build.log fails, $review it");
+    const { text, skillReferences, skipped } = buildAgyPrompt(input);
+    expect(text.startsWith('/tmp/build.log fails, $review it\n\n[Skill "$review"')).toBe(true);
+    expect(skillReferences.map((reference) => reference.referenceName)).toEqual(["review"]);
+    expect(skipped).toEqual([]);
   });
 });

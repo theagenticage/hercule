@@ -71,7 +71,7 @@ import {
   buildSessionNotRunning,
 } from "../adapter-error-builders";
 import { readAttachmentBase64 } from "../attachments";
-import { buildSkippedSkillsWarning, buildUserMessage } from "../events";
+import { buildUserMessage } from "../events";
 import { joinInstructions } from "../prompt";
 import { applyCredential, formatModelArgument } from "../account";
 import { buildFailedProbe } from "../probe";
@@ -2291,6 +2291,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           skillReferences: input.skillReferences?.filter(
             (reference) => !prompt.skipped.includes(reference.referenceName),
           ),
+          skippedSkills: { harnessName: PI_NAME, names: prompt.skipped },
           senderSessionId: input.senderSessionId,
           steered,
           harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
@@ -2300,14 +2301,6 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           : userMessage) {
           emit(event);
         }
-        // After the user's message, in the turn the input opened or steered.
-        const warning = buildSkippedSkillsWarning({
-          sessionId,
-          turnId,
-          harnessName: PI_NAME,
-          skippedNames: prompt.skipped,
-        });
-        if (warning !== undefined) emit(warning);
         return { turnId, delivery: steered ? "steered" : "opened" };
       }),
 

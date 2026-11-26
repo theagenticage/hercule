@@ -118,8 +118,8 @@ export function resolveSkillReferences(
  * another file the user can read. A skill folder that is itself a symbolic
  * link is fine, because the file is compared with the resolved folder.
  *
- * Adapters call this before they point a harness at a skill file, so a
- * pointer never hands the harness a path outside the skill.
+ * `resolveSkillFiles` calls this for every skill folder an input names, so
+ * an adapter never points a harness at a path outside the skill.
  */
 export function resolveSkillFile(folder: string): string | undefined {
   try {
@@ -129,4 +129,41 @@ export function resolveSkillFile(folder: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A skill folder the references name, with the checked path of its `SKILL.md`. */
+export interface FoundSkillFile {
+  /** The first reference to the skill folder in the message. */
+  readonly reference: ResolvedSkillReference;
+  /** The real path `resolveSkillFile` returned for the folder. */
+  readonly skillFile: string;
+}
+
+/**
+ * Checks the skill file of every distinct skill folder the `references` name,
+ * so every adapter points its harness at the same files. Returns:
+ *
+ * - `found`: one entry per skill folder, in order of first reference, with
+ *   the first reference to it and the real path `resolveSkillFile` returned;
+ * - `skipped`: the `referenceName` of each skill folder whose file
+ *   `resolveSkillFile` rejects, in order of first reference.
+ *
+ * A folder is checked once, however many tokens name it. A folder has one
+ * reference name, so a skipped name also covers the later tokens of that skill.
+ */
+export function resolveSkillFiles(references: ReadonlyArray<ResolvedSkillReference>): {
+  readonly found: ReadonlyArray<FoundSkillFile>;
+  readonly skipped: ReadonlyArray<string>;
+} {
+  const seenFolders = new Set<string>();
+  const found: Array<FoundSkillFile> = [];
+  const skipped: Array<string> = [];
+  for (const reference of references) {
+    if (seenFolders.has(reference.folder)) continue;
+    seenFolders.add(reference.folder);
+    const skillFile = resolveSkillFile(reference.folder);
+    if (skillFile === undefined) skipped.push(reference.referenceName);
+    else found.push({ reference, skillFile });
+  }
+  return { found, skipped };
 }
