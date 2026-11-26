@@ -13,8 +13,8 @@ import { MAX_TODO_STEPS, type HarnessEvent } from "@hercule/protocol";
 import { describe, expect, it } from "vitest";
 import {
   addPromptUsage,
-  buildNormalizingState,
-  closeProcess,
+  buildNormalizerState,
+  buildProcessEndEvents,
   closeTurn,
   describeRequestItem,
   findRequestOwner,
@@ -24,7 +24,7 @@ import {
   normalizeUpdate,
   openTurn,
   releaseTurn,
-  type Normalizing,
+  type NormalizerState,
   type RequestItem,
 } from "./normalize";
 import { buildPlanFilePaths } from "./harness-home";
@@ -54,7 +54,7 @@ const buildNotification = (params: {
 });
 
 interface Played {
-  readonly state: Normalizing;
+  readonly state: NormalizerState;
   readonly events: HarnessEvent[];
   readonly requests: Array<RequestItem | undefined>;
 }
@@ -70,7 +70,7 @@ const playRecording = (name: RecordingName): Played => {
   const nativeSessionId = messages
     .map((entry) => (entry.message.result as { sessionId?: string } | undefined)?.sessionId)
     .find((id) => id !== undefined)!;
-  const state = buildNormalizingState({
+  const state = buildNormalizerState({
     sessionId: SESSION,
     nativeSessionId,
     planFilePaths: buildPlanFilePaths(HOME, nativeSessionId),
@@ -155,7 +155,7 @@ const buildOther = (name: string): SessionUpdateNotification => ({
 });
 
 const freshState = () =>
-  buildNormalizingState({
+  buildNormalizerState({
     sessionId: SESSION,
     nativeSessionId: "native-1",
     planFilePaths: buildPlanFilePaths("/b", "native-1"),
@@ -831,7 +831,7 @@ describe("the files of the plan", () => {
       ...(text === undefined ? {} : { content: [{ type: "diff", path, newText: text }] }),
     });
 
-  const startWrite = (state: Normalizing, path: string, id = "w1") =>
+  const startWrite = (state: NormalizerState, path: string, id = "w1") =>
     normalizeUpdate(
       state,
       buildToolStart({ toolCallId: id, name: "write_file", rawInput: { Path: path } }),
@@ -840,7 +840,7 @@ describe("the files of the plan", () => {
   const TASK = "/b/antigravity-acp/brain/native-1/task.md";
 
   const write = (
-    state: Normalizing,
+    state: NormalizerState,
     path: string,
     text: string | undefined,
     id = "w1",
@@ -866,7 +866,7 @@ describe("the files of the plan", () => {
   });
 
   it("accepts the /private spelling of the plan files it was given", () => {
-    const state = buildNormalizingState({
+    const state = buildNormalizerState({
       sessionId: SESSION,
       nativeSessionId: "native-1",
       planFilePaths: buildPlanFilePaths("/tmp/b", "native-1", "darwin"),
@@ -1037,7 +1037,7 @@ describe("usage", () => {
   });
 });
 
-describe("closeProcess", () => {
+describe("buildProcessEndEvents", () => {
   it("fails every running item in its own turn, and closes a synthetic turn", () => {
     const state = freshState();
     openTurn(state, "t1");
@@ -1045,7 +1045,7 @@ describe("closeProcess", () => {
     closeTurn(state, { state: "interrupted" });
     normalizeUpdate(state, buildToolStart(runCall("b")));
     normalizeUpdate(state, buildChunk("partial"));
-    const events = closeProcess(state);
+    const events = buildProcessEndEvents(state);
     const completed = only(events, "item.completed");
     expect(
       completed.map((e) => [e.itemId === "a" || e.itemId === "b" ? e.itemId : "text", e.turnId]),
@@ -1062,7 +1062,7 @@ describe("closeProcess", () => {
     const state = freshState();
     openTurn(state, "t1");
     normalizeUpdate(state, buildToolStart(runCall("a")));
-    expect(outline(closeProcess(state))).toEqual(["item.completed command_execution"]);
+    expect(outline(buildProcessEndEvents(state))).toEqual(["item.completed command_execution"]);
     expect(
       normalizeUpdate(state, buildToolUpdate({ ...runCall("a"), status: "completed" })),
     ).toEqual([]);

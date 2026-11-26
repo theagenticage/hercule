@@ -130,10 +130,10 @@ type BufferedMessage =
   | { readonly type: "unhandled"; readonly message: UnhandledMessage };
 
 /**
- * The state of one session's normalizing. Build it with `buildNormalizingState`.
+ * The state of one session's normalizer. Build it with `buildNormalizerState`.
  * Nothing outside this module reads its fields.
  */
-export interface Normalizing {
+export interface NormalizerState {
   readonly sessionId: string;
   readonly nativeSessionId: string;
   /** Where this conversation's `task.md` and `implementation_plan.md` can be reported. */
@@ -173,11 +173,11 @@ export interface RequestItem extends RequestOwner {
  * Returns the state for a new session. `planFilePaths` are the paths of this
  * conversation's plan files (`buildPlanFilePaths`).
  */
-export const buildNormalizingState = (input: {
+export const buildNormalizerState = (input: {
   readonly sessionId: string;
   readonly nativeSessionId: string;
   readonly planFilePaths: PlanFilePaths;
-}): Normalizing => ({
+}): NormalizerState => ({
   sessionId: input.sessionId,
   nativeSessionId: input.nativeSessionId,
   planFilePaths: input.planFilePaths,
@@ -201,7 +201,7 @@ const buildZeroTotals = (): Totals => ({
 // ---- Event builders ----
 
 /** Returns the fields every event has. The call's id goes in `harnessRefs` for an event about a call. */
-const buildBase = (state: Normalizing, toolCallId?: string) =>
+const buildBase = (state: NormalizerState, toolCallId?: string) =>
   buildEnvelope(state.sessionId, {
     nativeSessionId: state.nativeSessionId,
     ...(toolCallId === undefined ? {} : { toolCallId }),
@@ -222,7 +222,7 @@ interface ItemFields {
 }
 
 const buildItemStarted = (
-  state: Normalizing,
+  state: NormalizerState,
   item: ItemFields,
   message?: { readonly raw: unknown },
 ): HarnessEvent => ({
@@ -235,7 +235,7 @@ const buildItemStarted = (
   ...(item.detail === undefined ? {} : { detail: item.detail }),
 });
 
-const buildItemUpdated = (state: Normalizing, item: ItemFields): HarnessEvent => ({
+const buildItemUpdated = (state: NormalizerState, item: ItemFields): HarnessEvent => ({
   _tag: "item.updated",
   ...buildBase(state, item.toolCallId),
   turnId: item.turnId,
@@ -245,7 +245,7 @@ const buildItemUpdated = (state: Normalizing, item: ItemFields): HarnessEvent =>
 });
 
 const buildItemCompleted = (
-  state: Normalizing,
+  state: NormalizerState,
   item: ItemFields,
   status: ItemStatus,
   message?: { readonly raw: unknown },
@@ -260,14 +260,14 @@ const buildItemCompleted = (
   ...(item.detail === undefined ? {} : { detail: item.detail }),
 });
 
-const buildTurnStarted = (state: Normalizing, turnId: string): HarnessEvent => ({
+const buildTurnStarted = (state: NormalizerState, turnId: string): HarnessEvent => ({
   _tag: "turn.started",
   ...buildBase(state),
   turnId,
 });
 
 const buildRuntimeWarning = (
-  state: Normalizing,
+  state: NormalizerState,
   turnId: string,
   message: string,
 ): HarnessEvent => ({
@@ -303,7 +303,7 @@ const buildTurnRecord = (id: string, synthetic: boolean): TurnRecord => ({
  * opened while the adapter prepares one.
  */
 const ensureTurn = (
-  state: Normalizing,
+  state: NormalizerState,
 ): { readonly turn: TurnRecord; readonly events: HarnessEvent[] } => {
   if (state.turn !== undefined) return { turn: state.turn, events: [] };
   const turn = buildTurnRecord(crypto.randomUUID(), true);
@@ -327,7 +327,7 @@ const ensureTurn = (
  * a newer turn that opened meanwhile.
  */
 export const closeTurn = (
-  state: Normalizing,
+  state: NormalizerState,
   end: { readonly state: TurnState; readonly error?: string; readonly turnId?: string },
 ): HarnessEvent[] => {
   const turn = state.turn;
@@ -360,11 +360,11 @@ export const closeTurn = (
 };
 
 /** Returns the id of the open synthetic turn (output came with no input, and no input's turn is open), or `undefined` when there is none. */
-export const readSyntheticTurnId = (state: Normalizing): string | undefined =>
+export const readSyntheticTurnId = (state: NormalizerState): string | undefined =>
   state.turn?.synthetic === true ? state.turn.id : undefined;
 
 /** Returns the events that close the synthetic turn when its last item has completed, else nothing. */
-const closeIdleSyntheticTurn = (state: Normalizing): HarnessEvent[] =>
+const closeIdleSyntheticTurn = (state: NormalizerState): HarnessEvent[] =>
   state.turn?.synthetic === true && state.turn.running.size === 0
     ? closeTurn(state, { state: "completed" })
     : [];
@@ -376,7 +376,7 @@ const closeIdleSyntheticTurn = (state: Normalizing): HarnessEvent[] =>
  * the new output belongs to it. An update for a call that is already known goes
  * through, because it completes an item of the turn the call started in.
  */
-export const holdTurn = (state: Normalizing): void => {
+export const holdTurn = (state: NormalizerState): void => {
   state.held = true;
 };
 
@@ -388,7 +388,7 @@ export const holdTurn = (state: Normalizing): void => {
  * at once: its running items finish in it later.
  */
 export const openTurn = (
-  state: Normalizing,
+  state: NormalizerState,
   turnId: string,
   afterStart: ReadonlyArray<HarnessEvent> = [],
 ): HarnessEvent[] => {
@@ -404,12 +404,12 @@ export const openTurn = (
  * of the buffered messages as output with no input: each opens a synthetic turn
  * as it needs one.
  */
-export const releaseTurn = (state: Normalizing): HarnessEvent[] => {
+export const releaseTurn = (state: NormalizerState): HarnessEvent[] => {
   state.held = false;
   return replayBuffered(state);
 };
 
-const replayBuffered = (state: Normalizing): HarnessEvent[] =>
+const replayBuffered = (state: NormalizerState): HarnessEvent[] =>
   state.buffered
     .splice(0)
     .flatMap((message) =>
@@ -421,7 +421,7 @@ const replayBuffered = (state: Normalizing): HarnessEvent[] =>
 // ---- Text items ----
 
 /** Returns the event that completes the open text item, or nothing when none is open. */
-const closeTextItem = (state: Normalizing): HarnessEvent[] => {
+const closeTextItem = (state: NormalizerState): HarnessEvent[] => {
   const text = state.text;
   if (text === undefined) return [];
   state.text = undefined;
@@ -446,7 +446,7 @@ const STREAM_KINDS = {
  * new one in the turn.
  */
 const appendText = (
-  state: Normalizing,
+  state: NormalizerState,
   kind: TextRecord["kind"],
   text: string,
   notification: SessionUpdateNotification,
@@ -483,7 +483,7 @@ const appendText = (
  * the message is of another kind.
  */
 const buildUnknownItem = (
-  state: Normalizing,
+  state: NormalizerState,
   name: string,
   message: { readonly raw: unknown },
 ): HarnessEvent[] => {
@@ -606,7 +606,7 @@ const mergeCall = (last: ToolCallFields, next: ToolCallFields): ToolCallFields =
  *   its Request with a deny or a cancel. Any other status is not an end.
  */
 const normalizeToolCall = (
-  state: Normalizing,
+  state: NormalizerState,
   notification: SessionUpdateNotification,
   call: ToolCall,
   isStart: boolean,
@@ -711,7 +711,7 @@ const parseTaskSteps = (text: string): TodoStep[] =>
  * - `implementation_plan.md` shows a `plan` item holding the file's text.
  */
 const buildPlanFileEvents = (
-  state: Normalizing,
+  state: NormalizerState,
   record: RunningTool,
   completingCall: ToolCall,
 ): HarnessEvent[] => {
@@ -773,7 +773,7 @@ const buildPlanFileEvents = (
  * the turn the call belongs to. Anything else would draw something new, which
  * belongs to the input's turn and not to a turn that is about to close.
  */
-const mustBuffer = (state: Normalizing, update?: SessionUpdate): boolean => {
+const mustBuffer = (state: NormalizerState, update?: SessionUpdate): boolean => {
   if (!state.held) return false;
   const call = update === undefined ? undefined : readToolCall(update);
   return call === undefined || !state.tools.has(call.toolCallId);
@@ -796,7 +796,7 @@ const mustBuffer = (state: Normalizing, update?: SessionUpdate): boolean => {
  * are kept, and this returns nothing for them.
  */
 export const normalizeUpdate = (
-  state: Normalizing,
+  state: NormalizerState,
   notification: SessionUpdateNotification,
 ): HarnessEvent[] => {
   if (mustBuffer(state, notification.update)) {
@@ -807,7 +807,7 @@ export const normalizeUpdate = (
 };
 
 const routeUpdate = (
-  state: Normalizing,
+  state: NormalizerState,
   notification: SessionUpdateNotification,
 ): HarnessEvent[] => {
   const { update } = notification;
@@ -848,7 +848,7 @@ const routeUpdate = (
  * that draws something, it waits in the buffer while a turn is held.
  */
 export const normalizeUnhandled = (
-  state: Normalizing,
+  state: NormalizerState,
   message: UnhandledMessage,
 ): HarnessEvent[] => {
   if (mustBuffer(state)) {
@@ -866,7 +866,7 @@ export const normalizeUnhandled = (
  * `failed` is then shown as `declined`. A call whose item is unknown or has
  * ended is not recorded: no `failed` would ever remove it.
  */
-export const markDeclined = (state: Normalizing, toolCallId: string): void => {
+export const markDeclined = (state: NormalizerState, toolCallId: string): void => {
   if (state.tools.get(toolCallId)?.ended === false) state.declined.add(toolCallId);
 };
 
@@ -877,7 +877,7 @@ export const markDeclined = (state: Normalizing, toolCallId: string): void => {
  * Request.
  */
 export const findRequestOwner = (
-  state: Normalizing,
+  state: NormalizerState,
   toolCallId: string,
 ): RequestOwner | undefined => {
   const record = state.tools.get(toolCallId);
@@ -892,7 +892,7 @@ export const findRequestOwner = (
  * Returns `undefined` under the same conditions as `findRequestOwner`.
  */
 export const describeRequestItem = (
-  state: Normalizing,
+  state: NormalizerState,
   toolCallId: string,
   snapshot: ToolCall,
 ): RequestItem | undefined => {
@@ -912,7 +912,7 @@ export const describeRequestItem = (
  * `thoughtTokens` is never added, because `outputTokens` already includes it.
  */
 export const addPromptUsage = (
-  state: Normalizing,
+  state: NormalizerState,
   usage: PromptUsage | null | undefined,
 ): HarnessEvent[] => {
   if (usage == null) {
@@ -934,7 +934,7 @@ export const addPromptUsage = (
 };
 
 /** Returns `session.usage.updated` with the process's sum, in the incomplete form once that applies. */
-const buildUsageUpdated = (state: Normalizing): HarnessEvent => {
+const buildUsageUpdated = (state: NormalizerState): HarnessEvent => {
   const counts = buildUsage(state.processUsage);
   return {
     _tag: "session.usage.updated",
@@ -960,7 +960,7 @@ const addTotals = (total: Totals, parts: Totals): void => {
  * never come), and an open synthetic turn closes as completed. A turn of the
  * user's is left to `closeTurn`.
  */
-export const closeProcess = (state: Normalizing): HarnessEvent[] => {
+export const buildProcessEndEvents = (state: NormalizerState): HarnessEvent[] => {
   const events = closeTextItem(state);
   for (const [toolCallId, record] of state.tools) {
     if (record.ended) continue;

@@ -67,8 +67,8 @@ import {
 import { buildPlanFilePaths } from "./harness-home";
 import { buildModelCatalog, findSelectOption } from "./model-catalog";
 import {
-  buildNormalizingState,
-  closeProcess,
+  buildNormalizerState,
+  buildProcessEndEvents,
   closeTurn,
   holdTurn,
   normalizeUnhandled,
@@ -76,7 +76,7 @@ import {
   readSyntheticTurnId,
   releaseTurn,
 } from "./normalize";
-import type { Normalizing } from "./normalize";
+import type { NormalizerState } from "./normalize";
 import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
 import type { Turn } from "./turn";
@@ -283,7 +283,7 @@ export const startAgySession = (
     };
 
     // What the handlers and the session's methods share.
-    let normalizing: Normalizing | undefined;
+    let normalizing: NormalizerState | undefined;
     /** Undefined until `agy` replies to the call that opens the conversation. */
     let nativeSessionId: string | undefined;
     let current: Turn | undefined;
@@ -379,7 +379,7 @@ export const startAgySession = (
             const ended = yield* Effect.timeoutOption(runningTurn.ended, TURN_END_WAIT);
             if (Option.isNone(ended)) yield* runningTurn.abandon;
           }
-          if (normalizing !== undefined) emitEvents(closeProcess(normalizing));
+          if (normalizing !== undefined) emitEvents(buildProcessEndEvents(normalizing));
           emitEvents([{ _tag: "session.exited", ...buildBase(), reason }]);
           Deferred.doneUnsafe(exitedSignal, Effect.void);
         });
@@ -574,7 +574,7 @@ export const startAgySession = (
       const startReading = (id: string) =>
         Effect.sync(() => {
           nativeSessionId = id;
-          normalizing = buildNormalizingState({
+          normalizing = buildNormalizerState({
             sessionId,
             nativeSessionId: id,
             planFilePaths: buildPlanFilePaths(ctx.home, id),

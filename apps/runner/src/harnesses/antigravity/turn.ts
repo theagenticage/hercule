@@ -52,7 +52,7 @@ import {
   markDeclined,
   openTurn,
   releaseTurn,
-  type Normalizing,
+  type NormalizerState,
 } from "./normalize";
 import {
   buildApprovalDecisions,
@@ -93,7 +93,7 @@ export interface TurnContext {
   readonly sessionId: string;
   readonly nativeSessionId: string;
   readonly connection: Pick<AcpConnection, "sendPrompt" | "cancel">;
-  readonly normalizing: Normalizing;
+  readonly normalizing: NormalizerState;
   /** Publishes events on the session's stream, in order. */
   readonly emit: (events: ReadonlyArray<HarnessEvent>) => void;
   /**
@@ -239,7 +239,7 @@ const buildFollowUpText = (toolNames: ReadonlyArray<string | null | undefined>):
  * is left out when the Request has no published Turn to belong to.
  */
 const warnOrphan = (
-  normalizing: Normalizing,
+  normalizing: NormalizerState,
   emit: TurnContext["emit"],
   what: string,
   toolCallId: string | null | undefined,
@@ -264,7 +264,7 @@ const warnOrphan = (
  * `turnId` is the Turn the warning is about, or undefined when there is none.
  */
 export const cancelOrphanApproval = (
-  normalizing: Normalizing,
+  normalizing: NormalizerState,
   emit: TurnContext["emit"],
   request: ApprovalRequest,
   turnId?: string,
@@ -277,7 +277,7 @@ export const cancelOrphanApproval = (
 
 /** Cancels a question Request that belongs to no running item of a Turn, and warns. Returns the reply to send to `agy`. */
 export const cancelOrphanQuestion = (
-  normalizing: Normalizing,
+  normalizing: NormalizerState,
   emit: TurnContext["emit"],
   request: ElicitationRequest,
   turnId?: string,

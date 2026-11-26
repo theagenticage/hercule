@@ -21,7 +21,7 @@ import {
 } from "@hercule/acp";
 import type { HarnessEvent } from "@hercule/protocol";
 import { buildPlanFilePaths } from "./harness-home";
-import { buildNormalizingState, holdTurn, normalizeUpdate } from "./normalize";
+import { buildNormalizerState, holdTurn, normalizeUpdate } from "./normalize";
 import { startTurn } from "./turn";
 
 const FIRST_PROMPT: ReadonlyArray<PromptContent> = [{ type: "text", text: "go" }];
@@ -100,7 +100,7 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
     const events: Array<HarnessEvent> = [];
     const prompts: Array<PromptCall> = [];
     const cancels: Array<string> = [];
-    const normalizing = buildNormalizingState({
+    const normalizing = buildNormalizerState({
       sessionId: "session-1",
       nativeSessionId: "native",
       planFilePaths: buildPlanFilePaths("/tmp", "native"),

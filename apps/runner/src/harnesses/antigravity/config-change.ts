@@ -41,7 +41,7 @@ export interface SettingChange {
 }
 
 /**
- * How `apply` ended, and what `agy` holds afterwards (`held`).
+ * How `apply` ended.
  *
  * - `applied`: `agy` confirmed every change the selection needed.
  * - `cancelled`: the caller gave up after the model, so the level was not asked for.
@@ -51,21 +51,19 @@ export interface SettingChange {
  * - `unconfirmed`: the reply to `change` names no value, so it is not known whether it took.
  */
 export type ApplyOutcome =
-  | { readonly kind: "applied"; readonly held: HeldSelection }
-  | { readonly kind: "cancelled"; readonly held: HeldSelection }
+  | { readonly kind: "applied" }
+  | { readonly kind: "cancelled" }
   | {
       readonly kind: "failed";
       readonly change: SettingChange;
       readonly error: AcpError;
-      readonly held: HeldSelection;
     }
   | {
       readonly kind: "other";
       readonly change: SettingChange;
       readonly named: string;
-      readonly held: HeldSelection;
     }
-  | { readonly kind: "unconfirmed"; readonly change: SettingChange; readonly held: HeldSelection };
+  | { readonly kind: "unconfirmed"; readonly change: SettingChange };
 
 /** An ending of `apply` that is not `applied` or `cancelled`: one change went wrong. */
 export type ApplyFailure = Exclude<ApplyOutcome, { readonly kind: "applied" | "cancelled" }>;
@@ -173,14 +171,14 @@ export const createConfigChange = (
           held = recordConfirmed(options);
           return undefined;
         }
-        if (named === undefined) return { kind: "unconfirmed" as const, change: setting, held };
+        if (named === undefined) return { kind: "unconfirmed" as const, change: setting };
         held = recordNamed(named, options);
-        return { kind: "other" as const, change: setting, named, held };
+        return { kind: "other" as const, change: setting, named };
       }),
       Effect.catch((error: AcpError) => {
         // A refusal means the setting did not change; anything else leaves it unknown.
         if (error.reason === "refused") held = before;
-        return Effect.succeed({ kind: "failed" as const, change: setting, error, held });
+        return Effect.succeed({ kind: "failed" as const, change: setting, error });
       }),
     );
   };
@@ -198,7 +196,7 @@ export const createConfigChange = (
         );
         if (failure !== undefined) return failure;
       }
-      if (isCancelled()) return { kind: "cancelled", held } as const;
+      if (isCancelled()) return { kind: "cancelled" } as const;
       if (effort !== undefined && held.effort !== effort) {
         const heldModel = held.model;
         const failure = yield* change(
@@ -209,7 +207,7 @@ export const createConfigChange = (
         );
         if (failure !== undefined) return failure;
       }
-      return { kind: "applied", held } as const;
+      return { kind: "applied" } as const;
     });
 
   const observe: ConfigChange["observe"] = (options) => {
