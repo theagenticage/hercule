@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Logger from "effect/Logger";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -461,25 +460,6 @@ describe("the skills folder of a session", () => {
         }),
       { fake: { withoutAdditionalDirectoriesCapability: true } },
     ));
-
-  it("fails a start with skills, before agy signs in, when agy does not take additional directories", () => {
-    const skills = createSessionSkills({ library: ["review"] });
-    return run(
-      (h) =>
-        Effect.gen(function* () {
-          const failure = yield* Effect.flip(h.start());
-
-          expect(failure._tag).toBe("AdapterFailed");
-          expect(failure.message).toContain("additionalDirectories");
-          expect(h.harness().received.map((message) => message.method)).toEqual(["initialize"]);
-          expect(yield* h.adapter.listSessions).toEqual([]);
-        }),
-      {
-        fake: { withoutAdditionalDirectoriesCapability: true },
-        context: () => skills.context,
-      },
-    );
-  });
 });
 
 describe("the instructions of a session", () => {
@@ -534,19 +514,18 @@ describe("an input with Skill References", () => {
   const readUserMessageDetail = (h: Harness) =>
     h.tags("item.started").find((event) => event.kind === "user_message")?.detail;
 
-  it("sends a pointer line for each skill with a file, records only those, and warns about the rest", () => {
+  it("sends a pointer line for each skill with a file, records only those, and warns about the rest after the user message", () => {
     const skills = createSessionSkills({ library: ["review", "gone"], withoutFile: ["gone"] });
-    const warnings: Array<string> = [];
-    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(String(message));
-    });
     return run(
       (h) =>
         Effect.gen(function* () {
           yield* h.start();
           const file = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
 
-          yield* h.adapter.sendInput(SESSION, skills.buildInput("do $gone and $review"));
+          const sent = yield* h.adapter.sendInput(
+            SESSION,
+            skills.buildInput("do $gone and $review"),
+          );
           yield* h.untilReceived("session/prompt");
 
           const prompt = h.received("session/prompt")[0]?.params as {
@@ -555,26 +534,17 @@ describe("an input with Skill References", () => {
           expect(prompt.prompt[0]?.text).toContain(JSON.stringify(file));
           // Only the skill that got a line is recorded, because a client draws a chip for each one.
           expect(readUserMessageDetail(h)).toMatchObject({ skills: ["review"] });
-          expect(warnings).toEqual([expect.stringContaining("no pointer for gone")]);
-        }).pipe(Effect.provide(Logger.layer([collecting]))),
-      { fake: { recording: "bad-model" }, context: () => skills.context },
-    );
-  });
-
-  it("sends an input that starts with a slash as typed, and records no skills", () => {
-    const skills = createSessionSkills({ library: ["review"] });
-    return run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-
-          yield* h.adapter.sendInput(SESSION, skills.buildInput("/compact $review"));
-          yield* h.untilReceived("session/prompt");
-
-          expect(h.received("session/prompt")[0]?.params).toMatchObject({
-            prompt: [{ type: "text", text: "/compact $review" }],
-          });
-          expect(readUserMessageDetail(h)).not.toHaveProperty("skills");
+          yield* h.until("reported the warning", () => h.tags("runtime.warning").length > 0);
+          const warnings = h.tags("runtime.warning");
+          expect(warnings.map(({ turnId, message }) => ({ turnId, message }))).toEqual([
+            {
+              turnId: sent.turnId,
+              message:
+                "Hercule could not give Antigravity the skill $gone: its SKILL.md is missing or leads outside the skill's folder. The message was sent without it.",
+            },
+          ]);
+          const tags = h.seen.map((event) => event._tag);
+          expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("item.completed"));
         }),
       { fake: { recording: "bad-model" }, context: () => skills.context },
     );

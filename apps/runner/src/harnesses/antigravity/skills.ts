@@ -3,7 +3,7 @@
  * library skills of the start and the skills of the workspace's checkouts,
  * in the one place `agy` reads skills from for a single session.
  */
-import { mkdir, symlink } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import * as Effect from "effect/Effect";
 import type { AdapterFailed } from "@hercule/protocol";
@@ -14,9 +14,9 @@ import { describeFileFailure, readFolderNames } from "../session-files";
 
 /**
  * Links every skill of the session into `<sessionSkillsFolder>/.agents/skills`
- * and returns the folders to pass to `agy` as additional directories: the
- * session skills folder when the session has any skill, none otherwise. When
- * none is returned, nothing was written.
+ * and returns the session skills folder, to pass to `agy` as an additional
+ * directory. Returns undefined when the session has no skill, and then nothing
+ * was written.
  *
  * Each skill is one relative symbolic link, named after the skill, to its
  * folder in the library skills folder or in a repository skills folder (which
@@ -33,6 +33,15 @@ import { describeFileFailure, readFolderNames } from "../session-files";
  * one session. The runner removes the session skills folder when the session
  * exits.
  *
+ * The folder also gets an empty `.git` file. `agy` walks up from an additional
+ * directory to the nearest git root, as it does from the working directory. If
+ * the runner's storage lies inside a repository (a dotfiles repository in the
+ * user's home, say), that repository's skills, instructions and hooks would
+ * reach every session that has skills. The empty file stops the walk at this
+ * folder. It is the same boundary the runner puts in a workspace root, but
+ * written here with its own error message: the one in `ensureRootBoundary`
+ * names the workspace folder.
+ *
  * Fails with `AdapterFailed`, whose message gives the operating system's
  * reason and no path, when the links cannot be written. This includes a
  * `.agents` folder that already exists: every start and resume gets a fresh
@@ -43,9 +52,9 @@ export const stageAgySkills = (
     HarnessRunnerContext,
     "sessionSkillsFolder" | "librarySkillsFolder" | "repositorySkillsFolders"
   >,
-): Effect.Effect<ReadonlyArray<string>, AdapterFailed> => {
+): Effect.Effect<string | undefined, AdapterFailed> => {
   const { sessionSkillsFolder } = ctx;
-  if (sessionSkillsFolder === undefined) return Effect.succeed([]);
+  if (sessionSkillsFolder === undefined) return Effect.succeed(undefined);
   const linkFolder = join(sessionSkillsFolder, ".agents", "skills");
   const skillsFolders = [ctx.librarySkillsFolder, ...(ctx.repositorySkillsFolders ?? [])].flatMap(
     (folder) => (folder === undefined ? [] : [join(folder, "skills")]),
@@ -61,13 +70,15 @@ export const stageAgySkills = (
           links.push({ name, target: relative(linkFolder, join(skillsFolder, name)) });
         }
       }
-      if (links.length === 0) return [];
+      if (links.length === 0) return undefined;
       // Not recursive, so an existing `.agents` fails the start instead of
       // being merged into.
       await mkdir(join(sessionSkillsFolder, ".agents"));
       await mkdir(linkFolder);
+      // `wx` fails when anything is at the path: the folder is fresh, so nothing should be.
+      await writeFile(join(sessionSkillsFolder, ".git"), "", { flag: "wx" });
       for (const { name, target } of links) await symlink(target, join(linkFolder, name), "dir");
-      return [sessionSkillsFolder];
+      return sessionSkillsFolder;
     },
     catch: (error) => buildAdapterFailed(describeFolderFailure(describeFileFailure(error))),
   });

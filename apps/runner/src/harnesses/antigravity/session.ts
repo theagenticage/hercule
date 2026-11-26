@@ -49,6 +49,7 @@ import {
   buildStartFailure,
 } from "../adapter-error-builders";
 import { readAttachmentBase64 } from "../attachments";
+import { buildSkippedSkillsWarning } from "../events";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
 import { joinInstructions } from "../prompt";
@@ -572,7 +573,7 @@ export const startAgySession = (
     const start = Effect.gen(function* () {
       // Staged before the process exists, so a failure here spawns nothing. A
       // resume stages again: every start has a fresh session skills folder.
-      const additionalDirectories = yield* stageAgySkills(ctx);
+      const skillsFolder = yield* stageAgySkills(ctx);
       // Read on every start, so a resume gets the current text of the files.
       const userInstructions = yield* readUserInstructions(
         ctx.userMaterial?.instructionsFiles ?? [],
@@ -583,7 +584,7 @@ export const startAgySession = (
         purpose: {
           kind: "session",
           accessMode,
-          hasSkillsFolder: additionalDirectories.length > 0,
+          hasSkillsFolder: skillsFolder !== undefined,
         },
       }).pipe(Scope.provide(processScope));
       const connection: AcpConnection = agy.connection;
@@ -591,7 +592,7 @@ export const startAgySession = (
       const instructions = buildInstructions(ctx, spec, userInstructions);
       const request = {
         cwd,
-        additionalDirectories,
+        additionalDirectories: skillsFolder === undefined ? [] : [skillsFolder],
         // The MCP Gateway is handed to `agy` by a later change.
         mcpServers: [],
         ...(instructions === undefined
@@ -729,10 +730,11 @@ export const startAgySession = (
       stopping || generation !== inputGeneration;
 
     /**
-     * Reads the images and sets the model, and returns the prompt for `agy`, the
-     * Skill References its text translated, and the part of `PREPARATION_BUDGET`
-     * that is left for the handoff of the prompt. Logs a warning for each Skill
-     * Reference that got no pointer line. Fails with
+     * Reads the images, sets the model and builds the prompt, and returns the
+     * prompt for `agy`, the Skill References its text translated, the names of
+     * the ones that got no pointer line, and the part of `PREPARATION_BUDGET`
+     * that is left for the handoff of the prompt. Building the prompt counts
+     * against the budget, because it reads the skill files. Fails with
      * `InputNotDelivered` when an interrupt or a stop voids the input, with the
      * failures of the model change, and with `AdapterFailed` when an image cannot
      * be read or the budget runs out.
@@ -744,6 +746,7 @@ export const startAgySession = (
       {
         readonly prompt: ReadonlyArray<PromptContent>;
         readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
+        readonly skippedSkills: ReadonlyArray<string>;
         readonly handoffBudget: Duration.Duration;
       },
       AdapterError
@@ -759,14 +762,19 @@ export const startAgySession = (
           if (changed.kind !== "applied")
             return yield* Effect.fail(buildInputConfigFailure(changed));
         }
+        const { text, translated, skipped } = buildAgyPrompt(input);
         // The last wait before the write is over, so an interrupt that came during it is checked here.
         if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
-        return images;
+        return {
+          prompt: [{ type: "text", text } as const, ...images],
+          skillReferences: translated,
+          skippedSkills: skipped,
+        };
       }).pipe(
         Effect.timeoutOption(PREPARATION_BUDGET),
-        Effect.flatMap((images) =>
-          Option.isSome(images)
-            ? Effect.succeed(images.value)
+        Effect.flatMap((prepared) =>
+          Option.isSome(prepared)
+            ? Effect.succeed(prepared.value)
             : Effect.fail(
                 buildAdapterFailed(
                   `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
@@ -774,21 +782,10 @@ export const startAgySession = (
               ),
         ),
         Effect.timed,
-        Effect.flatMap(([elapsed, images]) =>
-          Effect.gen(function* () {
-            const { text, translated, skipped } = buildAgyPrompt(input);
-            if (skipped.length > 0) {
-              yield* Effect.logWarning(
-                `Gave ${ANTIGRAVITY_NAME} no pointer for ${skipped.join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
-              );
-            }
-            return {
-              prompt: [{ type: "text", text } as const, ...images],
-              skillReferences: translated,
-              handoffBudget: Duration.subtract(PREPARATION_BUDGET, elapsed),
-            };
-          }),
-        ),
+        Effect.map(([elapsed, prepared]) => ({
+          ...prepared,
+          handoffBudget: Duration.subtract(PREPARATION_BUDGET, elapsed),
+        })),
       );
 
     const send: AgySession["send"] = (input) =>
@@ -822,6 +819,7 @@ export const startAgySession = (
               }
               return yield* Effect.fail(buildInputStopped());
             }
+            const { skippedSkills, ...forTurn } = prepared.value;
             // The Turn reserves the place for the input and writes its prompt. It is
             // published only when `agy` is known to have the prompt, so a prompt that
             // could not be written leaves no Turn at all.
@@ -834,7 +832,7 @@ export const startAgySession = (
                 emit: emitEvents,
                 onDeliveryUnknown: endForUnknownDelivery,
               },
-              { input, ...prepared.value },
+              { input, ...forTurn },
             ).pipe(Scope.provide(scope));
             current = turn;
             preparing = false;
@@ -846,8 +844,17 @@ export const startAgySession = (
             }
             const outcome = handoff.value;
             // A proven handoff opens the input even when a stop came meanwhile: failing it would let the controller send it again. The stop then ends the Turn as interrupted.
-            if (outcome.kind === "proven")
+            if (outcome.kind === "proven") {
+              // After the `user_message`, which the Turn published before it proved the handoff.
+              const warning = buildSkippedSkillsWarning({
+                sessionId,
+                turnId: turn.id,
+                harnessName: ANTIGRAVITY_NAME,
+                skippedNames: skippedSkills,
+              });
+              if (warning !== undefined) emitEvents([warning]);
               return { turnId: turn.id, delivery: "opened" } satisfies SendResult;
+            }
             if (outcome.kind === "unknown")
               return yield* Effect.fail(buildHarnessProtocolError(outcome.message));
             return yield* Effect.fail(

@@ -71,7 +71,7 @@ import {
   buildSessionNotRunning,
 } from "../adapter-error-builders";
 import { readAttachmentBase64 } from "../attachments";
-import { buildUserMessage } from "../events";
+import { buildSkippedSkillsWarning, buildUserMessage } from "../events";
 import { joinInstructions } from "../prompt";
 import { applyCredential, formatModelArgument } from "../account";
 import { buildFailedProbe } from "../probe";
@@ -2231,10 +2231,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
         const turnId = (root.state.turnId ??= crypto.randomUUID());
+        const prompt = buildPiPrompt(input, listSkillFolders(held.ctx));
         const response = yield* Effect.tapError(
           root.rpc.send({
             type: steered ? "steer" : "prompt",
-            message: buildPiPrompt(input, listSkillFolders(held.ctx)),
+            message: prompt.text,
             ...(images.length === 0 ? {} : { images }),
           }),
           (failure) =>
@@ -2295,6 +2296,14 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           : userMessage) {
           emit(event);
         }
+        // After the user's message, in the turn the input opened or steered.
+        const warning = buildSkippedSkillsWarning({
+          sessionId,
+          turnId,
+          harnessName: PI_NAME,
+          skippedNames: prompt.skipped,
+        });
+        if (warning !== undefined) emit(warning);
         return { turnId, delivery: steered ? "steered" : "opened" };
       }),
 

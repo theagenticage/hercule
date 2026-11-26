@@ -159,13 +159,22 @@ describe("buildAgyPrompt", () => {
     });
   });
 
-  it("sends an input that starts with a slash as typed, whatever references it has", () => {
+  it("sends a user's input that starts with a slash as typed, whatever references it has", () => {
     const skills = createSkills({ library: ["review"] });
-    const input = skills.buildInput("/compact $review", { senderSessionId: SENDER });
+    const input = skills.buildInput("/compact $review");
     expect(buildAgyPrompt(input)).toEqual({
-      text: buildHarnessPrompt(input),
+      text: "/compact $review",
       translated: [],
       skipped: [],
     });
+  });
+
+  it("gives an input another session sent its pointer lines, because the header comes first", () => {
+    const skills = createSkills({ library: ["review"] });
+    const input = skills.buildInput("/compact $review", { senderSessionId: SENDER });
+    const { text, translated } = buildAgyPrompt(input);
+    expect(buildHarnessPrompt(input).startsWith("/")).toBe(false);
+    expect(text).toContain('[Skill "$review"');
+    expect(translated).toEqual(input.skillReferences);
   });
 });

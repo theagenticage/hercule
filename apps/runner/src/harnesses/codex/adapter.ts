@@ -58,7 +58,7 @@ import type {
 } from "../index";
 import { resolveSkillFile, type ResolvedSkillReference } from "../../skills";
 import { buildFailedProbe } from "../probe";
-import { buildUserMessage } from "../events";
+import { buildSkippedSkillsWarning, buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { readUserInstructions } from "../user-instructions";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
@@ -613,11 +613,14 @@ interface SkillInputs {
   readonly items: ReadonlyArray<UserInput>;
   /** One reference per item, in text order. A reference that got no item is not here. */
   readonly translated: ReadonlyArray<ResolvedSkillReference>;
+  /** The names, as typed, of the skills that got no item, once each in text order. */
+  readonly skipped: ReadonlyArray<string>;
 }
 
 /**
  * Builds one `skill` item per distinct skill the turn's text references, and
- * returns the references that got an item. Codex ignores a plain `$name` in
+ * returns the references that got an item and the names of the skills that
+ * got none. Codex ignores a plain `$name` in
  * the text for a name that has an item, so the item decides which skill the
  * name stands for: the library skill `release` or the repository skill
  * `webshop:release`, which Codex also knows as `release`.
@@ -640,15 +643,19 @@ const buildSkillInputs = (references: ReadonlyArray<ResolvedSkillReference>): Sk
   const seen = new Set<string>();
   const items: Array<UserInput> = [];
   const translated: Array<ResolvedSkillReference> = [];
+  const skipped: Array<string> = [];
   for (const reference of references) {
     if (seen.has(reference.folder)) continue;
     seen.add(reference.folder);
     const path = resolveSkillFile(reference.folder);
-    if (path === undefined) continue;
+    if (path === undefined) {
+      skipped.push(reference.referenceName);
+      continue;
+    }
     items.push({ type: "skill", name: reference.skillName, path });
     translated.push(reference);
   }
-  return { items, translated };
+  return { items, translated, skipped };
 };
 
 /**
@@ -1630,7 +1637,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         sessions.get(sessionId) === held &&
         held.asyncQuestions.get(question.requestId) === question;
       return Effect.uninterruptible(
-        Effect.matchEffect(deliverInput(held, input, { items: [], translated: [] }), {
+        Effect.matchEffect(deliverInput(held, input, { items: [], translated: [], skipped: [] }), {
           onFailure: (failure) => {
             // Only a failure of the connection leaves it unknown whether Codex took the input.
             const maybeDelivered = failure._tag === "HarnessProtocolError";
@@ -1938,14 +1945,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
-        const references = input.skillReferences ?? [];
-        const skills = buildSkillInputs(references);
-        const skipped = new Set(references.map((reference) => reference.referenceName));
-        for (const reference of skills.translated) skipped.delete(reference.referenceName);
-        if (skipped.size > 0)
-          yield* Effect.logWarning(
-            `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
-          );
+        const skills = buildSkillInputs(input.skillReferences ?? []);
         const sent = yield* deliverInput(held, input, skills);
         for (const event of sessions.get(sessionId) !== held
           ? []
@@ -1961,6 +1961,17 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             })) {
           emit(event);
         }
+        // After the user's message, in the turn the input opened or steered.
+        const warning =
+          sessions.get(sessionId) !== held
+            ? undefined
+            : buildSkippedSkillsWarning({
+                sessionId,
+                turnId: sent.turnId,
+                harnessName: CODEX_NAME,
+                skippedNames: skills.skipped,
+              });
+        if (warning !== undefined) emit(warning);
         return sent;
       }),
 

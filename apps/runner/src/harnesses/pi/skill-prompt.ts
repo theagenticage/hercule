@@ -17,7 +17,7 @@ import { lstatSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { AdapterTurnInput } from "../index";
 import { buildHarnessPrompt } from "../prompt";
-import type { ResolvedSkillReference } from "../../skills/references";
+import { resolveSkillFile, type ResolvedSkillReference } from "../../skills/references";
 
 /**
  * Returns the folder of the skill pi loads under `name`, or undefined when
@@ -59,15 +59,24 @@ const removeReference = (text: string, reference: ResolvedSkillReference): strin
 };
 
 /**
- * Returns the line that points the model at a skill pi does not run itself.
- * It has the same bracket form as the line for an attached image.
+ * Returns the line that points the model at a skill pi does not run itself,
+ * or undefined when `resolveSkillFile` finds no usable `SKILL.md` for it. It
+ * has the same bracket form as the line for an attached image.
  */
-const buildSkillPointer = (reference: ResolvedSkillReference): string =>
-  `[Skill "$${reference.referenceName}" is at ${join(reference.folder, "SKILL.md")}. Read it with the read tool and follow it.]`;
+const buildSkillPointer = (reference: ResolvedSkillReference): string | undefined => {
+  const skillFile = resolveSkillFile(reference.folder);
+  return skillFile === undefined
+    ? undefined
+    : `[Skill "$${reference.referenceName}" is at ${skillFile}. Read it with the read tool and follow it.]`;
+};
 
 /**
- * Returns the message text to send pi for an input. An input without Skill
- * References gets exactly `buildHarnessPrompt(input)`.
+ * Returns the message text to send pi for an input, and the names of the
+ * skills that got a pointer line in no form: their `SKILL.md` is missing or
+ * leads outside the skill's folder. The caller tells the user about those. The
+ * leading `/skill:<name>` command needs no file check, because pi loaded that
+ * skill itself. An input without Skill References gets exactly
+ * `buildHarnessPrompt(input)` and skips nothing.
  *
  * With references, the message is built from these parts:
  *
@@ -78,8 +87,9 @@ const buildSkillPointer = (reference: ResolvedSkillReference): string =>
  *   candidate, and the next reference may lead instead. The token of the
  *   leading skill is removed from the text.
  * - the prompt `buildHarnessPrompt` builds: sender header, text, image lines;
- * - one pointer line for each other skill, once per skill, in text order. The
- *   `$name` tokens of those skills stay in the text as typed. A second token
+ * - one pointer line for each other skill that has a usable `SKILL.md`, once
+ *   per skill, in text order. The `$name` tokens of those skills stay in the
+ *   text as typed, also when the skill gets no line. A second token
  *   of the leading skill stays in the text and gets no pointer, because pi
  *   already expanded that skill.
  *
@@ -92,9 +102,9 @@ const buildSkillPointer = (reference: ResolvedSkillReference): string =>
 export const buildPiPrompt = (
   input: AdapterTurnInput,
   stagedFolders: ReadonlyArray<string>,
-): string => {
+): { readonly text: string; readonly skipped: ReadonlyArray<string> } => {
   const references = input.skillReferences ?? [];
-  if (references.length === 0) return buildHarnessPrompt(input);
+  if (references.length === 0) return { text: buildHarnessPrompt(input), skipped: [] };
   // One skill is referenced by one name, so the first token of each name is
   // enough to decide the leading skill and to build the pointers. This keeps
   // the folder lookups to one per skill, however often the text repeats it.
@@ -111,12 +121,17 @@ export const buildPiPrompt = (
     input,
     leading === undefined ? input.text : removeReference(input.text, leading),
   );
-  const pointers = [...firstTokens.values()]
-    .filter((reference) => reference !== leading)
-    .map(buildSkillPointer)
-    .join("\n");
+  const lines: Array<string> = [];
+  const skipped: Array<string> = [];
+  for (const reference of firstTokens.values()) {
+    if (reference === leading) continue;
+    const line = buildSkillPointer(reference);
+    if (line === undefined) skipped.push(reference.referenceName);
+    else lines.push(line);
+  }
+  const pointers = lines.join("\n");
   const body = pointers === "" ? prompt : prompt === "" ? pointers : `${prompt}\n\n${pointers}`;
-  if (leading === undefined) return body;
+  if (leading === undefined) return { text: body, skipped };
   const command = `/skill:${leading.skillName}`;
-  return body === "" ? command : `${command} ${body}`;
+  return { text: body === "" ? command : `${command} ${body}`, skipped };
 };

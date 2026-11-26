@@ -1303,6 +1303,40 @@ describe("what an input does to a Codex session", () => {
       expect(reported?.detail).toEqual({ text: "$review $gone", skills: ["review"] });
     });
 
+    it("warns the user, after the user message, about a skill it gave Codex no item for", async () => {
+      const review = stageLibrarySkill("review");
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startTestSession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "$review $gone", skillReferences: [review, gone] }),
+      );
+
+      const warnings = filterByTag(run.seen, "runtime.warning");
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          turnId: sent.turnId,
+          message:
+            "Hercule could not give Codex the skill $gone: its SKILL.md is missing or leads outside the skill's folder. The message was sent without it.",
+        }),
+      ]);
+      const tags = run.seen.map((event) => event._tag);
+      expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.lastIndexOf("item.completed"));
+    });
+
+    it("sends no warning when every skill got an item", async () => {
+      const run = await startTestSession();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "$review",
+          skillReferences: [stageLibrarySkill("review")],
+        }),
+      );
+
+      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+    });
+
     it("refuses to steer an input with a skill into a running turn, before it changes anything", async () => {
       const review = stageLibrarySkill("review");
       const run = await startBusySession();

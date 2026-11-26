@@ -7,7 +7,7 @@
  * (`findSkillReferences`). This file only decides which tokens name a skill of
  * the session.
  */
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { findSkillReferences } from "@hercule/protocol";
 import type { ListedRepositorySkill } from "./repository";
@@ -112,11 +112,11 @@ export function resolveSkillReferences(
 
 /**
  * Returns the real path of `<folder>/SKILL.md`, with every symbolic link
- * resolved. Returns undefined when the file does not exist, or when it
- * resolves to a file outside the real `folder`, such as a `SKILL.md` that is a
- * link to another file the user can read. A skill folder that is itself a
- * symbolic link is fine, because the file is compared with the resolved
- * folder.
+ * resolved. Returns undefined when the file does not exist, when it is not a
+ * regular file (a folder named `SKILL.md`, for example), or when it resolves
+ * to a file outside the real `folder`, such as a `SKILL.md` that is a link to
+ * another file the user can read. A skill folder that is itself a symbolic
+ * link is fine, because the file is compared with the resolved folder.
  *
  * Adapters call this before they point a harness at a skill file, so a
  * pointer never hands the harness a path outside the skill.
@@ -124,7 +124,8 @@ export function resolveSkillReferences(
 export function resolveSkillFile(folder: string): string | undefined {
   try {
     const path = realpathSync(join(folder, "SKILL.md"));
-    return path === join(realpathSync(folder), "SKILL.md") ? path : undefined;
+    if (path !== join(realpathSync(folder), "SKILL.md")) return undefined;
+    return statSync(path).isFile() ? path : undefined;
   } catch {
     return undefined;
   }

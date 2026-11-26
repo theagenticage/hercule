@@ -5,7 +5,7 @@
  */
 import type { AttachmentReference, HarnessEvent, SubagentId } from "@hercule/protocol";
 import { now } from "../report";
-import { truncateFact } from "./text";
+import { truncateFact, truncateMessage } from "./text";
 
 /**
  * Returns `given` truncated to the length the protocol allows, or a new random
@@ -83,4 +83,38 @@ export const buildUserMessage = (input: {
     { _tag: "item.started", eventId: crypto.randomUUID(), ...item },
     { _tag: "item.completed", eventId: crypto.randomUUID(), ...item, status: "completed" },
   ];
+};
+
+/**
+ * Returns the `runtime.warning` that tells the user a harness did not get some
+ * skills an input named, or undefined when `skippedNames` is empty. An adapter
+ * skips a skill when its `SKILL.md` is missing or leads outside the skill's
+ * folder. The message was still sent, so the warning says it went without the
+ * skills.
+ *
+ * `skippedNames` are the references as typed, such as `review` or
+ * `webshop:release`. One warning lists all of them, so an input gets at most
+ * one. The warning belongs to `turnId`, the turn the input opened or steered,
+ * and an adapter emits it after that input's `user_message`.
+ */
+export const buildSkippedSkillsWarning = (input: {
+  readonly sessionId: string;
+  readonly turnId: string;
+  /** The harness's display name, such as `Codex`. */
+  readonly harnessName: string;
+  readonly skippedNames: ReadonlyArray<string>;
+}): HarnessEvent | undefined => {
+  if (input.skippedNames.length === 0) return undefined;
+  const plural = input.skippedNames.length > 1;
+  const names = input.skippedNames.map((name) => `$${name}`).join(", ");
+  return {
+    _tag: "runtime.warning",
+    eventId: crypto.randomUUID(),
+    sessionId: input.sessionId,
+    at: now(),
+    turnId: input.turnId,
+    message: truncateMessage(
+      `Hercule could not give ${input.harnessName} the ${plural ? "skills" : "skill"} ${names}: ${plural ? "their SKILL.md files are" : "its SKILL.md is"} missing or ${plural ? "lead" : "leads"} outside the skill's folder. The message was sent without ${plural ? "them" : "it"}.`,
+    ),
+  };
 };

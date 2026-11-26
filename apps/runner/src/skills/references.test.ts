@@ -129,6 +129,12 @@ describe("resolveSkillFile", () => {
     expect(resolveSkillFile(join(root, "missing"))).toBeUndefined();
   });
 
+  it("returns undefined when SKILL.md is a folder", () => {
+    const folder = join(root, "folder-skill");
+    mkdirSync(join(folder, "SKILL.md"), { recursive: true });
+    expect(resolveSkillFile(folder)).toBeUndefined();
+  });
+
   it("returns undefined when SKILL.md is a link to a file outside the folder", () => {
     const folder = join(root, "escaping");
     mkdirSync(folder);

@@ -70,9 +70,17 @@ const readLinkedSkill = (ctx: SkillsContext, name: string): string =>
 describe("stageAgySkills", () => {
   it("links the library skills and returns the session skills folder", async () => {
     const ctx = createSession({ library: ["review", "release"] });
-    expect(await stage(ctx)).toEqual([ctx.sessionSkillsFolder]);
+    expect(await stage(ctx)).toBe(ctx.sessionSkillsFolder);
     expect(listLinked(ctx)).toEqual(["release", "review"]);
     expect(readLinkedSkill(ctx, "review")).toBe("library review\n");
+  });
+
+  it("puts an empty .git file in the folder, so agy does not walk up into a parent repository", async () => {
+    const ctx = createSession({ library: ["review"] });
+    await stage(ctx);
+    const boundary = join(ctx.sessionSkillsFolder!, ".git");
+    expect(lstatSync(boundary).isFile()).toBe(true);
+    expect(readFileSync(boundary, "utf8")).toBe("");
   });
 
   it("links with relative links, so the folder can be read from any path", async () => {
@@ -95,7 +103,7 @@ describe("stageAgySkills", () => {
         { checkout: "api", skills: ["migrate"] },
       ],
     });
-    expect(await stage(ctx)).toEqual([ctx.sessionSkillsFolder]);
+    expect(await stage(ctx)).toBe(ctx.sessionSkillsFolder);
     expect(listLinked(ctx)).toEqual(["deploy", "migrate"]);
     expect(readLinkedSkill(ctx, "deploy")).toBe("webshop deploy\n");
     expect(readLinkedSkill(ctx, "migrate")).toBe("api migrate\n");
@@ -122,13 +130,14 @@ describe("stageAgySkills", () => {
       repositories: [{ checkout: "x", skills: [] }],
     });
     for (const ctx of [noFolders, emptyFolders]) {
-      expect(await stage(ctx)).toEqual([]);
+      expect(await stage(ctx)).toBeUndefined();
       expect(existsSync(join(ctx.sessionSkillsFolder!, ".agents"))).toBe(false);
+      expect(existsSync(join(ctx.sessionSkillsFolder!, ".git"))).toBe(false);
     }
   });
 
   it("returns nothing when the session has no session skills folder", async () => {
-    expect(await stage({})).toEqual([]);
+    expect(await stage({})).toBeUndefined();
   });
 
   it("fails without a path in the message when the links cannot be written", async () => {

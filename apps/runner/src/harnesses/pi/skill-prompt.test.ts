@@ -3,7 +3,7 @@
  * staged skill folders, and through the adapter for both ways an input
  * reaches pi.
  */
-import { mkdirSync, symlinkSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -15,6 +15,7 @@ import { buildPiPrompt } from "./skill-prompt";
 import {
   cleanupHomes,
   createPiHome,
+  filterByTag,
   listSentCommands,
   SESSION,
   SPEC,
@@ -36,11 +37,16 @@ const HEADER = `[Message from session ${SENDER}, another agent. To reply: hercul
 const stageSkills = (options: {
   readonly library: ReadonlyArray<string>;
   readonly repositories: ReadonlyArray<{ checkout: string; skills: ReadonlyArray<string> }>;
+  /** Library skills that have no `SKILL.md`. */
+  readonly withoutFile?: ReadonlyArray<string>;
 }) => {
   const root = createPiHome();
   const libraryFolder = join(root, "session-skills");
-  for (const name of options.library)
+  for (const name of options.library) {
     mkdirSync(join(libraryFolder, "skills", name), { recursive: true });
+    if (!options.withoutFile?.includes(name))
+      writeFileSync(join(libraryFolder, "skills", name, "SKILL.md"), "# skill\n");
+  }
   const repositorySkillsFolders: Array<string> = [];
   const repositorySkills: Array<{ checkoutName: string; name: string; absolutePath: string }> = [];
   for (const { checkout, skills } of options.repositories) {
@@ -49,6 +55,7 @@ const stageSkills = (options: {
     for (const name of skills) {
       const absolutePath = join(root, "checkouts", checkout, ".agents", "skills", name);
       mkdirSync(absolutePath, { recursive: true });
+      writeFileSync(join(absolutePath, "SKILL.md"), "# skill\n");
       symlinkSync(absolutePath, join(staged, "skills", name), "dir");
       repositorySkills.push({ checkoutName: checkout, name, absolutePath });
     }
@@ -69,7 +76,9 @@ const stageSkills = (options: {
       ...rest,
     }),
     buildPrompt: (input: AdapterTurnInput) =>
-      buildPiPrompt(input, [libraryFolder, ...repositorySkillsFolders]),
+      buildPiPrompt(input, [libraryFolder, ...repositorySkillsFolders]).text,
+    buildSkipped: (input: AdapterTurnInput) =>
+      buildPiPrompt(input, [libraryFolder, ...repositorySkillsFolders]).skipped,
     findSkillFolder: (referenceName: string) => loaded.get(referenceName)!.folder,
   };
 };
@@ -196,7 +205,57 @@ describe("building the prompt for pi", () => {
   });
 });
 
+describe("a skill pi is only pointed at", () => {
+  it("gets no pointer line, and is reported, when its SKILL.md is missing", () => {
+    const staged = stageSkills({
+      library: ["review", "deploy", "lint"],
+      repositories: [],
+      withoutFile: ["deploy"],
+    });
+    const input = staged.buildInput("$review then $deploy and $lint");
+
+    expect(staged.buildPrompt(input)).toBe(
+      `/skill:review then $deploy and $lint\n\n[Skill "$lint" is at ${join(staged.findSkillFolder("lint"), "SKILL.md")}. Read it with the read tool and follow it.]`,
+    );
+    expect(staged.buildSkipped(input)).toEqual(["deploy"]);
+  });
+
+  it("gets no pointer line when its SKILL.md is a folder", () => {
+    const staged = stageSkills({ library: ["review", "deploy"], repositories: [] });
+    const input = staged.buildInput("$review then $deploy");
+    const file = join(staged.findSkillFolder("deploy"), "SKILL.md");
+    rmSync(file);
+    mkdirSync(file);
+
+    expect(staged.buildPrompt(input)).toBe("/skill:review then $deploy");
+    expect(staged.buildSkipped(input)).toEqual(["deploy"]);
+  });
+});
+
 describe("sending an input with Skill References to pi", () => {
+  it("warns the user, after the user message, about a skill it gave no pointer line", async () => {
+    const staged = stageSkills({
+      library: ["review", "gone"],
+      repositories: [],
+      withoutFile: ["gone"],
+    });
+    const run = await startTestSession({}, SPEC, {}, { librarySkillsFolder: staged.libraryFolder });
+
+    const sent = await Effect.runPromise(
+      run.adapter.sendInput(SESSION, staged.buildInput("$review and $gone")),
+    );
+
+    expect(filterByTag(run.seen, "runtime.warning")).toEqual([
+      expect.objectContaining({
+        turnId: sent.turnId,
+        message:
+          "Hercule could not give pi the skill $gone: its SKILL.md is missing or leads outside the skill's folder. The message was sent without it.",
+      }),
+    ]);
+    const tags = run.seen.map((event) => event._tag);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.lastIndexOf("item.completed"));
+  });
+
   for (const [command, start] of [
     ["prompt", startTestSession],
     ["steer", startBusySession],
