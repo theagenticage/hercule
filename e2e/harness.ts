@@ -238,7 +238,8 @@ export const LOGIN_DEADLINE_MS = 120_000;
 /** What a runner reported about one Provider Account in one harness when it last probed it. */
 export interface Snapshot {
   readonly auth: { readonly status: string; readonly message?: string };
-  readonly models: ReadonlyArray<{ readonly slug: string }>;
+  /** `imageInput` is `null` for a model that takes no images. */
+  readonly models: ReadonlyArray<{ readonly slug: string; readonly imageInput?: unknown }>;
 }
 
 /** A Provider Account as `providerAccount.query` returns it. */
@@ -873,6 +874,12 @@ export interface PreparedHarness {
   readonly model: string | undefined;
   /** The Access Mode its Threads start in when a test names none, or `undefined` for the default. */
   readonly accessMode: string | undefined;
+  /**
+   * Whether `model` takes images, as the runner's model list declares it. It is
+   * `true` when no model was picked, because the account's default model is
+   * not known here. The controller refuses an image for a model that takes none.
+   */
+  readonly modelTakesImages: boolean;
 }
 
 /**
@@ -903,7 +910,9 @@ export async function prepareHarness(
     harnessId: harness.harnessId,
   });
   const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
+  const picked = snapshot.models.find((one) => one.slug === model);
   return {
+    modelTakesImages: picked === undefined || picked.imageInput !== null,
     providerAccountId: account.id,
     harnessId: harness.harnessId,
     model,

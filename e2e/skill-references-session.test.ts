@@ -450,6 +450,11 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
           ctx.skip(skipReason);
           return;
         }
+        if (!prepared.modelTakesImages) {
+          // The controller refuses an image for a model that declares none.
+          ctx.skip(`the model ${prepared.model} takes no images (imageInput is null)`);
+          return;
+        }
         const text = "$alpha $bravo what colour is the image? Answer in one short sentence.";
         // Full access, because a model may read the skill files before it
         // answers, and in approval-required mode that read waits for a person
