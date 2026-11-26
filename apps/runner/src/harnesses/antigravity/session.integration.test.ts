@@ -1156,6 +1156,39 @@ describe.skipIf(skipReason !== undefined)(
       );
 
       it(
+        "in Approval required denies the browser agent with Hercule's reason, and no npm exec runs",
+        async () => {
+          // The agent gets a PATH with node and npx, so the launcher could run if the hook let it.
+          const session = await startLiveSession({
+            accessMode: "approval-required",
+            context: {
+              env: {
+                ...buildProbeEnvironment(),
+                PATH: `${process.env["PATH"] ?? ""}:/usr/bin:/bin`,
+                [SESSION_TOKEN_VARIABLE]: TEST_SESSION_TOKEN,
+              },
+            },
+          });
+          const turn = await runTurn(
+            session,
+            "/browser open https://example.com and tell me its title",
+          );
+          const why = dumpEvents(session.id);
+
+          const subagent = turn.events.find(
+            (event): event is Event<"item.completed"> =>
+              event._tag === "item.completed" && event.kind === "subagent",
+          );
+          expect(subagent?.status, why).toBe("failed");
+          expect(JSON.stringify(subagent?.detail), why).toContain("The browser agent is off in");
+          // `npm exec` unpacks the launcher under the HOME of the agent.
+          expect(existsSync(join(userHome, ".npm", "_npx")), why).toBe(false);
+          expect(turn.completed.state, why).toBe("completed");
+        },
+        TEST_MS,
+      );
+
+      it(
         "lets a command through that a workspace hook approves, and still denies a guarded write while that hook says auto_approve",
         async () => {
           const cwd = makeScratchFolderOutsideTemp("work");

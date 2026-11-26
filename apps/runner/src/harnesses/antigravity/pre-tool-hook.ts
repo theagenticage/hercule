@@ -1,8 +1,8 @@
 /**
  * `hercule antigravity-pre-tool-hook`: the pre-tool hook of an `agy` session
  * (spec 06 section 8.1). The hooks file in the Harness Home runs it before
- * every `run_command`, `edit_file`, `write_file` and `search_web`, and the
- * tool waits for it. `agy` writes the call as one JSON document on stdin; the
+ * every `run_command`, `edit_file`, `write_file`, `search_web`,
+ * `invoke_subagent` and chrome-devtools call, and the tool waits for it. `agy` writes the call as one JSON document on stdin; the
  * hook prints a denial as JSON, or nothing to let the call run. It always
  * exits 0.
  *
@@ -11,10 +11,12 @@
  * reads the rules from `HOOK_RULES_VARIABLE` and decides what each Access
  * Mode denies:
  * - Full access: nothing.
- * - Approval required: web search, and every change to a guarded place.
- * - Every other mode: every change to a guarded place.
+ * - Approval required: web search, the browser agent, and every change to a
+ *   guarded place.
+ * - Auto-accept edits: the browser agent, and every change to a guarded place.
  * A rules value that is missing or does not decode is Hercule's own setup
- * being wrong, so the hook denies every edit and every web search, and says so.
+ * being wrong, so the hook denies every edit, every web search and every
+ * browser call, and says so.
  *
  * One call goes through one straight line: read the rules, decode the call,
  * take the edit-watch mark (spec 19 section 4.1), then decide. The mark is
@@ -117,16 +119,33 @@ export const decodeHookRules = (text: string): HookRules | undefined => {
  * - `shell`: runs a command. Marked, and never denied: `agy` asks about it.
  * - `edit`: changes the file at `Path`. Marked, and denied in a guarded place.
  * - `search`: searches the web. Not marked.
+ * - `subagent`: starts a subagent. Not marked. Denied only for the browser
+ *   agent (`TypeName` "browser"); every other subagent runs.
+ * - `browser`: a chrome-devtools call, matched by `BROWSER_TOOL_PREFIX`. Not
+ *   marked, and denied outside Full access.
  */
-const TOOLS: ReadonlyMap<string, "shell" | "edit" | "search"> = new Map([
+type ToolKind = "shell" | "edit" | "search" | "subagent" | "browser";
+
+const TOOLS: ReadonlyMap<string, ToolKind> = new Map([
   ["run_command", "shell"],
   ["edit_file", "edit"],
   ["write_file", "edit"],
   ["search_web", "search"],
+  ["invoke_subagent", "subagent"],
 ]);
 
+/**
+ * The start of the name of every tool of the chrome-devtools MCP server, which
+ * the browser agent drives. Measured on `agy` 1.5.15: `mcp_chrome_devtools_list_pages`.
+ */
+const BROWSER_TOOL_PREFIX = "mcp_chrome_devtools_";
+
+/** Returns the kind of the tool `name`, or undefined for a tool the hook does not know. */
+const classifyTool = (name: string): ToolKind | undefined =>
+  name.startsWith(BROWSER_TOOL_PREFIX) ? "browser" : TOOLS.get(name);
+
 /** The tools the hooks file runs the hook for, as the regular expression `agy` matches tool names against. */
-const HOOK_MATCHER = [...TOOLS.keys()].join("|");
+const HOOK_MATCHER = [...TOOLS.keys(), `${BROWSER_TOOL_PREFIX}.*`].join("|");
 
 /**
  * Returns the hooks file of the Harness Home: one `PreToolUse` hook, for the
@@ -230,6 +249,10 @@ const BAD_RULES_REASON =
 const CHECK_FAILED_REASON =
   "Hercule's check of this tool call failed, so it cannot allow it. Ask the user, or switch the thread to Full access.";
 
+/** Returns the reason for a browser call denied in `mode`, spelled as the app spells it. */
+const buildBrowserReason = (mode: "approval-required" | "auto-accept-edits"): string =>
+  `The browser agent is off in ${mode === "approval-required" ? "Approval required" : "Auto-accept edits"}: it acts in your own Chrome, with your logins, and Hercule cannot ask you first. Switch the thread to Full access to use it.`;
+
 const WEB_SEARCH_REASON =
   "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.";
 
@@ -285,8 +308,10 @@ const decodeCall = (input: RawInput): DecodedCall | undefined => {
 const takeMark = (call: DecodedCall, env: Readonly<Record<string, string | undefined>>): void => {
   try {
     const marksDir = env[SESSION_MARKS_DIR_VARIABLE];
-    const kind = TOOLS.get(call.name);
-    if (!marksDir || kind === undefined || kind === "search" || !SAFE_ID.test(call.id)) return;
+    const kind = classifyTool(call.name);
+    if (!marksDir || (kind !== "shell" && kind !== "edit") || !SAFE_ID.test(call.id)) {
+      return;
+    }
     const command = call.args["CommandLine"];
     const content =
       kind === "shell" && typeof command === "string" && command !== ""
@@ -606,6 +631,24 @@ const isTargetInPlace = (target: EditTarget, place: GuardedPlace): boolean => {
 };
 
 /**
+ * Returns whether the call starts or drives the browser agent: a
+ * chrome-devtools call, or `invoke_subagent` with `TypeName` "browser". The
+ * `TypeName` is compared without the whitespace Go trims and without case, as
+ * `agy` may do either (not measured). `Role` is free text the model writes, so
+ * it is never read.
+ */
+const isBrowserCall = (call: DecodedCall): boolean => {
+  const kind = classifyTool(call.name);
+  if (kind === "browser") return true;
+  const typeName = call.args["TypeName"];
+  return (
+    kind === "subagent" &&
+    typeof typeName === "string" &&
+    foldSpelling(typeName.replace(GO_SPACE_AT_ENDS, "")) === "browser"
+  );
+};
+
+/**
  * Decides what the hook answers for an edit tool call in a guarded session: a
  * denial, or undefined to let it run. Denies when the call has no text `Path`
  * and when the guarded places cannot be listed. Throws on any other failure.
@@ -638,7 +681,8 @@ const decideEdit = (
  * Rules that are missing or do not decode (`rules` undefined) deny every edit
  * tool call (guarded place or not), every web search and every call that could
  * not be decoded, with a reason that says the setup is wrong. A shell command
- * runs, because `agy` asks about it.
+ * runs, because `agy` asks about it. In Approval required and Auto-accept
+ * edits the browser agent is denied, whatever the rules say.
  */
 const decide = (
   call: DecodedCall | undefined,
@@ -647,15 +691,16 @@ const decide = (
   env: Readonly<Record<string, string | undefined>>,
 ): HookDenial | undefined => {
   if (rules?.accessMode === "full-access") return undefined;
-  const kind = call === undefined ? undefined : TOOLS.get(call.name);
+  const kind = call === undefined ? undefined : classifyTool(call.name);
   if (rules === undefined) {
-    return call === undefined || kind === "edit" || kind === "search"
+    return call === undefined || kind === "edit" || kind === "search" || isBrowserCall(call)
       ? deny(BAD_RULES_REASON)
       : undefined;
   }
   if (call === undefined) {
     return deny(input === INPUT_TOO_LARGE ? TOO_LARGE_REASON : UNREADABLE_REASON);
   }
+  if (isBrowserCall(call)) return deny(buildBrowserReason(rules.accessMode));
   if (kind === "search") {
     return rules.accessMode === "approval-required" ? deny(WEB_SEARCH_REASON) : undefined;
   }

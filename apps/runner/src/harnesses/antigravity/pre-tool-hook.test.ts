@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { takeStartMarks } from "../../edit-marks";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks/mark-format";
 import { cleanupHomes, createScratchHome } from "../testing";
 import { HOOK_RULES_VARIABLE, answerPreToolCall, encodeHookRules } from "./pre-tool-hook";
 import type { HookRules } from "./pre-tool-hook";
@@ -150,6 +151,64 @@ describe("the policy inputs", () => {
     expect(answerPreToolCall(search, FULL)).toBe("");
   });
 
+  describe("the browser agent", () => {
+    const subagent = (typeName: unknown) =>
+      hookInput("/work", {
+        args: { Prompt: "x", Role: "Web Browser", TypeName: typeName },
+        id: "call_8",
+        name: "invoke_subagent",
+      });
+    const chromeCall = hookInput("/work", {
+      args: { toolSummary: "List open pages" },
+      id: "call_9",
+      name: "mcp_chrome_devtools_list_pages",
+    });
+
+    it.each([
+      ["Approval required", APPROVAL],
+      ["Auto-accept edits", GUARDED],
+    ])("denies both ways in to it in %s, with a reason that says what to do", (mode, env) => {
+      for (const input of [subagent("browser"), chromeCall]) {
+        const reason = readReason(answerPreToolCall(input, env));
+        expect(reason).toBe(
+          `The browser agent is off in ${mode}: it acts in your own Chrome, with your logins, and Hercule cannot ask you first. Switch the thread to Full access to use it.`,
+        );
+      }
+    });
+
+    it("allows both in Full access", () => {
+      expect(answerPreToolCall(subagent("browser"), FULL)).toBe("");
+      expect(answerPreToolCall(chromeCall, FULL)).toBe("");
+    });
+
+    it.each([" Browser ", "BROWSER", "browser\n", "\u0085browser\u00A0"])(
+      "denies TypeName %j",
+      (typeName) => {
+        expect(isDenied(answerPreToolCall(subagent(typeName), GUARDED))).toBe(true);
+      },
+    );
+
+    it("allows every other subagent, and writes no mark for it", () => {
+      const marks = createScratchHome("marks");
+      const env = { ...APPROVAL, [SESSION_MARKS_DIR_VARIABLE]: marks };
+
+      for (const typeName of ["general", "", undefined, 5, "browser agent"]) {
+        expect(answerPreToolCall(subagent(typeName), env)).toBe("");
+      }
+      expect(readdirSync(marks)).toEqual([]);
+    });
+
+    it("denies a subagent call it cannot decode, with the reason for an unreadable call", () => {
+      const undecodable = JSON.stringify({
+        cwd: "/work",
+        toolCall: { id: "c", name: "invoke_subagent", args: "TypeName=browser" },
+      });
+
+      expect(readReason(answerPreToolCall(undecodable, GUARDED))).toContain("could not read");
+      expect(answerPreToolCall(undecodable, FULL)).toBe("");
+    });
+  });
+
   it("allows everything in Full access, and only there", () => {
     const { cwd } = setUpRepo();
 
@@ -189,6 +248,10 @@ describe("the policy inputs", () => {
       for (const answer of [
         answerPreToolCall(editInput(cwd, "src/a.ts"), env),
         answerPreToolCall(search, env),
+        answerPreToolCall(
+          hookInput(cwd, { args: { TypeName: "browser" }, id: "c", name: "invoke_subagent" }),
+          env,
+        ),
         answerPreToolCall("not json", env),
       ]) {
         expect(readReason(answer)).toContain("own setup for this session is wrong");

@@ -1171,7 +1171,7 @@ describe("the pre-tool hook of a session", () => {
     expect(readFileSync(target, "utf8")).toBe("{}");
     expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     expect((JSON.parse(hooks) as HooksFile).hercule.PreToolUse[0]!.matcher).toBe(
-      "run_command|edit_file|write_file|search_web",
+      "run_command|edit_file|write_file|search_web|invoke_subagent|mcp_chrome_devtools_.*",
     );
     expect(hooks).not.toContain("agy-marks");
   });

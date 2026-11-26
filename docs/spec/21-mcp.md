@@ -163,7 +163,7 @@ The `instructions` of the server are one first line that names the servers insid
 
 ### 3.3 What a session sees
 
-*(Amended 2026-11-26, [#1282](https://github.com/theagenticage/hercule/issues/1282).)* On Antigravity, a stdio MCP server that a repository's own `mcp_config.json` lists starts with no card, and the pre-tool hook guards the file against the agent's own edits only. [./06-providers.md](./06-providers.md) section 8.1 holds the detail.
+*(Amended 2026-11-26, [#1282](https://github.com/theagenticage/hercule/issues/1282).)* On Antigravity, a stdio MCP server that a repository's own `mcp_config.json` lists starts with no card, and the pre-tool hook guards the file against the agent's own edits only. *(Amended 2026-11-26, [#1282](https://github.com/theagenticage/hercule/issues/1282).)* The chrome-devtools MCP server that `agy`'s own browser agent starts is another that runs with no card: the hook denies that agent outside Full access (section 8.1, Exception 3). [./06-providers.md](./06-providers.md) section 8.1 holds the detail.
 
 One live rule decides what a session sees:
 
