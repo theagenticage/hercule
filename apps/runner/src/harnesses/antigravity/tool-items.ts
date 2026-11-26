@@ -58,6 +58,9 @@ export type ApprovalDescription = ApprovalRequest extends infer Request
 /** The prefix Antigravity puts before the name of every tool of the MCP Gateway. */
 const MCP_GATEWAY_TOOL_PREFIX = "mcp_tools_";
 
+/** The name of the tool whose call starts a subagent. */
+export const LAUNCH_TOOL_NAME = "invoke_subagent";
+
 /**
  * The item kinds of Antigravity's own tools, by tool name. A name not listed
  * here is an MCP tool or a `tool_call` of kind `native`. Only the table's own

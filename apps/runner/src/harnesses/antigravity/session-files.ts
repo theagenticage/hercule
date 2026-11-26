@@ -29,6 +29,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describeFileFailure, isMissingPath, UUID_PATTERN } from "../session-files";
 import { APP_DATA_DIR, readRegularFile } from "./harness-home";
+import { LAUNCH_TOOL_NAME } from "./tool-items";
 
 /**
  * The longest line of a transcript that is read. Past it the transcript is
@@ -45,11 +46,18 @@ const MAX_LINE_BYTES = 4 * 1024 * 1024;
  */
 const MAX_BYTES_PER_READ = 2 * MAX_LINE_BYTES;
 
-/** The most subagents read in one session. `agy` swarms start a handful; the bound stops a runaway folder. */
+/** The most subagents read in one session. Only a subagent that has produced a step counts. `agy` swarms start a handful; the bound stops a runaway folder. */
 const MAX_SUBAGENTS = 64;
 
 /** The largest small file (a subagent file or a message) that is read. Real ones are a few KiB. */
 const MAX_SMALL_FILE_BYTES = 256 * 1024;
+
+/**
+ * How long a subagent may have steps without a launch message before it is
+ * reported unreadable. `agy` writes the launch message with the subagent's
+ * first work, so a message that is still missing after this is not coming.
+ */
+const LAUNCH_MESSAGE_WAIT_MS = 2000;
 
 /** One step of an `agy` conversation, as its transcript records it. */
 export interface AgyStep {
@@ -74,14 +82,20 @@ export interface AgyStep {
     readonly cacheReadTokens: number;
     readonly outputTokens: number;
   };
+  /**
+   * True on a `PLANNER_RESPONSE` whose three token counts are not all present
+   * as non-negative integers. Such a step has no `usage`, and the total of
+   * its conversation is then known to be incomplete.
+   */
+  readonly hasInvalidUsage?: true;
 }
 
 /** A subagent of the session, as its files link it to the conversation that started it. */
 export interface AgySubagentLink {
   readonly conversationId: string;
   readonly parentConversationId: string;
-  /** The id of the parent's tool call that started the child. Missing when the launch message never showed up. */
-  readonly launchToolCallId?: string;
+  /** The id of the parent's tool call that started the child, from the launch message. */
+  readonly launchToolCallId: string;
   /** The parent's step that holds the result of that tool call. */
   readonly launchStepIndex?: number;
   readonly role?: string;
@@ -103,58 +117,64 @@ export interface SessionFiles {
    * `agy` writes it becomes one `unreadable` observation for its conversation,
    * and that conversation is not read again. Calls must not overlap.
    *
-   * A child's steps wait until its launch message is read. A child that has
-   * steps, and whose launch message is still missing at the next call, is
-   * linked from its subagent file alone.
+   * A child is linked only by its launch message, and only after its parent
+   * is announced (the session's own conversation counts as announced). Its
+   * steps wait until then. A child that has had steps for 2 seconds without a
+   * launch message becomes one `unreadable` observation.
    */
   readonly read: Effect.Effect<ReadonlyArray<SessionFileObservation>>;
 }
 
 const decodeJson = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown));
 
+/** An optional field whose value may also be `null`, which is read as absent. */
+const optionalOrNull = <S extends Schema.Top>(schema: S) =>
+  Schema.optionalKey(Schema.NullOr(schema));
+
 const ToolCall = Schema.Struct({
   name: Schema.String,
-  args: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+  args: optionalOrNull(Schema.Record(Schema.String, Schema.Unknown)),
 });
 
 /** The fields of a transcript line that are read. Other fields, and values of other kinds in them, are ignored. */
 const TranscriptLine = Schema.Struct({
   step_index: Schema.Finite,
   type: Schema.String,
-  status: Schema.optionalKey(Schema.String),
-  content: Schema.optionalKey(Schema.String),
-  thinking: Schema.optionalKey(Schema.String),
+  status: optionalOrNull(Schema.String),
+  content: optionalOrNull(Schema.String),
+  thinking: optionalOrNull(Schema.String),
   error: Schema.optionalKey(Schema.Unknown),
-  tool_calls: Schema.optionalKey(Schema.Array(ToolCall)),
-  model: Schema.optionalKey(Schema.String),
-  input_tokens: Schema.optionalKey(Schema.Finite),
-  cache_read_tokens: Schema.optionalKey(Schema.Finite),
-  output_tokens: Schema.optionalKey(Schema.Finite),
+  tool_calls: optionalOrNull(Schema.Array(ToolCall)),
+  model: optionalOrNull(Schema.String),
+  // Read as any value: a count that is not a non-negative integer must not make the whole line unreadable.
+  input_tokens: Schema.optionalKey(Schema.Unknown),
+  cache_read_tokens: Schema.optionalKey(Schema.Unknown),
+  output_tokens: Schema.optionalKey(Schema.Unknown),
 });
 const decodeTranscriptLine = Schema.decodeUnknownResult(TranscriptLine);
 
 const SubagentFile = Schema.Struct({
-  subagentDescriptor: Schema.optionalKey(
+  subagentDescriptor: optionalOrNull(
     Schema.Struct({
-      typeName: Schema.optionalKey(Schema.String),
-      role: Schema.optionalKey(Schema.String),
+      typeName: optionalOrNull(Schema.String),
+      role: optionalOrNull(Schema.String),
     }),
   ),
 });
 const decodeSubagentFile = Schema.decodeUnknownResult(SubagentFile);
 
 const MessageFile = Schema.Struct({
-  sender: Schema.optionalKey(Schema.String),
-  sourceMetadata: Schema.optionalKey(
+  sender: optionalOrNull(Schema.String),
+  sourceMetadata: optionalOrNull(
     Schema.Struct({
-      tool: Schema.optionalKey(
+      tool: optionalOrNull(
         Schema.Struct({
-          stepIndex: Schema.optionalKey(Schema.Finite),
-          toolCall: Schema.optionalKey(
+          stepIndex: optionalOrNull(Schema.Finite),
+          toolCall: optionalOrNull(
             Schema.Struct({
               id: Schema.String,
               name: Schema.String,
-              argumentsJson: Schema.optionalKey(Schema.String),
+              argumentsJson: optionalOrNull(Schema.String),
             }),
           ),
         }),
@@ -165,11 +185,8 @@ const MessageFile = Schema.Struct({
 const decodeMessageFile = Schema.decodeUnknownResult(MessageFile);
 
 const decodeLaunchArguments = Schema.decodeUnknownResult(
-  Schema.fromJsonString(Schema.Struct({ Prompt: Schema.optionalKey(Schema.String) })),
+  Schema.fromJsonString(Schema.Struct({ Prompt: optionalOrNull(Schema.String) })),
 );
-
-/** The tools of a parent conversation whose call starts a subagent. */
-export const LAUNCH_TOOL_NAMES: ReadonlyArray<string> = ["invoke_subagent", "swarm"];
 
 const NEWLINE = 0x0a;
 
@@ -185,11 +202,18 @@ interface Conversation {
   isUnreadable: boolean;
   /** True for a child that existed when a resumed session opened: it is announced only once it has a new step. */
   isDormant: boolean;
+  /** True once the child is announced. The session's own conversation is announced from the start. */
   isAnnounced: boolean;
+  /** True once the child has produced a step and so counts toward `MAX_SUBAGENTS`. */
+  isCounted: boolean;
   /** Steps read but not yet returned, because the child is not announced. */
   held: Array<AgyStep>;
-  /** True once a call found the child with steps and without a launch message. The next call gives up waiting. */
-  hasWaitedForLaunch: boolean;
+  /** When the child first had a step that waited for its launch message, in milliseconds since the epoch. */
+  waitingSince: number | undefined;
+  /** How many calls to the launch tool the steps of this conversation hold. */
+  launchCallCount: number;
+  /** How many new subagents were found in this conversation's `subagents/` folder. Subagents known at a resume are not new. */
+  newSubagentCount: number;
   role: string | undefined;
   typeName: string | undefined;
   hasReadSubagentFile: boolean;
@@ -211,9 +235,12 @@ const buildConversation = (
   inode: undefined,
   isUnreadable: false,
   isDormant,
-  isAnnounced: false,
+  isAnnounced: parentId === undefined,
+  isCounted: false,
   held: [],
-  hasWaitedForLaunch: false,
+  waitingSince: undefined,
+  launchCallCount: 0,
+  newSubagentCount: 0,
   role: undefined,
   typeName: undefined,
   hasReadSubagentFile: false,
@@ -221,15 +248,31 @@ const buildConversation = (
   readMessages: new Set(),
 });
 
+/** Returns `value` when it is a non-negative integer, else undefined. */
+const readTokenCount = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
+/**
+ * Returns the text of the error a step records: the first non-empty of its
+ * `error` and its `content`, or undefined when both are empty or missing.
+ */
+export const readStepErrorText = (step: AgyStep): string | undefined =>
+  [step.error, step.content].find((text) => text !== undefined && text !== "");
+
 /** Returns the step a transcript line records. */
 const buildStep = (line: Schema.Schema.Type<typeof TranscriptLine>): AgyStep => {
   const error = line.error;
+  const inputTokens = readTokenCount(line.input_tokens);
+  const cacheReadTokens = readTokenCount(line.cache_read_tokens);
+  const outputTokens = readTokenCount(line.output_tokens);
+  const hasUsage =
+    inputTokens !== undefined && cacheReadTokens !== undefined && outputTokens !== undefined;
   return {
     index: line.step_index,
     type: line.type,
-    ...(line.status === undefined ? {} : { status: line.status }),
-    ...(line.content === undefined ? {} : { content: line.content }),
-    ...(line.thinking === undefined ? {} : { thinking: line.thinking }),
+    ...(line.status == null ? {} : { status: line.status }),
+    ...(line.content == null ? {} : { content: line.content }),
+    ...(line.thinking == null ? {} : { thinking: line.thinking }),
     ...(error === undefined || error === null
       ? {}
       : { error: typeof error === "string" ? error : JSON.stringify(error) }),
@@ -243,34 +286,25 @@ const buildStep = (line: Schema.Schema.Type<typeof TranscriptLine>): AgyStep => 
         }),
       ),
     })),
-    ...(line.model === undefined ? {} : { model: line.model }),
-    // A step with some of the three counts missing has no usage: a missing count is not taken to be zero.
-    ...(line.input_tokens !== undefined &&
-    line.cache_read_tokens !== undefined &&
-    line.output_tokens !== undefined
-      ? {
-          usage: {
-            inputTokens: line.input_tokens,
-            cacheReadTokens: line.cache_read_tokens,
-            outputTokens: line.output_tokens,
-          },
-        }
-      : {}),
+    ...(line.model == null ? {} : { model: line.model }),
+    // A step with a count that is missing or not valid has no usage: such a count is not taken to be zero.
+    ...(hasUsage ? { usage: { inputTokens, cacheReadTokens, outputTokens } } : {}),
+    ...(!hasUsage && line.type === "PLANNER_RESPONSE" ? { hasInvalidUsage: true as const } : {}),
   };
 };
 
-const buildLink = (conversation: Conversation, parentId: string): AgySubagentLink => ({
+const buildLink = (
+  conversation: Conversation,
+  parentId: string,
+  launch: NonNullable<Conversation["launch"]>,
+): AgySubagentLink => ({
   conversationId: conversation.id,
   parentConversationId: parentId,
-  ...(conversation.launch === undefined
-    ? {}
-    : { launchToolCallId: conversation.launch.toolCallId }),
-  ...(conversation.launch?.stepIndex === undefined
-    ? {}
-    : { launchStepIndex: conversation.launch.stepIndex }),
+  launchToolCallId: launch.toolCallId,
+  ...(launch.stepIndex === undefined ? {} : { launchStepIndex: launch.stepIndex }),
   ...(conversation.role === undefined ? {} : { role: conversation.role }),
   ...(conversation.typeName === undefined ? {} : { typeName: conversation.typeName }),
-  ...(conversation.launch?.brief === undefined ? {} : { brief: conversation.launch.brief }),
+  ...(launch.brief === undefined ? {} : { brief: launch.brief }),
 });
 
 /**
@@ -294,7 +328,8 @@ export const openSessionFiles = (input: {
   const conversations = new Map<string, Conversation>([[root.id, root]]);
   // Conversations in the order they were found, so that a parent is read before its children.
   const order: Array<Conversation> = [root];
-  let childCount = 0;
+  // Subagents that have produced a step. A subagent with none costs one file check per call and does not count.
+  let countedChildren = 0;
 
   const buildConversationFolder = (base: string, conversation: Conversation): string =>
     join(base, conversation.id, ".system_generated");
@@ -303,7 +338,6 @@ export const openSessionFiles = (input: {
     const child = buildConversation(id, parentId, isDormant);
     conversations.set(id, child);
     order.push(child);
-    childCount += 1;
     return child;
   };
 
@@ -365,8 +399,6 @@ export const openSessionFiles = (input: {
 
     // The bytes after the last line end are a line `agy` has not finished writing. They are read again next call.
     const end = window.subarray(0, length).lastIndexOf(NEWLINE);
-    if (length - (end + 1) > MAX_LINE_BYTES)
-      throw new Error("the transcript has a line that is too long");
     let lineStart = 0;
     while (lineStart <= end) {
       const lineEnd = window.indexOf(NEWLINE, lineStart);
@@ -386,6 +418,10 @@ export const openSessionFiles = (input: {
       conversation.offset += lineEnd + 1 - lineStart;
       lineStart = lineEnd + 1;
     }
+    // Checked after the complete lines, so that a tail that is too long does not lose the lines before it.
+    if (length - (end + 1) > MAX_LINE_BYTES) {
+      throw new Error("the transcript has a line that is too long");
+    }
   };
 
   /** Reads the subagent file that links `child` to its parent, once. A file that is missing or not decodable yet is tried again next call. */
@@ -402,8 +438,8 @@ export const openSessionFiles = (input: {
       if (isTruncated || json._tag === "Failure") return;
       const file = decodeSubagentFile(json.success);
       if (file._tag === "Failure") return;
-      child.role = file.success.subagentDescriptor?.role;
-      child.typeName = file.success.subagentDescriptor?.typeName;
+      child.role = file.success.subagentDescriptor?.role ?? undefined;
+      child.typeName = file.success.subagentDescriptor?.typeName ?? undefined;
       child.hasReadSubagentFile = true;
     } catch (error) {
       if (!isMissingPath(error)) throw error;
@@ -447,23 +483,32 @@ export const openSessionFiles = (input: {
       const call = tool?.toolCall;
       if (
         message.success.sender !== child.parentId ||
-        call === undefined ||
-        !LAUNCH_TOOL_NAMES.includes(call.name)
+        call == null ||
+        call.name !== LAUNCH_TOOL_NAME
       ) {
         continue;
       }
       const launchArguments =
-        call.argumentsJson === undefined ? undefined : decodeLaunchArguments(call.argumentsJson);
+        call.argumentsJson == null ? undefined : decodeLaunchArguments(call.argumentsJson);
       child.launch = {
         toolCallId: call.id,
-        stepIndex: tool?.stepIndex,
-        brief: launchArguments?._tag === "Success" ? launchArguments.success.Prompt : undefined,
+        stepIndex: tool?.stepIndex ?? undefined,
+        brief:
+          launchArguments?._tag === "Success"
+            ? (launchArguments.success.Prompt ?? undefined)
+            : undefined,
       };
       return;
     }
   };
 
-  /** Returns the steps of `conversation` that may be returned now, announcing a child first when it is time. */
+  /**
+   * Returns the steps of `conversation` that may be returned now, announcing a
+   * child first when it is time. A child waits while it is dormant, while its
+   * parent is not announced, and while its launch message is missing. Fails
+   * when the parent can never be announced, or when the launch message is
+   * still missing `LAUNCH_MESSAGE_WAIT_MS` after the child's first step.
+   */
   const releaseSteps = async (
     base: string,
     conversation: Conversation,
@@ -473,16 +518,23 @@ export const openSessionFiles = (input: {
     if (parentId !== undefined && !conversation.isAnnounced) {
       const hasSteps = conversation.held.length > 0;
       if (conversation.isDormant && !hasSteps) return;
+      const parent = conversations.get(parentId);
+      if (parent?.isUnreadable === true) {
+        throw new Error("its parent subagent is unreadable, so this one was never announced");
+      }
+      if (parent?.isAnnounced !== true) return;
       await readSubagentFile(base, conversation);
       await findLaunchMessage(base, conversation);
-      if (conversation.launch === undefined) {
+      const launch = conversation.launch;
+      if (launch === undefined) {
         if (!hasSteps) return;
-        if (!conversation.hasWaitedForLaunch) {
-          conversation.hasWaitedForLaunch = true;
-          return;
+        conversation.waitingSince ??= Date.now();
+        if (Date.now() - conversation.waitingSince >= LAUNCH_MESSAGE_WAIT_MS) {
+          throw new Error("agy wrote no launch message for this subagent");
         }
+        return;
       }
-      out.push({ kind: "subagent", link: buildLink(conversation, parentId) });
+      out.push({ kind: "subagent", link: buildLink(conversation, parentId, launch) });
       conversation.isAnnounced = true;
     }
     for (const step of conversation.held) {
@@ -511,26 +563,18 @@ export const openSessionFiles = (input: {
     }
   };
 
-  /** Adds each subagent registered in `<conversation>/subagents/` that is not known yet. */
-  const discoverSubagents = async (
-    base: string,
-    conversation: Conversation,
-    out: Array<SessionFileObservation>,
-  ): Promise<void> => {
+  /**
+   * Adds each subagent registered in `<conversation>/subagents/` that is not
+   * known yet. It lists the folder only while the conversation has started
+   * more subagents (calls to the launch tool) than were found so far, so a
+   * conversation that started none costs no listing.
+   */
+  const discoverSubagents = async (base: string, conversation: Conversation): Promise<void> => {
+    if (conversation.newSubagentCount >= conversation.launchCallCount) return;
     for (const id of await listSubagentIds(base, conversation)) {
       if (conversations.has(id)) continue;
-      if (childCount >= MAX_SUBAGENTS) {
-        const extra = buildConversation(id, conversation.id, false);
-        extra.isUnreadable = true;
-        conversations.set(id, extra);
-        out.push({
-          kind: "unreadable",
-          conversationId: id,
-          reason: `the session already has ${MAX_SUBAGENTS} subagents, which is the most that are read`,
-        });
-        continue;
-      }
       addChild(id, conversation.id, false);
+      conversation.newSubagentCount += 1;
     }
   };
 
@@ -553,7 +597,7 @@ export const openSessionFiles = (input: {
     }
     try {
       for (const id of await listSubagentIds(base, conversation)) {
-        if (conversations.has(id) || childCount >= MAX_SUBAGENTS) continue;
+        if (conversations.has(id)) continue;
         await skipExistingFiles(base, addChild(id, conversation.id, true));
       }
     } catch {
@@ -591,9 +635,22 @@ export const openSessionFiles = (input: {
       // The lines read before a failure are still returned, so they are not lost.
       if (fresh.length > 0) conversation.isDormant = false;
       conversation.held.push(...fresh);
+      conversation.launchCallCount += fresh.reduce(
+        (total, step) => total + step.toolCalls.filter((c) => c.name === LAUNCH_TOOL_NAME).length,
+        0,
+      );
       try {
+        if (fresh.length > 0 && conversation.parentId !== undefined && !conversation.isCounted) {
+          if (countedChildren >= MAX_SUBAGENTS) {
+            throw new Error(
+              `the session already has ${MAX_SUBAGENTS} subagents, which is the most that are read`,
+            );
+          }
+          conversation.isCounted = true;
+          countedChildren += 1;
+        }
         await releaseSteps(base, conversation, out);
-        if (failure === undefined) await discoverSubagents(base, conversation, out);
+        if (failure === undefined) await discoverSubagents(base, conversation);
       } catch (error) {
         failure = failure ?? error;
       }
