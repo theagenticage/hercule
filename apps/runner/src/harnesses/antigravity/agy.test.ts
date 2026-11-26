@@ -28,6 +28,7 @@ import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
+import type { NewSessionRequest } from "@hercule/acp";
 import { answerWith } from "@hercule/acp/testing";
 import { buildAdapterFailed } from "../adapter-error-builders";
 import {
@@ -193,8 +194,9 @@ describe("how the process is started", () => {
     await Effect.runPromise(readAgyVersion(run, ctx, BINARY));
     const login = buildLoginCommand(ctx, BINARY);
 
-    const { TMPDIR, ...sessionEnv } = fake.spawns[0]!.env;
+    const { TMPDIR, HERCULE_AGY_HOOK_RULES, ...sessionEnv } = fake.spawns[0]!.env;
     expect(TMPDIR).toContain("hercule-agy-");
+    expect(HERCULE_AGY_HOOK_RULES).toBeDefined();
     expect(sessionEnv).toEqual(AGY_ENV);
     expect(versionEnvs).toEqual([AGY_ENV]);
     expect(login.env).toEqual(AGY_ENV);
@@ -212,7 +214,7 @@ describe("what the process is opened for", () => {
   const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access", request: REQUEST };
 
   it("adds the skip-permissions flag for a session in full-access only", async () => {
-    const modes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
+    const modes = ["approval-required", "auto-accept-edits", "full-access"] as const;
     const commands: Array<ReadonlyArray<string>> = [];
     for (const accessMode of modes) {
       const { home, fake } = setUp();
@@ -226,12 +228,7 @@ describe("what the process is opened for", () => {
     const { home, fake } = setUp();
     await Effect.runPromise(Effect.scoped(open(fake, home)));
 
-    expect(commands.map((command) => command.includes(SKIP_FLAG))).toEqual([
-      false,
-      false,
-      false,
-      true,
-    ]);
+    expect(commands.map((command) => command.includes(SKIP_FLAG))).toEqual([false, false, true]);
     expect(fake.spawns[0]!.command).not.toContain(SKIP_FLAG);
   });
 
@@ -1193,6 +1190,26 @@ describe("the pre-tool hook of a session", () => {
     expect(words.at(-1)).toBe("antigravity-pre-tool-hook");
   });
 
+  it("runs the launcher the caller gives, quoted word by word, in front of the verb", async () => {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home);
+    await Effect.runPromise(
+      Effect.scoped(
+        openSignedInAgy(fake.spawn, buildContext(home), BINARY, {
+          cwd: createScratchHome("agy-work"),
+          handlers: NO_HANDLERS,
+          purpose: SESSION,
+          hookLauncher: ["/usr/bin/bun", "/a b/main.ts"],
+        }),
+      ),
+    );
+
+    const hooks = JSON.parse(readFileSync(HOOKS_FILE(home), "utf8")) as HooksFile;
+    expect(hooks.hercule.PreToolUse[0]!.hooks[0]!.command).toBe(
+      "'/usr/bin/bun' '/a b/main.ts' antigravity-pre-tool-hook",
+    );
+  });
+
   it("gives the marks directory to the agy process of a session with an edit watch only", async () => {
     const marks = createScratchHome("agy-marks");
 
@@ -1203,9 +1220,9 @@ describe("the pre-tool hook of a session", () => {
     expect(unwatched.env).not.toHaveProperty("HERCULE_SESSION_MARKS_DIR");
   });
 
-  it("sets the guard and the web search denial on the agy process by access mode, and the read-only folders only when the request has additional directories", async () => {
+  it("gives the agy process of every session and probe the rules: the access mode, the read-only folders and the owned paths of the Harness Home", async () => {
     const spawned = async (
-      accessMode: "approval-required" | "auto-accept-edits" | "full-access",
+      purpose: (request: NewSessionRequest) => AgyPurpose,
       additionalDirectories?: ReadonlyArray<string>,
     ) => {
       const home = createSignedInHome();
@@ -1215,37 +1232,49 @@ describe("the pre-tool hook of a session", () => {
           openSignedInAgy(fake.spawn, buildContext(home), BINARY, {
             cwd: createScratchHome("agy-work"),
             handlers: NO_HANDLERS,
-            purpose: {
-              kind: "session",
-              accessMode,
-              request: {
-                cwd: "/work",
-                mcpServers: [],
-                ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
-              },
-            },
+            purpose: purpose({
+              cwd: "/work",
+              mcpServers: [],
+              ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+            }),
           }),
         ),
       );
-      return fake.spawns[0]!.env;
+      const rules = JSON.parse(fake.spawns[0]!.env["HERCULE_AGY_HOOK_RULES"]!) as {
+        accessMode: string;
+        readOnlyFolders: ReadonlyArray<string>;
+        harnessHomePaths: ReadonlyArray<string>;
+      };
+      return { home, rules };
     };
+    const inMode =
+      (accessMode: "approval-required" | "auto-accept-edits" | "full-access") =>
+      (request: NewSessionRequest): AgyPurpose => ({ kind: "session", accessMode, request });
 
-    const approval = await spawned("approval-required", [
+    const approval = await spawned(inMode("approval-required"), [
       "/made/up/skills/../skills",
       "/made/other",
     ]);
-    const edits = await spawned("auto-accept-edits");
-    const full = await spawned("full-access");
+    const edits = await spawned(inMode("auto-accept-edits"));
+    const full = await spawned(inMode("full-access"));
+    const probe = await spawned(() => ({ kind: "probe" }));
 
-    expect(approval["HERCULE_AGY_GUARD"]).toBe("1");
-    expect(approval["HERCULE_AGY_DENY_WEB_SEARCH"]).toBe("1");
-    expect(approval["HERCULE_AGY_READ_ONLY_FOLDERS"]).toBe(
-      JSON.stringify(["/made/up/skills", "/made/other"]),
-    );
-    expect(edits["HERCULE_AGY_GUARD"]).toBe("1");
-    expect(edits).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
-    expect(edits).not.toHaveProperty("HERCULE_AGY_READ_ONLY_FOLDERS");
-    expect(full).not.toHaveProperty("HERCULE_AGY_GUARD");
-    expect(full).not.toHaveProperty("HERCULE_AGY_DENY_WEB_SEARCH");
+    expect(approval.rules.accessMode).toBe("approval-required");
+    expect(approval.rules.readOnlyFolders).toEqual(["/made/up/skills", "/made/other"]);
+    expect(edits.rules).toMatchObject({ accessMode: "auto-accept-edits", readOnlyFolders: [] });
+    expect(full.rules.accessMode).toBe("full-access");
+    expect(probe.rules.accessMode).toBe("approval-required");
+    for (const { home, rules } of [approval, edits, full, probe]) {
+      expect(rules.harnessHomePaths).toEqual(
+        expect.arrayContaining([
+          join(home, "config", "hooks.json"),
+          join(home, "config", "plugins"),
+          join(home, "config", "mcp_config.json"),
+          join(home, "antigravity-acp", "settings.json"),
+          join(home, "skills"),
+          join(home, "AGENTS.md"),
+        ]),
+      );
+    }
   });
 });

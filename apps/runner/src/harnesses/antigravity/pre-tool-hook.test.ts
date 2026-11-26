@@ -11,11 +11,28 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { takeStartMarks } from "../../edit-marks";
 import { cleanupHomes, createScratchHome } from "../testing";
-import { answerPreToolCall } from "./pre-tool-hook";
+import { HOOK_RULES_VARIABLE, answerPreToolCall, encodeHookRules } from "./pre-tool-hook";
+import type { HookRules } from "./pre-tool-hook";
 
 afterEach(cleanupHomes);
 
-const GUARDED = { HERCULE_AGY_GUARD: "1" };
+/** The environment of an `agy` process whose session has these rules. */
+const rulesEnv = (
+  accessMode: HookRules["accessMode"],
+  rules: Partial<Omit<HookRules, "accessMode">> = {},
+): Record<string, string> => ({
+  [HOOK_RULES_VARIABLE]: encodeHookRules({
+    accessMode,
+    readOnlyFolders: [],
+    harnessHomePaths: [],
+    ...rules,
+  }),
+});
+
+/** Every mode but Full access guards the files; only Approval required also denies web search. */
+const GUARDED = rulesEnv("auto-accept-edits");
+const APPROVAL = rulesEnv("approval-required");
+const FULL = rulesEnv("full-access");
 const CONFIG_FOLDERS = [".agents", ".agent", "_agents", "_agent"];
 
 /** The input `agy` 1.5.15 gives a PreToolUse hook, as recorded. */
@@ -121,22 +138,70 @@ describe("the marks", () => {
 });
 
 describe("the policy inputs", () => {
-  it("denies web search only for the process that has the variable", () => {
+  it("denies web search only in Approval required", () => {
     const search = hookInput("/work", { args: { query: "x" }, id: "call_6", name: "search_web" });
 
-    expect(JSON.parse(answerPreToolCall(search, { HERCULE_AGY_DENY_WEB_SEARCH: "1" }))).toEqual({
+    expect(JSON.parse(answerPreToolCall(search, APPROVAL))).toEqual({
       decision: "deny",
       reason:
         "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.",
     });
     expect(answerPreToolCall(search, GUARDED)).toBe("");
+    expect(answerPreToolCall(search, FULL)).toBe("");
   });
 
-  it("allows everything in full access, where the process has no guard variable", () => {
+  it("allows everything in Full access, and only there", () => {
     const { cwd } = setUpRepo();
 
-    expect(answerPreToolCall(editInput(cwd, ".agents/hooks.json"), {})).toBe("");
+    expect(answerPreToolCall(editInput(cwd, ".agents/hooks.json"), FULL)).toBe("");
+    expect(answerPreToolCall("not json", FULL)).toBe("");
   });
+
+  it.each([
+    ["missing", {}],
+    ["empty", { [HOOK_RULES_VARIABLE]: "" }],
+    ["not JSON", { [HOOK_RULES_VARIABLE]: "{" }],
+    [
+      "an unknown mode",
+      { [HOOK_RULES_VARIABLE]: '{"accessMode":"yolo","readOnlyFolders":[],"harnessHomePaths":[]}' },
+    ],
+    [
+      "an old mode that is not exact",
+      {
+        [HOOK_RULES_VARIABLE]:
+          '{"accessMode":"Full access","readOnlyFolders":[],"harnessHomePaths":[]}',
+      },
+    ],
+    ["without the folders", { [HOOK_RULES_VARIABLE]: '{"accessMode":"full-access"}' }],
+    [
+      "folders that are not text",
+      {
+        [HOOK_RULES_VARIABLE]:
+          '{"accessMode":"full-access","readOnlyFolders":[1],"harnessHomePaths":[]}',
+      },
+    ],
+  ])(
+    "denies edits, searches and calls it cannot read, with its own reason, when the rules are %s",
+    (_name, env) => {
+      const { cwd } = setUpRepo();
+      const search = hookInput(cwd, { args: { query: "x" }, id: "call_6", name: "search_web" });
+
+      for (const answer of [
+        answerPreToolCall(editInput(cwd, "src/a.ts"), env),
+        answerPreToolCall(search, env),
+        answerPreToolCall("not json", env),
+      ]) {
+        expect(readReason(answer)).toContain("own setup for this session is wrong");
+        expect(readReason(answer)).toContain("Full access");
+      }
+      expect(
+        answerPreToolCall(
+          hookInput(cwd, { args: { CommandLine: "ls" }, id: "c", name: "run_command" }),
+          env,
+        ),
+      ).toBe("");
+    },
+  );
 
   it.each([
     ["not JSON", "not json"],
@@ -145,10 +210,11 @@ describe("the policy inputs", () => {
     ["no tool call id", JSON.stringify({ cwd: "/w", toolCall: { name: "write_file", args: {} } })],
     ["a text field only holding the fields", JSON.stringify({ lastUserInput: '"cwd":"/w"' })],
   ])(
-    "denies a call it cannot decode (%s) when the guard is on, and allows it when not",
+    "denies a call it cannot decode (%s) outside Full access, and allows it there",
     (_name, input) => {
       expect(readReason(answerPreToolCall(input, GUARDED))).toContain("could not read");
-      expect(answerPreToolCall(input, {})).toBe("");
+      expect(readReason(answerPreToolCall(input, APPROVAL))).toContain("could not read");
+      expect(answerPreToolCall(input, FULL)).toBe("");
     },
   );
 
@@ -255,31 +321,77 @@ describe("the guard of the approval files", () => {
     expect(isDenied(decide(join(folder, "sub"), ".agents/hooks.json"))).toBe(true);
   });
 
-  it("denies every path inside each read-only folder, and only when it lists them", () => {
+  it("denies every path inside each read-only folder, and only when the rules list them", () => {
     const { root, cwd } = setUpRepo();
     const skills = join(createScratchHome("hook-skills"), "skills");
     const other = join(createScratchHome("hook-other"), "docs");
     mkdirSync(skills);
     mkdirSync(other);
     symlinkSync(skills, join(root, "skills-link"));
-    const env = { ...GUARDED, HERCULE_AGY_READ_ONLY_FOLDERS: JSON.stringify([skills, other]) };
+    const env = rulesEnv("auto-accept-edits", { readOnlyFolders: [skills, other] });
 
-    expect(isDenied(decide(cwd, join(other, "a.md"), env))).toBe(true);
+    expect(readReason(decide(cwd, join(other, "a.md"), env))).toBe(
+      `Hercule gives the agent this folder to read, not to change: ${join(other, "a.md")}. Ask the user to change it.`,
+    );
     expect(isDenied(decide(cwd, join(skills, "deploy", "SKILL.md"), env))).toBe(true);
     expect(isDenied(decide(cwd, join(root, "skills-link", ".git", "config"), env))).toBe(true);
     expect(decide(cwd, join(skills, "..", "other.md"), env)).toBe("");
     expect(decide(cwd, join(skills, "deploy", "SKILL.md"))).toBe("");
   });
 
-  it.each(["{", '"x"', "[1]", '{"a":"b"}'])(
-    "denies an edit when the read-only folders value is %s",
-    (value) => {
-      const { cwd } = setUpRepo();
-      const env = { ...GUARDED, HERCULE_AGY_READ_ONLY_FOLDERS: value };
+  it("denies every path the Harness Home owns, with the reason of Hercule's own files", () => {
+    const { cwd } = setUpRepo();
+    const home = createScratchHome("hook-home");
+    const hooks = join(home, "config", "hooks.json");
+    const env = rulesEnv("approval-required", {
+      harnessHomePaths: [hooks, join(home, "config", "plugins")],
+    });
 
-      expect(isDenied(decide(cwd, "src/a.ts", env))).toBe(true);
-    },
-  );
+    expect(readReason(decide(cwd, hooks, env))).toBe(
+      `Hercule does not let the agent change ${hooks}: it decides what the agent may do without asking. Ask the user to change it.`,
+    );
+    expect(isDenied(decide(cwd, join(home, "config", "plugins", "p", "x.json"), env))).toBe(true);
+    expect(decide(cwd, join(home, "config", "other.json"), env)).toBe("");
+    expect(decide(cwd, hooks, FULL)).toBe("");
+  });
+
+  it.each([
+    [".agents/Hooks.json"],
+    [".agents/MCP_CONFIG.json"],
+    [".agents/Plugins/p/hooks.json"],
+    [".AGENTS/hooks.json"],
+    ["_Agents/mcp_config.json"],
+    [".agents/plugins.JSON"],
+    [".agents/hoo\u212As.json"],
+    [".agents/hook\u017F.json"],
+    [".agents/plugins.j\u017Fon"],
+    [".agents/mcp_conf\u0131g.json"],
+  ])("denies %s, a file that does not exist, spelled in another case", (path) => {
+    const folder = realpathSync(createScratchHome("hook-case"));
+
+    expect(isDenied(decide(folder, path))).toBe(true);
+  });
+
+  it("denies another Unicode normalization form and other case folding of a read-only folder", () => {
+    const folder = realpathSync(createScratchHome("hook-unicode"));
+    const readOnly = join(folder, "r\u00E9sum\u00E9s");
+    const env = rulesEnv("auto-accept-edits", { readOnlyFolders: [readOnly] });
+
+    expect(isDenied(decide(folder, `re\u0301sume\u0301s/new.md`, env))).toBe(true);
+    expect(isDenied(decide(folder, `R\u00C9SUM\u00C9S/new.md`, env))).toBe(true);
+    expect(decide(folder, "resumes/new.md", env)).toBe("");
+  });
+
+  it("reads a Path that starts with ~ or is a file:// URL as the path it may name, and guards both", () => {
+    const { root, cwd } = setUpRepo();
+    const hooks = join(root, ".agents", "hooks.json");
+    const home = root;
+    const env = { ...GUARDED, HOME: home };
+
+    expect(isDenied(answerPreToolCall(editInput(cwd, "~/.agents/hooks.json"), env))).toBe(true);
+    expect(isDenied(decide(cwd, `file://${hooks}`))).toBe(true);
+    expect(decide(cwd, "~/src/a.ts")).toBe("");
+  });
 
   describe("the folders a plugins.json lists", () => {
     const writePluginsFile = (root: string, content: string) =>
@@ -306,9 +418,8 @@ describe("the guard of the approval files", () => {
       expect(isDenied(decide(cwd, "../.agents/hooks.json"))).toBe(true);
     });
 
-    it("lists no folder for an entry with no path, and a missing manifest is not a problem", () => {
-      const { root, cwd } = setUpRepo();
-      writePluginsFile(root, JSON.stringify({ entries: [{ name: "x" }, 5] }));
+    it("treats a missing manifest as no problem", () => {
+      const { cwd } = setUpRepo();
 
       expect(decide(cwd, "../myplugins/p/hooks.json")).toBe("");
     });
@@ -316,6 +427,9 @@ describe("the guard of the approval files", () => {
     it.each([
       ["not JSON", "{"],
       ["JSON of another shape", "5"],
+      ["an entry with no path", JSON.stringify({ entries: [{ name: "x" }] })],
+      ["an entry that is a bare string", JSON.stringify({ entries: ["myplugins"] })],
+      ["an entry whose path is not text", JSON.stringify({ entries: [{ path: 5 }] })],
       [
         "a file larger than the limit",
         JSON.stringify({ entries: [{ path: "myplugins" }], pad: "x".repeat(70_000) }),
@@ -376,31 +490,28 @@ describe("the guard of the approval files", () => {
 });
 
 describe("an unexpected failure", () => {
-  /** An environment that throws when the marks variable is read, which the hook does after it starts. */
+  /** An environment that throws when the home folder is read, which the hook does while it checks an edit. */
   const failingEnv = (env: Record<string, string>): Record<string, string | undefined> =>
     new Proxy(env, {
       get: (target, key) => {
-        if (key === "HERCULE_SESSION_MARKS_DIR") throw new Error("injected failure");
+        if (key === "HOME") throw new Error("injected failure");
         return target[key as string];
       },
     });
   const input = editInput("/work", "a.ts");
 
-  it("prints nothing when neither the guard nor the web search denial is on", () => {
-    expect(answerPreToolCall(input, failingEnv({}))).toBe("");
-  });
-
   it.each([
-    ["the guard", GUARDED],
-    ["the web search denial", { HERCULE_AGY_DENY_WEB_SEARCH: "1" }],
-  ])("prints a denial that says the check failed when %s is on", (_name, env) => {
-    const reason = readReason(answerPreToolCall(input, failingEnv(env)));
+    ["Approval required", APPROVAL],
+    ["another mode", GUARDED],
+    ["rules that do not decode", {}],
+  ])("prints a denial that says the check failed, in %s", (_name, env) => {
+    const answer = answerPreToolCall(input, failingEnv(env));
 
-    expect(reason).toContain("check of this tool call failed");
-    expect(reason).toContain("Full access");
+    expect(isDenied(answer)).toBe(true);
+    expect(readReason(answer)).toMatch(/check of this tool call failed|own setup/);
   });
 
-  it("still gives the policy's answer when the marks cannot be written", () => {
+  it("still gives the decision when the marks cannot be written", () => {
     const marks = join(createScratchHome("hook-marks"), "file");
     writeFileSync(marks, "not a folder");
     const { cwd } = setUpRepo();
@@ -430,8 +541,8 @@ describe("the verb of the binary", () => {
     expect(isDenied(result.stdout.toString())).toBe(true);
   });
 
-  it("exits 0 with nothing on stdout for input that is not JSON, when nothing is enforced", () => {
-    const result = runVerb("not json", {});
+  it("exits 0 with nothing on stdout for input that is not JSON, in Full access", () => {
+    const result = runVerb("not json", FULL);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe("");
@@ -457,6 +568,6 @@ describe("the verb of the binary", () => {
     const result = runVerb(large, GUARDED);
 
     expect(result.exitCode).toBe(0);
-    expect(readReason(result.stdout.toString())).toContain("could not read");
+    expect(readReason(result.stdout.toString())).toContain("too large for Hercule to check");
   });
 });

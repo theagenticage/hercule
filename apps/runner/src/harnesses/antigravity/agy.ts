@@ -44,17 +44,13 @@ import { truncateFact } from "../text";
 import {
   ANTIGRAVITY_NAME,
   APP_DATA_DIR,
+  listOwnedPaths,
   readLoginFile,
   readRegularFile,
   resetOwnedHomePaths,
 } from "./harness-home";
-import {
-  DENY_WEB_SEARCH_VARIABLE,
-  GUARD_VARIABLE,
-  HOOK_MATCHER,
-  PRE_TOOL_HOOK_VERB,
-  READ_ONLY_FOLDERS_VARIABLE,
-} from "./pre-tool-hook-policy";
+import { HOOK_RULES_VARIABLE, buildHooksFile, encodeHookRules } from "./pre-tool-hook";
+import type { HookRules } from "./pre-tool-hook";
 
 export { ANTIGRAVITY_NAME };
 
@@ -68,37 +64,23 @@ export type AgyPurpose =
   | { readonly kind: "probe" }
   | {
       readonly kind: "session";
-      readonly accessMode: AccessMode;
+      readonly accessMode: Exclude<AccessMode, "auto">;
       readonly request: NewSessionRequest;
     };
 
 /**
- * Returns the command line `agy` runs as the pre-tool hook: the running
- * executable, plus the entry script when running from source rather than the
- * compiled binary, plus the hook's verb. `agy` runs it through a shell, so each
- * word is quoted.
+ * Returns the shell command that starts the `hercule` binary for the pre-tool
+ * hook: `words` with each word quoted, because `agy` runs the hook through a
+ * shell. `words` is the running executable, plus the entry script when
+ * running from source rather than the compiled binary. A test passes its own
+ * words to point `agy` at the verb of another build.
  */
-const buildHookCommand = (): string =>
-  [
+const buildHookLauncher = (
+  words: ReadonlyArray<string> = [
     process.execPath,
     ...(locateCompiledBinary() === undefined ? [Bun.main] : []),
-    PRE_TOOL_HOOK_VERB,
-  ]
-    .map(quoteShellWord)
-    .join(" ");
-
-/**
- * Returns the hooks file of the Harness Home: one `PreToolUse` hook, for the
- * tools in `HOOK_MATCHER`, that runs the pre-tool hook (`pre-tool-hook.ts`).
- */
-const buildHooksFile = (): string =>
-  JSON.stringify({
-    hercule: {
-      PreToolUse: [
-        { matcher: HOOK_MATCHER, hooks: [{ type: "command", command: buildHookCommand() }] },
-      ],
-    },
-  });
+  ],
+): string => words.map(quoteShellWord).join(" ");
 
 /**
  * Returns the id of the `agy` mode that matches a Hercule Access Mode, or
@@ -241,16 +223,6 @@ const STDERR_WAIT = Duration.seconds(1);
 /** The number of lines from the end of stderr that a failed start repeats. */
 const STDERR_LINES = 5;
 
-/** What the hook script denies in one session, given through the environment of its `agy` process. */
-interface HookRules {
-  /** Whether the hook denies a change of a file that `agy` loads approval rules from. */
-  readonly guardsApprovalFiles: boolean;
-  /** Whether the hook denies `search_web`. */
-  readonly deniesWebSearch: boolean;
-  /** The folders in which the hook denies every change: the ones Hercule gives the agent to read only. */
-  readonly readOnlyFolders: ReadonlyArray<string>;
-}
-
 /**
  * Returns the environment of an `agy` process of this account: the context's
  * environment without the variables `agy` reads settings and credentials from,
@@ -269,10 +241,11 @@ interface HookRules {
  * - `SESSION_MARKS_DIR_VARIABLE` is `sessionMarksDir` when one is given, which
  *   only a session with an edit watch has. The hook in the Harness Home reads
  *   it, and only the `agy` process of that session sees it.
- * - `GUARD_VARIABLE`, `DENY_WEB_SEARCH_VARIABLE` and `READ_ONLY_FOLDERS_VARIABLE`
- *   come from `hookRules`. The hook script in the Harness Home reads them, and
- *   only the `agy` process of that session sees them. A process without them
- *   gets the unguarded hook: no denials.
+ * - `HOOK_RULES_VARIABLE` is `hookRules` when one is given: what the pre-tool
+ *   hook denies in this session. Only the `agy` process of that session sees
+ *   it. A process without it gets the hook that denies every edit and search,
+ *   because the hook reads a missing value as a setup that is wrong. Only the
+ *   sign-in and `agy --version` give none, and they run no tools.
  * - `TMPDIR` is `tempFolder` when one is given. In its `default` mode `agy`
  *   lets the agent write under the system's temporary folder without asking,
  *   and `agy` finds that folder through `$TMPDIR`. Pointing it at a private
@@ -297,10 +270,7 @@ const buildAgyEnv = (
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
   if (tempFolder !== undefined) env["TMPDIR"] = tempFolder;
   if (sessionMarksDir !== undefined) env[SESSION_MARKS_DIR_VARIABLE] = sessionMarksDir;
-  if (hookRules?.guardsApprovalFiles === true) env[GUARD_VARIABLE] = "1";
-  if (hookRules?.deniesWebSearch === true) env[DENY_WEB_SEARCH_VARIABLE] = "1";
-  if (hookRules !== undefined && hookRules.readOnlyFolders.length > 0)
-    env[READ_ONLY_FOLDERS_VARIABLE] = JSON.stringify(hookRules.readOnlyFolders);
+  if (hookRules !== undefined) env[HOOK_RULES_VARIABLE] = encodeHookRules(hookRules);
   return env;
 };
 
@@ -694,6 +664,8 @@ export const openSignedInAgy = (
     readonly cwd: string;
     readonly handlers: AcpHandlers;
     readonly purpose: AgyPurpose;
+    /** The words that start the `hercule` binary for the pre-tool hook. Defaults to the running executable. */
+    readonly hookLauncher?: ReadonlyArray<string>;
   },
 ): Effect.Effect<SignedInAgy, AdapterError, Scope.Scope> =>
   Effect.gen(function* () {
@@ -708,7 +680,7 @@ export const openSignedInAgy = (
 
     // A probe resets them too, so no `agy` process ever starts on a home that
     // holds a file that would loosen it.
-    yield* resetOwnedHomePaths(ctx.home, buildHooksFile());
+    yield* resetOwnedHomePaths(ctx.home, buildHooksFile(buildHookLauncher(options.hookLauncher)));
 
     const folder = yield* makeSessionLogFolder(ctx.home);
     const command = [
@@ -725,14 +697,14 @@ export const openSignedInAgy = (
       ctx,
       tempFolder,
       options.purpose.kind === "session" ? ctx.editMarks?.sessionMarksDir : undefined,
-      options.purpose.kind === "session"
-        ? {
-            guardsApprovalFiles: options.purpose.accessMode !== "full-access",
-            deniesWebSearch: options.purpose.accessMode === "approval-required",
-            // Every additional directory is a folder Hercule gives the agent to read, never to change.
-            readOnlyFolders: (request.additionalDirectories ?? []).map((folder) => resolve(folder)),
-          }
-        : undefined,
+      {
+        // A probe runs no tools, so it gets the strictest rules.
+        accessMode:
+          options.purpose.kind === "session" ? options.purpose.accessMode : "approval-required",
+        // Every additional directory is a folder Hercule gives the agent to read, never to change.
+        readOnlyFolders: (request.additionalDirectories ?? []).map((folder) => resolve(folder)),
+        harnessHomePaths: listOwnedPaths(ctx.home),
+      },
     );
     const child = yield* Effect.acquireRelease(
       Effect.try({
