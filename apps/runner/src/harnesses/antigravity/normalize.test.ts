@@ -488,6 +488,10 @@ describe("a call the pre-tool hook denied", () => {
     const hide = makeEventSecretHider(secret);
     const events = hide(complete(WRITE, `tool call denied by pre-tool hook: ${secret}`));
     expect(JSON.stringify(events)).not.toContain(secret);
+    // The reason is hidden, not dropped: the card still shows why the call failed.
+    expect(events).toMatchObject([
+      { detail: { content: "tool call denied by pre-tool hook: [hidden]" } },
+    ]);
   });
 });
 
