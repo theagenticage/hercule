@@ -655,7 +655,7 @@ describe("which controller a runner accepts", () => {
       ]) as unknown,
     });
     // One MCP Servers capability for each adapter that maps the gateway's
-    // entry, which today is Claude Code, Codex and pi, and the retired plain
+    // entry, which today is Antigravity, Claude Code, Codex and pi, and the retired plain
     // `mcpServers` for a controller of the first MCP Gateway build.
     const hello = stub.received[0] as { readonly capabilities: ReadonlyArray<string> };
     expect(hello.capabilities.filter((capability) => capability.startsWith("mcpServers"))).toEqual([
@@ -663,6 +663,7 @@ describe("which controller a runner accepts", () => {
       "mcpServers:claude-code/claude-code",
       "mcpServers:codex/codex",
       "mcpServers:pi/pi",
+      "mcpServers:antigravity/antigravity",
     ]);
 
     stub.hangUp();
