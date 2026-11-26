@@ -13,6 +13,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -3092,6 +3093,20 @@ const readFilesUntil = (what: string, ready: () => boolean) =>
   });
 
 /**
+ * Waits for an interrupt, or an answer that cancels, which waits for the files to catch up with
+ * the cancel while a subagent's turn is open. The test clock runs that wait out only when asked,
+ * so this runs it in steps until the fiber is done.
+ */
+const joinAfterCancelLag = (fiber: Fiber.Fiber<unknown, unknown>) =>
+  Effect.gen(function* () {
+    for (let rounds = 0; rounds < 20 && fiber.pollUnsafe() === undefined; rounds += 1) {
+      yield* TestClock.adjust(Duration.millis(250));
+      yield* Effect.promise(settle);
+    }
+    yield* Fiber.join(fiber);
+  });
+
+/**
  * Runs the clock out by `duration` in steps of half a second, and lets every read in between finish
  * as far as it goes. It checks nothing itself: a test that then sees nothing new can trust that
  * the reader had every chance to show it, because a late read only makes such a test pass.
@@ -3282,6 +3297,55 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
+  it("ends the open turn of a known subagent as failed, and reports the usage incomplete, when the session's own files become unreadable", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+
+          appendFileSync(transcriptPath(h.home, ROOT), "this is not json\n");
+          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "failed"));
+
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended failed"]);
+          expect(h.tags("runtime.warning")).toHaveLength(1);
+          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+            usageReport: { status: "incomplete" },
+          });
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("keeps reading after the tail while a subagent that has steps waits for its launch message, and reports it once its wait ran out", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          // The child is seen late in the 2 second tail, so the tail ends before its own 2 second wait.
+          yield* TestClock.adjust(Duration.millis(1900));
+          yield* Effect.promise(settle);
+          registerSubagent(h.home);
+          rmSync(join(conversationFolder(h.home, CHILD), "messages"), {
+            recursive: true,
+            force: true,
+          });
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the warning about the subagent", () =>
+            h.tags("runtime.warning").some((event) => event.message.includes(CHILD)),
+          );
+        }),
+      { fake: subagentFake },
+    ));
+
   it("warns once, and stops reading the session's own files, when a turn replied and agy wrote no transcript for the conversation", () =>
     run(
       (h) =>
@@ -3364,7 +3428,7 @@ describe("the subagents that agy's files show", () => {
           const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
           yield* h.untilReceived("session/cancel");
           yield* replyToLatestPrompt(h, "cancelled");
-          yield* Fiber.join(interrupting);
+          yield* joinAfterCancelLag(interrupting);
 
           expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
           expect(hasChildCommandCompleted(h)).toBe(true);
@@ -3418,7 +3482,7 @@ describe("the subagents that agy's files show", () => {
           );
           yield* h.untilReceived("session/cancel");
           yield* replyToLatestPrompt(h, "cancelled");
-          yield* Fiber.join(cancelling);
+          yield* joinAfterCancelLag(cancelling);
 
           expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
           expect(hasChildCommandCompleted(h)).toBe(true);
@@ -3442,7 +3506,7 @@ describe("the subagents that agy's files show", () => {
           yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
           appendSubagentSteps(h.home, 2, 5);
 
-          yield* h.adapter.interrupt(SESSION);
+          yield* joinAfterCancelLag(yield* Effect.forkChild(h.adapter.interrupt(SESSION)));
 
           expect(h.received("session/cancel")).toHaveLength(1);
           expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
@@ -3481,7 +3545,7 @@ describe("the subagents that agy's files show", () => {
           );
           yield* h.until("a synthetic turn opened", () => h.tags("turn.started").length === 2);
           yield* TestClock.adjust(Duration.seconds(9));
-          yield* Fiber.join(interrupting);
+          yield* joinAfterCancelLag(interrupting);
           expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
 
           // The end of the subagent's turn is not output of agy, so the wait is still the one that began with the chunk.
@@ -3490,6 +3554,45 @@ describe("the subagents that agy's files show", () => {
             { state: "completed" },
             { state: "completed" },
           ]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("waits for the files to catch up with the cancel, so a step written just after agy answered it is shown before the subagent's turn ends", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          yield* replyToLatestPrompt(h, "cancelled");
+          yield* h.until("the Turn ended", () => h.tags("turn.completed").some(isRoot));
+          // Real time, enough for a read of the files that does not wait to finish.
+          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)));
+          // `agy` wrote this step before the cancel, but it reaches the file only now.
+          appendSubagentSteps(h.home, 2, 5);
+          yield* joinAfterCancelLag(interrupting);
+
+          const commandAt = h.seen.findIndex(
+            (event) =>
+              isChild(event) &&
+              event._tag === "item.completed" &&
+              event.kind === "command_execution" &&
+              event.status === "completed",
+          );
+          const endAt = h.seen.findIndex(
+            (event) => isChild(event) && event._tag === "turn.completed",
+          );
+          expect(commandAt, "the step was shown").toBeGreaterThan(-1);
+          expect(commandAt).toBeLessThan(endAt);
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
         }),
       { fake: subagentFake },
     ));

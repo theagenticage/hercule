@@ -96,6 +96,7 @@ import type { SessionFileObservation, SessionFiles } from "./session-files";
 import {
   buildSubagentsState,
   endUnreadableSubagent,
+  endUnreadableSubagents,
   hasOpenSubagentTurn,
   interruptSubagentTurns,
   introduceSubagent,
@@ -120,6 +121,14 @@ const FILE_READ_INTERVAL = Duration.millis(500);
  * read at the close would miss them.
  */
 const FILE_READ_TAIL = Duration.seconds(2);
+/**
+ * How long the session waits after `agy` answered a cancel, before it reads the
+ * files a last time and ends the subagent turns. A subagent's step reaches its
+ * file up to about 100 ms after `agy` wrote it to ACP (80 ms and 100 ms in the
+ * recording `subagent-full`), so a step written just before the cancel would
+ * otherwise be read after its turn ended.
+ */
+const CANCEL_FILE_LAG = Duration.millis(250);
 /** How long `session/cancel` may take to be acknowledged when the session asks `agy` to stop output that has no input. */
 const CANCEL_DEADLINE = Duration.seconds(3);
 
@@ -405,6 +414,8 @@ export const startAgySession = (
     let hasOwnReply = false;
     /** Lets only one read of the files run at a time: the loop and a stop both read. */
     const readLock = Semaphore.makeUnsafe(1);
+    /** Whether the last read left a subagent that waits for its link, so the loop reads again although no work is open. */
+    let readerIsAwaitingLink = false;
     /** Completes when work opens while the reader of the files waits for it. */
     let readerWake: Deferred.Deferred<void> | undefined;
 
@@ -878,6 +889,19 @@ export const startAgySession = (
     };
 
     /**
+     * Returns the events for files that could not be read. When they are the
+     * session's own, the reader closes and every known subagent ends with
+     * incomplete usage, because nothing of it can be read any more. Else only
+     * the subagent of those files ends.
+     */
+    const buildUnreadableFilesEvents = (conversationId: string, reason: string): HarnessEvent[] => [
+      ...recordUnreadableFiles(conversationId, reason),
+      ...(conversationId === nativeId
+        ? endUnreadableSubagents(subagentsState)
+        : endUnreadableSubagent(subagentsState, conversationId)),
+    ];
+
+    /**
      * Gives one observation of the files to whoever shows it, and returns the
      * events that follow from it. A step of the session's own conversation goes
      * to the running Turn, which emits what it shows itself.
@@ -901,10 +925,7 @@ export const startAgySession = (
             findLaunchItem(state, toolCallId),
           );
         case "unreadable":
-          return [
-            ...recordUnreadableFiles(observation.conversationId, observation.reason),
-            ...endUnreadableSubagent(subagentsState, observation.conversationId),
-          ];
+          return buildUnreadableFilesEvents(observation.conversationId, observation.reason);
       }
     };
 
@@ -919,7 +940,8 @@ export const startAgySession = (
       Effect.suspend(() => {
         const reader = files;
         if (reader === undefined) return Effect.void;
-        return Effect.map(reader.read, (observations) => {
+        return Effect.map(reader.read, ({ observations, isAwaitingLink }) => {
+          readerIsAwaitingLink = isAwaitingLink;
           for (const observation of observations) publishEvents(routeObservation(observation));
           publishSubagentUsage();
         });
@@ -934,7 +956,7 @@ export const startAgySession = (
     const endReaderWithoutTranscript = Effect.sync(() => {
       if (files === undefined || !hasOwnReply || hasSeenOwnStep) return;
       publishEvents(
-        recordUnreadableFiles(nativeId, "agy wrote no transcript for this conversation"),
+        buildUnreadableFilesEvents(nativeId, "agy wrote no transcript for this conversation"),
       );
       publishSubagentUsage();
     });
@@ -942,7 +964,8 @@ export const startAgySession = (
     /**
      * Reads the files every `FILE_READ_INTERVAL` while work is open, and for
      * `FILE_READ_TAIL` after the last of it closed, because the files lag ACP
-     * and a subagent can write after its parent's reply. Then it waits until
+     * and a subagent can write after its parent's reply. It also keeps reading
+     * while the reader awaits a link it will settle within 2 seconds. Then it waits until
      * work opens again. One fiber does all of it, so nothing is read or timed
      * while the session is idle.
      */
@@ -959,7 +982,7 @@ export const startAgySession = (
           wasOpen = false;
           tailEndsAt = now + Duration.toMillis(FILE_READ_TAIL);
         }
-        if (isOpen || (tailEndsAt !== undefined && now < tailEndsAt)) {
+        if (isOpen || readerIsAwaitingLink || (tailEndsAt !== undefined && now < tailEndsAt)) {
           yield* readSessionFiles;
           yield* Effect.sleep(FILE_READ_INTERVAL);
         } else if (tailEndsAt !== undefined) {
@@ -1191,11 +1214,13 @@ export const startAgySession = (
 
     /**
      * Ends the open subagent turns as `interrupted` after `agy` took a
-     * `session/cancel`, which stops every subagent. It reads the files once
-     * first, so the steps a subagent wrote before the cancel are shown before
-     * its turn ends.
+     * `session/cancel`, which stops every subagent. It waits `CANCEL_FILE_LAG`
+     * (when a subagent turn is open) and reads the files once first, so the steps a subagent wrote before the
+     * cancel are shown before its turn ends.
      */
     const endSubagentTurnsAfterCancel = Effect.gen(function* () {
+      // Only a turn that is open has a step that can still be on its way.
+      if (hasOpenSubagentTurn(subagentsState)) yield* Effect.sleep(CANCEL_FILE_LAG);
       yield* readSessionFiles;
       publishEvents(interruptSubagentTurns(subagentsState));
     });

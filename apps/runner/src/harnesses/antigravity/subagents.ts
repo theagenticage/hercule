@@ -61,6 +61,13 @@ interface Subagent {
    * transcript's first step, and this text replaces the step's wrapped copy.
    */
   launchBrief: string | undefined;
+  /**
+   * True after `agy` took a cancel, until a message from a conversation arrives.
+   * A step of a stopped subagent that is read late is shown, but the turn it
+   * opens ends at once as interrupted: `agy` is no longer working on it, so
+   * nothing would ever close that turn.
+   */
+  isStopped: boolean;
   /** The input that the next turn opens with, when one is waiting. */
   pendingInput: string | undefined;
   turn: OpenTurn | undefined;
@@ -94,6 +101,7 @@ const buildSubagent = (input: {
 }): Subagent => ({
   ...input,
   introduced: false,
+  isStopped: false,
   pendingInput: undefined,
   turn: undefined,
   pending: [],
@@ -317,6 +325,8 @@ const normalizeSystemMessage = (
   const message = parseMessage(step.content);
   if (message === undefined) return [];
   if (isAutomaticSender(message.sender)) return ensureTurn(state, agent).events;
+  // A message from a conversation is new work for a stopped subagent.
+  agent.isStopped = false;
   if (agent.turn === undefined) {
     // The launch message is the first message from a conversation, and it
     // comes before any turn. The link's brief is the unwrapped text of it.
@@ -540,7 +550,7 @@ export const normalizeSubagentStep = (
 ): HarnessEvent[] => {
   const agent = state.agents.get(conversationId);
   if (agent === undefined) return [];
-  const events = (() => {
+  const events: HarnessEvent[] = (() => {
     switch (step.type) {
       case "SYSTEM_MESSAGE":
         return normalizeSystemMessage(state, agent, step);
@@ -554,6 +564,7 @@ export const normalizeSubagentStep = (
         return [];
     }
   })();
+  if (agent.isStopped) events.push(...closeTurn(state, agent, "interrupted"));
   return introduceBefore(state, agent, events);
 };
 
@@ -580,12 +591,23 @@ export const endUnreadableSubagent = (
 };
 
 /**
+ * Returns the events that end every known subagent after the session's own
+ * files could not be read, as `endUnreadableSubagent` does for one.
+ */
+export const endUnreadableSubagents = (state: SubagentsState): HarnessEvent[] =>
+  [...state.agents.keys()].flatMap((id) => endUnreadableSubagent(state, id));
+
+/**
  * Returns `turn.completed` with state `interrupted` for every subagent turn
- * that is open. The session calls it once `agy` has answered `session/cancel`,
- * which stops every subagent.
+ * that is open, and marks every subagent as stopped (see `Subagent.isStopped`).
+ * The session calls it once `agy` has answered `session/cancel`, which stops
+ * every subagent.
  */
 export const interruptSubagentTurns = (state: SubagentsState): HarnessEvent[] =>
-  [...state.agents.values()].flatMap((agent) => closeTurn(state, agent, "interrupted"));
+  [...state.agents.values()].flatMap((agent) => {
+    agent.isStopped = true;
+    return closeTurn(state, agent, "interrupted");
+  });
 
 /** Checks whether some subagent has a turn open, so the session keeps reading the files. */
 export const hasOpenSubagentTurn = (state: SubagentsState): boolean =>

@@ -110,11 +110,24 @@ export type SessionFileObservation =
   | { readonly kind: "subagent"; readonly link: AgySubagentLink }
   | { readonly kind: "unreadable"; readonly conversationId: string; readonly reason: string };
 
+/** What one call of `SessionFiles.read` returns. */
+export interface SessionFilesRead {
+  readonly observations: ReadonlyArray<SessionFileObservation>;
+  /**
+   * True while the reader holds the steps of a subagent that it has not
+   * announced yet, and will announce or report by itself within
+   * `LAUNCH_MESSAGE_WAIT_MS`. The caller keeps calling `read` while it is true,
+   * even when no work is open.
+   */
+  readonly isAwaitingLink: boolean;
+}
+
 export interface SessionFiles {
   /**
    * Returns what is new in the files since the last call, in order: for each
    * conversation its steps in file order, and a child's `subagent`
-   * observation before any of its steps. Never fails: a file that is not as
+   * observation before any of its steps, and whether it still awaits a link
+   * (see `SessionFilesRead`). Never fails: a file that is not as
    * `agy` writes it becomes one `unreadable` observation for its conversation,
    * and that conversation is not read again. Calls must not overlap.
    *
@@ -122,8 +135,14 @@ export interface SessionFiles {
    * is announced (the session's own conversation counts as announced). Its
    * steps wait until then. A child that has had steps for 2 seconds without a
    * launch message becomes one `unreadable` observation.
+   *
+   * A child whose parent is a subagent is also announced only after its
+   * parent's transcript was read up to the step that holds the result of the
+   * launch call, so that the parent's launch item is known. After
+   * `LAUNCH_MESSAGE_WAIT_MS` of waiting for that step it is announced without
+   * the step's number.
    */
-  readonly read: Effect.Effect<ReadonlyArray<SessionFileObservation>>;
+  readonly read: Effect.Effect<SessionFilesRead>;
 }
 
 const decodeJson = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown));
@@ -211,6 +230,10 @@ interface Conversation {
   held: Array<AgyStep>;
   /** When the child first had a step that waited for its launch message, on Effect's clock, in milliseconds. */
   waitingSince: number | undefined;
+  /** When the child first waited for its parent's transcript to reach the launch step, on the same clock. */
+  parentStepWaitingSince: number | undefined;
+  /** The highest step number read from this conversation's transcript. */
+  lastStepIndex: number | undefined;
   /** How many calls to the launch tool the steps of this conversation hold. */
   launchCallCount: number;
   /** How many new subagents were found in this conversation's `subagents/` folder. Subagents known at a resume are not new. */
@@ -240,6 +263,8 @@ const buildConversation = (
   isCounted: false,
   held: [],
   waitingSince: undefined,
+  parentStepWaitingSince: undefined,
+  lastStepIndex: undefined,
   launchCallCount: 0,
   newSubagentCount: 0,
   role: undefined,
@@ -506,7 +531,10 @@ export const openSessionFiles = (input: {
   /**
    * Returns the steps of `conversation` that may be returned now, announcing a
    * child first when it is time. A child waits while it is dormant, while its
-   * parent is not announced, and while its launch message is missing. Fails
+   * parent is not announced, while its launch message is missing, and, when its
+   * parent is a subagent, while the parent's transcript has not reached the
+   * launch step (for at most `LAUNCH_MESSAGE_WAIT_MS`, then it is announced
+   * without the launch step). Fails
    * when the parent can never be announced, or when the launch message is
    * still missing `LAUNCH_MESSAGE_WAIT_MS` after the child's first step.
    * `now` is the time of this read on Effect's clock, in milliseconds.
@@ -537,7 +565,21 @@ export const openSessionFiles = (input: {
         }
         return;
       }
-      out.push({ kind: "subagent", link: buildLink(conversation, parentId, launch) });
+      // The session's own conversation has its launch items from ACP, so only a parent that is a subagent needs its transcript read up to the launch step.
+      let stepIndex = launch.stepIndex;
+      if (
+        stepIndex !== undefined &&
+        parent.parentId !== undefined &&
+        (parent.lastStepIndex ?? -1) < stepIndex
+      ) {
+        conversation.parentStepWaitingSince ??= now;
+        if (now - conversation.parentStepWaitingSince < LAUNCH_MESSAGE_WAIT_MS) return;
+        stepIndex = undefined;
+      }
+      out.push({
+        kind: "subagent",
+        link: buildLink(conversation, parentId, { ...launch, stepIndex }),
+      });
       conversation.isAnnounced = true;
     }
     for (const step of conversation.held) {
@@ -568,12 +610,19 @@ export const openSessionFiles = (input: {
 
   /**
    * Adds each subagent registered in `<conversation>/subagents/` that is not
-   * known yet. It lists the folder only while the conversation has started
-   * more subagents (calls to the launch tool) than were found so far, so a
-   * conversation that started none costs no listing.
+   * known yet. The session's own conversation is listed on every call, because
+   * `agy` can register a subagent without a launch call (for example `/swarm`).
+   * The folder of a child is listed only while it has started more subagents
+   * (calls to the launch tool) than were found so far, so a child that
+   * started none costs no listing.
    */
   const discoverSubagents = async (base: string, conversation: Conversation): Promise<void> => {
-    if (conversation.newSubagentCount >= conversation.launchCallCount) return;
+    if (
+      conversation.parentId !== undefined &&
+      conversation.newSubagentCount >= conversation.launchCallCount
+    ) {
+      return;
+    }
     for (const id of await listSubagentIds(base, conversation)) {
       if (conversations.has(id)) continue;
       addChild(id, conversation.id, false);
@@ -608,7 +657,7 @@ export const openSessionFiles = (input: {
     }
   };
 
-  const readAll = async (now: number): Promise<ReadonlyArray<SessionFileObservation>> => {
+  const readAll = async (now: number): Promise<SessionFilesRead> => {
     const out: Array<SessionFileObservation> = [];
     let base: string;
     try {
@@ -622,7 +671,7 @@ export const openSessionFiles = (input: {
           reason: describeFileFailure(error),
         });
       }
-      return out;
+      return { observations: out, isAwaitingLink: false };
     }
     // `order` grows while it is walked: a child found in this call is read in this call.
     for (let at = 0; at < order.length; at += 1) {
@@ -638,6 +687,9 @@ export const openSessionFiles = (input: {
       // The lines read before a failure are still returned, so they are not lost.
       if (fresh.length > 0) conversation.isDormant = false;
       conversation.held.push(...fresh);
+      for (const step of fresh) {
+        conversation.lastStepIndex = Math.max(conversation.lastStepIndex ?? step.index, step.index);
+      }
       conversation.launchCallCount += fresh.reduce(
         (total, step) => total + step.toolCalls.filter((c) => c.name === LAUNCH_TOOL_NAME).length,
         0,
@@ -667,7 +719,12 @@ export const openSessionFiles = (input: {
         });
       }
     }
-    return out;
+    // A child with held steps is announced, or reported unreadable, within the wait.
+    const isAwaitingLink = order.some(
+      (conversation) =>
+        !conversation.isUnreadable && !conversation.isAnnounced && conversation.held.length > 0,
+    );
+    return { observations: out, isAwaitingLink };
   };
 
   return Effect.promise(async () => {

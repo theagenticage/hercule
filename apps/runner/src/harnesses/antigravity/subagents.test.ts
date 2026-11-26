@@ -16,6 +16,7 @@ import { openSessionFiles, type AgyStep } from "./session-files";
 import {
   buildSubagentsState,
   endUnreadableSubagent,
+  endUnreadableSubagents,
   hasOpenSubagentTurn,
   interruptSubagentTurns,
   introduceSubagent,
@@ -47,7 +48,7 @@ const playFixture = async (
   const files = await Effect.runPromise(
     openSessionFiles({ home, conversationId: root, skipExisting: false }),
   );
-  const observations = await Effect.runPromise(files.read);
+  const { observations } = await Effect.runPromise(files.read);
   const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: root, known: [] });
   const events: HarnessEvent[] = [];
   for (const observation of observations) {
@@ -487,5 +488,63 @@ describe("an unreadable subagent", () => {
     expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
     expect(endUnreadableSubagent(state, "A")).toEqual([]);
     expect(endUnreadableSubagent(state, "unknown")).toEqual([]);
+  });
+});
+
+describe("every subagent when the session's own files are unreadable", () => {
+  it("ends the open turn of each known subagent as failed and reports each one's usage incomplete", () => {
+    const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
+    for (const id of ["A", "B"]) {
+      introduceSubagent(
+        state,
+        { conversationId: id, parentConversationId: "root", launchToolCallId: id },
+        findNothing,
+      );
+      normalizeSubagentStep(state, id, step(1, "PLANNER_RESPONSE", { toolCalls: [command()] }));
+    }
+
+    const events = endUnreadableSubagents(state);
+
+    expect(find(events, "turn.completed")).toMatchObject([
+      { subagentId: "A", state: "failed" },
+      { subagentId: "B", state: "failed" },
+    ]);
+    expect(find(events, "session.usage.updated")).toHaveLength(2);
+    expect(hasOpenSubagentTurn(state)).toBe(false);
+    expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
+  });
+});
+
+describe("a subagent that a cancel stopped", () => {
+  it("shows a late step of its work, and ends the turn that step opens as interrupted", () => {
+    const state = buildStateWithChild();
+    normalizeSubagentStep(state, "A", step(1, "PLANNER_RESPONSE", { toolCalls: [command()] }));
+    interruptSubagentTurns(state);
+
+    const events = normalizeSubagentStep(
+      state,
+      "A",
+      step(2, "PLANNER_RESPONSE", { content: "late words", toolCalls: [command()] }),
+    );
+
+    expect(find(events, "turn.completed")).toMatchObject([{ state: "interrupted" }]);
+    expect(userMessages(events)).toEqual([]);
+    expect(tags(events)).toContain("turn.started");
+    expect(hasOpenSubagentTurn(state)).toBe(false);
+  });
+
+  it("works normally again once a conversation sends it a message", () => {
+    const state = buildStateWithChild();
+    interruptSubagentTurns(state);
+
+    normalizeSubagentStep(state, "A", message("root", "Go on"));
+    const events = normalizeSubagentStep(
+      state,
+      "A",
+      step(3, "PLANNER_RESPONSE", { toolCalls: [command()] }),
+    );
+
+    expect(tags(events)).not.toContain("turn.completed");
+    expect(hasOpenSubagentTurn(state)).toBe(true);
   });
 });
