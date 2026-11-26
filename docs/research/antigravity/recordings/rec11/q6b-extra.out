@@ -1,0 +1,16 @@
+q6b-extra prompt -> end_turn
+q6b-extra prompt -> end_turn
+q6b-extra prompt -> end_turn
+q6b-extra prompt -> end_turn
+TOOL CALLS (last status):
+  call_1177295 echo hi | failed | {"CommandLine":"echo hi","Path":"/etc/x","WaitMsBeforeAsync":2000,"cwd":"/"}
+  call_1489364 File a.txt | failed | {"Content":"x","Path":"/var/tmp/hercule-1282-t11/work/q6b-extra/a.txt","path":"/var/tmp/hercule-1282-t11/work/q6b-extra/b.txt"}
+  call_1506893 File existing.txt | failed | {"Overwrite":true,"Path":"/var/tmp/hercule-1282-t11/work/q6b-extra/existing.txt","Replacement":"new","Target":"old","extra":{"Path":"/etc/y"}}
+  call_3401785 File c.txt | completed | {"Content":"x","Overwrite":false,"Path":"/var/tmp/hercule-1282-t11/work/q6b-extra/c.txt"}
+REQUESTS: 1
+  ALLOW {"sessionUpdate":"tool_call","toolCallId":"call_340178539441744901","name":"write_file","args":{"Content":"x","Overwrite":false,"Path":"/var/tmp/hercule-1282-t11/work/q6b-extra/c.txt"},"status":"pending","kind":"edit","title":"File c.txt","locations":[{"path":
+HOOK LOG:
+1795704396136 {"artifactDirectoryPath":"/var/tmp/hercule-1282-t11/home/antigravity-acp/brain/5e60c645-436d-47fe-be51-71638251fa33","conversationId":"5e60c645-436d-47fe-be51-71638251fa33","cwd":"/var/tmp/hercule-1282-t11/work/q6b-extra","hookEventName":"PreToolUse","lastUserInput":"Call the write_file tool exactly once with this JSON as its arguments, adding nothing and removing nothing: {\"Path\":\"/var/tmp/hercule-1282-t11/work/q6b-extra/c.txt\",\"Content\":\"x\",\"Overwrite\":false}. If the tool rejects arguments, quote the error and stop.","modelName":"gemini-4-neon-high","stepIdx":15,"toolCall":{"args":{"Content":"x","Overwrite":false,"Path":"/var/tmp/hercule-1282-t11/work/q6b-extra/c.tx
+
+TEXT: The `run_command` tool rejected the arguments with the following error:  > Encountered error in tool validation: invalid arguments: > - missing property 'toolSummary' > - additional properties 'Path', 'cwd' not allowedThe `write_file` tool rejected the arguments with the following error:  > Encountered error in tool validation: invalid arguments: > - additional properties 'path' not allowedThe `edit_file` tool rejected the arguments with the following error:  > Encountered error in tool validati
+FILES: existing.txt c.txt

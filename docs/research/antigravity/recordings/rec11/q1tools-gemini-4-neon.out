@@ -1,0 +1,8 @@
+set model gemini-4-neon ok
+q1tools-gemini-4-neon prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT: read_file, write_file, edit_file, run_command, manage_task, search_web, ask_question, schedule, define_subagent, invoke_subagent, manage_subagents, send_message, run_workflow, swarm
+FILES: 

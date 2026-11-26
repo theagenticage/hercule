@@ -1,0 +1,14 @@
+== PROMPT "Use your write_file tool to create the f" -> end_turn in 39906 ms; requests this prompt: 0
+  TOOL tool_call in_progress {"title":"File hello.txt"}
+  TOOL tool_call_update failed {"title":"File hello.txt","content":[{"type":"content","content":{"type":"text","text":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: signal: killed, stderr:"}}],"rawOutput":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: signal: killed, stderr:"}
+  AGENT TEXT: Encountered error in tool execution: JSON hook "jsonhook__h_PreToolUse_0_0" failed: command failed: signal: killed, stderr: 
+== PROMPT "Use your run_command tool to run exactly" -> end_turn in 45196 ms; requests this prompt: 0
+  TOOL tool_call in_progress {"title":"echo hi"}
+  TOOL tool_call_update failed {"title":"echo hi","content":[{"type":"content","content":{"type":"text","text":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: signal: killed, stderr:"}}],"rawOutput":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: signal: killed, stderr:"}
+  AGENT TEXT: Encountered error in tool execution: JSON hook "jsonhook__h_PreToolUse_0_0" failed: command failed: signal: killed, stderr: 
+REQUESTS: 0
+HOOK LOG:
+START 1795704851131 behaviour=sleep35
+START 1795704888658 behaviour=sleep35
+
+FILES: 

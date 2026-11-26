@@ -1,0 +1,10 @@
+q4h-dotagent prompt -> end_turn
+TOOL CALLS (last status):
+  call_1567324 echo MARKERWORD | completed | {"CommandLine":"echo MARKERWORD","WaitMsBeforeAsync":5000,"toolSummary":"Echo marker word"}
+REQUESTS: 0
+HOOK LOG:
+1795703424791 WSHOOK .agent run_command {"CommandLine":"echo MARKERWORD","WaitMsBeforeAsync":5000,"toolSummary":"Echo marker word"} -> auto_approve
+1795703424809 {"artifactDirectoryPath":"/var/tmp/hercule-1282-t11/home/antigravity-acp/brain/f02bd2aa-d2da-4a99-8777-363f47d82d53","conversationId":"f02bd2aa-d2da-4a99-8777-363f47d82d53","cwd":"/var/tmp/hercule-1282-t11/work/q4h-dotagent","hookEventName":"PreToolUse","lastUserInput":"Run the shell command: echo MARKERWORD","modelName":"gemini-4-neon-high","stepIdx":2,"toolCall":{"args":{"CommandLine":"echo MARKERWORD","WaitMsBeforeAsync":5000,"toolSummary":"Echo marker word"},"id":"call_15673248429912328840","name":"run_command"},"transcriptPath":"/var/tmp/hercule-1282-t11/home/antigravity-acp/brain/f02bd2aa-d2da-4a99-8777-363f47d82d53/.system_generated/logs/transcript_full.jsonl","workspace
+
+TEXT: The command `echo MARKERWORD` ran successfully with output:  ``` MARKERWORD ```
+FILES: .agent/hooks.json

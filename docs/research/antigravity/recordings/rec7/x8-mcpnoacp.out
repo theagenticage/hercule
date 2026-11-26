@@ -1,0 +1,11 @@
+  [x8-mcpnoacp] "Call your MCP tool named whoami now and " -> end_turn
+    tool_call id=call_104 kind=read status=in_progress title="File ../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/hercule-1282-test_tools/whoami.json" content=""
+    tool_call_update id=call_104 kind=read status=completed title="File ../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/hercule-1282-test_tools/whoami.json" content=""
+    tool_call id=call_313 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_313 kind=execute status=pending title="MCP Tool whoami" content=""
+    PERMISSION "MCP Tool whoami" kind=execute opts=allow_once,reject_once
+    tool_call_update id=call_313 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_313 kind=execute status=completed title="MCP Tool whoami" content=[{"type":"content","content":{"type":"text","text":"standin-B whoami says: user=alice auth=present"}}]
+    text: "`standin-B whoami says: user=alice auth=present` — **standin-B** answered (via the `hercule-1282-test_tools` MCP server)."
+x8-mcpnoacp A: 
+x8-mcpnoacp B: POST server/discover auth=Bearer <c> sid=- POST initialize auth=Bearer <c> sid=- POST notifications/initialized auth=Bearer <c> sid=yes POST tools/list auth=Bearer <c> sid=yes POST server/discover auth=Bearer <c> sid=- POST initialize auth=Bearer <c> sid=- POST notifications/initialized auth=Bearer <c> sid=yes POST tools/list auth=Bearer <c> sid=yes POST notifications/roots/list_changed auth=Bearer <c> sid=yes POST tools/call(whoami) auth=Bearer <c> sid=yes DELETE (DELETE) auth=Bearer <c> sid=yes DELETE (DELETE) auth=Bearer <c> sid=yes

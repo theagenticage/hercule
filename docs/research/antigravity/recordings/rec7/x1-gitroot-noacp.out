@@ -1,0 +1,13 @@
+  [x1-gitroot-noacp] "Call your MCP tool named whoami now and " -> end_turn
+    text: "NO TOOL"
+x1-gitroot-noacp A:
+  
+x1-gitroot-noacp B:
+  POST server/discover auth=Bearer canary-0b7ac4cfc50a4886 sid=-
+  POST initialize auth=Bearer canary-0b7ac4cfc50a4886 sid=-
+  GET (GET stream) auth=Bearer canary-0b7ac4cfc50a4886 sid=yes
+  POST notifications/initialized auth=Bearer canary-0b7ac4cfc50a4886 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-0b7ac4cfc50a4886 sid=yes
+  DELETE (DELETE) auth=Bearer canary-0b7ac4cfc50a4886 sid=yes

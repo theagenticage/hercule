@@ -1,0 +1,19 @@
+  [x1-fakehome-acp] "Call your MCP tool named whoami now and " -> end_turn
+    tool_call id=call_135 kind=other status=in_progress title="Run mcp_tools_whoami" content=""
+    tool_call_update id=call_135 kind=other status=pending title="Run mcp_tools_whoami" content=""
+    PERMISSION "Run mcp_tools_whoami" kind=other opts=allow_once,reject_once
+    tool_call_update id=call_135 kind=other status=in_progress title="Run mcp_tools_whoami" content=""
+    tool_call_update id=call_135 kind=other status=completed title="Run mcp_tools_whoami" content=""
+    text: "`standin-A whoami says: user=alice auth=present`"
+x1-fakehome-acp A:
+  POST server/discover auth=Bearer canary-ee955b8ca7814690 sid=-
+  POST initialize auth=Bearer canary-ee955b8ca7814690 sid=-
+  POST notifications/initialized auth=Bearer canary-ee955b8ca7814690 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-ee955b8ca7814690 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-ee955b8ca7814690 sid=yes
+  POST tools/call(whoami) auth=Bearer canary-ee955b8ca7814690 sid=yes
+  DELETE (DELETE) auth=Bearer canary-ee955b8ca7814690 sid=yes
+x1-fakehome-acp B:
+  

@@ -1,0 +1,34 @@
+  [x1c-gitroot-acp] "Call your MCP tool named whoami now and " -> end_turn
+    tool_call id=call_143 kind=other status=in_progress title="Run mcp_tools_whoami" content=""
+    tool_call_update id=call_143 kind=other status=pending title="Run mcp_tools_whoami" content=""
+    PERMISSION "Run mcp_tools_whoami" kind=other opts=allow_once,reject_once
+    tool_call_update id=call_143 kind=other status=in_progress title="Run mcp_tools_whoami" content=""
+    tool_call_update id=call_143 kind=other status=completed title="Run mcp_tools_whoami" content=""
+    tool_call id=call_143 kind=read status=in_progress title="File ../../../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/other/whoami.json" content=""
+    tool_call_update id=call_143 kind=read status=completed title="File ../../../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/other/whoami.json" content=""
+    tool_call id=call_523 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_523 kind=execute status=pending title="MCP Tool whoami" content=""
+    PERMISSION "MCP Tool whoami" kind=execute opts=allow_once,reject_once
+    tool_call_update id=call_523 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_523 kind=execute status=completed title="MCP Tool whoami" content=[{"type":"content","content":{"type":"text","text":"standin-B whoami says: user=alice auth=present"}}]
+    text: "`tools` (`whoami`): \"standin-A whoami says: user=alice auth=present\" | `other` (`whoami`): \"standin-B whoami says: user=alice auth=present\""
+x1c-gitroot-acp A:
+  POST server/discover auth=Bearer canary-b697ee6000df4526 sid=-
+  POST initialize auth=Bearer canary-b697ee6000df4526 sid=-
+  POST notifications/initialized auth=Bearer canary-b697ee6000df4526 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-b697ee6000df4526 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-b697ee6000df4526 sid=yes
+  POST tools/call(whoami) auth=Bearer canary-b697ee6000df4526 sid=yes
+  DELETE (DELETE) auth=Bearer canary-b697ee6000df4526 sid=yes
+x1c-gitroot-acp B:
+  POST server/discover auth=Bearer canary-de7cb6662d9e4d4d sid=-
+  POST initialize auth=Bearer canary-de7cb6662d9e4d4d sid=-
+  GET (GET stream) auth=Bearer canary-de7cb6662d9e4d4d sid=yes
+  POST notifications/initialized auth=Bearer canary-de7cb6662d9e4d4d sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-de7cb6662d9e4d4d sid=yes
+  POST tools/call(whoami) auth=Bearer canary-de7cb6662d9e4d4d sid=yes
+  DELETE (DELETE) auth=Bearer canary-de7cb6662d9e4d4d sid=yes

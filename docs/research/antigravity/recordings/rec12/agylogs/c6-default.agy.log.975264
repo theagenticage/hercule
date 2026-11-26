@@ -1,0 +1,140 @@
+I1126 14:48:57.580072       1 serve.go:30] Starting ACP server (pid 975264, worker=true, isJetski=false)
+I1126 14:48:57.580274       1 server.go:189] Running ACP RPC loop...
+I1126 14:48:57.581969      86 server.go:213] ACP Request received: initialize
+I1126 14:48:57.582427      86 auth_handlers.go:64] Sending initialize response: {"protocolVersion":1,"agentCapabilities":{"loadSession":true,"load_session":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}},"session_capabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}},"mcpCapabilities":{"http":true},"mcp_capabilities":{"http":true},"auth":{"logout":{}},"_meta":{"antigravity":{"tier":true,"systemPrompt":{"append":true}}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.15"},"authMethods":[{"id":"oauth-personal","name":"Log in with Google","description":"Log in with your Google account"},{"id":"oauth-business","name":"Log in with Gemini Enterprise","description":"Log in with your Gemini Enterprise account"},{"id":"gemini-api-key","name":"Gemini API key","description":"Use an API key with Gemini Developer API"},{"id":"agent-platform","name":"Gemini Enterprise Agent Platform","description":"Use Gemini Enterprise Agent Platform (formerly Vertex AI) with Application Default Credentials"}]}
+I1126 14:48:57.583171      87 server.go:213] ACP Request received: session/new
+I1126 14:48:57.583258      87 boot.go:65] Booting backend (overlay=false)
+I1126 14:48:57.583479      23 server.go:2656] Starting language server process with pid 975264
+I1126 14:48:57.583704      23 workflow_python.go:21] run_workflow Python: interpreter "", embedded true
+I1126 14:48:57.583715      23 server.go:1193] Setting GOMAXPROCS to 4
+I1126 14:48:57.588623      23 server.go:2715] Language server version: 1.5.15
+I1126 14:48:57.588671      23 server.go:1290] Language server will attempt to listen on host localhost
+I1126 14:48:57.589108      23 server.go:1305] Language server listening on random port at 37151 for HTTPS (gRPC)
+I1126 14:48:57.589183      23 server.go:1313] Language server listening on random port at 34591 for HTTP
+W1126 14:48:57.593585      98 cache.go:169] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+W1126 14:48:57.593665      98 cache.go:169] Cache(userInfo): Singleflight refresh failed: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+I1126 14:48:57.593933      59 model_configs.go:230] Auth mode is unspecified, skipping fetchAvailableModels and returning empty response
+W1126 14:48:57.594126      68 cache.go:169] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1126 14:48:57.594170      68 errorreport.go:282] error getting token source: You are not logged into Antigravity.
+E1126 14:48:57.594779      59 errorreport.go:282] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1126 14:48:57.594892      65 store_client.go:714] summary store: starting background reconciliation (trigger=empty_on_open)
+I1126 14:48:57.594914      65 store_client.go:743] summary store: reconcile func returned 0 records, skipping
+I1126 14:48:57.601452      23 auth_store.go:199] Using file-based secret storage at /var/tmp/hercule-1282-t12/fakehome/.config/antigravity/plugin-secrets.json
+I1126 14:48:57.601492      23 auth_store.go:199] Using file-based secret storage at /var/tmp/hercule-1282-t12/fakehome/.config/antigravity/plugin-secrets.json
+W1126 14:48:57.601545      97 cache.go:169] Cache(peopleInfo): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1126 14:48:57.601582      97 errorreport.go:282] error getting token source: You are not logged into Antigravity.
+W1126 14:48:57.601763      23 defaults.go:709] failed to get cs path: cs path /usr/bin/cs invalid
+I1126 14:48:57.601780      23 manager.go:162] Creating trajectory store manager with proto store and SQLite store
+I1126 14:48:57.602488     149 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1126 14:48:57.602664     149 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.602676     149 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1126 14:48:57.602738     149 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.602744     149 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1126 14:48:57.602814     149 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.602826     149 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1126 14:48:57.602832     149 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1126 14:48:57.602850     149 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1126 14:48:57.602854     149 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1126 14:48:57.602921     149 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.602941     149 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+I1126 14:48:57.660879     103 server.go:4891] Auth succeeded, refreshing features and managers
+I1126 14:48:57.660850      23 server.go:4083] initialized server successfully in 77.283925ms
+W1126 14:48:57.661001     125 rpcs_plugin_auth.go:110] Not reloading plugin MCP servers: cannot get the signed-in user: error getting token source: You are not logged into Antigravity.
+W1126 14:48:57.661053     126 cache.go:169] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1126 14:48:57.661077     126 errorreport.go:282] error getting token source: You are not logged into Antigravity.
+E1126 14:48:57.661169     103 errorreport.go:282] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1126 14:48:57.661217     103 server.go:4910] State refresh took 0ms
+I1126 14:48:57.661231     103 server.go:4925] [RemoteControl] Subscription callback triggered.
+I1126 14:48:57.661357     103 server.go:4928] [RemoteControl] RemoteControlEnabled value: false
+I1126 14:48:57.661363     103 server.go:6029] [RemoteControl] Session toggle is off, staying disconnected
+I1126 14:48:57.661368     103 server.go:5707] [RemoteControl] Resolved proxyServerURL: ""
+I1126 14:48:57.661428     103 profiler.go:231] Continuous pprof profiling is disabled.
+I1126 14:48:57.661440     170 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1126 14:48:57.661520     170 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.661526     170 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1126 14:48:57.661524     164 reconcile_summaries.go:94] [Summaries] reconcile checked 0 conversations, restored 0, cached 0, skipped 0, dropped 0, cancelled false in 0ms (resident: 0 -> 0)
+I1126 14:48:57.661568     170 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.661572     170 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1126 14:48:57.661617     170 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.661623     170 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1126 14:48:57.661627     170 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1126 14:48:57.661650     170 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1126 14:48:57.661653     170 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1126 14:48:57.661700     170 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:48:57.661705     170 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+E1126 14:48:57.661792      87 errorreport.go:282] failed to get git info for workspace /var/tmp/hercule-1282-t12/work/c6-default: reference not found
+I1126 14:48:57.661849      87 launcher.go:287] ACP app data directory: /var/tmp/hercule-1282-t12/home/antigravity-acp (cliDir="", mode=ccpa)
+I1126 14:48:57.661872      87 server.go:315] Creating CLI server backend: product=antigravity workspaceDirs=[] appDataDir=/var/tmp/hercule-1282-t12/home/antigravity-acp languageServer=true codeAssist=true
+I1126 14:48:57.661917      87 composite_token_storage.go:176] Using file-based token storage because SSH session detected
+I1126 14:48:57.661939      87 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
+I1126 14:48:57.662588      87 server.go:2366] Backend project ID updated dynamically to: default-cli-project
+I1126 14:48:57.662590     196 store_client.go:714] summary store: starting background reconciliation (trigger=empty_on_open)
+I1126 14:48:57.662631      87 composite_token_storage.go:176] Using file-based token storage because SSH session detected
+E1126 14:48:57.662715     196 server.go:3376] Failed to read conversations directory /var/tmp/hercule-1282-t12/home/antigravity/conversations: open /var/tmp/hercule-1282-t12/home/antigravity/conversations: no such file or directory
+I1126 14:48:57.662762     196 server.go:3262] ListConversations returning 0 summaries
+I1126 14:48:57.662772     196 store_client.go:743] summary store: reconcile func returned 0 records, skipping
+I1126 14:48:57.662779     204 keyring.go:64] keyringAuth: loaded token, expiry=2026-11-26 14:57:49.063030006 +0000 UTC expired=false
+I1126 14:48:57.662804      87 auth.go:157] ChainedAuth: authenticated via keyring (effective: keyring)
+I1126 14:48:57.662808      87 server_oauth.go:221] applyAuthResult: email=<scrubbed>, authMethod=consumer, quotaProject=
+I1126 14:48:57.662818      87 server_oauth.go:226] OAuth: authenticated successfully as <scrubbed>
+I1126 14:48:57.662822      87 server_oauth.go:235] b.codeAssistClient.AuthProvider (0x18f7cf8c4a50) is same as b.cliAuth (0x18f7cf8c4a50)
+W1126 14:48:57.662848     210 cache.go:201] Failed to refresh cache in background: admin controls not applicable
+W1126 14:48:57.662920     110 cache.go:201] Failed to refresh cache in background: admin controls not applicable
+I1126 14:48:58.345834     205 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist Trace: 0xd28ddefcca052f9d
+I1126 14:48:58.610503     206 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels Trace: 0x2b7fb6a127504400
+I1126 14:48:58.658863     212 code_assist_client.go:586] CCPA routed this account to AICode; serving AICode FetchConfig flags after 995.824312ms
+I1126 14:48:58.659914      87 http_helpers.go:108] UseAICodeMendel routing switch changed: false -> true
+I1126 14:48:58.659975      87 code_assist_client.go:427] ShadowCallAICodeFetchLicenses switch changed: false -> true
+I1126 14:48:58.660114      87 server.go:5552] [RemoteControl] Mendel flags changed (remote-control-setting-enabled=true, remote-control-proxy-server-url="jetski-webchannel.googleapis.com:443"), re-evaluating the connection
+I1126 14:48:58.660162      87 boot.go:109] Failed to load CLI settings, using defaults: open /var/tmp/hercule-1282-t12/home/antigravity-acp/settings.json: no such file or directory
+I1126 14:48:58.660191      87 server.go:1225] Creating new cascade trajectory (agentScript=false)
+I1126 14:48:58.660207      87 server.go:1252] Conversation using project ID: default-cli-project
+I1126 14:48:58.660335     256 server.go:6029] [RemoteControl] Session toggle is off, staying disconnected
+I1126 14:48:58.660345     256 server.go:5707] [RemoteControl] Resolved proxyServerURL: ""
+I1126 14:48:58.672172      87 server.go:1269] Created conversation 03b8633a-c486-489f-8931-6ebe54a7d934 (backend=BACKEND_TYPE_UNSPECIFIED)
+I1126 14:48:58.672206      87 server.go:1287] Starting conversation update stream for 03b8633a-c486-489f-8931-6ebe54a7d934
+I1126 14:48:58.673004      87 config_options.go:217] Setting default model override: Gemini 4 Neon (High)
+I1126 14:48:58.673357      87 session_handlers.go:156] Advertising available models to client: current=gemini-4-neon-high, count=27
+W1126 14:48:58.673460      87 store.go:31] Terminal sandbox unavailable: AppArmor restricts unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns = 1)
+I1126 14:48:58.674622     294 server.go:213] ACP Request received: session/set_config_option
+I1126 14:48:58.675151     294 config_options.go:51] Switching model in session 03b8633a-c486-489f-8931-6ebe54a7d934 to: Gemini 3.8 Flash (High) (enum: MODEL_PLACEHOLDER_M318)
+I1126 14:48:58.676105     295 server.go:213] ACP Request received: session/prompt
+I1126 14:48:58.676185     295 server.go:1883] Sending user message to conversation 03b8633a-c486-489f-8931-6ebe54a7d934 (items=1, media=0)
+E1126 14:48:58.680648      87 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:48:58.680693      87 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:48:58.681526     311 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:48:58.681555     311 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:48:58.681605     294 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:48:58.681636     294 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:48:58.681855     295 latency_breakdown.go:168] SEND_USER_CASCADE_MESSAGE_LATENCY latency breakdown: map[active_user_state_latency_ms:0 blocking:false cascade_id:03b8633a-c486-489f-8931-6ebe54a7d934 cascade_send_latency_ms:4 hydrate_slash_commands_latency_ms:0 load_trajectory_latency_ms:0 media_count:0 media_summaries_latency_ms:0 message_origin:AGENT_MESSAGE_ORIGIN_UNSPECIFIED resolve_agent_config_latency_ms:0 save_media_latency_ms:0 saved_media_count:0 status:OK total_latency_ms:4 trajectory_id:f3f26a44-cc0b-4b3f-86bd-64d3d718850f user_prompt_submit_hooks_latency_ms:0]
+I1126 14:48:58.690343     294 updates.go:556] Advertising 13 slash commands for session 03b8633a-c486-489f-8931-6ebe54a7d934
+I1126 14:48:58.691141      87 updates.go:556] Advertising 13 slash commands for session 03b8633a-c486-489f-8931-6ebe54a7d934
+I1126 14:48:58.696833     311 monitor_config_manager_external.go:53] externalMonitorConfigManager: initialized with embedded config (3 monitors)
+I1126 14:48:58.696913     311 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:48:58.696935     311 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:48:59.410198     309 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x747fbdcb406ab615 ResponseID: 2kYIa5TEO9Kb3boPoPKt8QI
+I1126 14:48:59.596543     203 updates.go:481] Sending session_info_update for session 03b8633a-c486-489f-8931-6ebe54a7d934: title="Create Hello.txt File"
+I1126 14:49:01.373466     311 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x6796638722bccd25 ResponseID: 2kYIa5S4OITDvdIPk9-TiQE
+E1126 14:49:01.402666     311 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:49:01.402696     311 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:49:01.404812     649 server.go:2852] Tool confirmation for conversation 03b8633a-c486-489f-8931-6ebe54a7d934 step 2 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+I1126 14:49:03.588017     311 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x6b5d895b7326ab9c ResponseID: 3UYIa-eKMLaokdUPs93psQo
+I1126 14:49:03.622131     728 server.go:213] ACP Request received: session/prompt
+I1126 14:49:03.622193     728 server.go:1883] Sending user message to conversation 03b8633a-c486-489f-8931-6ebe54a7d934 (items=1, media=0)
+I1126 14:49:03.623966     728 latency_breakdown.go:168] SEND_USER_CASCADE_MESSAGE_LATENCY latency breakdown: map[active_user_state_latency_ms:0 blocking:false cascade_id:03b8633a-c486-489f-8931-6ebe54a7d934 cascade_send_latency_ms:0 hydrate_slash_commands_latency_ms:0 load_trajectory_latency_ms:0 media_count:0 media_summaries_latency_ms:0 message_origin:AGENT_MESSAGE_ORIGIN_UNSPECIFIED resolve_agent_config_latency_ms:0 save_media_latency_ms:0 saved_media_count:0 status:OK total_latency_ms:0 trajectory_id:f3f26a44-cc0b-4b3f-86bd-64d3d718850f user_prompt_submit_hooks_latency_ms:0]
+E1126 14:49:03.628015     655 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:49:03.628071     655 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:49:03.635207     655 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:49:03.635238     655 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:49:06.270111     655 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xe40d4875748c96eb ResponseID: 30YIa6qHN9Le28oP5quauQg
+E1126 14:49:06.279238     655 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:49:06.279285     655 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:49:06.279671     655 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:49:06.279683     655 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:49:06.280972    1047 server.go:2852] Tool confirmation for conversation 03b8633a-c486-489f-8931-6ebe54a7d934 step 6 (type=*gemini_coder_go_proto.Step_Generic approved=true)
+W1126 14:49:06.281663     655 sandbox_gates.go:40] failed to read project file for default-cli-project in GetSandboxConfig: failed to read project config file /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:49:07.954667     655 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x222ec55bc0282261 ResponseID: 4kYIa7X8HObvxs0Ph97uwAE
+I1126 14:49:07.974111     289 server.go:1351] Stream goroutine exited for 03b8633a-c486-489f-8931-6ebe54a7d934, sending completion signal
+I1126 14:49:07.979140    1104 server.go:4516] Language server shutting down
+I1126 14:49:07.979158    1104 server.go:4556] Waiting for migrations to complete to prevent partial migration state...
+E1126 14:49:07.981862     100 file_watcher.go:194] skipping empty or temp file: 

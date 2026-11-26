@@ -1,0 +1,12 @@
+== PROMPT "Use your write_file tool to create the f" -> end_turn in 9935 ms; requests this prompt: 0
+  TOOL tool_call in_progress {"title":"File hello.txt"}
+  TOOL tool_call_update failed {"title":"File hello.txt","content":[{"type":"content","content":{"type":"text","text":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: exit status 127, stderr: sh: 1: /var/tmp/hercule-1282-t12/hook/missing.sh: not found"}}],"rawOutput":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: exit status 127, stderr: sh: 1: /var/tmp/hercule-1282-t12/hook/missing.sh: not found"}
+  AGENT TEXT: Encountered error in tool execution: JSON hook "jsonhook__h_PreToolUse_0_0" failed: command failed: exit status 127, stderr: sh: 1: /var/tmp/hercule-1282-t12/hook/missing.sh: not found
+== PROMPT "Use your run_command tool to run exactly" -> end_turn in 5873 ms; requests this prompt: 0
+  TOOL tool_call in_progress {"title":"echo hi"}
+  TOOL tool_call_update failed {"title":"echo hi","content":[{"type":"content","content":{"type":"text","text":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: exit status 127, stderr: sh: 1: /var/tmp/hercule-1282-t12/hook/missing.sh: not found"}}],"rawOutput":"JSON hook \"jsonhook__h_PreToolUse_0_0\" failed: command failed: exit status 127, stderr: sh: 1: /var/tmp/hercule-1282-t12/hook/missing.sh: not found"}
+  AGENT TEXT: Encountered error in tool execution: JSON hook "jsonhook__h_PreToolUse_0_0" failed: command failed: exit status 127, stderr: sh: 1: /var/tmp/hercule-1282-t12/hook/missing.sh: not found
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+FILES: 

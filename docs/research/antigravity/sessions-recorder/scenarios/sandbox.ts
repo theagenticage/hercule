@@ -4,7 +4,7 @@ import { runScenario, openSession, prompt, summarize, autoPermission, setMode, F
 const mode = process.argv[4] ?? "full";
 const PROMPT =
   "Run each of these four commands as its own command, do not set BypassSandbox yourself, and report each output exactly: " +
-  "`curl -sS -m 5 -o /dev/null -w '%{http_code}' http://controller.example:4937/api/v1/` ; " +
+  "`curl -sS -m 5 -o /dev/null -w '%{http_code}' http://<ip>:4937/api/v1/` ; " +
   "`curl -sS -m 5 -o /dev/null -w '%{http_code}' https://api.github.com` ; " +
   "`git ls-remote https://github.com/octocat/Hello-World HEAD` ; " +
   "`echo $SSH_CONNECTION`";

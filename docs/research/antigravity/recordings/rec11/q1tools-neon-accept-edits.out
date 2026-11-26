@@ -1,0 +1,7 @@
+q1tools-neon-accept-edits prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT: run_command, manage_task, read_file, write_file, edit_file, ask_question, define_subagent, invoke_subagent, manage_subagents, send_message, swarm, search_web, schedule, run_workflow
+FILES: 

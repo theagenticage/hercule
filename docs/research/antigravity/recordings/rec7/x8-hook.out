@@ -1,0 +1,7 @@
+  [x8-hook] "Run the shell command `echo HERCULE1282`" -> end_turn
+    tool_call id=call_140 kind=execute status=in_progress title="echo HERCULE1282" content=""
+    tool_call_update id=call_140 kind=execute status=completed title="echo HERCULE1282" content=[{"type":"content","content":{"type":"text","text":"Created At: 2026-11-26T11:50:29Z\nCompleted At: 2026-11-26T11:50:29Z\nCommand exited with code 0.\n\nCommand
+    text: "done"
+   RESULT hook: permission requests=0 hookFired=1
+x8-hook A: 
+x8-hook B: 

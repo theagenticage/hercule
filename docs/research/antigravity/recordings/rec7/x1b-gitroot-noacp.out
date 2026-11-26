@@ -1,0 +1,26 @@
+  [x1b-gitroot-noacp] "List the names of all your tools that co" -> end_turn
+    text: "NONE"
+  [x1b-gitroot-noacp] "Try calling any MCP tool named like whoa" -> end_turn
+    tool_call id=call_917 kind=read status=in_progress title="File ../../../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/tools/whoami.json" content=""
+    tool_call_update id=call_917 kind=read status=completed title="File ../../../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/tools/whoami.json" content=""
+    tool_call id=call_917 kind=read status=in_progress title="File ../../../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/tools/instructions.md" content=""
+    tool_call_update id=call_917 kind=read status=failed title="File ../../../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/tools/instructions.md" content=[{"type":"content","content":{"type":"text","text":"file does not exist"}}]
+    tool_call id=call_916 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_916 kind=execute status=pending title="MCP Tool whoami" content=""
+    PERMISSION "MCP Tool whoami" kind=execute opts=allow_once,reject_once
+    tool_call_update id=call_916 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_916 kind=execute status=completed title="MCP Tool whoami" content=[{"type":"content","content":{"type":"text","text":"standin-B whoami says: user=alice auth=present"}}]
+    text: "Calling `whoami` on MCP server `tools` (which is available as a lazy MCP tool; apologies for missing it in the previous turn) returned:\n\n> `standin-B whoami says: user=alice auth=present`"
+x1b-gitroot-noacp A:
+  
+x1b-gitroot-noacp B:
+  POST server/discover auth=Bearer canary-d900abf0a7a04e73 sid=-
+  POST initialize auth=Bearer canary-d900abf0a7a04e73 sid=-
+  GET (GET stream) auth=Bearer canary-d900abf0a7a04e73 sid=yes
+  POST notifications/initialized auth=Bearer canary-d900abf0a7a04e73 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-d900abf0a7a04e73 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-d900abf0a7a04e73 sid=yes
+  POST tools/call(whoami) auth=Bearer canary-d900abf0a7a04e73 sid=yes
+  DELETE (DELETE) auth=Bearer canary-d900abf0a7a04e73 sid=yes

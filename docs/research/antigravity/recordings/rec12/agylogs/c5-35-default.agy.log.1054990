@@ -1,0 +1,207 @@
+I1126 14:54:04.243834       1 serve.go:30] Starting ACP server (pid 1054990, worker=true, isJetski=false)
+I1126 14:54:04.244052       1 server.go:189] Running ACP RPC loop...
+I1126 14:54:04.244184      70 server.go:213] ACP Request received: initialize
+I1126 14:54:04.244626      70 auth_handlers.go:64] Sending initialize response: {"protocolVersion":1,"agentCapabilities":{"loadSession":true,"load_session":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}},"session_capabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}},"mcpCapabilities":{"http":true},"mcp_capabilities":{"http":true},"auth":{"logout":{}},"_meta":{"antigravity":{"tier":true,"systemPrompt":{"append":true}}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.15"},"authMethods":[{"id":"oauth-personal","name":"Log in with Google","description":"Log in with your Google account"},{"id":"oauth-business","name":"Log in with Gemini Enterprise","description":"Log in with your Gemini Enterprise account"},{"id":"gemini-api-key","name":"Gemini API key","description":"Use an API key with Gemini Developer API"},{"id":"agent-platform","name":"Gemini Enterprise Agent Platform","description":"Use Gemini Enterprise Agent Platform (formerly Vertex AI) with Application Default Credentials"}]}
+I1126 14:54:04.244885      71 server.go:213] ACP Request received: session/new
+I1126 14:54:04.244959      71 boot.go:65] Booting backend (overlay=false)
+I1126 14:54:04.245162      21 server.go:2656] Starting language server process with pid 1054990
+I1126 14:54:04.245373      21 workflow_python.go:21] run_workflow Python: interpreter "", embedded true
+I1126 14:54:04.245384      21 server.go:1193] Setting GOMAXPROCS to 4
+I1126 14:54:04.247309      21 server.go:2715] Language server version: 1.5.15
+I1126 14:54:04.247344      21 server.go:1290] Language server will attempt to listen on host localhost
+I1126 14:54:04.247812      21 server.go:1305] Language server listening on random port at 38323 for HTTPS (gRPC)
+I1126 14:54:04.247886      21 server.go:1313] Language server listening on random port at 45801 for HTTP
+I1126 14:54:04.249041      84 model_configs.go:230] Auth mode is unspecified, skipping fetchAvailableModels and returning empty response
+W1126 14:54:04.249799      98 cache.go:169] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+W1126 14:54:04.249861      98 cache.go:169] Cache(userInfo): Singleflight refresh failed: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+E1126 14:54:04.250322      84 errorreport.go:282] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1126 14:54:04.251890      90 store_client.go:714] summary store: starting background reconciliation (trigger=startup)
+I1126 14:54:04.252838      90 store_client.go:764] summary store: reconciliation complete, synced 13 records
+I1126 14:54:04.254733      21 auth_store.go:199] Using file-based secret storage at /var/tmp/hercule-1282-t12/fakehome/.config/antigravity/plugin-secrets.json
+I1126 14:54:04.254770      21 auth_store.go:199] Using file-based secret storage at /var/tmp/hercule-1282-t12/fakehome/.config/antigravity/plugin-secrets.json
+W1126 14:54:04.254831     142 cache.go:169] Cache(peopleInfo): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1126 14:54:04.254888     142 errorreport.go:282] error getting token source: You are not logged into Antigravity.
+W1126 14:54:04.255066      21 defaults.go:709] failed to get cs path: cs path /usr/bin/cs invalid
+I1126 14:54:04.255087      21 manager.go:162] Creating trajectory store manager with proto store and SQLite store
+I1126 14:54:04.255742     178 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1126 14:54:04.255897     178 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.255933     178 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1126 14:54:04.256007     178 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.256013     178 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1126 14:54:04.256059     178 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.256071     178 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1126 14:54:04.256076     178 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1126 14:54:04.256110     178 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1126 14:54:04.256115     178 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1126 14:54:04.256175     178 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.256184     178 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+I1126 14:54:04.333466     118 server.go:4891] Auth succeeded, refreshing features and managers
+W1126 14:54:04.333678     150 cache.go:169] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1126 14:54:04.333712     150 errorreport.go:282] error getting token source: You are not logged into Antigravity.
+E1126 14:54:04.333834     118 errorreport.go:282] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1126 14:54:04.333897     118 server.go:4910] State refresh took 0ms
+I1126 14:54:04.333911     118 server.go:4925] [RemoteControl] Subscription callback triggered.
+I1126 14:54:04.334042     118 server.go:4928] [RemoteControl] RemoteControlEnabled value: false
+I1126 14:54:04.334055     118 server.go:6029] [RemoteControl] Session toggle is off, staying disconnected
+I1126 14:54:04.334061     118 server.go:5707] [RemoteControl] Resolved proxyServerURL: ""
+I1126 14:54:04.334158     118 profiler.go:231] Continuous pprof profiling is disabled.
+I1126 14:54:04.334174     194 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1126 14:54:04.334276     194 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.334284     194 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1126 14:54:04.334323     194 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.334328     194 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1126 14:54:04.334362     194 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.334372     194 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1126 14:54:04.334378     194 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1126 14:54:04.334404     194 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1126 14:54:04.334408     194 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1126 14:54:04.334449     194 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1126 14:54:04.334456     194 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+W1126 14:54:04.334469     149 rpcs_plugin_auth.go:110] Not reloading plugin MCP servers: cannot get the signed-in user: error getting token source: You are not logged into Antigravity.
+I1126 14:54:04.335388     156 reconcile_summaries.go:94] [Summaries] reconcile checked 13 conversations, restored 0, cached 13, skipped 0, dropped 0, cancelled false in 0ms (resident: 0 -> 0)
+I1126 14:54:04.333330      21 server.go:4083] initialized server successfully in 88.087944ms
+E1126 14:54:04.338914      71 errorreport.go:282] failed to get git info for workspace /var/tmp/hercule-1282-t12/work/c5-35-default: reference not found
+I1126 14:54:04.339584      71 launcher.go:287] ACP app data directory: /var/tmp/hercule-1282-t12/home/antigravity-acp (cliDir="", mode=ccpa)
+I1126 14:54:04.339633      71 server.go:315] Creating CLI server backend: product=antigravity workspaceDirs=[] appDataDir=/var/tmp/hercule-1282-t12/home/antigravity-acp languageServer=true codeAssist=true
+I1126 14:54:04.339864      71 composite_token_storage.go:176] Using file-based token storage because SSH session detected
+I1126 14:54:04.339902      71 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
+I1126 14:54:04.341486      71 server.go:2366] Backend project ID updated dynamically to: default-cli-project
+I1126 14:54:04.341618      71 composite_token_storage.go:176] Using file-based token storage because SSH session detected
+I1126 14:54:04.342044     191 keyring.go:64] keyringAuth: loaded token, expiry=2026-11-26 15:53:03.397488753 +0000 UTC expired=false
+I1126 14:54:04.342084      71 auth.go:157] ChainedAuth: authenticated via keyring (effective: keyring)
+I1126 14:54:04.342092      71 server_oauth.go:221] applyAuthResult: email=<scrubbed>, authMethod=consumer, quotaProject=
+I1126 14:54:04.342102      71 server_oauth.go:226] OAuth: authenticated successfully as <scrubbed>
+I1126 14:54:04.342109      71 server_oauth.go:235] b.codeAssistClient.AuthProvider (0x11bc5ac4b0) is same as b.cliAuth (0x11bc5ac4b0)
+W1126 14:54:04.342244     213 cache.go:201] Failed to refresh cache in background: admin controls not applicable
+W1126 14:54:04.342497     230 cache.go:201] Failed to refresh cache in background: admin controls not applicable
+I1126 14:54:04.870763     193 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist Trace: 0xbe65396de20415bf
+I1126 14:54:05.071129     193 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels Trace: 0xf8186ecce93176ad
+I1126 14:54:05.283684     215 code_assist_client.go:586] CCPA routed this account to AICode; serving AICode FetchConfig flags after 940.778152ms
+I1126 14:54:05.285952      71 http_helpers.go:108] UseAICodeMendel routing switch changed: false -> true
+I1126 14:54:05.285998      71 code_assist_client.go:427] ShadowCallAICodeFetchLicenses switch changed: false -> true
+I1126 14:54:05.286330      71 server.go:5552] [RemoteControl] Mendel flags changed (remote-control-setting-enabled=true, remote-control-proxy-server-url="jetski-webchannel.googleapis.com:443"), re-evaluating the connection
+I1126 14:54:05.286690     278 server.go:6029] [RemoteControl] Session toggle is off, staying disconnected
+I1126 14:54:05.286705     278 server.go:5707] [RemoteControl] Resolved proxyServerURL: ""
+I1126 14:54:05.287407      71 boot.go:109] Failed to load CLI settings, using defaults: open /var/tmp/hercule-1282-t12/home/antigravity-acp/settings.json: no such file or directory
+I1126 14:54:05.287456      71 server.go:1225] Creating new cascade trajectory (agentScript=false)
+I1126 14:54:05.287476      71 server.go:1252] Conversation using project ID: default-cli-project
+I1126 14:54:05.304732      71 server.go:1269] Created conversation 47544ded-2573-4b60-b89f-9b8e6ec1ef27 (backend=BACKEND_TYPE_UNSPECIFIED)
+I1126 14:54:05.304783      71 server.go:1287] Starting conversation update stream for 47544ded-2573-4b60-b89f-9b8e6ec1ef27
+I1126 14:54:05.306430      71 config_options.go:217] Setting default model override: Gemini 4 Neon (High)
+I1126 14:54:05.307039      71 session_handlers.go:156] Advertising available models to client: current=gemini-4-neon-high, count=27
+W1126 14:54:05.307208      71 store.go:31] Terminal sandbox unavailable: AppArmor restricts unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns = 1)
+I1126 14:54:05.308905     320 server.go:213] ACP Request received: session/set_config_option
+I1126 14:54:05.309753     320 config_options.go:51] Switching model in session 47544ded-2573-4b60-b89f-9b8e6ec1ef27 to: Gemini 3.8 Flash (High) (enum: MODEL_PLACEHOLDER_M318)
+I1126 14:54:05.312371     321 server.go:213] ACP Request received: session/prompt
+I1126 14:54:05.312514     321 server.go:1883] Sending user message to conversation 47544ded-2573-4b60-b89f-9b8e6ec1ef27 (items=1, media=0)
+E1126 14:54:05.325161     320 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:54:05.325234     320 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:54:05.327765     320 updates.go:556] Advertising 13 slash commands for session 47544ded-2573-4b60-b89f-9b8e6ec1ef27
+E1126 14:54:05.329595      71 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:54:05.329651      71 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:54:05.329736     321 latency_breakdown.go:168] SEND_USER_CASCADE_MESSAGE_LATENCY latency breakdown: map[active_user_state_latency_ms:0 blocking:false cascade_id:47544ded-2573-4b60-b89f-9b8e6ec1ef27 cascade_send_latency_ms:12 hydrate_slash_commands_latency_ms:0 load_trajectory_latency_ms:0 media_count:0 media_summaries_latency_ms:0 message_origin:AGENT_MESSAGE_ORIGIN_UNSPECIFIED resolve_agent_config_latency_ms:0 save_media_latency_ms:0 saved_media_count:0 status:OK total_latency_ms:13 trajectory_id:c25424c8-ed2f-41c5-839e-482a0a3c884c user_prompt_submit_hooks_latency_ms:0]
+E1126 14:54:05.331748     209 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:54:05.331806     209 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:54:05.334749      71 updates.go:556] Advertising 13 slash commands for session 47544ded-2573-4b60-b89f-9b8e6ec1ef27
+I1126 14:54:05.345269     209 monitor_config_manager_external.go:53] externalMonitorConfigManager: initialized with embedded config (3 monitors)
+I1126 14:54:05.345422     209 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:54:05.345446     209 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:54:05.895641     207 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x46c3f73184a4594b ResponseID: DUgIa-HSGMTMkdUPr9rs2A8
+I1126 14:54:06.253351     190 updates.go:481] Sending session_info_update for session 47544ded-2573-4b60-b89f-9b8e6ec1ef27: title="Create Hello.txt File"
+I1126 14:54:11.100457     209 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0x675b9407ab8237fc ResponseID: DUgIa_a6IeKL7M8Px-OswAE
+I1126 14:54:44.705516     209 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xc9a09567bcc7cd20 ResponseID: MUgIa9G1EtGykdUP-oaP4Q8
+I1126 14:54:45.219862     798 server.go:213] ACP Request received: session/prompt
+I1126 14:54:45.219945     798 server.go:1883] Sending user message to conversation 47544ded-2573-4b60-b89f-9b8e6ec1ef27 (items=1, media=0)
+I1126 14:54:45.221839     798 latency_breakdown.go:168] SEND_USER_CASCADE_MESSAGE_LATENCY latency breakdown: map[active_user_state_latency_ms:0 blocking:false cascade_id:47544ded-2573-4b60-b89f-9b8e6ec1ef27 cascade_send_latency_ms:0 hydrate_slash_commands_latency_ms:0 load_trajectory_latency_ms:0 media_count:0 media_summaries_latency_ms:0 message_origin:AGENT_MESSAGE_ORIGIN_UNSPECIFIED resolve_agent_config_latency_ms:0 save_media_latency_ms:0 saved_media_count:0 status:OK total_latency_ms:0 trajectory_id:c25424c8-ed2f-41c5-839e-482a0a3c884c user_prompt_submit_hooks_latency_ms:0]
+E1126 14:54:45.227731     730 projects.go:204] projects store: project_store_get_file_missing: missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+E1126 14:54:45.227796     730 errorreport.go:282] missing project file: open /var/tmp/hercule-1282-t12/home/config/projects/default-cli-project.json: no such file or directory
+I1126 14:54:45.238113     730 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:54:45.238171     730 monitoring.go:411] [Sonar] Resolved active tags: [jetski_mode_default policy_guardian sonar_skip_tags] (detected surface: "")
+I1126 14:54:48.625220     730 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xc5ff18076dd915ab ResponseID: NUgIa46IG5GlxN8P04jfuQM
+I1126 14:55:30.307886     730 http_helpers.go:748] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xe82c3256c1402df8 ResponseID: VkgIa8rhNLW5kdUP2MDfEA
+I1126 14:55:30.417024     319 server.go:1351] Stream goroutine exited for 47544ded-2573-4b60-b89f-9b8e6ec1ef27, sending completion signal
+I1126 14:55:30.421984    1135 server.go:4516] Language server shutting down
+I1126 14:55:30.422026    1135 server.go:4556] Waiting for migrations to complete to prevent partial migration state...
+E1126 14:55:30.425596      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425646      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425652      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425656      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425661      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425671      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425675      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425679      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425682      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425687      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425690      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425694      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425697      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425702      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425705      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425709      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425713      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425717      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425720      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425724      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425728      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425731      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425735      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425738      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425742      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425746      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425760      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425764      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425766      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425771      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425774      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425777      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425780      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425783      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425785      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425788      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425791      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425794      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425802      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425805      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425808      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425810      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425813      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425816      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425819      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425822      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425825      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425828      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425831      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425833      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425836      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425839      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425842      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425845      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425847      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425850      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425853      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425855      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425858      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425861      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425863      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425866      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425869      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425872      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425875      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425878      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425880      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425883      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425886      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425889      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425892      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425900      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425902      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425905      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425908      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425910      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425917      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425920      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425922      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425937      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425940      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425957      99 file_watcher.go:194] skipping empty or temp file: 
+E1126 14:55:30.425960      99 file_watcher.go:194] skipping empty or temp file: 

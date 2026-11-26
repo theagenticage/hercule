@@ -1,0 +1,8 @@
+set model claude-sonnet-5-5 ok
+q1tools-claude-sonnet-5-5 prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT: read_file, run_command, manage_task, send_message, schedule, invoke_subagent, define_subagent, manage_subagents, write_file, edit_file, search_web, run_workflow, swarm, ask_question
+FILES: 

@@ -1,0 +1,11 @@
+{"t":1795693641316,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":null,"ua":"Go-http-client/1.1","proto":"2026-07-28","rpc":"server/discover","id":1}
+{"t":1795693641317,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"initialize","id":2}
+{"t":1795693641317,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795693641317,"server":"A","http":"GET","path":"/.well-known/oauth-protected-resource/mcp","auth":null,"sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"(GET stream)"}
+{"t":1795693641317,"server":"A","http":"GET","path":"/.well-known/oauth-protected-resource","auth":null,"sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"(GET stream)"}
+{"t":1795693641317,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/list","id":3}
+{"t":1795693641339,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/roots/list_changed"}
+{"t":1795693645127,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":4}
+{"t":1795693649159,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/roots/list_changed"}
+{"t":1795693653655,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":5}
+{"t":1795693656701,"server":"A","http":"DELETE","path":"/mcp","auth":"Bearer canary-1eb3dd58a5794812","sid":"c8aa27fb-8aa6-4815-a29c-b3a003297bc4","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"(DELETE)"}

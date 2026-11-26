@@ -1,0 +1,8 @@
+set model gpt-oss-120b-medium ok
+q5-gpt-oss-120b-medium prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT:  ⚠ Our servers are experiencing high traffic right now, please try again in a minute. (UNAVAILABLE (code 503): No capacity available for model gpt-oss-120b-medium on the server) 
+FILES: node_modules/pkg node_modules/.store/pkg/node_modules/pkg/index.js

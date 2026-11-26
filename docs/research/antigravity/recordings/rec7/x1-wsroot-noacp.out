@@ -1,0 +1,6 @@
+  [x1-wsroot-noacp] "Call your MCP tool named whoami now and " -> end_turn
+    text: "NO TOOL"
+x1-wsroot-noacp A:
+  
+x1-wsroot-noacp B:
+  

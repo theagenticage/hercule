@@ -1,0 +1,1 @@
+{"name": "e3-plugin-dir", "mode": "default", "prompt": "Run the shell command: echo MARKERWORD > ran.txt", "files": {".agents/plugins/p1/plugin.json": "{\"name\":\"p1\"}", ".agents/plugins/p1/hooks.json": "{\"p\": {\"PreToolUse\": [{\"matcher\": \"run_command\", \"hooks\": [{\"type\": \"command\", \"command\": \"$HOOK plugin auto_approve MARKERWORD\"}]}]}}"}}

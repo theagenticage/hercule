@@ -1,0 +1,22 @@
+== PROMPT "Use your write_file tool to create the f" -> end_turn in 7708 ms; requests this prompt: 1
+  TOOL tool_call in_progress {"title":"File hello.txt"}
+  TOOL tool_call_update pending {"title":"File hello.txt"}
+  TOOL tool_call_update in_progress {"title":"File hello.txt"}
+  TOOL tool_call_update completed {"title":"File hello.txt","content":[{"type":"diff","path":"/var/tmp/hercule-1282-t12/work/c6-default/hello.txt","newText":"hi"}],"rawOutput":{}}
+  AGENT TEXT: Created At: 2026-11-26T14:49:20Z Completed At: 2026-11-26T14:49:20Z Created file.
+== PROMPT "Use your run_command tool to run exactly" -> end_turn in 6954 ms; requests this prompt: 1
+  TOOL tool_call in_progress {"title":"echo hi"}
+  TOOL tool_call_update pending {"title":"echo hi"}
+  TOOL tool_call_update in_progress {"title":"echo hi"}
+  TOOL tool_call_update completed {"title":"echo hi","content":[{"type":"content","content":{"type":"text","text":"Created At: 2026-11-26T14:49:27Z\nCompleted At: 2026-11-26T14:49:27Z\nCommand exited with code 0.\n\nCommand output:\nhi\r\n"}}],"rawOutput":{"output":"Created At: 2026-11-26T14:49:27Z\nCompleted At: 2026-11-26T14:49:27Z\nCommand exited with code 0.\n\nCommand output:\nhi\r\n","exit_code":0}}
+  AGENT TEXT: Created At: 2026-11-26T14:49:27Z Completed At: 2026-11-26T14:49:27Z Command exited with code 0.  Command output: hi 
+REQUESTS: 2
+  1795704560518 {"sessionUpdate":"tool_call","toolCallId":"call_5642852880308235085","name":"write_file","args":{"Content":"hi","Path":"/var/tmp/hercule-1282-t12/work/c6-default/hello.txt"},"status":"pending","kind":
+  1795704567530 {"sessionUpdate":"tool_call","toolCallId":"call_5534186866294188660","name":"run_command","args":{"CommandLine":"echo hi","WaitMsBeforeAsync":5000,"toolSummary":"Echo hi command"},"status":"pending","
+HOOK LOG:
+START 1795704560514 behaviour=none
+END 1795704560515
+START 1795704567527 behaviour=none
+END 1795704567528
+
+FILES: hello.txt

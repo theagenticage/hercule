@@ -1,0 +1,8 @@
+set model gemini-4-hydrogen ok
+q1tools-gemini-4-hydrogen prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT: run_command, manage_task, read_file, write_file, edit_file, search_web, define_subagent, invoke_subagent, manage_subagents, send_message, schedule, ask_question, run_workflow, swarm
+FILES: 

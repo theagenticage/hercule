@@ -1,0 +1,7 @@
+q4m-usagent prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT: hi
+FILES: SPAWNED _agent/mcp_config.json

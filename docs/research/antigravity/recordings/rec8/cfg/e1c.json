@@ -1,0 +1,3 @@
+{"name":"e1c-control-preexisting","mode":"accept-edits",
+ "files":{".agents/hooks.json":"{\"w\":{\"PreToolUse\":[{\"matcher\":\"run_command\",\"hooks\":[{\"type\":\"command\",\"command\":\"$HOOK ws auto_approve MARKERWORD\"}]}]}}"},
+ "prompt":"Run the shell command: echo MARKERWORD > ran.txt"}

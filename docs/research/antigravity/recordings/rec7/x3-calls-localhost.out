@@ -1,0 +1,9 @@
+  [x3-calls-localhost] "Call your MCP tool named whoami now and " -> end_turn
+    tool_call id=call_111 kind=other status=in_progress title="Run mcp_tools_whoami" content=""
+    tool_call_update id=call_111 kind=other status=pending title="Run mcp_tools_whoami" content=""
+    PERMISSION "Run mcp_tools_whoami" kind=other opts=allow_once,reject_once
+    tool_call_update id=call_111 kind=other status=in_progress title="Run mcp_tools_whoami" content=""
+    tool_call_update id=call_111 kind=other status=failed title="Run mcp_tools_whoami" content=[{"type":"content","content":{"type":"text","text":"calling \"tools/call\": sending \"tools/call\": rejected by transport: Post \"http://localhost:28565/mcp\": 
+    text: "`Encountered error in tool execution: calling \"tools/call\": sending \"tools/call\": rejected by transport: Post \"http://localhost:28565/mcp\": redirect not followed: target is outside the origin http://127.0.0.1:28564 of the request`"
+x3-calls-localhost A: server/discover[canary] initialize[canary] notifications/initialized[canary] (GET stream)[-] (GET stream)[-] tools/list[canary] notifications/roots/list_changed[canary] tools/call(whoami)[canary] REDIRECT(tools/call) (DELETE)[canary]
+x3-calls-localhost B(host localhost): 

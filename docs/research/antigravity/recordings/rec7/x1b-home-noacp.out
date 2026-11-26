@@ -1,0 +1,69 @@
+  [x1b-home-noacp] "List the names of all your tools that co" -> end_turn
+    text: "whoami"
+  [x1b-home-noacp] "Try calling any MCP tool named like whoa" -> end_turn
+    tool_call id=call_150 kind=read status=in_progress title="File ../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/tools/whoami.json" content=""
+    tool_call_update id=call_150 kind=read status=completed title="File ../../../../tmp/hercule-1282/homes/neon/antigravity-acp/mcp/tools/whoami.json" content=""
+    tool_call id=call_316 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_316 kind=execute status=pending title="MCP Tool whoami" content=""
+    PERMISSION "MCP Tool whoami" kind=execute opts=allow_once,reject_once
+    tool_call_update id=call_316 kind=execute status=in_progress title="MCP Tool whoami" content=""
+    tool_call_update id=call_316 kind=execute status=completed title="MCP Tool whoami" content=[{"type":"content","content":{"type":"text","text":"standin-B whoami says: user=alice auth=present"}}]
+    text: "Result from `tools` / `whoami`:\n\n> `standin-B whoami says: user=alice auth=present`"
+x1b-home-noacp A:
+  
+x1b-home-noacp B:
+  POST server/discover auth=Bearer canary-3cf69bcff24c4888 sid=-
+  POST initialize auth=Bearer canary-3cf69bcff24c4888 sid=-
+  GET (GET stream) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/initialized auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST server/discover auth=Bearer canary-3cf69bcff24c4888 sid=-
+  POST initialize auth=Bearer canary-3cf69bcff24c4888 sid=-
+  GET (GET stream) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/initialized auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST server/discover auth=Bearer canary-3cf69bcff24c4888 sid=-
+  POST initialize auth=Bearer canary-3cf69bcff24c4888 sid=-
+  GET (GET stream) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/initialized auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST server/discover auth=Bearer canary-3cf69bcff24c4888 sid=-
+  POST initialize auth=Bearer canary-3cf69bcff24c4888 sid=-
+  GET (GET stream) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/initialized auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  DELETE (DELETE) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  DELETE (DELETE) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST server/discover auth=Bearer canary-3cf69bcff24c4888 sid=-
+  POST initialize auth=Bearer canary-3cf69bcff24c4888 sid=-
+  GET (GET stream) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/initialized auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST server/discover auth=Bearer canary-3cf69bcff24c4888 sid=-
+  POST initialize auth=Bearer canary-3cf69bcff24c4888 sid=-
+  GET (GET stream) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/initialized auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  GET (GET stream) auth=- sid=-
+  GET (GET stream) auth=- sid=-
+  POST tools/list auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST notifications/roots/list_changed auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  POST tools/call(whoami) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  DELETE (DELETE) auth=Bearer canary-3cf69bcff24c4888 sid=yes
+  DELETE (DELETE) auth=Bearer canary-3cf69bcff24c4888 sid=yes

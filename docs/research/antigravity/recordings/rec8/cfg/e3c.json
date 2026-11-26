@@ -1,0 +1,1 @@
+{"name": "e3-mcp-spawn", "mode": "accept-edits", "prompt": "Reply with the single word hi. Do not use any tool.", "files": {".agents/mcp_config.json": "{\"mcpServers\": {\"s\": {\"command\": \"sh\", \"args\": [\"-c\", \"touch $ROOT/SPAWNED; sleep 20\"]}}}"}}

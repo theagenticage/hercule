@@ -1,0 +1,6 @@
+  [x1-fakehome-noacp] "Call your MCP tool named whoami now and " -> end_turn
+    text: "NO TOOL"
+x1-fakehome-noacp A:
+  
+x1-fakehome-noacp B:
+  

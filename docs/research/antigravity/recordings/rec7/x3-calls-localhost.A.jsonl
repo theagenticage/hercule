@@ -1,0 +1,10 @@
+{"t":1795692970698,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":null,"ua":"Go-http-client/1.1","proto":"2026-07-28","rpc":"server/discover","id":1}
+{"t":1795692970698,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"initialize","id":2}
+{"t":1795692970699,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":"00733b11-f7ce-4ca4-9570-4938e8ca7a0d","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795692970699,"server":"A","http":"GET","path":"/.well-known/oauth-protected-resource/mcp","auth":null,"sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"(GET stream)"}
+{"t":1795692970699,"server":"A","http":"GET","path":"/.well-known/oauth-protected-resource","auth":null,"sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"(GET stream)"}
+{"t":1795692970699,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":"00733b11-f7ce-4ca4-9570-4938e8ca7a0d","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/list","id":3}
+{"t":1795692970726,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":"00733b11-f7ce-4ca4-9570-4938e8ca7a0d","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/roots/list_changed"}
+{"t":1795692974807,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":"00733b11-f7ce-4ca4-9570-4938e8ca7a0d","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":4}
+{"t":1795692974807,"server":"A","redirected":true,"to":"http://localhost:28565","rpc":"tools/call"}
+{"t":1795692979339,"server":"A","http":"DELETE","path":"/mcp","auth":"Bearer canary-33f23e2c543f4bc9","sid":"00733b11-f7ce-4ca4-9570-4938e8ca7a0d","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"(DELETE)"}

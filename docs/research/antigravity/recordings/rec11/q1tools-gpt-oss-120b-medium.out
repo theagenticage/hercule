@@ -1,0 +1,8 @@
+set model gpt-oss-120b-medium ok
+q1tools-gpt-oss-120b-medium prompt -> end_turn
+TOOL CALLS (last status):
+REQUESTS: 0
+HOOK LOG:
+(no hook ran)
+TEXT: **Available tool function names:**    read_file, run_command, manage_task, send_message, schedule, invoke_subagent, define_subagent, manage_subagents, write_file, edit_file, search_web, run_workflow, swarm, ask_question
+FILES: 

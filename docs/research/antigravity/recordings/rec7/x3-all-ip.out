@@ -1,0 +1,4 @@
+  [x3-all-ip] "Call your MCP tool named whoami now and " -> end_turn
+    text: "NO TOOL"
+x3-all-ip A: server/discover[canary] REDIRECT(server/discover) initialize[canary] REDIRECT(initialize) (GET stream)[-] (GET stream)[-] server/discover[canary] REDIRECT(server/discover) initialize[canary] REDIRECT(initialize) (GET stream)[-] (GET stream)[-]
+x3-all-ip B(host 127.0.0.1): 

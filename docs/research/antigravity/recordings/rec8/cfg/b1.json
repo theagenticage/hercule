@@ -1,0 +1,4 @@
+{"name":"b1-built-hook","mode":"accept-edits","allowIf":"echo","env":{"HERCULE_SESSION_MARKS_DIR":"/var/tmp/hercule-1282-hookdir/gen/marks"},
+ "files":{"a.txt":"hello\n"},
+ "homeHooks":{"hercule":{"PreToolUse":[{"matcher":"run_command|edit_file|write_file","hooks":[{"type":"command","command":"/bin/sh '/var/tmp/hercule-1282-hookdir/gen/hercule-start-mark.sh'"}]}]}},
+ "prompts":["Run the shell command: echo \"a b\" && echo 'c'","Edit a.txt: replace hello with bye, using your edit tool."]}

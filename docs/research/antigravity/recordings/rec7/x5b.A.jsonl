@@ -1,0 +1,11 @@
+{"t":1795693609711,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":null,"ua":"Go-http-client/1.1","proto":"2026-07-28","rpc":"server/discover","id":1}
+{"t":1795693609711,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"initialize","id":2}
+{"t":1795693609712,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":"364c188e-2aa9-43f2-bc04-92421675701f","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/initialized"}
+{"t":1795693609712,"server":"A","http":"GET","path":"/.well-known/oauth-protected-resource/mcp","auth":null,"sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"(GET stream)"}
+{"t":1795693609712,"server":"A","http":"GET","path":"/.well-known/oauth-protected-resource","auth":null,"sid":null,"ua":"Go-http-client/1.1","proto":null,"rpc":"(GET stream)"}
+{"t":1795693609712,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":"364c188e-2aa9-43f2-bc04-92421675701f","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/list","id":3}
+{"t":1795693609738,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":"364c188e-2aa9-43f2-bc04-92421675701f","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/roots/list_changed"}
+{"t":1795693613337,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":"364c188e-2aa9-43f2-bc04-92421675701f","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":4}
+{"t":1795693618059,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":"364c188e-2aa9-43f2-bc04-92421675701f","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"notifications/roots/list_changed"}
+{"t":1795693629973,"server":"A","http":"POST","path":"/mcp","auth":"Bearer canary-cd2d713e3ac845d7","sid":"364c188e-2aa9-43f2-bc04-92421675701f","ua":"Go-http-client/1.1","proto":"2025-11-25","rpc":"tools/call","tool":"whoami","args":{},"id":5}
+{"t":1795693629973,"server":"A","answered":404,"rpc":"tools/call"}
