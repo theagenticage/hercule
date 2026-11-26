@@ -253,6 +253,7 @@ export { listWorkspaceRepositorySkills, type RepositorySkillListing } from "./re
 export { stageRepositorySkills } from "./repository-staging";
 export {
   buildLoadedSkills,
+  resolveSkillFile,
   resolveSkillReferences,
   type LoadedSkills,
   type ResolvedSkillReference,

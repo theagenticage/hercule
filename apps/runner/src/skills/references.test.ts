@@ -1,6 +1,9 @@
 /** Tests that a message's Skill References resolve against the skills a session loaded. */
-import { describe, expect, it } from "vitest";
-import { buildLoadedSkills, resolveSkillReferences } from "./references";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { buildLoadedSkills, resolveSkillFile, resolveSkillReferences } from "./references";
 
 const loaded = buildLoadedSkills({
   libraryFolder: "/home/session-skills/s1-abc",
@@ -95,5 +98,42 @@ describe("resolveSkillReferences", () => {
 
   it("returns nothing for a text without references", () => {
     expect(resolveSkillReferences("costs $5", loaded)).toEqual([]);
+  });
+});
+
+describe("resolveSkillFile", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "hercule-skill-file-")));
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("returns the path of the SKILL.md of a normal skill folder", () => {
+    const folder = join(root, "normal");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "SKILL.md"), "# normal\n");
+    expect(resolveSkillFile(folder)).toBe(join(folder, "SKILL.md"));
+  });
+
+  it("returns the path in the real folder for a skill folder that is a link", () => {
+    const folder = join(root, "real");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "SKILL.md"), "# real\n");
+    symlinkSync(folder, join(root, "linked"), "dir");
+    expect(resolveSkillFile(join(root, "linked"))).toBe(join(folder, "SKILL.md"));
+  });
+
+  it("returns undefined when the folder has no SKILL.md", () => {
+    const folder = join(root, "empty");
+    mkdirSync(folder);
+    expect(resolveSkillFile(folder)).toBeUndefined();
+    expect(resolveSkillFile(join(root, "missing"))).toBeUndefined();
+  });
+
+  it("returns undefined when SKILL.md is a link to a file outside the folder", () => {
+    const folder = join(root, "escaping");
+    mkdirSync(folder);
+    writeFileSync(join(root, "secret.md"), "secret\n");
+    symlinkSync(join(root, "secret.md"), join(folder, "SKILL.md"));
+    expect(resolveSkillFile(folder)).toBeUndefined();
   });
 });

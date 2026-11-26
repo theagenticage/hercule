@@ -8,7 +8,7 @@
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the Harness Home's Codex directory.
  */
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -56,7 +56,7 @@ import type {
   SessionUsageReport,
   TextGenerationContext,
 } from "../index";
-import type { ResolvedSkillReference } from "../../skills";
+import { resolveSkillFile, type ResolvedSkillReference } from "../../skills";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
@@ -643,13 +643,8 @@ const buildSkillInputs = (references: ReadonlyArray<ResolvedSkillReference>): Sk
   for (const reference of references) {
     if (seen.has(reference.folder)) continue;
     seen.add(reference.folder);
-    let path: string;
-    try {
-      path = realpathSync(join(reference.folder, "SKILL.md"));
-      if (path !== join(realpathSync(reference.folder), "SKILL.md")) continue;
-    } catch {
-      continue;
-    }
+    const path = resolveSkillFile(reference.folder);
+    if (path === undefined) continue;
     items.push({ type: "skill", name: reference.skillName, path });
     translated.push(reference);
   }
