@@ -47,7 +47,7 @@ import {
 } from "@hercule/protocol";
 import type { LeaseHeld } from "./harness-home-leases";
 import type { HarnessAdapter, HarnessRunnerContext } from "./index";
-import { STOP_GRACE, stopChild, type StopSignal } from "./process";
+import { stopChild, type StopSignal } from "./process";
 import { TerminalScreen } from "./terminal-screen";
 import { truncateFact } from "./text";
 
@@ -277,8 +277,6 @@ interface Held {
   readonly makesToken: boolean;
   /** Returns the token on the screen, or `undefined` when there is none. */
   readonly readToken: () => string | undefined;
-  /** Removes the login's scratch folder, if it has one. Safe to call more than once. */
-  readonly removeScratchFolder: () => void;
   /** Resolves once the child has exited and its scratch folder is removed. */
   readonly cleanedUp: Promise<void>;
   /**
@@ -289,6 +287,8 @@ interface Held {
   readonly expiresAt: number | undefined;
   /** The expiry timer. Undefined only between the spawn and the first call to `armExpiry`. */
   idle: Fiber.Fiber<void> | undefined;
+  /** The stop of this login (see `stopLogin`). Undefined until the first stop starts. */
+  stopping: Fiber.Fiber<void> | undefined;
 }
 
 /**
@@ -344,25 +344,31 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     });
 
   /**
-   * Stops a login and waits until its process has exited: SIGTERM, then SIGKILL
-   * after a grace period (see `stopChild`). The process's lease on the Harness
-   * Home ends only at its exit, so a stop that returned earlier could let a
-   * session start while the process still writes the login.
+   * Stops a login and waits until its process has exited and its lease is
+   * released: SIGTERM, then SIGKILL after a grace period (see `stopChild`). A
+   * stopped login stays in `held` until then, so shutdown still finds it.
+   * The work runs in a fiber of its own, started once per login: a caller
+   * that is interrupted while waiting leaves the stop running, and a second
+   * caller (a replacement, or shutdown) waits for the same completion.
    */
   const stopLogin = (providerAccountId: string, login: Held): Effect.Effect<void> =>
-    Effect.suspend(() => {
-      login.markStopped();
-      // A killed child's pipes do not always close, so the stdout reader cannot
-      // be relied on to resolve `printed`.
-      login.abandon();
-      return Effect.andThen(
-        forgetLogin(providerAccountId, login),
-        Effect.andThen(
-          stopChild(login.child),
-          Effect.promise(() => login.cleanedUp),
-        ),
-      );
-    });
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        login.stopping ??= yield* Effect.forkDetach(
+          Effect.gen(function* () {
+            login.markStopped();
+            // A killed child's pipes do not always close, so the stdout reader
+            // cannot be relied on to resolve `printed`.
+            login.abandon();
+            if (login.idle !== undefined) yield* Fiber.interrupt(login.idle);
+            yield* stopChild(login.child);
+            yield* Effect.promise(() => login.cleanedUp);
+            yield* forgetLogin(providerAccountId, login);
+          }),
+        );
+        yield* restore(Fiber.join(login.stopping));
+      }),
+    );
 
   /**
    * Restarts the expiry timer of a login that just showed activity. A device
@@ -533,24 +539,26 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         terminal: screen !== undefined,
         makesToken: command.tokenPattern !== undefined,
         readToken,
-        removeScratchFolder,
         cleanedUp,
         expiresAt:
           pattern === undefined
             ? undefined
             : (yield* Clock.currentTimeMillis) + Duration.toMillis(LOGIN_CODE_LIFETIME),
         idle: undefined,
+        stopping: undefined,
       };
       held.set(providerAccountId, login);
       // Once the vendor exits on its own, nobody can finish this login. A
       // device login exits on its own when the user finishes it in the
-      // browser, so its exit is reported. A login that is no longer held was
-      // stopped or replaced, and its end means nothing.
+      // browser, so its exit is reported. A login that is stopping or no
+      // longer held was stopped or replaced, and its end means nothing.
       void child.exited
         .then(() =>
           Effect.runPromise(
             Effect.suspend(() =>
-              held.get(providerAccountId) === login && isDeviceLogin(login)
+              held.get(providerAccountId) === login &&
+              login.stopping === undefined &&
+              isDeviceLogin(login)
                 ? Effect.andThen(forgetLogin(providerAccountId, login), reportEnded(login))
                 : forgetLogin(providerAccountId, login),
             ),
@@ -712,21 +720,10 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     // object is built, which is before any login exists.
     stopAll: Effect.suspend(() => {
       const entries = [...held];
-      const logins = entries.map(([, login]) => login);
       return Effect.forEach(
         entries,
         ([providerAccountId, login]) => stopLogin(providerAccountId, login),
         { discard: true, concurrency: "unbounded" },
-      ).pipe(
-        // The runner is about to exit, and a folder whose removal is still
-        // waiting on a child's exit would be left behind.
-        Effect.andThen(
-          Effect.timeoutOption(
-            Effect.promise(() => Promise.all(logins.map((login) => login.cleanedUp))),
-            STOP_GRACE,
-          ),
-        ),
-        Effect.andThen(Effect.sync(() => logins.forEach((login) => login.removeScratchFolder()))),
       );
     }),
   };

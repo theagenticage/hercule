@@ -1127,6 +1127,65 @@ describe("the lease of a login on the Harness Home", () => {
     expect(result.calls).toEqual(["release"]);
   });
 
+  it("still kills the child and releases the lease when the stop is interrupted", async () => {
+    const { spawn, children } = createMachine({ ignoresTerm: true });
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+
+    const signals = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        const stopping = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.zero);
+        yield* Fiber.interrupt(stopping);
+        yield* TestClock.adjust(Duration.seconds(3));
+        // Shutdown after the interrupted stop finds nothing left to wait for.
+        yield* driver.stopAll;
+        return children[0]!.signals;
+      }),
+    );
+
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(calls).toEqual(["release"]);
+  });
+
+  it("makes shutdown during a stop wait for that stop", async () => {
+    const { spawn, children } = createMachine({ ignoresTerm: true });
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        const first = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.zero);
+        const second = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.seconds(1));
+        const secondDoneEarly = second.pollUnsafe() !== undefined;
+        const callsEarly = [...calls];
+        yield* TestClock.adjust(Duration.seconds(3));
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+        return { secondDoneEarly, callsEarly, signals: children[0]!.signals };
+      }),
+    );
+
+    expect(result.secondDoneEarly).toBe(false);
+    expect(result.callsEarly).toEqual([]);
+    expect(result.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(calls).toEqual(["release"]);
+  });
+
   it("does not start the verifying state for a stopped login that exits with 0", async () => {
     const result = await startThenStop({ exitCode: 0 }, Duration.zero);
 
