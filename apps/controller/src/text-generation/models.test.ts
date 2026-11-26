@@ -10,6 +10,8 @@ import * as Statement from "effect/sql/Statement";
 import { withTransaction } from "../db";
 import { inTransaction } from "../db/testing";
 import { PluginHost } from "../plugins";
+import { antigravity } from "@hercule/plugin-antigravity";
+import { google } from "@hercule/plugin-google";
 import type { Plugin } from "@hercule/plugin-host";
 import { buildPluginStack, declareNoTextGeneration } from "../plugins/testing";
 import {
@@ -30,6 +32,7 @@ import {
   addTextGenerationRunner,
   buildProbeResult as probed,
   buildTextGenerationPlugins,
+  SUBSCRIPTION_KIND,
   type RunnerTraits,
 } from "./testing";
 
@@ -339,14 +342,12 @@ describe("automatic", () => {
   });
 
   it("is unresolved, with a message that says why, when nothing matches", async () => {
-    const target = await run(
-      ({ openai, addRunner, snapshot }) =>
-        Effect.gen(function* () {
-          const runner = yield* addRunner();
-          yield* snapshot(openai, runner, probed("ok", "other"));
-          return yield* resolve.pipe(Effect.orDie);
-        }),
-      buildPluginsWithCodexUnableToGenerate(),
+    const target = await run(({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        yield* snapshot(openai, runner, probed("ok", "other"));
+        return yield* resolve.pipe(Effect.orDie);
+      }),
     );
 
     expect(target).toMatchObject({
@@ -435,6 +436,60 @@ describe("a harness that makes no text generations", () => {
     });
   });
 
+  it("stays unresolved when the only account's provider suggests a model, its catalog holds it, and only the harness refuses", async () => {
+    // Only the OpenAI account is snapshotted, so no other account can be picked:
+    // the harness is the one reason left for `automatic` to find nothing.
+    const target = await run(
+      ({ openai, addRunner, snapshot }) =>
+        Effect.gen(function* () {
+          const runner = yield* addRunner();
+          yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+          return yield* resolve.pipe(Effect.orDie);
+        }),
+      buildPluginsWithCodexUnableToGenerate(),
+    );
+
+    expect(target).toMatchObject({
+      _tag: "unresolved",
+      message: expect.stringContaining("add an account that offers") as unknown,
+    });
+  });
+
+  it("stays unresolved when the only account is a Google account, which runs in Antigravity", async () => {
+    const target = await run(
+      ({ addRunner }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const accounts = yield* providerAccountRepository;
+          const runner = yield* addRunner();
+          const account = yield* withTransaction(
+            sql,
+            accounts.insert({
+              providerId: "google/google",
+              kind: SUBSCRIPTION_KIND,
+              label: null,
+              defaultHarnessId: "antigravity/antigravity",
+              at: "2026-10-04T00:00:00.000Z",
+            }),
+          ).pipe(Effect.orDie);
+          yield* Effect.orDie(
+            Effect.gen(function* () {
+              const result = probed("ok", "gemini-3-flash");
+              yield* addSnapshot(account.id, account.defaultHarnessId, runner, result);
+              yield* addCatalog(account.id, result);
+            }),
+          );
+          return yield* resolve.pipe(Effect.orDie);
+        }),
+      [...buildTextGenerationPlugins(), google, antigravity],
+    );
+
+    expect(target).toMatchObject({
+      _tag: "unresolved",
+      message: expect.stringContaining("add an account that offers") as unknown,
+    });
+  });
+
   it("leaves a chosen model unresolved, with the reason, even on a runner that could take the call", async () => {
     const target = await run(
       ({ openai, addRunner, snapshot }) =>
@@ -456,7 +511,7 @@ describe("a harness that makes no text generations", () => {
     expect(target).toMatchObject({
       _tag: "unresolved",
       message:
-        "OpenAI cannot make text generations: Codex runs no text generations; pick a model that runs in another harness, or Automatic",
+        "OpenAI cannot be the text generation model: Codex makes no text generations; pick another model in Settings › System, or Automatic",
     });
   });
 });
@@ -558,48 +613,44 @@ describe("a chosen account and model", () => {
   });
 
   it("is unresolved, naming the account, when the account cannot run in the chosen harness", async () => {
-    const target = await run(
-      ({ openai, addRunner, snapshot }) =>
-        Effect.gen(function* () {
-          const settings = yield* Settings;
-          const runner = yield* addRunner();
-          yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
-          yield* inTransaction(
-            settings.set("textGeneration.model", {
-              providerAccountId: openai.id,
-              harnessId: "pi/pi",
-              model: "gpt-6-luna",
-            }),
-          );
-          return yield* resolve.pipe(Effect.orDie);
-        }),
-      buildPluginsWithCodexUnableToGenerate(),
+    const target = await run(({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const settings = yield* Settings;
+        const runner = yield* addRunner();
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+        yield* inTransaction(
+          settings.set("textGeneration.model", {
+            providerAccountId: openai.id,
+            harnessId: "pi/pi",
+            model: "gpt-6-luna",
+          }),
+        );
+        return yield* resolve.pipe(Effect.orDie);
+      }),
     );
 
     expect(target).toMatchObject({
       _tag: "unresolved",
-      message: expect.stringContaining("OpenAI cannot make text generations") as unknown,
+      message: expect.stringContaining("OpenAI cannot be the text generation model") as unknown,
     });
   });
 
   it("is unresolved once the account is gone, and never replaced by automatic", async () => {
-    const target = await run(
-      ({ openai, zai, addRunner, snapshot }) =>
-        Effect.gen(function* () {
-          const settings = yield* Settings;
-          const accounts = yield* providerAccountRepository;
-          const runner = yield* addRunner();
-          yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
-          yield* inTransaction(
-            settings.set("textGeneration.model", {
-              providerAccountId: zai.id,
-              model: "glm-5.3-flash",
-            }),
-          );
-          yield* inTransaction(accounts.delete(zai.id)).pipe(Effect.orDie);
-          return yield* resolve.pipe(Effect.orDie);
-        }),
-      buildPluginsWithCodexUnableToGenerate(),
+    const target = await run(({ openai, zai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const settings = yield* Settings;
+        const accounts = yield* providerAccountRepository;
+        const runner = yield* addRunner();
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+        yield* inTransaction(
+          settings.set("textGeneration.model", {
+            providerAccountId: zai.id,
+            model: "glm-5.3-flash",
+          }),
+        );
+        yield* inTransaction(accounts.delete(zai.id)).pipe(Effect.orDie);
+        return yield* resolve.pipe(Effect.orDie);
+      }),
     );
 
     expect(target).toMatchObject({

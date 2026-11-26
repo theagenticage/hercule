@@ -1,6 +1,6 @@
 /**
  * Tests the model select of Settings > System (`buildTextGenerationField`)
- * and the line about the last failure (`describeTextGenerationFailure`).
+ * and the line about the last failure (`describeTextGenerationProblem`).
  */
 import { describe, expect, it } from "vitest";
 import type { TextGenerationStatus } from "@hercule/contract";
@@ -18,7 +18,7 @@ import {
 } from "./providers.testing";
 import {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   describeTextGenerationModel,
   describeTextGenerationRecap,
 } from "./text-generation";
@@ -326,7 +326,7 @@ describe("buildTextGenerationField", () => {
   });
 });
 
-describe("describeTextGenerationFailure", () => {
+describe("describeTextGenerationProblem", () => {
   const failed = (
     reason: "unavailable" | "failed" | "timeout" | "invalid-output",
   ): TextGenerationStatus => ({
@@ -336,17 +336,17 @@ describe("describeTextGenerationFailure", () => {
   });
 
   it("reads the reason, the message and how long ago it was", () => {
-    expect(describeTextGenerationFailure(undefined, failed("timeout"), NOW)).toBe(
+    expect(describeTextGenerationProblem(undefined, failed("timeout"), NOW)).toBe(
       "Last failure 5 minutes ago - timed out: The call went wrong.",
     );
-    expect(describeTextGenerationFailure("automatic", failed("unavailable"), NOW)).toBe(
+    expect(describeTextGenerationProblem("automatic", failed("unavailable"), NOW)).toBe(
       "Last failure 5 minutes ago - unavailable: The call went wrong.",
     );
-    expect(describeTextGenerationFailure("automatic", failed("failed"), NOW)).toBe(
+    expect(describeTextGenerationProblem("automatic", failed("failed"), NOW)).toBe(
       "Last failure 5 minutes ago - failed: The call went wrong.",
     );
     expect(
-      describeTextGenerationFailure(
+      describeTextGenerationProblem(
         { providerAccountId: CODEX.id, model: "gpt-6" },
         failed("invalid-output"),
         NOW,
@@ -354,12 +354,39 @@ describe("describeTextGenerationFailure", () => {
     ).toBe("Last failure 5 minutes ago - invalid output: The call went wrong.");
   });
 
-  it("returns null when there is no failure", () => {
-    expect(describeTextGenerationFailure(undefined, NOTHING, NOW)).toBeNull();
+  it("returns null when there is no failure and no reason text generation cannot run", () => {
+    expect(describeTextGenerationProblem(undefined, NOTHING, NOW)).toBeNull();
+  });
+
+  it("reads the reason text generation cannot run when there is no failure", () => {
+    const status: TextGenerationStatus = {
+      ...NOTHING,
+      unavailableReason: "Codex makes no text generations",
+    };
+
+    expect(describeTextGenerationProblem(undefined, status, NOW)).toBe(
+      "Unavailable: Codex makes no text generations",
+    );
+  });
+
+  it("prefers the last failure over the reason text generation cannot run", () => {
+    const status: TextGenerationStatus = {
+      ...failed("timeout"),
+      unavailableReason: "no runner is signed in",
+    };
+
+    expect(describeTextGenerationProblem("automatic", status, NOW)).toBe(
+      "Last failure 5 minutes ago - timed out: The call went wrong.",
+    );
   });
 
   it("returns null while text generation is off", () => {
-    expect(describeTextGenerationFailure("off", failed("timeout"), NOW)).toBeNull();
+    const status: TextGenerationStatus = {
+      ...failed("timeout"),
+      unavailableReason: "text generation is off in Settings",
+    };
+
+    expect(describeTextGenerationProblem("off", status, NOW)).toBeNull();
   });
 });
 

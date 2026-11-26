@@ -36,7 +36,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { TEXT_GENERATION_CAPABILITY } from "@hercule/protocol";
-import { decideTextGenerationHarness, PluginHost } from "../plugins";
+import { decideTextGenerationHarness, PluginHost, type RegisteredProvider } from "../plugins";
 import {
   describeProviderAccount,
   ModelCatalogs,
@@ -79,8 +79,22 @@ type TextGenerationChoice =
     }
   | { readonly _tag: "unresolved"; readonly message: string };
 
-const NO_AUTOMATIC_MATCH =
-  "no model is available for text generation; add an account that offers OpenAI's, Z.ai's or Anthropic's small model and can run on an up-to-date runner, or pick a model in Settings › System";
+/**
+ * Returns why `automatic` found no model, naming the small models of the
+ * providers that suggest one (such as "OpenAI's, Z.ai's or Anthropic's small
+ * model") so the user knows which account to add.
+ */
+const buildNoAutomaticMatchMessage = (providers: ReadonlyArray<RegisteredProvider>): string => {
+  const owners = providers
+    .filter((provider) => provider.suggestedTextGenerationModel !== undefined)
+    .map((provider) => `${provider.displayName}'s`);
+  if (owners.length === 0) {
+    return "no model is available for text generation; pick a model in Settings › System";
+  }
+  const ownerList =
+    owners.length === 1 ? owners[0]! : `${owners.slice(0, -1).join(", ")} or ${owners.at(-1)!}`;
+  return `no model is available for text generation; add an account that offers ${ownerList} small model and can run on an up-to-date runner, or pick a model in Settings › System`;
+};
 
 const CHOSEN_ACCOUNT_GONE =
   "the provider account chosen for text generation was deleted; choose another in Settings";
@@ -177,7 +191,7 @@ const make = Effect.gen(function* () {
       if (choice._tag === "refused") {
         return {
           _tag: "unresolved",
-          message: `${providerAccountName} cannot make text generations: ${choice.reason}`,
+          message: `${providerAccountName} cannot be the text generation model: ${choice.reason}`,
         } as const;
       }
       const [available] = yield* accountRunners.listMany([
@@ -194,16 +208,8 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Finds the first account, oldest first, that meets all of these:
-   *
-   * - its default harness is carried by this build, the account can run in it,
-   *   and it makes text generations (as `decideTextGenerationHarness`
-   *   decides);
-   * - its provider names a suggested model that the account's Model Catalog
-   *   holds;
-   * - it can run now on a runner able to make the call.
-   *
-   * An account that fails any of these is skipped.
+   * Finds the first account, oldest first, that meets the `automatic` rule in
+   * the file header. An account that fails any part of it is skipped.
    *
    * Reads the accounts, the catalogs and the runners once, then decides in
    * memory, so the number of queries does not grow with the number of
@@ -214,11 +220,10 @@ const make = Effect.gen(function* () {
     const harnesses = yield* host.harnesses();
     const candidates = [];
     for (const account of yield* accounts.list()) {
-      const model = providers.find(
-        (one) => one.id === account.providerId,
-      )?.suggestedTextGenerationModel;
       const choice = decideTextGenerationHarness(providers, harnesses, account);
-      if (model === undefined || choice._tag === "refused") continue;
+      if (choice._tag === "refused") continue;
+      const model = choice.provider.suggestedTextGenerationModel;
+      if (model === undefined) continue;
       candidates.push({ account, harnessId: choice.harness.id, model });
     }
     const available = yield* accountRunners.listMany(
@@ -241,7 +246,7 @@ const make = Effect.gen(function* () {
         runnerIds,
       } as const;
     }
-    return { _tag: "unresolved", message: NO_AUTOMATIC_MATCH } as const;
+    return { _tag: "unresolved", message: buildNoAutomaticMatchMessage(providers) } as const;
   });
 
   return {

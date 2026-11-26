@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   formatAccessMode,
   formatRunnerLabel,
 } from "@hercule/client-core";
@@ -121,7 +121,7 @@ function TextGenerationRow(): JSX.Element {
     modelProfiles,
     textGeneration,
   );
-  const failure = describeTextGenerationFailure(model.value, textGeneration, new Date());
+  const failure = describeTextGenerationProblem(model.value, textGeneration, new Date());
   return (
     <>
       <SettingRow

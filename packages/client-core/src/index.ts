@@ -616,7 +616,7 @@ export {
 export { resolveThreadRowsMode } from "./thread-rows";
 export {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   describeTextGenerationModel,
   describeTextGenerationRecap,
   type TextGenerationChoice,

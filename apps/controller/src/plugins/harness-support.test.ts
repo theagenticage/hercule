@@ -20,7 +20,7 @@ const PROVIDER: RegisteredProvider = {
       description: "A key.",
       setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
       keyCheck: { url: "https://api.example.com/v1/models", headers: {} },
-      harnesses: ["alpha/alpha", "beta/beta", "nongenerating/nongenerating"],
+      harnesses: ["alpha/alpha", "beta/beta"],
     },
     {
       id: "subscription",
@@ -188,55 +188,8 @@ describe("decideProviderAccountHarness", () => {
 });
 
 describe("decideTextGenerationHarness", () => {
-  const NON_GENERATING_HARNESS = {
-    ...buildHarness("nongenerating", ALPHA.runs),
-    declared: { ...ALPHA.declared, textGeneration: "unsupported" as const },
-  };
-  const HARNESSES_WITH_NON_GENERATING = [...HARNESSES, NON_GENERATING_HARNESS];
-  const REFUSAL_REASON =
-    "Harness nongenerating runs no text generations; pick a model that runs in another harness, or Automatic";
-
-  it("chooses a harness that makes text generations, as decideProviderAccountHarness does", () => {
-    expect(decideTextGenerationHarness(PROVIDERS, HARNESSES_WITH_NON_GENERATING, ACCOUNT)).toEqual(
-      decideProviderAccountHarness(PROVIDERS, HARNESSES_WITH_NON_GENERATING, ACCOUNT),
-    );
-    expect(
-      decideTextGenerationHarness(PROVIDERS, HARNESSES_WITH_NON_GENERATING, ACCOUNT),
-    ).toMatchObject({
-      _tag: "chosen",
-      harness: ALPHA,
-    });
-  });
-
-  it("refuses an account whose default harness makes no text generations, blaming the account", () => {
-    const account = { ...ACCOUNT, defaultHarnessId: "nongenerating/nongenerating" };
-
-    expect(decideTextGenerationHarness(PROVIDERS, HARNESSES_WITH_NON_GENERATING, account)).toEqual({
-      _tag: "refused",
-      field: "providerAccountId",
-      reason: REFUSAL_REASON,
-    });
-  });
-
-  it("refuses a named harness that makes no text generations, blaming the harness", () => {
-    expect(
-      decideTextGenerationHarness(
-        PROVIDERS,
-        HARNESSES_WITH_NON_GENERATING,
-        ACCOUNT,
-        "nongenerating/nongenerating",
-      ),
-    ).toEqual({
-      _tag: "refused",
-      field: "harnessId",
-      reason: REFUSAL_REASON,
-    });
-  });
-
   it("returns a refusal of decideProviderAccountHarness unchanged", () => {
-    expect(
-      decideTextGenerationHarness(PROVIDERS, HARNESSES_WITH_NON_GENERATING, ACCOUNT, "delta/delta"),
-    ).toEqual({
+    expect(decideTextGenerationHarness(PROVIDERS, HARNESSES, ACCOUNT, "delta/delta")).toEqual({
       _tag: "refused",
       field: "harnessId",
       reason: "this build carries no delta/delta harness",

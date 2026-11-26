@@ -482,7 +482,7 @@ One model call made on a runner: instructions, one input and an output schema go
 _Avoid_: completion, LLM call, one-shot session, prompt (for the whole call), text gen
 
 **Text Generation Model**:
-The Provider Account and model, and optionally the harness, every Text Generation runs on, set by one controller setting: Automatic (the first account, in the order accounts were added, that can run now and whose provider suggests a small model), one model the user chose, or Off. A chosen model never falls back to another.
+The Provider Account and model, and optionally the harness, every Text Generation runs on, set by one controller setting: Automatic (the first account, in the order accounts were added, that can run now, whose harness makes text generations, and whose provider suggests a small model), one model the user chose, or Off. A chosen model never falls back to another.
 _Avoid_: utility model, small model, cheap model, title model
 
 **Purpose**:

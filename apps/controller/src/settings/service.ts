@@ -96,13 +96,13 @@ const make = Effect.gen(function* () {
    * `harnessId` is absent or null). Fails with a validation error otherwise,
    * because a setting pointing at such a pair could never run. The error names
    * the part that is wrong and says why. `pathOf` gives the path of the
-   * account or of the harness within the patch. `decide` is the rule for
+   * account or of the harness within the patch. `decideHarness` is the rule for
    * whether the pair can run: `decideProviderAccountHarness` for a setting
    * that starts sessions, `decideTextGenerationHarness` for one that makes
    * text generations.
    */
   const validateProviderAccountHarness = (
-    decide: typeof decideProviderAccountHarness,
+    decideHarness: typeof decideProviderAccountHarness,
     providerAccountId: string,
     harnessId: string | null | undefined,
     pathOf: (field: "providerAccountId" | "harnessId") => ReadonlyArray<string>,
@@ -114,7 +114,7 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: pathOf("providerAccountId"), message: NO_SUCH_ACCOUNT }]),
         );
       }
-      const choice = decide(
+      const choice = decideHarness(
         yield* host.providers(),
         yield* host.harnesses(),
         account.value,

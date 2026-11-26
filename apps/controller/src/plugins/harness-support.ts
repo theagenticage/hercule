@@ -165,6 +165,6 @@ export const decideTextGenerationHarness = (
   return {
     _tag: "refused",
     field: selectRefusedField(harnessId),
-    reason: `${decision.harness.displayName} runs no text generations; pick a model that runs in another harness, or Automatic`,
+    reason: `${decision.harness.displayName} makes no text generations; pick another model in Settings › System, or Automatic`,
   };
 };

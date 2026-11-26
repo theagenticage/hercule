@@ -43,8 +43,10 @@ export const TextGenerationStatus = Schema.Struct({
   /**
    * Why no text generation can run now, in words a user can act on, or null
    * when one can. It is set when text generation is off, when `automatic`
-   * finds no match or the chosen account is gone, and when no placeable
-   * runner is logged in to the account. A workflow step that waits for text
+   * finds no match or the chosen account is gone, when the chosen model's
+   * account cannot make text generations in its harness (for example a
+   * harness that makes none), and when no placeable runner is logged in to
+   * the account. A workflow step that waits for text
    * generation shows this text.
    */
   unavailableReason: Schema.NullOr(Schema.NonEmptyString),
