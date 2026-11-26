@@ -44,7 +44,7 @@ import { truncateFact } from "../text";
 import {
   ANTIGRAVITY_NAME,
   APP_DATA_DIR,
-  listOwnedPaths,
+  listGuardedHomePaths,
   readLoginFile,
   readRegularFile,
   resetOwnedHomePaths,
@@ -753,7 +753,7 @@ export const openSignedInAgy = (
         // Every additional directory is a folder Hercule gives the agent to read, never to change.
         readOnlyFolders: (request.additionalDirectories ?? []).map((folder) => resolve(folder)),
         // The file of the conversation id sits in the process's own log folder, and the agent may not change it.
-        harnessHomePaths: [...listOwnedPaths(ctx.home), conversationIdFile],
+        harnessHomePaths: [...listGuardedHomePaths(ctx.home), conversationIdFile],
         conversationIdFile,
       },
     );

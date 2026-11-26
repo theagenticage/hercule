@@ -85,7 +85,8 @@ export interface HookRules {
   /** Absolute paths of the folders Hercule gives the agent to read and never to change. */
   readonly readOnlyFolders: ReadonlyArray<string>;
   /**
-   * Absolute paths of the files and folders Hercule owns in the Harness Home.
+   * Absolute paths of the files and folders in the Harness Home that the agent
+   * may not change: the ones Hercule owns and the ones it reads from.
    * A segment `*` stands for any one folder name.
    */
   readonly harnessHomePaths: ReadonlyArray<string>;

@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { takeStartMarks } from "../../edit-marks";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks/mark-format";
 import { cleanupHomes, createScratchHome } from "../testing";
-import { listOwnedPaths } from "./harness-home";
+import { listGuardedHomePaths } from "./harness-home";
 import {
   HOOK_RULES_VARIABLE,
   answerPreToolCall,
@@ -597,7 +597,9 @@ describe("the guard of the approval files", () => {
   it("denies a change to the files Hercule reads in any conversation's brain folder, and lets the model's own files be written", () => {
     const { cwd } = setUpRepo();
     const home = createScratchHome("hook-home");
-    const env = rulesEnv("auto-accept-edits", { harnessHomePaths: [...listOwnedPaths(home)] });
+    const env = rulesEnv("auto-accept-edits", {
+      harnessHomePaths: [...listGuardedHomePaths(home)],
+    });
     const brain = join(home, "antigravity-acp", "brain");
 
     expect(isDenied(decide(cwd, join(brain, "conv-1", ".system_generated"), env))).toBe(true);
