@@ -30,6 +30,7 @@ import {
   writeTestImage,
 } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { answerPreToolCall } from "./pre-tool-hook";
 import {
   answerConfigChange,
   answerNewSession,
@@ -489,6 +490,45 @@ describe("the skills folder of a session", () => {
     );
   });
 
+  it("is the folder the hook guards, on the agy process of a start and of a resume", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    const resumedSkills = createSessionSkills({ library: ["review"] });
+    const skillFile = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
+    const readDecision = (env: Readonly<Record<string, string | undefined>>) =>
+      answerPreToolCall(
+        JSON.stringify({
+          cwd: CWD,
+          toolCall: { name: "write_file", args: { Path: skillFile, Content: "x" } },
+        }),
+        env,
+      );
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          const env = h.fake.spawns[0]!.env;
+          expect(env["HERCULE_AGY_SKILLS_DIR"]).toBe(skills.sessionSkillsFolder);
+          expect(JSON.parse(readDecision(env)) as { decision: string }).toMatchObject({
+            decision: "deny",
+          });
+        }),
+      { context: () => skills.context },
+    ).then(() =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start(RESUME);
+
+            expect(h.fake.spawns[0]!.env["HERCULE_AGY_SKILLS_DIR"]).toBe(
+              resumedSkills.sessionSkillsFolder,
+            );
+          }),
+        { fake: withConversation, context: () => resumedSkills.context },
+      ),
+    );
+  });
+
   it("is passed resolved when it is reached through a link, as the pointer lines name resolved paths", () => {
     const skills = createSessionSkills({ library: ["review"] });
     const link = join(createScratchHome("agy-session-link"), "linked");
@@ -614,7 +654,7 @@ describe("the instructions of a session", () => {
           expect(params).toContain("Persona.");
           expect(params).not.toContain("The user's marker.");
         }),
-      { context: (home) => ({ env: { ...buildContext(home).env, HOME: userHome } }) },
+      { context: (home) => ({ env: { ...buildStartContext(home, CWD).env, HOME: userHome } }) },
     );
   });
 });
