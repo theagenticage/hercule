@@ -207,6 +207,26 @@ const buildBase = (state: NormalizerState, toolCallId?: string) =>
     ...(toolCallId === undefined ? {} : { toolCallId }),
   });
 
+/**
+ * Returns `value` with every occurrence of `secret` replaced by `[hidden]`, in
+ * every string, in object keys, and at any depth of arrays and plain objects.
+ * The result is a copy. `agy` may echo a credential it was given, in any text
+ * it sends, so every event passes through this before it is published.
+ */
+export const hideSecret = <T>(value: T, secret: string): T => {
+  const hide = (item: unknown): unknown => {
+    if (typeof item === "string") return item.replaceAll(secret, "[hidden]");
+    if (Array.isArray(item)) return item.map(hide);
+    if (typeof item === "object" && item !== null) {
+      return Object.fromEntries(
+        Object.entries(item).map(([key, entry]) => [hide(key), hide(entry)]),
+      );
+    }
+    return item;
+  };
+  return hide(value) as T;
+};
+
 /** Returns the `raw` field for an event built from `message`, or nothing when there is none. */
 const buildMessageRaw = (message: { readonly raw: unknown } | undefined) =>
   message === undefined ? {} : buildRaw(ANTIGRAVITY_MESSAGE, message.raw);

@@ -78,6 +78,10 @@ interface HarnessOptions {
   readonly context?: (home: string) => Partial<SessionStartContext>;
   /** The folder the session works in. Defaults to `CWD`, which does not exist. */
   readonly cwd?: string;
+  /** The MCP servers the runner resolved for the session. */
+  readonly mcpServers?: ReadonlyArray<{ readonly name: string; readonly url: string }>;
+  /** The environment of the session's process. Defaults to one with no token. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
   /** What every start of the test changes in `SPEC`. */
   readonly spec?: Partial<SessionSpec>;
   /**
@@ -126,7 +130,8 @@ const buildHarness = (options: HarnessOptions = {}) =>
     const ctx = {
       ...buildContext(home, BINARY),
       cwd: options.cwd ?? CWD,
-      mcpServers: [],
+      env: options.env ?? buildContext(home).env,
+      mcpServers: options.mcpServers ?? [],
       herculeTool: {
         ...buildContext(home).herculeTool,
         orientation: options.orientation ?? "",
@@ -654,6 +659,144 @@ describe("an input with Skill References", () => {
       { fake: { recording: "bad-model" }, context: () => skills.context },
     );
   });
+});
+
+describe("the MCP servers of a session", () => {
+  const TOKEN = "sess-tok-7f3a91c2e8";
+  const GATEWAY = { name: "tools", url: "http://127.0.0.1:4000/mcp" };
+  const ENTRY = {
+    name: "tools",
+    url: GATEWAY.url,
+    type: "http",
+    headers: [{ name: "Authorization", value: `Bearer ${TOKEN}` }],
+  };
+  const withGateway: HarnessOptions = {
+    mcpServers: [GATEWAY],
+    env: { PATH: "/usr/bin", HERCULE_TOKEN: TOKEN },
+  };
+
+  it("are given to agy with the session's token in a new conversation, and again in a resume", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          expect(h.received("session/new")[0]?.params).toMatchObject({ mcpServers: [ENTRY] });
+        }),
+      withGateway,
+    ).then(() =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start({ continue: { nativeSessionId: CONVERSATION, mode: "resume" } });
+            expect(h.received("session/resume")[0]?.params).toMatchObject({
+              mcpServers: [ENTRY],
+            });
+          }),
+        {
+          ...withGateway,
+          fake: (home) => {
+            createConversationFiles(home, CONVERSATION);
+            return {};
+          },
+        },
+      ),
+    ));
+
+  it("fail the start, and spawn nothing, when the session has no token", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("no session token");
+          expect(h.fake.spawns).toHaveLength(0);
+        }),
+      { mcpServers: [GATEWAY] },
+    ));
+
+  it("fail the start when agy takes no MCP server over HTTP", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("acceptsHttpMcpServers");
+          expect(h.received("authenticate")).toHaveLength(0);
+        }),
+      { ...withGateway, fake: { withoutHttpMcpCapability: true } },
+    ));
+
+  it("never publish the token, wherever agy echoes it", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const send = (message: JsonRpcMessage) => h.harness().sendLine(JSON.stringify(message));
+          const echo = `echo ${TOKEN} end`;
+          send(
+            buildUpdate({
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: echo },
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: "agent_thought_chunk",
+              content: { type: "text", text: echo },
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: "tool_call",
+              toolCallId: "call-1",
+              name: "run_command",
+              status: "in_progress",
+              kind: "execute",
+              title: echo,
+              rawInput: { CommandLine: `curl -H "Authorization: Bearer ${TOKEN}"` },
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: "tool_call_update",
+              toolCallId: "call-1",
+              name: "run_command",
+              status: "completed",
+              rawInput: { CommandLine: `curl -H "Authorization: Bearer ${TOKEN}"` },
+              rawOutput: echo,
+              content: [{ type: "content", content: { type: "text", text: echo } }],
+            }),
+          );
+          send(
+            buildUpdate({
+              sessionUpdate: `mystery_${TOKEN}`,
+              detail: echo,
+            }),
+          );
+          send({ jsonrpc: "2.0", method: `x/${TOKEN}`, params: { text: echo } });
+          send({
+            jsonrpc: "2.0",
+            id: "jetski-acp-front:9",
+            method: "session/request_permission",
+            params: {
+              sessionId: CONVERSATION,
+              toolCall: { toolCallId: "call-unknown", name: "run_command", title: echo },
+              options: [{ optionId: "deny", name: echo, kind: "reject_once" }],
+            },
+          });
+          send(buildModeUpdate(`mode-${TOKEN}`));
+          yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+
+          const published = JSON.stringify(h.seen);
+          expect(published).not.toContain(TOKEN);
+          expect(published).toContain("echo [hidden] end");
+          expect(h.tags("runtime.error")).toHaveLength(1);
+          expect(h.tags("item.completed").length).toBeGreaterThan(1);
+        }),
+      { ...withGateway, fake: { recording: readRecordedSetup("cancel") } },
+    ));
 });
 
 describe("the temporary folder of a process", () => {

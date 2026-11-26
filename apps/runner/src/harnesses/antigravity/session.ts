@@ -79,6 +79,7 @@ import {
   readSyntheticTurnId,
   releaseTurn,
 } from "./normalize";
+import { hideSecret } from "./normalize";
 import type { NormalizerState } from "./normalize";
 import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
@@ -287,6 +288,21 @@ export const startAgySession = (
       return yield* Effect.die(new Error("Antigravity declares fork unsupported."));
     }
 
+    // The token is read once. It goes to `agy` in the MCP servers' headers, over stdin, and `agy` may echo it, so every event is cleaned of it (`emitEvents`).
+    const token = ctx.env["HERCULE_TOKEN"];
+    if (ctx.mcpServers.length > 0 && (token === undefined || token === "")) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} could not start, because the session has MCP servers and no session token to give them.`,
+        ),
+      );
+    }
+    const mcpServers = ctx.mcpServers.map(({ name, url }) => ({
+      name,
+      url,
+      headers: [{ name: "Authorization", value: `Bearer ${token}` }],
+    }));
+
     const scope = yield* Scope.Scope;
     // The process has a scope of its own, so that a stop can close it while the
     // Turn, which lives in the session's scope, still reports its end.
@@ -359,7 +375,7 @@ export const startAgySession = (
     /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
       if (!isStarted) return;
-      if (events.length > 0) emit(events);
+      if (events.length > 0) emit(token === undefined ? events : hideSecret(events, token));
       boundSyntheticTurn();
     };
 
@@ -580,9 +596,7 @@ export const startAgySession = (
       const request: NewSessionRequest = {
         cwd,
         ...(skillsFolder === undefined ? {} : { additionalDirectories: [skillsFolder] }),
-        // The MCP Gateway is handed to `agy` here by a later change, together
-        // with its capability check in `openSignedInAgy`.
-        mcpServers: [],
+        mcpServers,
         ...(instructions === undefined
           ? {}
           : { meta: { antigravity: { systemPrompt: { append: instructions } } } }),

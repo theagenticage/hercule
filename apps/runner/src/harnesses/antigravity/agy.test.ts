@@ -204,6 +204,11 @@ describe("how the process is started", () => {
 describe("what the process is opened for", () => {
   const SKIP_FLAG = "--dangerously-skip-permissions";
   const REQUEST = { cwd: "/work", mcpServers: [] };
+  const GATEWAY_ENTRY = {
+    name: "tools",
+    url: "http://127.0.0.1:1/mcp",
+    headers: [{ name: "Authorization", value: "Bearer token" }],
+  };
   const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access", request: REQUEST };
 
   it("adds the skip-permissions flag for a session in full-access only", async () => {
@@ -266,6 +271,26 @@ describe("what the process is opened for", () => {
     expect(fake.spawns[0]!.harness.received.map((message) => message.method)).toContain(
       "authenticate",
     );
+  });
+
+  it("fails a session start that has MCP servers before authenticate when agy takes none over HTTP, and a probe or a session without them does not need it", async () => {
+    const withServers: AgyPurpose = {
+      ...FULL_ACCESS,
+      request: { ...REQUEST, mcpServers: [GATEWAY_ENTRY] },
+    };
+    const { home, fake } = setUp({ withoutHttpMcpCapability: true });
+
+    const error = await runAndReadFailure(open(fake, home, { purpose: withServers }));
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain("acceptsHttpMcpServers");
+    const methods = fake.spawns[0]!.harness.received.map((message) => message.method);
+    expect(methods).toContain("initialize");
+    expect(methods).not.toContain("authenticate");
+
+    const other = setUp({ withoutHttpMcpCapability: true });
+    await Effect.runPromise(Effect.scoped(open(other.fake, other.home, { purpose: FULL_ACCESS })));
+    expect(await openAndReadPlan(other.fake, other.home)).toBe(PLAN_LABEL);
   });
 
   it("still reads a signed-out home as not signed in when the capability is there", async () => {
@@ -935,6 +960,7 @@ describe("the files of the Harness Home that Hercule owns", () => {
   const REMOVED = [
     ["config", "hooks.json"],
     ["antigravity-acp", "settings.json"],
+    ["config", "plugins"],
   ] as const;
   const MCP_CONFIG = (home: string) => join(home, "config", "mcp_config.json");
 
@@ -972,18 +998,21 @@ describe("the files of the Harness Home that Hercule owns", () => {
     expect(existsSync(join(home, folder, name))).toBe(false);
   });
 
-  it.each(REMOVED)("removes %s/%s as a link to a folder, and the folder stays", async (folder, name) => {
-    const { home, fake } = setUp();
-    const target = createScratchHome("agy-target");
-    writeFileSync(join(target, "file"), "x");
-    mkdirSync(join(home, folder), { recursive: true });
-    symlinkSync(target, join(home, folder, name));
+  it.each(REMOVED)(
+    "removes %s/%s as a link to a folder, and the folder stays",
+    async (folder, name) => {
+      const { home, fake } = setUp();
+      const target = createScratchHome("agy-target");
+      writeFileSync(join(target, "file"), "x");
+      mkdirSync(join(home, folder), { recursive: true });
+      symlinkSync(target, join(home, folder, name));
 
-    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+      await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
-    expect(existsSync(join(home, folder, name))).toBe(false);
-    expect(readFileSync(join(target, "file"), "utf8")).toBe("x");
-  });
+      expect(existsSync(join(home, folder, name))).toBe(false);
+      expect(readFileSync(join(target, "file"), "utf8")).toBe("x");
+    },
+  );
 
   it("empties the MCP servers file, also when it is a link, and leaves the link's target alone", async () => {
     const { home, fake } = setUp();

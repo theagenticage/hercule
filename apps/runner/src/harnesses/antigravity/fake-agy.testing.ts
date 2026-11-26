@@ -266,18 +266,22 @@ export interface FakeAgyOptions {
   readonly withoutSystemPromptCapability?: boolean;
   /** Leaves `sessionCapabilities.additionalDirectories` out of the reply to `initialize`. */
   readonly withoutAdditionalDirectoriesCapability?: boolean;
+  /** Sets `mcpCapabilities.http` to false in the reply to `initialize`, as an `agy` that takes no MCP server over HTTP does. */
+  readonly withoutHttpMcpCapability?: boolean;
 }
 
 /**
  * Returns the recording without the capabilities the options name, in the
- * reply to `initialize`: `antigravity.systemPrompt` and
- * `sessionCapabilities.additionalDirectories`.
+ * reply to `initialize`: `antigravity.systemPrompt`,
+ * `sessionCapabilities.additionalDirectories` and `mcpCapabilities.http`.
  */
 const removeCapabilities = (
   recording: ReadonlyArray<RecordedMessage>,
   options: Pick<
     FakeAgyOptions,
-    "withoutSystemPromptCapability" | "withoutAdditionalDirectoriesCapability"
+    | "withoutSystemPromptCapability"
+    | "withoutAdditionalDirectoriesCapability"
+    | "withoutHttpMcpCapability"
   >,
 ): ReadonlyArray<RecordedMessage> =>
   recording.map((entry) => {
@@ -286,6 +290,7 @@ const removeCapabilities = (
           agentCapabilities?: {
             _meta?: { antigravity?: Record<string, unknown> };
             sessionCapabilities?: Record<string, unknown>;
+            mcpCapabilities?: Record<string, unknown>;
           };
         }
       | undefined;
@@ -306,6 +311,7 @@ const removeCapabilities = (
       delete withoutDirectories["additionalDirectories"];
       kept.sessionCapabilities = withoutDirectories;
     }
+    if (options.withoutHttpMcpCapability === true) kept.mcpCapabilities = { http: false };
     return {
       ...entry,
       message: { ...entry.message, result: { ...result, agentCapabilities: kept } },

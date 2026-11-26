@@ -81,6 +81,8 @@ interface OwnedHomePath {
  *   hook that approves every command would loosen every later session.
  * - `antigravity-acp/settings.json`: `toolPermission` in it works under
  *   `agy acp`. `agy` does not create the file.
+ * - `config/plugins`: `agy` loads a plugin from this folder live, and a
+ *   plugin's `hooks.json` auto-approved a command in the default mode.
  * - `config/mcp_config.json`: `agy` loads every MCP server in it in every
  *   session, and with no server in the session's own request, such a server
  *   would connect. `agy` creates it as an empty file, so it is emptied, not
@@ -96,6 +98,11 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
     path: join(APP_DATA_DIR, "settings.json"),
     whenStarting: "remove",
     reason: `Hercule owns the settings of the Harness Home, because a tool permission in them would change every session of the account.`,
+  },
+  {
+    path: join("config", "plugins"),
+    whenStarting: "remove",
+    reason: `${ANTIGRAVITY_NAME} loads a plugin from this folder in every session of the account, and a plugin's hooks.json can approve a command without asking.`,
   },
   {
     path: join("config", "mcp_config.json"),
