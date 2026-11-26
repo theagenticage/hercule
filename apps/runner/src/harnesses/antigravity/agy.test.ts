@@ -39,6 +39,7 @@ import {
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
+import { takeStartMarks } from "../../edit-marks";
 import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
 import {
   buildLoginCommand,
@@ -958,7 +959,6 @@ describe("the files of the Harness Home that Hercule owns", () => {
     request: { cwd: "/work", mcpServers: [] },
   };
   const REMOVED = [
-    ["config", "hooks.json"],
     ["antigravity-acp", "settings.json"],
     ["config", "plugins"],
   ] as const;
@@ -1037,7 +1037,11 @@ describe("the files of the Harness Home that Hercule owns", () => {
     await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
 
     expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("");
-    expect(readdirSync(join(home, "config"))).toEqual(["mcp_config.json"]);
+    expect(readdirSync(join(home, "config")).sort()).toEqual([
+      "hercule-start-mark.sh",
+      "hooks.json",
+      "mcp_config.json",
+    ]);
   });
 
   it("leaves all of them alone when agy is opened for a probe", async () => {
@@ -1050,6 +1054,7 @@ describe("the files of the Harness Home that Hercule owns", () => {
 
     expect(readFileSync(join(home, "config", "hooks.json"), "utf8")).toBe("{}");
     expect(readFileSync(MCP_CONFIG(home), "utf8")).toBe("{}");
+    expect(existsSync(join(home, "config", "hercule-start-mark.sh"))).toBe(false);
   });
 
   it("fails the start with AdapterFailed naming the path, and spawns nothing, when one cannot be changed", async () => {
@@ -1061,5 +1066,180 @@ describe("the files of the Harness Home that Hercule owns", () => {
     expect(failure._tag).toBe("AdapterFailed");
     expect(failure.message).toContain("mcp_config.json");
     expect(fake.spawns).toHaveLength(0);
+  });
+});
+
+describe("the hook that takes the start marks of the edit watch", () => {
+  const SESSION: AgyPurpose = {
+    kind: "session",
+    accessMode: "approval-required",
+    hasMcpServers: false,
+  };
+  interface HooksFile {
+    readonly hercule: {
+      readonly PreToolUse: ReadonlyArray<{
+        readonly matcher: string;
+        readonly hooks: ReadonlyArray<{ readonly command: string }>;
+      }>;
+    };
+  }
+  const HOOKS_FILE = (home: string) => join(home, "config", "hooks.json");
+  const SCRIPT_FILE = (home: string) => join(home, "config", "hercule-start-mark.sh");
+
+  /** The input `agy` 1.5.15 gives a PreToolUse hook, as recorded, for a shell command. */
+  const hookInput = (toolCall: Record<string, unknown>): string =>
+    JSON.stringify({
+      artifactDirectoryPath: "/home/x/brain/1",
+      conversationId: "1",
+      cwd: "/work",
+      hookEventName: "PreToolUse",
+      lastUserInput: 'Run "CommandLine":"decoy" please',
+      modelName: "m",
+      stepIdx: 2,
+      toolCall,
+      transcriptPath: "/home/x/t.jsonl",
+      workspacePaths: ["/work"],
+    });
+
+  /** Starts a session for the account in `home`, and returns what the spawned `agy` was given. */
+  const startSession = async (home: string, sessionMarksDir: string | null) => {
+    const fake = buildFakeAgy(home);
+    const ctx = buildContext(home);
+    await Effect.runPromise(
+      Effect.scoped(
+        openSignedInAgy(
+          fake.spawn,
+          sessionMarksDir === null
+            ? ctx
+            : {
+                ...ctx,
+                editMarks: {
+                  sessionMarksDir,
+                  recordToolStart: () => undefined,
+                  recordProcessStart: () => undefined,
+                  recordProcessEnd: () => undefined,
+                  recordRequestOnRunningItem: () => undefined,
+                },
+              },
+          BINARY,
+          { cwd: createScratchHome("agy-work"), handlers: NO_HANDLERS, purpose: SESSION },
+        ),
+      ),
+    );
+    return fake.spawns[0]!;
+  };
+
+  /** Runs the command of the hook in `home` the way `agy` does, with `input` on stdin. */
+  const runHook = (home: string, input: string, env: Record<string, string>) => {
+    const hooks = JSON.parse(readFileSync(HOOKS_FILE(home), "utf8")) as HooksFile;
+    return Bun.spawnSync(["/bin/sh", "-c", hooks.hercule.PreToolUse[0]!.hooks[0]!.command], {
+      env,
+      stdin: new TextEncoder().encode(`${input}\n`),
+    });
+  };
+
+  it("is the same two files for every session, writes them over what is there, and leaves no temporary file", async () => {
+    const home = createSignedInHome();
+    await startSession(home, null);
+    const hooks = readFileSync(HOOKS_FILE(home), "utf8");
+    const script = readFileSync(SCRIPT_FILE(home), "utf8");
+
+    const target = join(createScratchHome("agy-target"), "hooks.json");
+    writeFileSync(target, "{}");
+    rmSync(HOOKS_FILE(home));
+    symlinkSync(target, HOOKS_FILE(home));
+    writeFileSync(SCRIPT_FILE(home), "exit 1");
+    await startSession(home, createScratchHome("agy-marks"));
+
+    expect(readFileSync(HOOKS_FILE(home), "utf8")).toBe(hooks);
+    expect(readFileSync(SCRIPT_FILE(home), "utf8")).toBe(script);
+    expect(lstatSync(HOOKS_FILE(home)).isFile()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("{}");
+    expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    expect((JSON.parse(hooks) as HooksFile).hercule.PreToolUse[0]!.matcher).toBe(
+      "run_command|edit_file|write_file",
+    );
+    expect(hooks).not.toContain("agy-marks");
+  });
+
+  it("gives the marks directory to the agy process of a session with an edit watch only", async () => {
+    const marks = createScratchHome("agy-marks");
+
+    const watched = await startSession(createSignedInHome(), marks);
+    const unwatched = await startSession(createSignedInHome(), null);
+
+    expect(watched.env["HERCULE_SESSION_MARKS_DIR"]).toBe(marks);
+    expect(unwatched.env).not.toHaveProperty("HERCULE_SESSION_MARKS_DIR");
+  });
+
+  describe("the script", () => {
+    const setUpHome = async () => {
+      const home = createSignedInHome();
+      await startSession(home, null);
+      return { home, marks: createScratchHome("agy-marks") };
+    };
+
+    it("writes the mark of a shell command with its text, quotes and escapes included", async () => {
+      const { home, marks } = await setUpHome();
+      const command = "echo \"a b\" \\ 'c'\nls";
+
+      const result = runHook(
+        home,
+        hookInput({
+          args: { CommandLine: command, WaitMsBeforeAsync: 5000 },
+          id: "call_123",
+          name: "run_command",
+        }),
+        { HERCULE_SESSION_MARKS_DIR: marks, PATH: "/usr/bin:/bin" },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toBe("");
+      expect(
+        takeStartMarks(marks).map(({ toolUseId, shellCommand }) => ({ toolUseId, shellCommand })),
+      ).toEqual([{ toolUseId: "call_123", shellCommand: command }]);
+    });
+
+    it.each(["edit_file", "write_file"])(
+      "writes the mark of a %s with no command",
+      async (name) => {
+        const { home, marks } = await setUpHome();
+
+        runHook(
+          home,
+          hookInput({
+            args: { Content: 'x "CommandLine":"y"', Path: "/work/a.txt" },
+            id: "call_9",
+            name,
+          }),
+          { HERCULE_SESSION_MARKS_DIR: marks, PATH: "/usr/bin:/bin" },
+        );
+
+        expect(
+          takeStartMarks(marks).map(({ toolUseId, shellCommand }) => ({ toolUseId, shellCommand })),
+        ).toEqual([{ toolUseId: "call_9", shellCommand: undefined }]);
+      },
+    );
+
+    it("does nothing, and exits 0 with nothing on stdout, without the marks directory, and when it cannot write", async () => {
+      const { home, marks } = await setUpHome();
+      const input = hookInput({ args: { CommandLine: "ls" }, id: "call_1", name: "run_command" });
+
+      const without = runHook(home, input, { PATH: "/usr/bin:/bin" });
+      const missing = runHook(home, input, {
+        HERCULE_SESSION_MARKS_DIR: join(marks, "gone"),
+        PATH: "/usr/bin:/bin",
+      });
+      const garbage = runHook(home, "not json", {
+        HERCULE_SESSION_MARKS_DIR: marks,
+        PATH: "/usr/bin:/bin",
+      });
+
+      for (const result of [without, missing, garbage]) {
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.toString()).toBe("");
+      }
+      expect(readdirSync(marks)).toEqual([]);
+    });
   });
 });

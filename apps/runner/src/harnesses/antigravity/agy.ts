@@ -26,6 +26,7 @@ import type {
 import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
 import { ResumeTranscriptMissing } from "@hercule/protocol";
 import type { AccessMode, AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
@@ -59,17 +60,98 @@ export type AgyPurpose =
     };
 
 /** What Hercule does at a session start with a path it owns in the Harness Home. */
-interface OwnedHomePath {
+type OwnedHomePath = {
   /** The path, relative to the Harness Home. */
   readonly path: string;
-  /**
-   * `remove` deletes a file or a whole folder. `empty` replaces the file with
-   * an empty one, which is what `agy` creates itself and may need to find.
-   */
-  readonly whenStarting: "remove" | "empty";
   /** Why Hercule owns the path, for the log line and the failure message. */
   readonly reason: string;
+} & (
+  | {
+      /**
+       * `remove` deletes a file or a whole folder. `empty` replaces the file
+       * with an empty one, which is what `agy` creates itself and may need to
+       * find.
+       */
+      readonly whenStarting: "remove" | "empty";
+    }
+  | {
+      /**
+       * Replaces the file with one that holds exactly `buildContent(home)`.
+       * The file is written beside the path and renamed over it, so a session
+       * that reads it while another one starts sees the old content or the
+       * new, never half of it.
+       */
+      readonly whenStarting: "write";
+      readonly buildContent: (home: string) => string;
+    }
+);
+
+/** The file in the Harness Home that holds the script of the edit-watch gate. */
+const START_MARK_SCRIPT_PATH = join("config", "hercule-start-mark.sh");
+
+/**
+ * The script of the gate of an `agy` session (spec 19 section 4.1). `agy`
+ * runs it before every `run_command`, `edit_file` and `write_file`, and the
+ * tool waits for it. `agy` writes the hook's input to it as one line of JSON,
+ * and its `toolCall.id` is the id of the call's item. The script turns that
+ * into a mark file in the session's marks directory, so the file's ctime is
+ * the start of the call:
+ *
+ * - The directory comes from the environment of the `agy` process of the
+ *   session. The script is the same for every session of the account, because
+ *   they share the Harness Home. A process without the variable gets no mark.
+ * - It extracts the fields with `sed` and no JSON parser, because the runner's
+ *   machine may have no other tool. The command's text stays in the JSON
+ *   escaped form it arrived in, so it goes into the mark as it is.
+ * - It never overwrites a mark (`set -C`), and an id with characters that are
+ *   not safe in a file name gets none.
+ * - It always exits 0 and prints nothing, so the call runs unchanged. When it
+ *   could not write the mark, the call still runs: watching edits is best
+ *   effort and never blocks a session.
+ *
+ * A rule that decides about a call, such as one that denies it, belongs at the
+ * end of the script, after the mark is taken, and prints its answer there.
+ */
+const START_MARK_SCRIPT = `#!/bin/sh
+set -C
+dir="$${SESSION_MARKS_DIR_VARIABLE}"
+input=$(cat)
+
+take_mark() {
+  [ -n "$dir" ] || return 0
+  id=$(printf %s "$input" | sed -nE 's/.*"id":"([A-Za-z0-9_-]+)".*/\\1/p')
+  [ -n "$id" ] || return 0
+  command=$(printf %s "$input" | sed -nE 's/.*"CommandLine":"(([^"\\\\]|\\\\.)*)".*/\\1/p')
+  if [ -n "$command" ]; then
+    printf '{"tool_use_id":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$id" "$command" > "$dir/$id"
+  else
+    printf '{"tool_use_id":"%s"}' "$id" > "$dir/$id"
+  fi
 }
+
+take_mark 2>/dev/null
+exit 0
+`;
+
+/**
+ * The hooks file of the Harness Home: one `PreToolUse` hook for the tools
+ * that become `command_execution` and `file_change` items, which runs
+ * `START_MARK_SCRIPT`. The path is quoted for the shell, because it holds the
+ * account's folder.
+ */
+const buildHooksFile = (home: string): string => {
+  const script = join(home, START_MARK_SCRIPT_PATH).replaceAll("'", "'\\''");
+  return JSON.stringify({
+    hercule: {
+      PreToolUse: [
+        {
+          matcher: "run_command|edit_file|write_file",
+          hooks: [{ type: "command", command: `/bin/sh '${script}'` }],
+        },
+      ],
+    },
+  });
+};
 
 /**
  * The paths of the Harness Home that Hercule owns. Every session of an account
@@ -78,7 +160,12 @@ interface OwnedHomePath {
  * workspace. `resetOwnedHomePaths` resets them all before `agy` runs.
  *
  * - `config/hooks.json`: `agy` runs the hooks in it at every tool call, so a
- *   hook that approves every command would loosen every later session.
+ *   hook that approves every command would loosen every later session. It
+ *   holds the one hook of Hercule, which takes the start marks of the edit
+ *   watch, and is never removed: a session without an edit watch has no marks
+ *   directory, and the hook then does nothing.
+ * - `config/hercule-start-mark.sh`: the script of that hook. It is written
+ *   before the hooks file, so the hook never names a script that is missing.
  * - `antigravity-acp/settings.json`: `toolPermission` in it works under
  *   `agy acp`. `agy` does not create the file.
  * - `config/plugins`: `agy` loads a plugin from this folder live, and a
@@ -90,9 +177,16 @@ interface OwnedHomePath {
  */
 const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
   {
+    path: START_MARK_SCRIPT_PATH,
+    whenStarting: "write",
+    buildContent: () => START_MARK_SCRIPT,
+    reason: `Hercule gives ${ANTIGRAVITY_NAME} one hook, which takes the start of each command and edit for the edit watch.`,
+  },
+  {
     path: join("config", "hooks.json"),
-    whenStarting: "remove",
-    reason: `Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
+    whenStarting: "write",
+    buildContent: buildHooksFile,
+    reason: `Hercule allows only its own hook in the Harness Home, because ${ANTIGRAVITY_NAME} runs the hooks in it for every session of the account.`,
   },
   {
     path: join(APP_DATA_DIR, "settings.json"),
@@ -114,7 +208,8 @@ const OWNED_HOME_PATHS: ReadonlyArray<OwnedHomePath> = [
 /**
  * Applies `OWNED_HOME_PATHS` to the Harness Home `home`, and logs each path it
  * had to change. A path that is already as wanted (missing for `remove`, an
- * empty file for `empty`) is left alone and not logged. A link is removed or
+ * empty file for `empty`, a file with the wanted content for `write`) is left
+ * alone and not logged. A link is removed or
  * replaced, never followed. Fails with `AdapterFailed` naming the path when it
  * cannot be changed, because then Hercule cannot tell what `agy` would load.
  *
@@ -127,25 +222,42 @@ const resetOwnedHomePaths = (home: string): Effect.Effect<void, AdapterFailed> =
     OWNED_HOME_PATHS,
     (owned) => {
       const path = join(home, owned.path);
+      const [verb, past] = describeOwnedAction(owned.whenStarting);
       return Effect.tryPromise({
-        try: () =>
-          owned.whenStarting === "remove" ? removePath(path) : replaceWithEmptyFile(path),
+        try: () => {
+          switch (owned.whenStarting) {
+            case "remove":
+              return removePath(path);
+            case "empty":
+              return replaceWithFile(path, "");
+            case "write":
+              return replaceWithFile(path, owned.buildContent(home));
+          }
+        },
         catch: (error) =>
           buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} could not start, because Hercule could not ${owned.whenStarting === "remove" ? "remove" : "empty"} ${path}: ${describeFileFailure(error)}`,
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not ${verb} ${path}: ${describeFileFailure(error)}`,
           ),
       }).pipe(
         Effect.flatMap((wasChanged) =>
-          wasChanged
-            ? Effect.logWarning(
-                `${owned.whenStarting === "remove" ? "Removed" : "Emptied"} ${path}: ${owned.reason}`,
-              )
-            : Effect.void,
+          wasChanged ? Effect.logWarning(`${past} ${path}: ${owned.reason}`) : Effect.void,
         ),
       );
     },
     { discard: true },
   );
+
+/** Returns the verb and the past tense that name what `whenStarting` does to a path. */
+const describeOwnedAction = (whenStarting: OwnedHomePath["whenStarting"]): [string, string] => {
+  switch (whenStarting) {
+    case "remove":
+      return ["remove", "Removed"];
+    case "empty":
+      return ["empty", "Emptied"];
+    case "write":
+      return ["write", "Wrote"];
+  }
+};
 
 /**
  * Deletes the file, link or folder (with all it holds) at `path`. A link is
@@ -163,20 +275,20 @@ const removePath = async (path: string): Promise<boolean> => {
 };
 
 /**
- * Makes `path` an empty regular file: writes an empty file beside it, then
- * renames it over `path`, so a link or a file in its place is replaced and
- * nothing is written through a link. Creates the folder when it is missing.
- * Returns whether `path` held anything else than an empty regular file.
+ * Makes `path` a regular file that holds exactly `content`: writes the content
+ * to a file beside it, then renames that file over `path`, so a link or a file
+ * in its place is replaced and nothing is written through a link. Creates the
+ * folder when it is missing. Returns whether `path` held anything else.
  */
-const replaceWithEmptyFile = async (path: string): Promise<boolean> => {
-  const wasEmpty = await readRegularFile(path, 1).then(
-    ({ text }) => text === "",
+const replaceWithFile = async (path: string, content: string): Promise<boolean> => {
+  const isAsWanted = await readRegularFile(path, Buffer.byteLength(content)).then(
+    ({ text, isTruncated }) => text === content && !isTruncated,
     () => false,
   );
-  if (wasEmpty) return false;
+  if (isAsWanted) return false;
   await mkdir(dirname(path), { recursive: true });
   const next = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(next, "", { flag: "wx" });
+  await writeFile(next, content, { flag: "wx" });
   await rename(next, path);
   return true;
 };
@@ -337,6 +449,9 @@ const STDERR_LINES = 5;
  * - `AGY_CLI_DISABLE_AUTO_UPDATE` must be exactly `true`. The value `1` has no
  *   effect, and `agy` then replaces its own binary in the background.
  *
+ * - `SESSION_MARKS_DIR_VARIABLE` is `sessionMarksDir` when one is given, which
+ *   only a session with an edit watch has. The hook in the Harness Home reads
+ *   it, and only the `agy` process of that session sees it.
  * - `TMPDIR` is `tempFolder` when one is given. In its `default` mode `agy`
  *   lets the agent write under the system's temporary folder without asking,
  *   and `agy` finds that folder through `$TMPDIR`. Pointing it at a private
@@ -350,6 +465,7 @@ const STDERR_LINES = 5;
 const buildAgyEnv = (
   ctx: HarnessRunnerContext,
   tempFolder?: string,
+  sessionMarksDir?: string,
 ): Record<string, string | undefined> => {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(ctx.env)) {
@@ -358,6 +474,7 @@ const buildAgyEnv = (
   env["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 0";
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
   if (tempFolder !== undefined) env["TMPDIR"] = tempFolder;
+  if (sessionMarksDir !== undefined) env[SESSION_MARKS_DIR_VARIABLE] = sessionMarksDir;
   return env;
 };
 
@@ -778,7 +895,11 @@ export const openSignedInAgy = (
       ...buildAccountFlags(ctx.home, folder),
     ];
     const tempFolder = yield* makeAgyTempFolder();
-    const env = buildAgyEnv(ctx, tempFolder);
+    const env = buildAgyEnv(
+      ctx,
+      tempFolder,
+      options.purpose.kind === "session" ? ctx.editMarks?.sessionMarksDir : undefined,
+    );
     const child = yield* Effect.acquireRelease(
       Effect.try({
         try: () => spawn(command, env, options.cwd),
