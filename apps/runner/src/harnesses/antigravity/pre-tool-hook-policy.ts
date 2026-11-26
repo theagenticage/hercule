@@ -121,6 +121,25 @@ const WEB_SEARCH_REASON =
 const UNREADABLE_REASON =
   "Hercule could not read this tool call, so it cannot check it. Ask the user, or switch the thread to Full access.";
 
+const CHECK_FAILED_REASON =
+  "Hercule's check of this tool call failed, so it cannot allow it. Ask the user, or switch the thread to Full access.";
+
+/**
+ * Decides what the hook answers when its own work failed unexpectedly. `agy`
+ * stops the tool when the hook exits non-zero, prints invalid output or does
+ * not answer in time, so the hook must always answer. With neither the guard
+ * nor the web search denial on there is nothing to enforce, so the call runs
+ * (undefined). Otherwise the call is denied, with a reason that says the check
+ * failed.
+ */
+export const decideAfterHookFailure = (facts: {
+  readonly guardIsOn: boolean;
+  readonly deniesWebSearch: boolean;
+}): HookDenial | undefined =>
+  facts.guardIsOn || facts.deniesWebSearch
+    ? { decision: "deny", reason: CHECK_FAILED_REASON }
+    : undefined;
+
 /** Returns whether `path` is `folder` or a path below it. Both are absolute and normalized. */
 const isInsideFolder = (path: string, folder: string): boolean =>
   path === folder || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);

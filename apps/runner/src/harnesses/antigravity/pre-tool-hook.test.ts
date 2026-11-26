@@ -316,6 +316,42 @@ describe("the guard of the approval files", () => {
   });
 });
 
+describe("an unexpected failure", () => {
+  /** An environment that throws when the marks variable is read, which the hook does after it starts. */
+  const failingEnv = (env: Record<string, string>): Record<string, string | undefined> =>
+    new Proxy(env, {
+      get: (target, key) => {
+        if (key === "HERCULE_SESSION_MARKS_DIR") throw new Error("injected failure");
+        return target[key as string];
+      },
+    });
+  const input = editInput("/work", "a.ts");
+
+  it("prints nothing when neither the guard nor the web search denial is on", () => {
+    expect(answerPreToolCall(input, failingEnv({}))).toBe("");
+  });
+
+  it.each([
+    ["the guard", GUARDED],
+    ["the web search denial", { HERCULE_AGY_DENY_WEB_SEARCH: "1" }],
+  ])("prints a denial that says the check failed when %s is on", (_name, env) => {
+    const reason = readReason(answerPreToolCall(input, failingEnv(env)));
+
+    expect(reason).toContain("check of this tool call failed");
+    expect(reason).toContain("Full access");
+  });
+
+  it("still gives the policy's answer when the marks cannot be written", () => {
+    const marks = join(createScratchHome("hook-marks"), "file");
+    writeFileSync(marks, "not a folder");
+    const { cwd } = setUpRepo();
+    const env = { ...GUARDED, HERCULE_SESSION_MARKS_DIR: marks };
+
+    expect(isDenied(answerPreToolCall(editInput(cwd, ".agents/hooks.json"), env))).toBe(true);
+    expect(answerPreToolCall(editInput(cwd, "src/a.ts"), env)).toBe("");
+  });
+});
+
 describe("the verb of the binary", () => {
   const MAIN = fileURLToPath(
     new URL("../../../../../packages/hercule/src/main.ts", import.meta.url),
@@ -333,6 +369,13 @@ describe("the verb of the binary", () => {
 
     expect(result.exitCode).toBe(0);
     expect(isDenied(result.stdout.toString())).toBe(true);
+  });
+
+  it("exits 0 with nothing on stdout for input that is not JSON, when nothing is enforced", () => {
+    const result = runVerb("not json", {});
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("");
   });
 
   it("prints nothing for a call it lets through", () => {

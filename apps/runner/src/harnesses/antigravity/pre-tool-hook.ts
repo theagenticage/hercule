@@ -45,9 +45,10 @@ import {
   PLUGINS_FOLDER_NAME,
   SHELL_TOOL_NAME,
   SKILLS_DIRECTORY_VARIABLE,
+  decideAfterHookFailure,
   decidePreToolHook,
 } from "./pre-tool-hook-policy";
-import type { DecodedToolCall, EditTarget, GuardedPlace } from "./pre-tool-hook-policy";
+import type { DecodedToolCall, EditTarget, GuardedPlace, HookDenial } from "./pre-tool-hook-policy";
 
 /** The most input the hook reads. A call larger than this counts as unreadable. */
 const MAX_INPUT_BYTES = 1024 * 1024;
@@ -272,36 +273,42 @@ export const answerPreToolCall = (
   input: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
 ): string => {
-  const call = decodeCall(input);
-  const marksDir = env[SESSION_MARKS_DIR_VARIABLE];
-  if (call !== undefined && marksDir && MARKED_TOOL_NAMES.includes(call.name)) {
-    writeMark(marksDir, call);
-  }
   const guardIsOn = !!env[GUARD_VARIABLE];
-  const path = call?.args["Path"];
-  let editTarget: EditTarget | undefined;
-  let guardedPlaces: ReadonlyArray<GuardedPlace> = [];
-  if (call !== undefined && guardIsOn && EDIT_TOOL_NAMES.includes(call.name)) {
-    try {
-      if (typeof path === "string") {
-        const target = buildEditTarget(call.cwd, path);
-        const places = buildGuardedPlaces(call.cwd, env[SKILLS_DIRECTORY_VARIABLE] || undefined);
-        editTarget = target;
-        guardedPlaces = places;
-      }
-    } catch {
-      // Both stay unset: the policy denies a call it cannot place.
+  const deniesWebSearch = !!env[DENY_WEB_SEARCH_VARIABLE];
+  try {
+    const call = decodeCall(input);
+    const marksDir = env[SESSION_MARKS_DIR_VARIABLE];
+    if (call !== undefined && marksDir && MARKED_TOOL_NAMES.includes(call.name)) {
+      writeMark(marksDir, call);
     }
+    const path = call?.args["Path"];
+    let editTarget: EditTarget | undefined;
+    let guardedPlaces: ReadonlyArray<GuardedPlace> = [];
+    if (call !== undefined && guardIsOn && EDIT_TOOL_NAMES.includes(call.name)) {
+      try {
+        if (typeof path === "string") {
+          const target = buildEditTarget(call.cwd, path);
+          const places = buildGuardedPlaces(call.cwd, env[SKILLS_DIRECTORY_VARIABLE] || undefined);
+          editTarget = target;
+          guardedPlaces = places;
+        }
+      } catch {
+        // Both stay unset: the policy denies a call it cannot place.
+      }
+    }
+    return formatAnswer(
+      decidePreToolHook({ guardIsOn, deniesWebSearch, call, editTarget, guardedPlaces }),
+    );
+  } catch {
+    // `agy` stops the tool when the hook fails, so any unexpected error still
+    // ends in a valid answer.
+    return formatAnswer(decideAfterHookFailure({ guardIsOn, deniesWebSearch }));
   }
-  const denial = decidePreToolHook({
-    guardIsOn,
-    deniesWebSearch: !!env[DENY_WEB_SEARCH_VARIABLE],
-    call,
-    editTarget,
-    guardedPlaces,
-  });
-  return denial === undefined ? "" : `${JSON.stringify(denial)}\n`;
 };
+
+/** Returns the text the hook prints for `denial`: one line of JSON, or nothing to let the call run. */
+const formatAnswer = (denial: HookDenial | undefined): string =>
+  denial === undefined ? "" : `${JSON.stringify(denial)}\n`;
 
 /**
  * Reads all of stdin, or returns undefined when it holds more than
@@ -318,7 +325,12 @@ const readBoundedStdin = async (): Promise<string | undefined> => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
-/** Runs the hook: reads the call from stdin, prints the answer on stdout, and exits 0. */
+/**
+ * Runs the hook: reads the call from stdin, prints the answer on stdout, and
+ * exits 0. It never throws: a stdin that cannot be read counts as unreadable
+ * input, which `answerPreToolCall` answers like any other.
+ */
 export const runPreToolHook = async (): Promise<void> => {
-  process.stdout.write(answerPreToolCall(await readBoundedStdin(), process.env));
+  const input = await readBoundedStdin().catch(() => undefined);
+  process.stdout.write(answerPreToolCall(input, process.env));
 };

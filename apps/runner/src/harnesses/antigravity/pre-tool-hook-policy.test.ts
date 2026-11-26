@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decidePreToolHook } from "./pre-tool-hook-policy";
+import { decideAfterHookFailure, decidePreToolHook } from "./pre-tool-hook-policy";
 import type { EditTarget, GuardedPlace, PreToolFacts } from "./pre-tool-hook-policy";
 
 const target = (path: string, overrides: Partial<EditTarget> = {}): EditTarget => ({
@@ -32,7 +32,47 @@ const editFacts = (
   guardedPlaces,
 });
 
+describe("decideAfterHookFailure", () => {
+  it("lets the call run when nothing is enforced, and otherwise denies with a reason", () => {
+    expect(decideAfterHookFailure({ guardIsOn: false, deniesWebSearch: false })).toBeUndefined();
+    for (const flags of [
+      { guardIsOn: true, deniesWebSearch: false },
+      { guardIsOn: false, deniesWebSearch: true },
+    ]) {
+      const denial = decideAfterHookFailure(flags);
+      expect(denial?.reason).toContain("check of this tool call failed");
+      expect(denial?.reason).toContain("Full access");
+    }
+  });
+});
+
 describe("decidePreToolHook", () => {
+  it("always gives a denial a reason that is not empty", () => {
+    const places = [file("/r/hooks.json")];
+    const denials = [
+      decidePreToolHook({ ...editFacts("x", target("/r/hooks.json"), places) }),
+      decidePreToolHook(editFacts(5, undefined, places)),
+      decidePreToolHook({
+        guardIsOn: false,
+        deniesWebSearch: true,
+        call: { name: "search_web", args: {} },
+        editTarget: undefined,
+        guardedPlaces: [],
+      }),
+      decidePreToolHook({
+        guardIsOn: true,
+        deniesWebSearch: false,
+        call: undefined,
+        editTarget: undefined,
+        guardedPlaces: [],
+      }),
+    ];
+
+    expect(denials.map((denial) => denial?.reason.length ?? 0).every((length) => length > 0)).toBe(
+      true,
+    );
+  });
+
   it("denies web search only when the web search denial is on", () => {
     const search = { name: "search_web", args: {} };
     const base = { guardIsOn: true, editTarget: undefined, guardedPlaces: [] };
