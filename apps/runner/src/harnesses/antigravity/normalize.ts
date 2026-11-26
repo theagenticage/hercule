@@ -55,6 +55,7 @@ import type * as Schema from "effect/Schema";
 import { ensureId } from "../events";
 import { buildEnvelope, buildRaw, clampCount } from "../normalize";
 import { readAgyErrorNotice } from "./agy";
+import { LAUNCH_TOOL_NAMES } from "./session-files";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
 import {
@@ -120,15 +121,29 @@ interface RunningTool {
 }
 
 /**
- * What stays of a tool item after it ends: nothing but the fact that it ended,
- * so a long session does not hold every file it edited. It is enough to ignore
- * a late update.
+ * What stays of a tool item after it ends: the fact that it ended, so a long
+ * session does not hold every file it edited. It is enough to ignore a late
+ * update. A call that launches subagents also keeps its item's id, because a
+ * subagent's files link it to the call about a second after the call ended
+ * (`findLaunchItem`).
  */
 interface EndedTool {
   readonly ended: true;
+  readonly itemId?: string;
 }
 
 const ENDED_TOOL: EndedTool = { ended: true };
+
+/**
+ * Returns what stays of `record` once it ended. Only a call that launches
+ * subagents keeps its item's id. That bounds the memory: a session makes as
+ * many such calls as it starts subagents, and the files of at most 64 of them
+ * are read.
+ */
+const buildEndedTool = (record: RunningTool): EndedTool =>
+  LAUNCH_TOOL_NAMES.includes(record.call.name ?? "")
+    ? { ended: true, itemId: record.itemId }
+    : ENDED_TOOL;
 
 type ToolRecord = RunningTool | EndedTool;
 
@@ -161,11 +176,15 @@ export interface NormalizerState {
   /** The calls whose Request the adapter answered with a deny or a cancel. */
   readonly declined: Set<string>;
   readonly processUsage: Totals;
+  /** The tokens the subagents used in this process. No prompt reply counts them, and the session's usage includes them. */
+  readonly subagentUsage: Totals;
   /**
-   * Whether the process used tokens that no prompt reply counts: a subagent
-   * ran, output came with no prompt open, or a reply had no usage.
+   * Whether the process used tokens that no prompt reply counts: output came
+   * with no prompt open, or a reply had no usage.
    */
   usageIsIncomplete: boolean;
+  /** Whether the files that hold the subagents' tokens could not be read, wholly or for one subagent. */
+  subagentUsageIsIncomplete: boolean;
 }
 
 /** The turn and item a Request belongs to. */
@@ -199,7 +218,9 @@ export const buildNormalizerState = (input: {
   tools: new Map(),
   declined: new Set(),
   processUsage: buildZeroTotals(),
+  subagentUsage: buildZeroTotals(),
   usageIsIncomplete: false,
+  subagentUsageIsIncomplete: false,
 });
 
 const buildZeroTotals = (): Totals => ({
@@ -757,7 +778,6 @@ const normalizeToolCall = (
     state.tools.set(call.toolCallId, record);
     turn.running.add(record.itemId);
     const { kind, detail } = buildToolItem(record.call);
-    if (kind === "subagent") state.usageIsIncomplete = true;
     events.push(
       ...turnEvents,
       buildItemStarted(
@@ -775,7 +795,7 @@ const normalizeToolCall = (
   const wasDeclined = state.declined.delete(call.toolCallId);
   const status: ItemStatus =
     call.status === "completed" ? "completed" : wasDeclined ? "declined" : "failed";
-  state.tools.set(call.toolCallId, ENDED_TOOL);
+  state.tools.set(call.toolCallId, buildEndedTool(record));
   if (state.turn?.id === record.turnId) state.turn.running.delete(record.itemId);
   const { kind, detail } =
     status === "failed" ? buildFailedToolItem(record.call) : buildToolItem(record.call);
@@ -1028,6 +1048,16 @@ export const findRequestOwner = (
 };
 
 /**
+ * Returns the id of the item of the call `toolCallId`, whether the call still
+ * runs or has ended, or `undefined` when the call is unknown or ended without
+ * launching subagents. A subagent's files link it to its launching call about
+ * a second after that call ended, so the session cannot use `findRequestOwner`,
+ * which refuses an ended call.
+ */
+export const findLaunchItem = (state: NormalizerState, toolCallId: string): string | undefined =>
+  state.tools.get(toolCallId)?.itemId;
+
+/**
  * Returns the owner of an approval Request, as `findRequestOwner` does, with
  * the Request's kind and detail built from the call. The approval's own
  * `snapshot` of the tool call is read over the fields the item last had.
@@ -1049,8 +1079,8 @@ export const describeRequestItem = (
 /**
  * Adds the usage of one prompt reply to the turn in flight and to the process,
  * and returns `session.usage.updated` with the process's sum. The event has
- * the incomplete form once the process used tokens that no reply counts: a
- * subagent ran, output came with no prompt open, or a reply had no usage.
+ * the incomplete form once the process used tokens that no reply counts:
+ * output came with no prompt open, or a reply had no usage.
  * `thoughtTokens` is never added, because `outputTokens` already includes it.
  */
 export const addPromptUsage = (
@@ -1075,13 +1105,46 @@ export const addPromptUsage = (
   return [buildUsageUpdated(state)];
 };
 
+/**
+ * Records the tokens the subagents used so far (`usage`) and whether their
+ * files could not be read, and returns `session.usage.updated` with the new
+ * sum. Returns nothing when neither changed, so a read of the files that finds
+ * no new token sends nothing. The sum is the session's own prompts plus every
+ * subagent's.
+ */
+export const setSubagentUsage = (
+  state: NormalizerState,
+  usage: Usage,
+  isIncomplete: boolean,
+): HarnessEvent[] => {
+  const known = state.subagentUsage;
+  if (
+    known.inputTokens === usage.inputTokens &&
+    known.outputTokens === usage.outputTokens &&
+    known.cacheReadTokens === (usage.cacheReadTokens ?? 0) &&
+    state.subagentUsageIsIncomplete === isIncomplete
+  ) {
+    return [];
+  }
+  known.inputTokens = usage.inputTokens;
+  known.outputTokens = usage.outputTokens;
+  known.cacheReadTokens = usage.cacheReadTokens ?? 0;
+  state.subagentUsageIsIncomplete = isIncomplete;
+  return [buildUsageUpdated(state)];
+};
+
 /** Returns `session.usage.updated` with the process's sum, in the incomplete form once that applies. */
 const buildUsageUpdated = (state: NormalizerState): HarnessEvent => {
-  const counts = buildUsage(state.processUsage);
+  const counts = buildUsage({
+    inputTokens: state.processUsage.inputTokens + state.subagentUsage.inputTokens,
+    outputTokens: state.processUsage.outputTokens + state.subagentUsage.outputTokens,
+    cacheReadTokens: state.processUsage.cacheReadTokens + state.subagentUsage.cacheReadTokens,
+    cacheWriteTokens: state.processUsage.cacheWriteTokens + state.subagentUsage.cacheWriteTokens,
+  });
   return {
     _tag: "session.usage.updated",
     ...buildBase(state),
-    ...(state.usageIsIncomplete
+    ...(state.usageIsIncomplete || state.subagentUsageIsIncomplete
       ? { usageReport: { status: "incomplete" as const, counts } }
       : { usage: counts }),
   };
@@ -1106,7 +1169,7 @@ export const buildProcessEndEvents = (state: NormalizerState): HarnessEvent[] =>
   const events = [...releaseErrorNotice(state), ...closeTextItem(state)];
   for (const [toolCallId, record] of state.tools) {
     if (record.ended) continue;
-    state.tools.set(toolCallId, ENDED_TOOL);
+    state.tools.set(toolCallId, buildEndedTool(record));
     const { kind, detail } = buildToolItem(record.call);
     events.push(
       buildItemCompleted(

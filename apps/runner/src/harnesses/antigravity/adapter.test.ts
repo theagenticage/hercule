@@ -7,11 +7,19 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
 import { antigravity as antigravityPlugin } from "@hercule/plugin-antigravity";
-import type { SessionSpec } from "@hercule/protocol";
-import { cleanupHomes } from "../testing";
+import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
+import { cleanupHomes, CWD, settle } from "../testing";
 import { ANTIGRAVITY, makeAntigravityAdapter } from "./adapter";
-import { BINARY, buildContext, buildFakeAgy, createSignedInHome } from "./fake-agy.testing";
+import {
+  BINARY,
+  buildContext,
+  buildFakeAgy,
+  buildStartContext,
+  createSignedInHome,
+} from "./fake-agy.testing";
 
 afterEach(() => {
   cleanupHomes();
@@ -135,5 +143,47 @@ describe("a session the adapter does not host", () => {
     await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
     await Effect.runPromise(adapter.interrupt(SESSION));
     await Effect.runPromise(adapter.respondToApprovalRequest(SESSION, "request", "allow"));
+  });
+});
+
+describe("an interrupt of one subagent", () => {
+  it("stops nothing, and warns in the subagent's name that only the session's turn can be interrupted", async () => {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home);
+    const adapter = makeAntigravityAdapter(fake);
+    const seen: Array<HarnessEvent> = [];
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.forkScoped(
+          Stream.runForEach(adapter.events, (event) =>
+            Effect.sync(() => {
+              seen.push(event);
+            }),
+          ),
+        );
+        yield* Effect.promise(settle);
+        yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
+        yield* adapter.startSession(
+          SESSION,
+          { ...SPEC, modelSelection: { model: "gemini-4-hydrogen", options: { effort: "high" } } },
+          buildStartContext(home, CWD),
+        );
+
+        yield* adapter.interrupt(SESSION, "a-subagent");
+        yield* Effect.promise(settle);
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    );
+
+    expect(seen.filter((event) => event._tag === "runtime.warning")).toMatchObject([
+      {
+        subagentId: "a-subagent",
+        message:
+          "Antigravity cannot stop one subagent. Interrupt the session's turn to stop all of its work.",
+      },
+    ]);
+    expect(
+      fake.spawns[0]!.harness.received.filter((message) => message.method === "session/cancel"),
+    ).toEqual([]);
   });
 });

@@ -17,6 +17,7 @@ import {
   buildProcessEndEvents,
   closeTurn,
   describeRequestItem,
+  findLaunchItem,
   findRequestOwner,
   holdTurn,
   makeEventSecretHider,
@@ -25,6 +26,7 @@ import {
   normalizeUpdate,
   openTurn,
   releaseTurn,
+  setSubagentUsage,
   takeErrorNotice,
   type NormalizerState,
   type RequestItem,
@@ -310,10 +312,19 @@ describe("the subagent recording", () => {
     expect(itemsOf(events, "assistant_message")).toHaveLength(2);
   });
 
-  it("reports usage in the incomplete form because a subagent ran", () => {
-    expect(only(events, "session.usage.updated")).toMatchObject([
-      { usageReport: { status: "incomplete", counts: { inputTokens: 15385, outputTokens: 783 } } },
-    ]);
+  it("reports the usage of the replies as complete, because the subagent's tokens are added from its files", () => {
+    const [update] = only(events, "session.usage.updated");
+    expect(update).toMatchObject({ usage: { inputTokens: 15385, outputTokens: 783 } });
+    expect(update).not.toHaveProperty("usageReport");
+  });
+
+  it("finds the item of the call that launched a subagent after the call ended", () => {
+    const { state, events: played } = playRecording("subagent");
+    const [launched] = itemsOf(played, "subagent");
+    const toolCallId = launched!.harnessRefs!.toolCallId!;
+
+    expect(findLaunchItem(state, toolCallId)).toBe(launched!.itemId);
+    expect(findLaunchItem(state, "unknown-call")).toBeUndefined();
   });
 });
 
@@ -1111,6 +1122,32 @@ describe("usage", () => {
     expect(first.map((event) => event._tag)).toContain("session.usage.updated");
     const again = normalizeUpdate(state, buildToolStart(runCall("c1")));
     expect(again.map((event) => event._tag)).not.toContain("session.usage.updated");
+  });
+
+  it("adds the subagents' tokens to the session's usage, and sends nothing when they did not change", () => {
+    const state = freshState();
+    addPromptUsage(state, reply);
+    const subagents = {
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 0,
+    };
+
+    expect(setSubagentUsage(state, subagents, false)).toMatchObject([
+      { usage: { inputTokens: 110, outputTokens: 25, cacheReadTokens: 37, cacheWriteTokens: 1 } },
+    ]);
+    expect(setSubagentUsage(state, subagents, false)).toEqual([]);
+  });
+
+  it("reports the incomplete form when the files of a subagent could not be read, with the counts so far", () => {
+    const state = freshState();
+    addPromptUsage(state, reply);
+    const none = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
+    expect(setSubagentUsage(state, none, true)).toMatchObject([
+      { usageReport: { status: "incomplete", counts: { inputTokens: 10 } } },
+    ]);
   });
 
   it("leaves usage out of a turn whose prompts reported none", () => {

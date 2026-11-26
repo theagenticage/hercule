@@ -7,6 +7,8 @@
  * `TestClock`.
  */
 import {
+  appendFileSync,
+  cpSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -37,6 +39,7 @@ import {
   writeTestImage,
 } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { APP_DATA_DIR } from "./harness-home";
 import { answerPreToolCall, decodeHookRules } from "./pre-tool-hook";
 import {
   answerConfigChange,
@@ -2854,5 +2857,431 @@ describe("a stop with a Request open", () => {
             ? new Promise(() => {})
             : undefined,
       },
+    ));
+});
+
+// ---- The files of agy that show a subagent ----
+
+/** The recorded files of `subagent-full`: the session's own conversation, and the subagent it started. */
+const FILES_BRAIN = join(
+  import.meta.dirname,
+  "fixtures",
+  "session-files",
+  "subagent-full",
+  "brain",
+);
+const ROOT = "86a5c11a-cc0d-4231-b6a7-4df5e51875e0";
+const CHILD = "e4553827-0073-42e6-bc63-8e9619a7d435";
+/** The ACP id of the `invoke_subagent` call that the launch message of the child names. */
+const LAUNCH_CALL = "call_11946467374736309831";
+
+const conversationFolder = (home: string, id: string): string =>
+  join(home, APP_DATA_DIR, "brain", id, ".system_generated");
+const transcriptPath = (home: string, id: string): string =>
+  join(conversationFolder(home, id), "logs", "transcript.jsonl");
+
+/** The recorded steps of the subagent, one line each. Its last step ends its turn. */
+const CHILD_STEPS = readFileSync(
+  join(FILES_BRAIN, CHILD, ".system_generated", "logs", "transcript.jsonl"),
+  "utf8",
+)
+  .split("\n")
+  .filter((step) => step !== "");
+
+/** A step the subagent writes after its turn ended: it opens a new turn that completes at once. */
+const LATE_STEP = JSON.stringify({
+  step_index: 7,
+  type: "PLANNER_RESPONSE",
+  status: "DONE",
+  model: "gemini-4-neon-high",
+  content: "Late words.",
+});
+
+/** Copies the registration of the subagent and the launch message that names the call which started it, as `agy` writes them about a second after the call. */
+const registerSubagent = (home: string): void => {
+  cpSync(
+    join(FILES_BRAIN, ROOT, ".system_generated", "subagents"),
+    join(conversationFolder(home, ROOT), "subagents"),
+    { recursive: true },
+  );
+  cpSync(
+    join(FILES_BRAIN, CHILD, ".system_generated", "messages"),
+    join(conversationFolder(home, CHILD), "messages"),
+    { recursive: true },
+  );
+};
+
+/** Appends the text to the subagent's transcript, as `agy` appends a finished step. */
+const appendToSubagentTranscript = (home: string, text: string): void => {
+  const path = transcriptPath(home, CHILD);
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, text);
+};
+
+/** Appends the recorded steps from `from` up to, but not including, `to` to the subagent's transcript. */
+const appendSubagentSteps = (home: string, from: number, to: number): void => {
+  appendToSubagentTranscript(
+    home,
+    CHILD_STEPS.slice(from, to)
+      .map((step) => `${step}\n`)
+      .join(""),
+  );
+};
+
+/**
+ * Returns the script for `session/prompt` of a session over the conversation
+ * `ROOT`. The first prompt gets a call that launches a subagent, which
+ * completes at once and leaves the prompt open. A later prompt gets a short
+ * text, which only proves that `agy` has taken it.
+ */
+const buildLaunchScript = (): HarnessScript => {
+  let prompts = 0;
+  return () => {
+    prompts += 1;
+    if (prompts > 1) {
+      return [
+        buildUpdate(
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Again." } },
+          ROOT,
+        ),
+      ];
+    }
+    const args = { Prompt: "Run it.", Role: "File Writer", TypeName: "self" };
+    const call = {
+      toolCallId: LAUNCH_CALL,
+      name: "invoke_subagent",
+      args,
+      kind: "other",
+      title: "Run invoke_subagent",
+      rawInput: args,
+    };
+    return [
+      buildUpdate({ sessionUpdate: "tool_call", ...call, status: "in_progress" }, ROOT),
+      buildUpdate({ sessionUpdate: "tool_call_update", ...call, status: "completed" }, ROOT),
+    ];
+  };
+};
+
+const subagentFake = (home: string): FakeAgyOptions => ({
+  recording: readRecordedSetup("cancel"),
+  scripts: {
+    "session/new": answerNewSession(home, ROOT),
+    "session/prompt": buildLaunchScript(),
+  },
+});
+
+/** Lets the reader of the files reach its wait, runs the 500 ms out, and lets the read finish. */
+const readFilesOnce = Effect.gen(function* () {
+  yield* Effect.promise(settle);
+  yield* TestClock.adjust(Duration.millis(500));
+  yield* Effect.promise(settle);
+});
+
+/** Makes `agy` reply to its latest prompt: the usage of the session's own agent, and the end of the turn. */
+const replyToLatestPrompt = (h: Harness, stopReason: "end_turn" | "cancelled" = "end_turn") =>
+  Effect.sync(() => {
+    h.harness().sendLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: h.received("session/prompt").at(-1)!.id,
+        result: {
+          stopReason,
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 50,
+            cachedReadTokens: 0,
+            cachedWriteTokens: 0,
+            totalTokens: 1050,
+          },
+        },
+      }),
+    );
+  });
+
+/** Sends the first input and waits until the call that launches the subagent has completed. Returns that call's item. */
+const sendUntilLaunched = (h: Harness) =>
+  Effect.gen(function* () {
+    yield* h.adapter.sendInput(SESSION, buildInput("Start it."));
+    yield* h.until("the launch call completed", () =>
+      h.tags("item.completed").some((event) => event.kind === "subagent"),
+    );
+    return h.tags("item.completed").find((event) => event.kind === "subagent")!;
+  });
+
+const isRoot = (event: HarnessEvent): boolean =>
+  !("subagentId" in event) || event.subagentId === undefined;
+const isChild = (event: HarnessEvent): boolean =>
+  "subagentId" in event && event.subagentId === CHILD;
+
+/** Describes the events in order as `tag` or `tag (state)` for a turn end, to compare a whole sequence. */
+const summarizeChildTurns = (h: Harness) =>
+  h.seen
+    .filter(
+      (event) =>
+        isChild(event) && (event._tag === "turn.started" || event._tag === "turn.completed"),
+    )
+    .map((event) => (event._tag === "turn.completed" ? `ended ${event.state}` : "started"));
+
+describe("the subagents that agy's files show", () => {
+  it("shows a subagent step by step, attributed to it and linked to the call that launched it, and adds its tokens to the usage", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const launch = yield* sendUntilLaunched(h);
+
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesOnce;
+
+          expect(h.tags("subagent.started")).toMatchObject([
+            {
+              subagentId: CHILD,
+              itemId: launch.itemId,
+              description: "File Writer",
+              agentType: "self",
+            },
+          ]);
+          expect(summarizeChildTurns(h)).toEqual(["started"]);
+          const startedAt = h.seen.findIndex((event) => event._tag === "subagent.started");
+          const turnAt = h.seen.findIndex(
+            (event) => event._tag === "turn.started" && isChild(event),
+          );
+          expect(startedAt).toBeLessThan(turnAt);
+
+          appendSubagentSteps(h.home, 2, 7);
+          yield* readFilesOnce;
+
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended completed"]);
+          expect(h.tags("turn.completed").filter(isChild)).toMatchObject([
+            { usage: { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169 } },
+          ]);
+          expect(h.tags("session.usage.updated").filter(isChild).at(-1)).toMatchObject({
+            usage: { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169 },
+          });
+          // The session's own snapshot adds the subagent's tokens to those of its own agent.
+          expect(h.tags("session.usage.updated").filter(isRoot).at(-1)).toMatchObject({
+            usage: { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169 },
+          });
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+          const snapshot = h.tags("session.usage.updated").filter(isRoot).at(-1);
+          expect(snapshot).toMatchObject({
+            usage: { inputTokens: 7801, outputTokens: 379, cacheReadTokens: 21169 },
+          });
+          expect(snapshot).not.toHaveProperty("usageReport");
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("reads once more after the last turn closed, and then reads nothing until a turn opens again", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          // The files show up after the reply of the parent, as they did in the recording.
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 7);
+          yield* readFilesOnce;
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended completed"]);
+
+          // Nothing is open, so a new step waits however long the clock runs.
+          const shown = h.seen.length;
+          appendToSubagentTranscript(h.home, `${LATE_STEP}\n`);
+          yield* readFilesOnce;
+          yield* readFilesOnce;
+          yield* TestClock.adjust(Duration.seconds(30));
+          yield* Effect.promise(settle);
+          expect(h.seen).toHaveLength(shown);
+
+          // A turn that opens makes the session read again.
+          yield* h.adapter.sendInput(SESSION, buildInput("Again."));
+          yield* h.until("the late step showed", () =>
+            h
+              .tags("content.delta")
+              .some((event) => isChild(event) && event.delta === "Late words."),
+          );
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("keeps reading while only a subagent's turn is open", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesOnce;
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          appendSubagentSteps(h.home, 2, 5);
+          yield* readFilesOnce;
+          appendSubagentSteps(h.home, 5, 7);
+          yield* readFilesOnce;
+
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended completed"]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("warns once when the session's own files cannot be read, goes on with ACP alone, and counts the usage as incomplete", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          mkdirSync(dirname(transcriptPath(h.home, ROOT)), { recursive: true });
+          writeFileSync(transcriptPath(h.home, ROOT), "this is not json\n");
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          yield* readFilesOnce;
+          yield* readFilesOnce;
+
+          const [warning, ...more] = h.tags("runtime.warning");
+          expect(more).toEqual([]);
+          expect(warning?.message).toMatch(
+            /^Hercule cannot read Antigravity's session files \(.+\), so subagents' work is not shown and their tokens are not counted\.$/,
+          );
+          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+            usageReport: { status: "incomplete" },
+          });
+
+          // The reader is closed for the rest of the process, so a subagent that shows up now is not shown.
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 7);
+          yield* readFilesOnce;
+          expect(h.tags("subagent.started")).toEqual([]);
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("warns once, naming the subagent, when one subagent's files cannot be read, and keeps the session's own work going", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+
+          registerSubagent(h.home);
+          appendToSubagentTranscript(h.home, "this is not json\n");
+          yield* readFilesOnce;
+          yield* readFilesOnce;
+
+          const [warning, ...more] = h.tags("runtime.warning");
+          expect(more).toEqual([]);
+          expect(warning?.message).toContain(CHILD);
+          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+            usageReport: { status: "incomplete" },
+          });
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state: "completed" }]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("ends a subagent's open turn as interrupted when an interrupt stops the session's turn", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesOnce;
+          expect(summarizeChildTurns(h)).toEqual(["started"]);
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          yield* replyToLatestPrompt(h, "cancelled");
+          yield* Fiber.join(interrupting);
+
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state: "interrupted" }]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("cancels when only subagents run, and ends their turns as interrupted", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesOnce;
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+          expect(summarizeChildTurns(h)).toEqual(["started"]);
+
+          yield* h.adapter.interrupt(SESSION);
+          yield* h.untilReceived("session/cancel");
+          expect(h.received("session/cancel")).toHaveLength(1);
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+          // The session's own agent is idle, so its status is untouched and the next input opens a Turn.
+          const sent = yield* h.adapter.sendInput(SESSION, buildInput("Now."));
+          expect(sent.delivery).toBe("opened");
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("sends no cancel for an interrupt when nothing runs, not even a subagent that already ended", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 7);
+          yield* readFilesOnce;
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          yield* h.adapter.interrupt(SESSION);
+
+          expect(h.received("session/cancel")).toHaveLength(0);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("skips what the files held before a resume, and shows a known subagent again only when it writes a new step", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          createConversationFiles(h.home, ROOT);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 7);
+          yield* h.start({
+            continue: {
+              nativeSessionId: ROOT,
+              mode: "resume",
+              subagents: [{ subagentId: CHILD, itemId: "item-of-an-earlier-process" }],
+            },
+          });
+          yield* sendUntilLaunched(h);
+          yield* readFilesOnce;
+          yield* readFilesOnce;
+          expect(h.tags("subagent.started")).toEqual([]);
+          expect(h.seen.filter(isChild)).toEqual([]);
+
+          appendToSubagentTranscript(h.home, `${LATE_STEP}\n`);
+          yield* readFilesOnce;
+
+          expect(h.tags("subagent.started")).toMatchObject([{ subagentId: CHILD }]);
+          expect(
+            h
+              .tags("content.delta")
+              .filter((event) => isChild(event) && event.delta === "Late words."),
+          ).toHaveLength(1);
+        }),
+      { fake: subagentFake },
     ));
 });

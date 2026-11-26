@@ -20,6 +20,8 @@
  * `normalize.recordings.test.ts` plays every other recording through the
  * normalizer alone.
  */
+import { cpSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -30,6 +32,7 @@ import type { HarnessEvent, QuestionAnswers, SessionSpec } from "@hercule/protoc
 import type { ApprovalDecision } from "@hercule/protocol";
 import { cleanupHomes, CWD, settle, waitUntil } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { APP_DATA_DIR } from "./harness-home";
 import { expectEventStreamToHoldTogether } from "./event-stream.testing";
 import {
   buildFakeAgy,
@@ -242,7 +245,7 @@ const openSession = (
       events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
     const until = (what: string, ready: () => boolean) =>
       Effect.promise(() => waitUntil(what, ready));
-    return { adapter, events, tags, until, received: () => fake.spawns[0]!.harness.received };
+    return { home, adapter, events, tags, until, received: () => fake.spawns[0]!.harness.received };
   });
 
 /** Plays one scenario and returns what the session emitted and what it wrote to `agy`. */
@@ -456,6 +459,70 @@ describe("steering, as recorded", () => {
         expect(tags("turn.completed")).toMatchObject([
           { state: "completed", usage: readRecordedUsage("steer-during-request", 0) },
         ]);
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+});
+
+describe("a subagent, as recorded", () => {
+  const isChild = (event: HarnessEvent) =>
+    "subagentId" in event && event.subagentId === "e4553827-0073-42e6-bc63-8e9619a7d435";
+
+  it("subagent-full: the files of agy show the subagent's work, linked to the call that started it, and its tokens join the usage", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { home, adapter, events, tags, until } = yield* openSession(
+          "subagent-full",
+          "full-access",
+        );
+        const [prompt] = readRecordedPrompts("subagent-full");
+        yield* adapter.sendInput(SESSION, { text: prompt! });
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+
+        // The files show up after the reply of the parent, as they did in the recording.
+        cpSync(
+          join(import.meta.dirname, "fixtures", "session-files", "subagent-full", "brain"),
+          join(home, APP_DATA_DIR, "brain"),
+          { recursive: true },
+        );
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust("500 millis");
+        yield* until("the subagent's turn completed", () => tags("turn.completed").some(isChild));
+
+        const launched = tags("item.completed").find((event) => event.kind === "subagent")!;
+        expect(tags("subagent.started")).toMatchObject([
+          {
+            subagentId: "e4553827-0073-42e6-bc63-8e9619a7d435",
+            itemId: launched.itemId,
+            description: "File Writer",
+            agentType: "self",
+          },
+        ]);
+        expect(tags("turn.completed").filter(isChild)).toMatchObject([{ state: "completed" }]);
+        expect(
+          tags("item.completed")
+            .filter(isChild)
+            .filter((event) => event.kind === "command_execution"),
+          "the subagent's command",
+        ).toMatchObject([
+          {
+            status: "completed",
+            detail: { command: expect.stringContaining("SUBMARK") as unknown },
+          },
+        ]);
+        expectEventStreamToHoldTogether(events.filter((event) => !isChild(event)));
+        expectEventStreamToHoldTogether(events.filter(isChild));
+
+        // The recorded reply counts the session's own agent, and the subagent's three model steps are added.
+        const snapshot = tags("session.usage.updated")
+          .filter((event) => !isChild(event))
+          .at(-1);
+        expect(snapshot).toMatchObject({
+          usage: sumUsage([
+            readRecordedUsage("subagent-full", 0),
+            { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169, cacheWriteTokens: 0 },
+          ]),
+        });
+        expect(snapshot).not.toHaveProperty("usageReport");
       }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
     ));
 });
