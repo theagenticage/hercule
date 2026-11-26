@@ -3454,6 +3454,46 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
+  it("does not start the wait of a synthetic turn again when it ends a subagent's turn after the cancel", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          // agy still speaks after the cancel: a synthetic turn opens while the subagent's turn is open.
+          h.harness().sendLine(
+            JSON.stringify(
+              buildUpdate(
+                { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hi." } },
+                ROOT,
+              ),
+            ),
+          );
+          yield* h.until("a synthetic turn opened", () => h.tags("turn.started").length === 2);
+          yield* TestClock.adjust(Duration.seconds(9));
+          yield* Fiber.join(interrupting);
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+
+          // The end of the subagent's turn is not output of agy, so the wait is still the one that began with the chunk.
+          yield* TestClock.adjust(Duration.seconds(1));
+          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([
+            { state: "completed" },
+            { state: "completed" },
+          ]);
+        }),
+      { fake: subagentFake },
+    ));
+
   it("leaves a subagent's turn open when the cancel could not be written", () =>
     run(
       (h) =>
