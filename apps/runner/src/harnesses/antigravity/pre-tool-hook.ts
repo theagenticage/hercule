@@ -554,8 +554,10 @@ const buildGuardedPlaces = (cwd: string, rules: HookRules): ReadonlyArray<Guarde
  * The characters an HFS+ volume ignores when it compares names, so
  * `hooks\u200C.json` opens `hooks.json` there: U+200C to U+200F, U+202A to
  * U+202E, U+206A to U+206F and U+FEFF. They are the ignorable code points of
- * HFS+ case-insensitive name comparison, as Apple documents it in TN1150 (HFS
- * Plus Volume Format).
+ * HFS+ case-insensitive name comparison. Apple's TN1150 (HFS Plus Volume
+ * Format) says such characters are skipped in that comparison, but does not
+ * print the table. It points to Apple's comparison code, a separate download,
+ * which holds the list.
  */
 const HFS_IGNORED_CHARACTERS = /[\u200C-\u200F\u202A-\u202E\u206A-\u206F\uFEFF]/g;
 
