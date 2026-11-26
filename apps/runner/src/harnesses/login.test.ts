@@ -470,12 +470,14 @@ describe("more than one login at a time", () => {
 /**
  * Google's `agy acp --login` runs on plain pipes. After a wrong code it prints
  * a blank line and then its refusal on stdout, prints nothing on stderr, and
- * exits 1. The command opts in to reading that line by setting `refusal`.
+ * exits 1. After a good code it exits 0. The command opts in by setting
+ * `refusal`, and then the exit code alone decides.
  */
 describe("a plain-pipe login whose command reads a refusal", () => {
   const AGY_URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=agy";
   const AGY_REFUSAL = `couldn't log in: token exchange failed: oauth2: "invalid_grant" "Bad Request"`;
-  const REFUSAL_ENDING = "This sign-in cannot take another code; start it again for a new link.";
+  const REFUSAL_MESSAGE =
+    "The code was refused. This sign-in cannot take another code; start it again for a new link.";
 
   const adapterWith = (refusal: RegExp | undefined): HarnessAdapter => ({
     ...claudeCode,
@@ -511,7 +513,7 @@ describe("a plain-pipe login whose command reads a refusal", () => {
       return submitting;
     });
 
-  it("fails with the vendor's refusal and says the sign-in must start again", async () => {
+  it("ends the login as failed and says the sign-in must start again", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -527,11 +529,7 @@ describe("a plain-pipe login whose command reads a refusal", () => {
       }),
     );
 
-    expect(answer).toEqual({
-      _tag: "loginResult",
-      ok: false,
-      message: `${AGY_REFUSAL}. ${REFUSAL_ENDING}`,
-    });
+    expect(answer).toEqual({ _tag: "loginFailed", message: REFUSAL_MESSAGE });
   });
 
   it("still reads a refusal line that arrives after the exit, before stdout ends", async () => {
@@ -552,11 +550,7 @@ describe("a plain-pipe login whose command reads a refusal", () => {
       }),
     );
 
-    expect(answer).toEqual({
-      _tag: "loginResult",
-      ok: false,
-      message: `${AGY_REFUSAL}. ${REFUSAL_ENDING}`,
-    });
+    expect(answer).toEqual({ _tag: "loginFailed", message: REFUSAL_MESSAGE });
   });
 
   it("does not count a matching line printed before the code, and a silent exit still fails as unfinished", async () => {
@@ -601,6 +595,70 @@ describe("a plain-pipe login whose command reads a refusal", () => {
     );
 
     expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+
+  it("relays fixed text and nothing of a refusal line that echoes what was pasted", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+    const echoed = `couldn't log in: bad request for ${AGY_URL}&code=a-wrong-code`;
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(/couldn't log in/));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => {
+          children[0]!.says(`${echoed}\n`);
+          children[0]!.exit(1);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginFailed", message: REFUSAL_MESSAGE });
+  });
+
+  it("does not read stderr as a complaint: a warning, then an exit 0 after the grace, is a success", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(/couldn't log in/));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.complains("warning: keychain is locked\n"));
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* Effect.sync(() => {
+          children[0]!.says("Logged in as someone@example.com.\n");
+          children[0]!.exit(0);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+
+  it("keeps waiting for the exit while stderr prints, and fails as unfinished on a non-zero exit with no refusal line", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(/couldn't log in/));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.complains("something went wrong\n"));
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* Effect.sync(() => children[0]!.exit(1));
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginResult",
+      ok: false,
+      message: "something went wrong",
+    });
   });
 
   it("reports stdout only as the end of the login when the command sets no refusal", async () => {
