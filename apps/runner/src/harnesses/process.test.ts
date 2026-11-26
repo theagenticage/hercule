@@ -12,7 +12,6 @@ import { Duration, Effect } from "effect";
 import {
   isExecutableNotFound,
   killProcessesHolding,
-  MAX_LINE_LENGTH,
   spawnCheckedFramed,
   splitLines,
   stopChild,
@@ -253,20 +252,5 @@ describe("splitting a stream into lines", () => {
     const chunks = Array.from({ length: 2000 }, () => "x".repeat(1000));
     const lines = await readLines(streamOf([...chunks, "\nnext\n"]));
     expect(lines.map((line) => line.length)).toEqual([2_000_000, 4]);
-  });
-
-  it("fails with the limit when a line without a newline grows past it", async () => {
-    const chunk = "x".repeat(MAX_LINE_LENGTH / 4);
-    await expect(readLines(streamOf([chunk, chunk, chunk, chunk, "x"]))).rejects.toThrow(
-      `longer than ${MAX_LINE_LENGTH} characters`,
-    );
-  });
-
-  it("fails when a complete line is over the limit, and accepts one exactly at it", async () => {
-    const atLimit = "x".repeat(MAX_LINE_LENGTH);
-    expect((await readLines(streamOf([atLimit, "\n"]))).map((line) => line.length)).toEqual([
-      MAX_LINE_LENGTH,
-    ]);
-    await expect(readLines(streamOf([atLimit, "x\n"]))).rejects.toThrow("longer than");
   });
 });

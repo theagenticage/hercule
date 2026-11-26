@@ -154,55 +154,33 @@ const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string>
 };
 
 /**
- * The longest line, in characters, that `splitLines` accepts. The largest
- * legitimate lines are Codex tool results that carry base64 images, a few
- * megabytes each. 64 MiB is far above that and still stops a harness that
- * never sends a newline from filling the runner's memory.
- */
-export const MAX_LINE_LENGTH = 64 * 1024 * 1024;
-
-/**
  * Splits a stream into lines and returns them in order, without the newline
  * (a `\r` before it stays). A trailing partial line is held back until its
  * newline arrives, and is returned at the end of the stream. Each chunk is
  * searched for a newline once, and the pieces of a partial line are joined once
  * when it completes, so a long line in many chunks costs time linear in its
  * length.
- *
- * The iterator fails with an error that names `MAX_LINE_LENGTH` when a line
- * grows past it. The Codex and pi readers treat a failing iterator like a
- * closed pipe and drop the cause; the ACP connection ends with the error text.
  */
 export const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
   (async function* () {
-    // The pieces of the line being read, and their total length.
+    // The pieces of the line being read.
     let pieces: Array<string> = [];
-    let pendingLength = 0;
-    const failTooLong = (): never => {
-      throw new Error(
-        `A line from the process is longer than ${MAX_LINE_LENGTH} characters, the limit for one line.`,
-      );
-    };
     for await (const chunk of decodeStream(stream)) {
       let start = 0;
       for (;;) {
         const newline = chunk.indexOf("\n", start);
         if (newline === -1) break;
         const piece = chunk.slice(start, newline);
-        if (pendingLength + piece.length > MAX_LINE_LENGTH) failTooLong();
         yield pieces.length === 0 ? piece : [...pieces, piece].join("");
         pieces = [];
-        pendingLength = 0;
         start = newline + 1;
       }
       if (start < chunk.length) {
         const rest = start === 0 ? chunk : chunk.slice(start);
-        pendingLength += rest.length;
-        if (pendingLength > MAX_LINE_LENGTH) failTooLong();
         pieces.push(rest);
       }
     }
-    if (pendingLength > 0) yield pieces.join("");
+    if (pieces.length > 0) yield pieces.join("");
   })();
 
 /**
