@@ -3233,6 +3233,28 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
+  it("leaves a subagent's turn open when the cancel could not be written", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesOnce;
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          // The connection ends just before the interrupt, so the cancel cannot be written and nothing stopped the subagents.
+          h.harness().end();
+          yield* Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
+          yield* h.adapter.interrupt(SESSION);
+
+          expect(summarizeChildTurns(h)).toEqual(["started"]);
+        }),
+      { fake: subagentFake },
+    ));
+
   it("sends no cancel for an interrupt when nothing runs, not even a subagent that already ended", () =>
     run(
       (h) =>

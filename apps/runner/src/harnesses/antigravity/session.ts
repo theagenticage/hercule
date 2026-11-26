@@ -100,7 +100,6 @@ import {
   normalizeSubagentStep,
   readSubagentUsage,
 } from "./subagents";
-import type { SubagentsState } from "./subagents";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
 import type { Turn } from "./turn";
 
@@ -386,8 +385,6 @@ export const startAgySession = (
     let config: ConfigChange | undefined;
     /** The wait that closes an open synthetic turn when `agy` goes quiet. */
     let syntheticTurnBound: Fiber.Fiber<void> | undefined;
-    /** The subagents' state. Undefined until `agy` replies to the call that opens the conversation. */
-    let subagents: SubagentsState | undefined;
     /** The reader of `agy`'s session files. Undefined until the conversation is open, and again once the session's own files proved unreadable. */
     let files: SessionFiles | undefined;
     /** Whether a subagent's files, or the session's own, could not be read. The session's usage is then incomplete. */
@@ -475,8 +472,6 @@ export const startAgySession = (
             const ended = yield* Effect.timeoutOption(runningTurn.ended, TURN_END_WAIT);
             if (Option.isNone(ended)) yield* runningTurn.abandon;
           }
-          // The subagents die with the process, so their open turns end here and no event of theirs follows `session.exited`.
-          if (subagents !== undefined) emitEvents(interruptSubagentTurns(subagents));
           if (normalizing !== undefined) emitEvents(buildProcessEndEvents(normalizing));
           emitEvents([{ _tag: "session.exited", ...buildBase(), reason }]);
           Deferred.doneUnsafe(exitedSignal, Effect.void);
@@ -715,7 +710,6 @@ export const startAgySession = (
         nativeSessionId: conversation.id,
         known: spec.continue?.subagents ?? [],
       });
-      subagents = subagentsState;
 
       const usable = checkAccountUsable(
         agy.planLabel,
@@ -820,7 +814,7 @@ export const startAgySession = (
       hasOpenSubagentTurn(subagentsState);
 
     /** Returns the events for a file that could not be read, and remembers that the session's usage is then incomplete. */
-    const handleUnreadable = (conversationId: string, reason: string): HarnessEvent[] => {
+    const recordUnreadableFiles = (conversationId: string, reason: string): HarnessEvent[] => {
       filesWereUnreadable = true;
       if (conversationId === nativeId) {
         // The reader is closed for the rest of the process, so the session goes on with ACP alone.
@@ -851,7 +845,7 @@ export const startAgySession = (
      * events that follow from it. A step of the session's own conversation goes
      * to the running Turn, which emits what it shows itself.
      */
-    const handleObservation = (observation: SessionFileObservation): HarnessEvent[] => {
+    const routeObservation = (observation: SessionFileObservation): HarnessEvent[] => {
       switch (observation.kind) {
         case "step":
           if (observation.conversationId === nativeId) {
@@ -881,7 +875,7 @@ export const startAgySession = (
           return introduceSubagent(subagentsState, link, itemId);
         }
         case "unreadable":
-          return handleUnreadable(observation.conversationId, observation.reason);
+          return recordUnreadableFiles(observation.conversationId, observation.reason);
       }
     };
 
@@ -890,7 +884,7 @@ export const startAgySession = (
       const reader = files;
       if (reader === undefined) return Effect.void;
       return Effect.map(reader.read, (observations) => {
-        for (const observation of observations) emitEvents(handleObservation(observation));
+        for (const observation of observations) emitEvents(routeObservation(observation));
         emitEvents(setSubagentUsage(state, readSubagentUsage(subagentsState), filesWereUnreadable));
       });
     });
@@ -1128,16 +1122,21 @@ export const startAgySession = (
         }
         // The cancel is written before the prompt of any later input, on the same ordered pipe, so it cannot stop an input that comes after it. An input still being prepared is void (`generation`).
         return withDeadline(connection.cancel(nativeId), CANCEL_DEADLINE, "cancel").pipe(
+          Effect.as(true),
           Effect.catch((error) =>
-            Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
+            Effect.as(
+              Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
+              false,
+            ),
           ),
-          Effect.andThen(
+          Effect.flatMap((wasCancelWritten) =>
             Effect.sync(() => {
               emitEvents([
                 ...(syntheticTurnId === undefined
                   ? []
                   : closeTurn(state, { state: "interrupted", turnId: syntheticTurnId })),
-                ...interruptSubagentTurns(subagentsState),
+                // The subagents keep running when the cancel was not written, so their turns must not read as interrupted.
+                ...(wasCancelWritten ? interruptSubagentTurns(subagentsState) : []),
               ]);
             }),
           ),
