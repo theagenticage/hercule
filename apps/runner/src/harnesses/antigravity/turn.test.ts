@@ -23,6 +23,7 @@ import type { HarnessEvent } from "@hercule/protocol";
 import { buildPlanFilePaths } from "./harness-home";
 import { buildNormalizerState, holdTurn, normalizeUpdate } from "./normalize";
 import { startTurn, type PreparedInput } from "./turn";
+import type { AgyStep } from "./session-files";
 
 const FIRST_PROMPT: ReadonlyArray<PromptContent> = [{ type: "text", text: "go" }];
 
@@ -833,7 +834,7 @@ describe("how a turn fails", () => {
   it.each([
     ["max_tokens", "output limit"],
     ["max_turn_requests", "limit of model requests"],
-    ["refusal", "refused to go on"],
+    ["refusal", "without giving a reason"],
   ])("fails with a message for the user and the class %s", (stopReason, words) =>
     run((h) =>
       Effect.gen(function* () {
@@ -846,6 +847,15 @@ describe("how a turn fails", () => {
       }),
     ),
   );
+
+  it("claims no cause for a refusal", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.reply(0, "refusal");
+        yield* h.turn.ended;
+        expect(h.tags("runtime.error")[0]?.message).not.toMatch(/refused to go on|policy|safety/);
+      }),
+    ));
 
   it("fails with the stop reason named when ACP does not define it", () =>
     run((h) =>
@@ -1320,6 +1330,97 @@ describe("a steer", () => {
         yield* h.turn.ended;
         expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 6 } });
         expect(h.tags("turn.completed")).toHaveLength(1);
+      }),
+    ));
+});
+
+describe("an error that agy wrote into the chat", () => {
+  const NETWORK = 'agent executor error: request failed: Post "https://x": Service Unavailable';
+  const QUOTA = "Individual quota reached. Resets in 1h22m55s.";
+
+  /** Plays the chunk that agy sends before it replies, as the session passes it on. */
+  const sendChunk = (h: Harness, text: string) => {
+    h.events.push(
+      ...normalizeUpdate(h.normalizing, {
+        nativeSessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        raw: {},
+      }),
+    );
+  };
+  const shownText = (h: Harness) =>
+    h
+      .tags("content.delta")
+      .map((event) => event.delta)
+      .join("");
+
+  it.each([
+    [NETWORK, "provider_error"],
+    [QUOTA, "usage_limit"],
+  ])("ends failed with agy's words and the class of %s", (words, errorClass) =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${words}\n`);
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed", usage: { inputTokens: 5 } });
+        expect(h.tags("runtime.error")).toMatchObject([{ class: errorClass, message: words }]);
+        expect(shownText(h), "no assistant message of the error").toBe("");
+      }),
+    ),
+  );
+
+  it("ends completed, with the text shown, when more output follows the notice", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${NETWORK}\n`);
+        sendChunk(h, "and then the answer");
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
+        expect(h.tags("runtime.error")).toEqual([]);
+        expect(shownText(h)).toContain("Service Unavailable");
+        expect(shownText(h)).toContain("and then the answer");
+      }),
+    ));
+
+  it("ends interrupted when an interrupt came, whatever the notice", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${NETWORK}\n`);
+        yield* h.turn.stop;
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(h.tags("runtime.error")).toEqual([]);
+      }),
+    ));
+});
+
+describe("a provider error in the transcript", () => {
+  const errorStep = (error: string): AgyStep => ({
+    index: 3,
+    type: "ERROR_MESSAGE",
+    status: "ERROR",
+    error,
+    toolCalls: [],
+  });
+
+  it("warns once with the provider's words, and ends nothing", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.turn.observeRootStep(errorStep("503 no capacity"));
+        h.turn.observeRootStep(errorStep("503 again"));
+        h.turn.observeRootStep({ index: 4, type: "GENERIC", toolCalls: [], content: "x" });
+        expect(h.tags("runtime.warning")).toMatchObject([
+          { message: expect.stringContaining("may try again: 503 no capacity") as unknown },
+        ]);
+        expect(h.completed()).toBeUndefined();
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
+        h.turn.observeRootStep(errorStep("too late"));
+        expect(h.tags("runtime.warning")).toHaveLength(1);
       }),
     ));
 });

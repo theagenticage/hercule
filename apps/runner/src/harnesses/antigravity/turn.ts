@@ -50,7 +50,8 @@ import type { AdapterTurnInput } from "../index";
 import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
 import type { ResolvedSkillReference } from "../../skills";
-import { ANTIGRAVITY_NAME } from "./agy";
+import { ANTIGRAVITY_NAME, isQuotaError } from "./agy";
+import type { AgyStep } from "./session-files";
 import {
   addPromptUsage,
   closeTurn,
@@ -59,6 +60,7 @@ import {
   markDeclined,
   openTurn,
   releaseTurn,
+  takeErrorNotice,
   type NormalizerState,
 } from "./normalize";
 import {
@@ -104,7 +106,7 @@ interface TurnError {
 const STOP_REASON_FAILURES: Readonly<Record<string, string | undefined>> = {
   max_tokens: "The model reached its output limit, so Antigravity ended the turn.",
   max_turn_requests: "Antigravity reached its limit of model requests for one turn.",
-  refusal: "The model refused to go on, so Antigravity ended the turn.",
+  refusal: "Antigravity ended the turn with the stop reason refusal, without giving a reason.",
 };
 
 /** An input made ready for `agy`: what the first prompt of a Turn and a steer both take. */
@@ -263,6 +265,14 @@ export interface Turn {
    * `turn.completed` was published always gets true.
    */
   readonly hasEnded: () => boolean;
+  /**
+   * Shows a provider error that `agy` wrote to the transcript of the root
+   * conversation: an `ERROR_MESSAGE` step becomes one `runtime.warning` per
+   * Turn, in the provider's words. It ends nothing, because `agy` may retry
+   * and recover; a step of another type, a second error, and a step that
+   * arrives after the Turn ended do nothing.
+   */
+  readonly observeRootStep: (step: AgyStep) => void;
   /** Waits until the Turn has ended, which is after it emitted `turn.completed`. */
   readonly ended: Effect.Effect<void>;
 }
@@ -1072,6 +1082,26 @@ export const startTurn = (
         }
       });
 
+    /** Whether this Turn already showed an `ERROR_MESSAGE` step of the transcript. */
+    let hasShownRootError = false;
+
+    const observeRootStep: Turn["observeRootStep"] = (step) => {
+      if (step.type !== "ERROR_MESSAGE" || hasShownRootError || phase === "closed") return;
+      const words = step.error ?? step.content;
+      if (words === undefined || words === "") return;
+      hasShownRootError = true;
+      emit([
+        {
+          _tag: "runtime.warning",
+          ...buildEvent(),
+          turnId,
+          message: truncateMessage(
+            `Google's model service answered with an error, and Antigravity may try again: ${words}`,
+          ),
+        },
+      ]);
+    };
+
     const runTurn = Effect.gen(function* () {
       const waiting = yield* writeFirstPrompt;
       if (waiting === undefined) return;
@@ -1120,6 +1150,13 @@ export const startTurn = (
         const { stopReason } = result.reply;
         if (stopReason === "end_turn") {
           if (interrupted) return yield* finish("interrupted");
+          const notice = takeErrorNotice(normalizing);
+          if (notice !== undefined) {
+            return yield* finish("failed", {
+              class: isQuotaError(notice) ? "usage_limit" : "provider_error",
+              message: notice,
+            });
+          }
           if (deniedToolNames.length === 0) return yield* finish("completed");
           const followUp: ReadonlyArray<PromptContent> = [
             { type: "text", text: buildFollowUpText(deniedToolNames) },
@@ -1204,6 +1241,7 @@ export const startTurn = (
       stop,
       abandon,
       hasEnded: () => phase === "closed",
+      observeRootStep,
       ended: Deferred.await(ended),
     };
   });

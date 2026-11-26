@@ -63,7 +63,7 @@ interface Input {
   readonly prompts: ReadonlyArray<number>;
   readonly actions: ReadonlyArray<Action>;
   readonly modelSelection?: SessionSpec["modelSelection"];
-  readonly end: "completed" | "interrupted";
+  readonly end: "completed" | "interrupted" | "failed";
 }
 
 interface Scenario {
@@ -130,6 +130,14 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
         end: "completed",
       },
     ],
+  },
+  {
+    // agy writes its own error into the chat and replies end_turn: the turn fails.
+    recording: "failed-turn-network-watch",
+    // The recorder cancelled after the reply to look for more; the session has nothing to cancel.
+    unplayedReplies: [0],
+    accessMode: "full-access",
+    inputs: [{ prompts: [0], actions: [], end: "failed" }],
   },
   {
     recording: "nonzero-exit",
@@ -347,6 +355,29 @@ describe("recordings of agy through an Antigravity session", () => {
         ),
       ));
   }
+});
+
+describe("a provider error, as recorded", () => {
+  it("failed-turn-network-watch: the turn fails with agy's own words and shows no assistant message of them", () =>
+    Effect.runPromise(
+      play(SCENARIOS.find((scenario) => scenario.recording === "failed-turn-network-watch")!).pipe(
+        Effect.map(({ events, tags }) => {
+          expect(tags("runtime.error")).toMatchObject([
+            {
+              class: "provider_error",
+              message: expect.stringContaining("Service Unavailable") as unknown,
+            },
+          ]);
+          const shown = events
+            .filter((event) => event._tag === "content.delta")
+            .map((event) => event.delta)
+            .join("");
+          expect(shown).not.toContain("agent executor error");
+        }),
+        Effect.scoped,
+        Effect.provide(TestClock.layer()),
+      ),
+    ));
 });
 
 describe("steering, as recorded", () => {

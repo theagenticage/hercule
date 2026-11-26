@@ -25,6 +25,7 @@ import {
   normalizeUpdate,
   openTurn,
   releaseTurn,
+  takeErrorNotice,
   type NormalizerState,
   type RequestItem,
 } from "./normalize";
@@ -1260,5 +1261,50 @@ describe("makeEventSecretHider", () => {
     const hide = makeEventSecretHider(SECRET);
     const event = closing("turn.completed");
     expect(hide([event])).toEqual([event]);
+  });
+});
+
+describe("the held error notice", () => {
+  const NOTICE = "\n\u26a0 agent executor error: Service Unavailable\n";
+
+  it("is held, and shown as assistant text by the next update, as it was no end", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    expect(normalizeUpdate(state, buildChunk(NOTICE))).toEqual([]);
+    const events = normalizeUpdate(state, buildChunk("more"));
+    expect(
+      only(events, "content.delta").map((event) => event.delta),
+      "the notice, then the text that followed",
+    ).toEqual([NOTICE, "more"]);
+  });
+
+  it("is taken once by the Turn, and then shown nowhere", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildChunk(NOTICE));
+    expect(takeErrorNotice(state)).toBe("agent executor error: Service Unavailable");
+    expect(takeErrorNotice(state)).toBeUndefined();
+    expect(only(closeTurn(state, { state: "failed" }), "content.delta")).toEqual([]);
+  });
+
+  it("is shown as text when the turn closes or the process ends without taking it", () => {
+    for (const end of [
+      (state: NormalizerState) => closeTurn(state, { state: "completed" }),
+      (state: NormalizerState) => buildProcessEndEvents(state),
+    ]) {
+      const state = freshState();
+      openTurn(state, "t");
+      normalizeUpdate(state, buildChunk(NOTICE));
+      expect(only(end(state), "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+    }
+  });
+
+  it("is ordinary text inside an open assistant text item", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildChunk("Hello"));
+    const events = normalizeUpdate(state, buildChunk(NOTICE));
+    expect(only(events, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+    expect(takeErrorNotice(state)).toBeUndefined();
   });
 });

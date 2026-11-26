@@ -211,6 +211,41 @@ const readLogMessage = (line: string): string | undefined => {
  */
 const HELD_BY_GOOGLE_PHRASE = /"reason":\s*"VALIDATION_REQUIRED"/;
 
+/**
+ * Returns the text of an error that `agy` wrote into the chat itself, or
+ * `undefined` when `text` is not such a notice. Takes the text of one
+ * `agent_message_chunk`.
+ *
+ * Dependency on the wording of `agy` 1.5.15: it writes its own errors as one
+ * chunk whose whole text is `"\n⚠ " + <text> + "\n"` (the format string
+ * `"\n⚠ %s\n"` is in the binary), and then replies `end_turn`. Seen with a
+ * cut network (recording `failed-turn-network.jsonl`: "agent executor error:
+ * generating and executing: request failed: ...: Service Unavailable") and
+ * with a used-up quota ("Individual quota reached. ..."; measured by hand,
+ * with no recording, because the quota cannot be used up on purpose).
+ *
+ * A chunk counts only when it is exactly that format, with no other line
+ * break in the text: a text that merely starts with or contains `⚠` is the
+ * model's own text. A later `agy` that words its errors differently gives an
+ * ordinary message and a turn that ends `completed`.
+ */
+export const readAgyErrorNotice = (text: string): string | undefined => {
+  if (!text.startsWith("\n⚠ ") || !text.endsWith("\n")) return undefined;
+  const notice = text.slice("\n⚠ ".length, -1);
+  return notice === "" || notice.includes("\n") ? undefined : notice;
+};
+
+/**
+ * The pattern with which the swarm monitor of `agy` 1.5.15 classes an error
+ * as a quota error (found in its code). A later `agy` with another pattern
+ * makes `isQuotaError` miss, and the turn then fails as an ordinary provider
+ * error with the same words.
+ */
+const QUOTA_ERROR_PATTERN = /RESOURCE_EXHAUSTED|quota|\b429\b|exhausted your capacity|rate.?limit/i;
+
+/** Returns true when the text of an error of `agy` is a quota error, by the pattern `agy` itself uses. */
+export const isQuotaError = (text: string): boolean => QUOTA_ERROR_PATTERN.test(text);
+
 /** The most bytes of one worker log that are read. A line that comes later is not found. */
 const LOG_LIMIT = 1024 * 1024;
 

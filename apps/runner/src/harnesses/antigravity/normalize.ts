@@ -20,6 +20,12 @@
  *   closes when its last item completes;
  * - text items: one starts at its first chunk and completes at the next
  *   message of another kind, at `usage_update`, or when the turn closes;
+ * - the held error notice: a message chunk that is agy's own error (see
+ *   `readAgyErrorNotice`) waits one step, because agy replies `end_turn` right
+ *   after it and only then is it known to be the end of the turn and not text
+ *   in the middle of one. The Turn takes it (`takeErrorNotice`) when the reply
+ *   comes; any other update, the end of the turn and the end of the process
+ *   show it as the assistant text it would have been;
  * - the `todo_list` and `plan` items, rebuilt from the files the model writes,
  *   because `agy` sends no ACP `plan` update. It compares a written path with
  *   the plan file paths it was given; it does not build paths.
@@ -48,6 +54,7 @@ import {
 import type * as Schema from "effect/Schema";
 import { ensureId } from "../events";
 import { buildEnvelope, buildRaw, clampCount } from "../normalize";
+import { readAgyErrorNotice } from "./agy";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
 import {
@@ -147,6 +154,8 @@ export interface NormalizerState {
   readonly buffered: Array<BufferedMessage>;
   /** The open assistant message or reasoning block, if any. */
   text: TextRecord | undefined;
+  /** The text of agy's own error notice that is held until the next update or the reply of the prompt, if any. */
+  errorNotice: string | undefined;
   /** Every tool call seen, by `toolCallId`. */
   readonly tools: Map<string, ToolRecord>;
   /** The calls whose Request the adapter answered with a deny or a cancel. */
@@ -186,6 +195,7 @@ export const buildNormalizerState = (input: {
   held: false,
   buffered: [],
   text: undefined,
+  errorNotice: undefined,
   tools: new Map(),
   declined: new Set(),
   processUsage: buildZeroTotals(),
@@ -425,7 +435,7 @@ export const closeTurn = (
 ): HarnessEvent[] => {
   const turn = state.turn;
   if (turn === undefined || (end.turnId !== undefined && end.turnId !== turn.id)) return [];
-  const events = closeTextItem(state);
+  const events = [...releaseErrorNotice(state), ...closeTextItem(state)];
   if (turn.todo !== undefined) {
     events.push(
       buildItemCompleted(
@@ -510,6 +520,26 @@ const replayBuffered = (state: NormalizerState): HarnessEvent[] =>
         ? normalizeUpdate(state, message.notification)
         : normalizeUnhandled(state, message.message),
     );
+
+// ---- The held error notice ----
+
+/**
+ * Removes and returns the text of the error notice that is held, or returns
+ * `undefined` when none is held. The Turn calls it when the newest prompt
+ * replies `end_turn`: the notice is then the provider's error, and is not
+ * shown as an assistant message.
+ */
+export const takeErrorNotice = (state: NormalizerState): string | undefined => {
+  const notice = state.errorNotice;
+  state.errorNotice = undefined;
+  return notice;
+};
+
+/** Returns the events that show the held error notice as assistant text, or nothing when none is held. */
+const releaseErrorNotice = (state: NormalizerState): HarnessEvent[] => {
+  const notice = takeErrorNotice(state);
+  return notice === undefined ? [] : appendText(state, "assistant_message", `\n⚠ ${notice}\n`);
+};
 
 // ---- Text items ----
 
@@ -898,7 +928,11 @@ export const normalizeUpdate = (
     state.buffered.push({ type: "update", notification });
     return [];
   }
-  return [...routeUpdate(state, notification), ...closeIdleSyntheticTurn(state)];
+  return [
+    ...releaseErrorNotice(state),
+    ...routeUpdate(state, notification),
+    ...closeIdleSyntheticTurn(state),
+  ];
 };
 
 const routeUpdate = (
@@ -912,6 +946,14 @@ const routeUpdate = (
     case "message":
     case "thought": {
       const text = readChunkText(update);
+      const notice =
+        decision === "message" && state.text?.kind !== "assistant_message" && text !== undefined
+          ? readAgyErrorNotice(text)
+          : undefined;
+      if (notice !== undefined) {
+        state.errorNotice = notice;
+        return [];
+      }
       return text === undefined
         ? buildUnknownItem(state, name, notification)
         : appendText(state, decision === "message" ? "assistant_message" : "reasoning", text);
@@ -945,7 +987,11 @@ export const normalizeUnhandled = (
     state.buffered.push({ type: "unhandled", message });
     return [];
   }
-  return [...buildUnknownItem(state, message.method, message), ...closeIdleSyntheticTurn(state)];
+  return [
+    ...releaseErrorNotice(state),
+    ...buildUnknownItem(state, message.method, message),
+    ...closeIdleSyntheticTurn(state),
+  ];
 };
 
 // ---- Public: declined calls and approvals ----
@@ -1051,7 +1097,7 @@ const addTotals = (total: Totals, parts: Totals): void => {
  * user's is left to `closeTurn`.
  */
 export const buildProcessEndEvents = (state: NormalizerState): HarnessEvent[] => {
-  const events = closeTextItem(state);
+  const events = [...releaseErrorNotice(state), ...closeTextItem(state)];
   for (const [toolCallId, record] of state.tools) {
     if (record.ended) continue;
     state.tools.set(toolCallId, ENDED_TOOL);
