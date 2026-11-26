@@ -6,20 +6,29 @@
  * recording's handshake only and writes the messages itself. Time runs on a
  * `TestClock`.
  */
-import { lstatSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Logger from "effect/Logger";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import type { HarnessScript, JsonRpcMessage } from "@hercule/acp/testing";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
-import type { AdapterTurnInput } from "../index";
-import { cleanupHomes, CWD, settle, waitUntil, writeTestImage } from "../testing";
+import { buildLoadedSkills, resolveSkillReferences } from "../../skills";
+import type { AdapterTurnInput, SessionStartContext } from "../index";
+import {
+  cleanupHomes,
+  createScratchHome,
+  CWD,
+  settle,
+  waitUntil,
+  writeTestImage,
+} from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import {
   answerConfigChange,
@@ -63,6 +72,10 @@ interface HarnessOptions {
   /** The fake's options, which may depend on the Harness Home the test gets. */
   readonly fake?: FakeAgyOptions | ((home: string) => FakeAgyOptions);
   readonly orientation?: string;
+  /** The skill text of the Hercule tool. */
+  readonly skill?: string;
+  /** What every start of the test changes in the runner's context, which may depend on the Harness Home. */
+  readonly context?: (home: string) => Partial<SessionStartContext>;
   /** The folder the session works in. Defaults to `CWD`, which does not exist. */
   readonly cwd?: string;
   /** What every start of the test changes in `SPEC`. */
@@ -114,7 +127,12 @@ const buildHarness = (options: HarnessOptions = {}) =>
       ...buildContext(home, BINARY),
       cwd: options.cwd ?? CWD,
       mcpServers: [],
-      herculeTool: { ...buildContext(home).herculeTool, orientation: options.orientation ?? "" },
+      herculeTool: {
+        ...buildContext(home).herculeTool,
+        orientation: options.orientation ?? "",
+        skill: options.skill ?? "",
+      },
+      ...options.context?.(home),
     };
     const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
       seen.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
@@ -360,6 +378,231 @@ describe("starting a session", () => {
         expect(h.tags("session.exited")).toHaveLength(0);
       }),
     ));
+});
+
+/**
+ * Lays out the skills of a session as the runner does: the library skills in
+ * `<sessionSkillsFolder>/skills/<name>` and, for each of `repository`, a
+ * checkout skills folder. A skill in `withoutFile` has no `SKILL.md`. Returns
+ * the context fields that give them to a start, and a builder of inputs whose
+ * Skill References name the library skills.
+ */
+const createSessionSkills = (options: {
+  readonly library: ReadonlyArray<string>;
+  readonly repository?: ReadonlyArray<string>;
+  readonly withoutFile?: ReadonlyArray<string>;
+}) => {
+  const sessionSkillsFolder = join(createScratchHome("agy-session-skills"), "session-skills");
+  for (const name of options.library) {
+    const folder = join(sessionSkillsFolder, "skills", name);
+    mkdirSync(folder, { recursive: true });
+    if (!options.withoutFile?.includes(name)) writeFileSync(join(folder, "SKILL.md"), "# skill\n");
+  }
+  const repositoryFolder = join(sessionSkillsFolder, "repositories", "webshop");
+  for (const name of options.repository ?? []) {
+    mkdirSync(join(repositoryFolder, "skills", name), { recursive: true });
+  }
+  const loaded = buildLoadedSkills({
+    libraryFolder: sessionSkillsFolder,
+    libraryNames: options.library,
+    repositorySkills: [],
+  });
+  return {
+    sessionSkillsFolder,
+    context: {
+      sessionSkillsFolder,
+      librarySkillsFolder: sessionSkillsFolder,
+      ...(options.repository === undefined ? {} : { repositorySkillsFolders: [repositoryFolder] }),
+    },
+    buildInput: (text: string): AdapterTurnInput => ({
+      text,
+      skillReferences: resolveSkillReferences(text, loaded),
+    }),
+  };
+};
+
+/** Returns a fake whose Harness Home already holds the conversation, so that a start can resume it. */
+const withConversation = (home: string): FakeAgyOptions => {
+  createConversationFiles(home, CONVERSATION);
+  return {};
+};
+
+const RESUME = { continue: { nativeSessionId: CONVERSATION, mode: "resume" } } as const;
+
+describe("the skills folder of a session", () => {
+  it("is passed to a new conversation as an additional directory, holding every skill", () => {
+    const skills = createSessionSkills({ library: ["review"], repository: ["deploy"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.received("session/new")[0]?.params).toMatchObject({
+            additionalDirectories: [skills.sessionSkillsFolder],
+          });
+          expect(readdirSync(join(skills.sessionSkillsFolder, ".agents", "skills")).sort()).toEqual(
+            ["deploy", "review"],
+          );
+        }),
+      { context: () => skills.context },
+    );
+  });
+
+  it("is passed to a resumed conversation too", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(RESUME);
+
+          expect(h.received("session/resume")[0]?.params).toMatchObject({
+            additionalDirectories: [skills.sessionSkillsFolder],
+          });
+        }),
+      { fake: withConversation, context: () => skills.context },
+    );
+  });
+
+  it("is left out of a start with no skills", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.start();
+
+        expect(h.received("session/new")[0]?.params).not.toHaveProperty("additionalDirectories");
+      }),
+    ));
+
+  it("fails a start with skills, before agy signs in, when agy does not take additional directories", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("skills folder");
+          expect(h.harness().received.map((message) => message.method)).toEqual(["initialize"]);
+          expect(yield* h.adapter.listSessions).toEqual([]);
+        }),
+      {
+        fake: { withoutAdditionalDirectoriesCapability: true },
+        context: () => skills.context,
+      },
+    );
+  });
+
+  it("does not need that capability for a start with no skills", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      { fake: { withoutAdditionalDirectoriesCapability: true } },
+    ));
+});
+
+describe("the instructions of a session", () => {
+  const PARTS = {
+    systemPrompt: "Persona.",
+    coordination: "Coordination.",
+    memory: "Memory.",
+  };
+  const withUserInstructions = (): Partial<SessionStartContext> => {
+    const file = join(createScratchHome("agy-user-instructions"), "AGENTS.md");
+    writeFileSync(file, "User.");
+    return { userMaterial: { promptTemplateDirs: [], instructionsFiles: [file] } };
+  };
+  const ALL_PARTS = "Orientation.\n\nPersona.\n\nUser.\n\nSkill.\n\nCoordination.\n\nMemory.";
+  const expectedMeta = (append: string) => ({ antigravity: { systemPrompt: { append } } });
+
+  it("hold the orientation, persona, user's instructions, skill, coordination and memory, in that order, on a new conversation", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(PARTS);
+
+          expect(h.received("session/new")[0]?.params).toMatchObject({
+            _meta: expectedMeta(ALL_PARTS),
+          });
+        }),
+      { orientation: "Orientation.", skill: "Skill.", context: withUserInstructions },
+    ));
+
+  it("hold the same parts in the same order on a resumed conversation", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start({ ...PARTS, ...RESUME });
+
+          expect(h.received("session/resume")[0]?.params).toMatchObject({
+            _meta: expectedMeta(ALL_PARTS),
+          });
+        }),
+      {
+        orientation: "Orientation.",
+        skill: "Skill.",
+        fake: withConversation,
+        context: withUserInstructions,
+      },
+    ));
+});
+
+describe("an input with Skill References", () => {
+  /** Returns the `detail` of the `user_message` the session reported. */
+  const readUserMessageDetail = (h: Harness) =>
+    h.tags("item.started").find((event) => event.kind === "user_message")?.detail;
+
+  it("sends one pointer line per skill and records the skills on the user message", () => {
+    const skills = createSessionSkills({ library: ["review", "gone"], withoutFile: ["gone"] });
+    const warnings: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(String(message));
+    });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const file = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
+
+          yield* h.adapter.sendInput(SESSION, skills.buildInput("do $gone and $review"));
+          yield* h.untilReceived("session/prompt");
+
+          expect(h.received("session/prompt")[0]?.params).toMatchObject({
+            prompt: [
+              {
+                type: "text",
+                text: `do $gone and $review\n\n[Skill "$review": read and use the skill at ${JSON.stringify(file)}.]`,
+              },
+            ],
+          });
+          // Only the skill that got a line is recorded, because a client draws a chip for each one.
+          expect(readUserMessageDetail(h)).toMatchObject({ skills: ["review"] });
+          expect(warnings).toEqual([expect.stringContaining("no pointer for gone")]);
+        }).pipe(Effect.provide(Logger.layer([collecting]))),
+      { fake: { recording: "bad-model" }, context: () => skills.context },
+    );
+  });
+
+  it("sends an input that starts with a slash as typed, and records no skills", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          yield* h.adapter.sendInput(SESSION, skills.buildInput("/compact $review"));
+          yield* h.untilReceived("session/prompt");
+
+          expect(h.received("session/prompt")[0]?.params).toMatchObject({
+            prompt: [{ type: "text", text: "/compact $review" }],
+          });
+          expect(readUserMessageDetail(h)).not.toHaveProperty("skills");
+        }),
+      { fake: { recording: "bad-model" }, context: () => skills.context },
+    );
+  });
 });
 
 describe("the temporary folder of a process", () => {

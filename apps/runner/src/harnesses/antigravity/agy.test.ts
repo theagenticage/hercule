@@ -201,7 +201,11 @@ describe("how the process is started", () => {
 
 describe("what the process is opened for", () => {
   const SKIP_FLAG = "--dangerously-skip-permissions";
-  const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access" };
+  const FULL_ACCESS: AgyPurpose = {
+    kind: "session",
+    accessMode: "full-access",
+    hasSkillsFolder: false,
+  };
 
   it("adds the skip-permissions flag for a session in full-access only", async () => {
     const modes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
@@ -209,7 +213,9 @@ describe("what the process is opened for", () => {
     for (const accessMode of modes) {
       const { home, fake } = setUp();
       await Effect.runPromise(
-        Effect.scoped(open(fake, home, { purpose: { kind: "session", accessMode } })),
+        Effect.scoped(
+          open(fake, home, { purpose: { kind: "session", accessMode, hasSkillsFolder: false } }),
+        ),
       );
       commands.push(fake.spawns[0]!.command);
     }
@@ -848,7 +854,11 @@ describe("closing the scope", () => {
 });
 
 describe("the hooks file of the Harness Home", () => {
-  const SESSION: AgyPurpose = { kind: "session", accessMode: "approval-required" };
+  const SESSION: AgyPurpose = {
+    kind: "session",
+    accessMode: "approval-required",
+    hasSkillsFolder: false,
+  };
   const HOOKS = (home: string) => join(home, "config", "hooks.json");
 
   it("is removed before agy starts for a session", async () => {

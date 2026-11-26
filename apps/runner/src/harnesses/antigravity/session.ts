@@ -51,11 +51,15 @@ import {
 import { readAttachmentBase64 } from "../attachments";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
-import { buildHarnessPrompt, joinInstructions } from "../prompt";
+import { joinInstructions } from "../prompt";
 import { escapeControlCharacters } from "../../report";
+import type { ResolvedSkillReference } from "../../skills";
 import { truncateFact, truncateMessage } from "../text";
+import { readUserInstructions } from "../user-instructions";
 import { ANTIGRAVITY_NAME, checkAccountUsable, chooseAgyMode, openSignedInAgy } from "./agy";
 import type { AgySeam } from "./agy";
+import { buildAgyPrompt } from "./skill-prompt";
+import { stageAgySkills } from "./skills";
 import {
   createConfigChange,
   describeSetting,
@@ -158,11 +162,23 @@ export interface AgySession {
   readonly exited: Effect.Effect<void>;
 }
 
-/** Returns the text the session's `agy` appends to its system prompt, or undefined when there is none. */
-const buildInstructions = (ctx: SessionStartContext, spec: SessionSpec): string | undefined =>
+/**
+ * Returns the text the session's `agy` appends to its system prompt, or
+ * undefined when there is none. The parts come in this order (spec 06 section
+ * 9.3): the orientation, the session's system prompt, the user's own
+ * instructions (undefined when there are none), the skill of the Hercule tool,
+ * the coordination text and the memory.
+ */
+const buildInstructions = (
+  ctx: SessionStartContext,
+  spec: SessionSpec,
+  userInstructions: string | undefined,
+): string | undefined =>
   joinInstructions([
     ctx.herculeTool.orientation,
     spec.systemPrompt,
+    userInstructions,
+    ctx.herculeTool.skill,
     spec.coordination,
     spec.memory,
   ]);
@@ -554,16 +570,28 @@ export const startAgySession = (
       });
 
     const start = Effect.gen(function* () {
+      // Staged before the process exists, so a failure here spawns nothing. A
+      // resume stages again: every start has a fresh session skills folder.
+      const additionalDirectories = yield* stageAgySkills(ctx);
+      // Read on every start, so a resume gets the current text of the files.
+      const userInstructions = yield* readUserInstructions(
+        ctx.userMaterial?.instructionsFiles ?? [],
+      );
       const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
         cwd,
         handlers,
-        purpose: { kind: "session", accessMode },
+        purpose: {
+          kind: "session",
+          accessMode,
+          hasSkillsFolder: additionalDirectories.length > 0,
+        },
       }).pipe(Scope.provide(processScope));
       const connection: AcpConnection = agy.connection;
 
-      const instructions = buildInstructions(ctx, spec);
+      const instructions = buildInstructions(ctx, spec, userInstructions);
       const request = {
         cwd,
+        additionalDirectories,
         // The MCP Gateway is handed to `agy` by a later change.
         mcpServers: [],
         ...(instructions === undefined
@@ -701,8 +729,10 @@ export const startAgySession = (
       stopping || generation !== inputGeneration;
 
     /**
-     * Reads the images and sets the model, and returns the prompt for `agy` with
-     * the part of `PREPARATION_BUDGET` that is left for the handoff of the prompt. Fails with
+     * Reads the images and sets the model, and returns the prompt for `agy`, the
+     * Skill References its text translated, and the part of `PREPARATION_BUDGET`
+     * that is left for the handoff of the prompt. Logs a warning for each Skill
+     * Reference that got no pointer line. Fails with
      * `InputNotDelivered` when an interrupt or a stop voids the input, with the
      * failures of the model change, and with `AdapterFailed` when an image cannot
      * be read or the budget runs out.
@@ -711,7 +741,11 @@ export const startAgySession = (
       input: AdapterTurnInput,
       inputGeneration: number,
     ): Effect.Effect<
-      { readonly prompt: ReadonlyArray<PromptContent>; readonly handoffBudget: Duration.Duration },
+      {
+        readonly prompt: ReadonlyArray<PromptContent>;
+        readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
+        readonly handoffBudget: Duration.Duration;
+      },
       AdapterError
     > =>
       Effect.gen(function* () {
@@ -740,10 +774,21 @@ export const startAgySession = (
               ),
         ),
         Effect.timed,
-        Effect.map(([elapsed, images]) => ({
-          prompt: [{ type: "text", text: buildHarnessPrompt(input) } as const, ...images],
-          handoffBudget: Duration.subtract(PREPARATION_BUDGET, elapsed),
-        })),
+        Effect.flatMap(([elapsed, images]) =>
+          Effect.gen(function* () {
+            const { text, translated, skipped } = buildAgyPrompt(input);
+            if (skipped.length > 0) {
+              yield* Effect.logWarning(
+                `Gave ${ANTIGRAVITY_NAME} no pointer for ${skipped.join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
+              );
+            }
+            return {
+              prompt: [{ type: "text", text } as const, ...images],
+              skillReferences: translated,
+              handoffBudget: Duration.subtract(PREPARATION_BUDGET, elapsed),
+            };
+          }),
+        ),
       );
 
     const send: AgySession["send"] = (input) =>

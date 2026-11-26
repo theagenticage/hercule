@@ -47,7 +47,12 @@ export const ANTIGRAVITY_NAME = "Antigravity";
 /** What a caller opens `agy` for. A session also says how much the agent may do without asking. */
 export type AgyPurpose =
   | { readonly kind: "probe" }
-  | { readonly kind: "session"; readonly accessMode: AccessMode };
+  | {
+      readonly kind: "session";
+      readonly accessMode: AccessMode;
+      /** Whether the session gives `agy` a folder of skills as an additional directory. */
+      readonly hasSkillsFolder: boolean;
+    };
 
 /**
  * Removes `<home>/config/hooks.json`, the hooks file of the Harness Home, and
@@ -639,7 +644,8 @@ const authenticateAccount = (
  *   the login, when the reason for a refused sign-in cannot be told, when its
  *   answer is not one of these, and when the process does not use this
  *   account's own login, or (for a session) when `agy` does not report that
- *   it takes an added system prompt.
+ *   it takes an added system prompt, or (for a session with a skills folder)
+ *   that it takes additional directories.
  *
  * The process runs in `options.cwd`, with its own log in a private folder of
  * the Harness Home. When the scope closes, the connection is closed first, then
@@ -737,6 +743,18 @@ export const openSignedInAgy = (
       return yield* Effect.fail(
         buildAdapterFailed(
           `${ANTIGRAVITY_NAME} did not confirm that it takes the instructions of a Hercule session, so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+        ),
+      );
+    }
+
+    if (
+      options.purpose.kind === "session" &&
+      options.purpose.hasSkillsFolder &&
+      !connection.harness.acceptsAdditionalDirectories
+    ) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} did not confirm that it takes a session's skills folder (\`additionalDirectories\`), so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
         ),
       );
     }

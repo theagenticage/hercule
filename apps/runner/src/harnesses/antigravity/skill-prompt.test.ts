@@ -63,7 +63,11 @@ describe("buildAgyPrompt", () => {
       skills.buildInput("plain text"),
       skills.buildInput("not a skill: $unknown", { senderSessionId: SENDER, attachments: [image] }),
     ]) {
-      expect(buildAgyPrompt(input)).toEqual({ text: buildHarnessPrompt(input), translated: [] });
+      expect(buildAgyPrompt(input)).toEqual({
+        text: buildHarnessPrompt(input),
+        translated: [],
+        skipped: [],
+      });
     }
   });
 
@@ -152,21 +156,30 @@ describe("buildAgyPrompt", () => {
   it("leaves out a skill whose SKILL.md is missing, and its references", () => {
     const skills = createSkills({ library: ["review", "gone"], missingFile: ["gone"] });
     const input = skills.buildInput("$gone and $review");
-    const { text, translated } = buildAgyPrompt(input);
+    const { text, translated, skipped } = buildAgyPrompt(input);
     expect(text).not.toContain('"$gone"');
     expect(text).toContain('"$review"');
     expect(translated.map((reference) => reference.referenceName)).toEqual(["review"]);
+    expect(skipped).toEqual(["gone"]);
   });
 
   it("returns the prompt alone when no referenced skill has a file", () => {
     const skills = createSkills({ library: ["gone"], missingFile: ["gone"] });
     const input = skills.buildInput("run $gone");
-    expect(buildAgyPrompt(input)).toEqual({ text: "run $gone", translated: [] });
+    expect(buildAgyPrompt(input)).toEqual({
+      text: "run $gone",
+      translated: [],
+      skipped: ["gone"],
+    });
   });
 
   it("sends an input that starts with a slash as typed, whatever references it has", () => {
     const skills = createSkills({ library: ["review"] });
     const input = skills.buildInput("/compact $review", { senderSessionId: SENDER });
-    expect(buildAgyPrompt(input)).toEqual({ text: buildHarnessPrompt(input), translated: [] });
+    expect(buildAgyPrompt(input)).toEqual({
+      text: buildHarnessPrompt(input),
+      translated: [],
+      skipped: [],
+    });
   });
 });

@@ -264,7 +264,30 @@ export interface FakeAgyOptions {
   readonly recording?: RecordingName | ReadonlyArray<RecordedMessage>;
   /** Leaves `antigravity.systemPrompt.append` out of the reply to `initialize`, as an older `agy` does. */
   readonly withoutSystemPromptCapability?: boolean;
+  /** Leaves `sessionCapabilities.additionalDirectories` out of the reply to `initialize`, as an older `agy` does. */
+  readonly withoutAdditionalDirectoriesCapability?: boolean;
 }
+
+/** Returns the recording without `additionalDirectories` in the session capabilities of the reply to `initialize`. */
+const removeAdditionalDirectoriesCapability = (
+  recording: ReadonlyArray<RecordedMessage>,
+): ReadonlyArray<RecordedMessage> =>
+  recording.map((entry) => {
+    const result = entry.message.result as
+      | { agentCapabilities?: { sessionCapabilities?: Record<string, unknown> } }
+      | undefined;
+    const capabilities = result?.agentCapabilities;
+    if (entry.direction !== "in" || capabilities?.sessionCapabilities === undefined) return entry;
+    const sessionCapabilities = { ...capabilities.sessionCapabilities };
+    delete sessionCapabilities["additionalDirectories"];
+    return {
+      ...entry,
+      message: {
+        ...entry.message,
+        result: { ...result, agentCapabilities: { ...capabilities, sessionCapabilities } },
+      },
+    };
+  });
 
 /** Returns the recording without `antigravity.systemPrompt` in the capabilities of the reply to `initialize`. */
 const removeSystemPromptCapability = (
@@ -339,11 +362,15 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
       options.recording === undefined || typeof options.recording === "string"
         ? readRecording(recordingName)
         : options.recording;
+    const withSystemPrompt =
+      options.withoutSystemPromptCapability === true
+        ? removeSystemPromptCapability(recording)
+        : recording;
     const harness = startFakeHarness({
       recording:
-        options.withoutSystemPromptCapability === true
-          ? removeSystemPromptCapability(recording)
-          : recording,
+        options.withoutAdditionalDirectoriesCapability === true
+          ? removeAdditionalDirectoriesCapability(withSystemPrompt)
+          : withSystemPrompt,
       scripts: harnessScripts,
     });
     const signals: Array<string | undefined> = [];

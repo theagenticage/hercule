@@ -44,6 +44,7 @@ import { buildUserMessage } from "../events";
 import type { AdapterTurnInput } from "../index";
 import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
+import type { ResolvedSkillReference } from "../../skills";
 import {
   addPromptUsage,
   closeTurn,
@@ -306,6 +307,8 @@ export const startTurn = (
   input: {
     readonly input: AdapterTurnInput;
     readonly prompt: ReadonlyArray<PromptContent>;
+    /** The Skill References the prompt got a pointer line for, recorded on the `user_message`. */
+    readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
     readonly handoffBudget: Duration.Duration;
   },
 ): Effect.Effect<Turn, never, Scope.Scope> =>
@@ -715,6 +718,7 @@ export const startTurn = (
             turnId,
             text: input.input.text,
             attachments: input.input.attachments,
+            skillReferences: input.skillReferences,
             senderSessionId: input.input.senderSessionId,
             steered: false,
             harnessRefs: { nativeSessionId },

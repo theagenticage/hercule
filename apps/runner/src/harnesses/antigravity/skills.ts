@@ -1,5 +1,5 @@
 /**
- * Stages the skills of an Antigravity Thread (spec 06 section 9.4): the
+ * Stages the skills of an Antigravity session (spec 06 section 9.4): the
  * library skills of the start and the skills of the workspace's checkouts,
  * in the one place `agy` reads skills from for a single session.
  */
