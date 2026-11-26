@@ -20,6 +20,7 @@ import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
 import { answerWith } from "@hercule/acp/testing";
 import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercule/protocol";
+import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
 import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
@@ -64,7 +65,7 @@ const setUp = (options: FakeAgyOptions = {}): { readonly home: string; readonly 
 };
 
 /** Runs the effect in a scope that closes when it ends, and returns what it failed with. */
-const failureOf = (
+const runAndReadFailure = (
   effect: Effect.Effect<unknown, AdapterError, Scope.Scope>,
 ): Promise<AdapterError> => Effect.runPromise(Effect.scoped(Effect.flip(effect)));
 
@@ -95,7 +96,7 @@ describe("a home with no login", () => {
     const home = createScratchHome("agy");
     const fake = buildFakeAgy(home);
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(HarnessLoginMissing);
     expect(error.message).toBe("Antigravity is not signed in on this runner.");
@@ -252,7 +253,7 @@ describe("checkAccountUsable", () => {
     imageInput: null,
     options: [],
   };
-  const failureOf = (
+  const readCheckFailure = (
     plan: string | undefined,
     models: ReadonlyArray<ModelDescriptor>,
     isHeldByGoogle = false,
@@ -263,7 +264,7 @@ describe("checkAccountUsable", () => {
   });
 
   it("says Google holds the account when there is no plan and a worker log shows it", () => {
-    const failure = failureOf(undefined, [model], true);
+    const failure = readCheckFailure(undefined, [model], true);
 
     expect(failure).toBeInstanceOf(AdapterFailed);
     expect(failure?.message).toBe(
@@ -272,7 +273,7 @@ describe("checkAccountUsable", () => {
   });
 
   it("says only what is known when there is no plan and no sign that Google holds the account", () => {
-    expect(failureOf(undefined, [model], false)?.message).toBe(
+    expect(readCheckFailure(undefined, [model], false)?.message).toBe(
       "Antigravity reported no plan for this account, so it cannot be used. Check this runner's network, then sign in to this Google account in a browser to see whether Google asks for anything.",
     );
   });
@@ -281,8 +282,8 @@ describe("checkAccountUsable", () => {
     const message =
       "Antigravity listed no models for this account. The runner may be offline, or Google may have refused the sign-in.";
 
-    expect(failureOf(PLAN_LABEL, [])?.message).toBe(message);
-    expect(failureOf(undefined, [], true)?.message).toBe(message);
+    expect(readCheckFailure(PLAN_LABEL, [])?.message).toBe(message);
+    expect(readCheckFailure(undefined, [], true)?.message).toBe(message);
   });
 });
 
@@ -290,7 +291,7 @@ describe("a refused authenticate", () => {
   it("is not signed in when agy asks for the login and its log has no network error", async () => {
     const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN } });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(HarnessLoginMissing);
     expect(error.message).toBe("Antigravity is not signed in on this runner.");
@@ -302,7 +303,7 @@ describe("a refused authenticate", () => {
       workerLogs: { authenticate: `${FILE_STORAGE_LINE}\n${NETWORK_ERROR_LINE}\n` },
     });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(
@@ -324,7 +325,7 @@ describe("a refused authenticate", () => {
       },
     });
 
-    expect(await failureOf(open(fake, home))).toBeInstanceOf(HarnessLoginMissing);
+    expect(await runAndReadFailure(open(fake, home))).toBeInstanceOf(HarnessLoginMissing);
   });
 
   it("does not read the network error from the log of the front process", async () => {
@@ -333,7 +334,7 @@ describe("a refused authenticate", () => {
       frontLog: NETWORK_ERROR_LINE,
     });
 
-    expect(await failureOf(open(fake, home))).toBeInstanceOf(HarnessLoginMissing);
+    expect(await runAndReadFailure(open(fake, home))).toBeInstanceOf(HarnessLoginMissing);
   });
 
   it("cannot tell why when there is no worker log at all, and does not call it signed out", async () => {
@@ -342,7 +343,7 @@ describe("a refused authenticate", () => {
       workerLogs: { authenticate: [] },
     });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(
@@ -356,14 +357,14 @@ describe("a refused authenticate", () => {
   ])("is a start failure with agy's own words for %s", async (_what, script) => {
     const { home, fake } = setUp({ scripts: { authenticate: script } });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toContain("Antigravity could not be started on this runner");
   });
 });
 
-const NOT_THIS_ACCOUNT = "Antigravity is signed in, but not with a login of this account.";
+const NOT_THIS_ACCOUNT = `Antigravity did not confirm that it uses this account's own login, so Hercule does not use it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`;
 
 describe("the sign that a process uses the account's own login", () => {
   it("passes when every worker log has it", async () => {
@@ -424,7 +425,7 @@ describe("the sign that a process uses the account's own login", () => {
   ])("fails the sign-in when %s", async (_what, logs) => {
     const { home, fake } = setUp(logs);
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(NOT_THIS_ACCOUNT);
@@ -548,7 +549,7 @@ describe("a process that cannot be started", () => {
       throws: Object.assign(new Error("spawn failed"), { code: "ENOENT" }),
     });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(HarnessNotInstalled);
     expect(error.message).toBe("Antigravity is not installed on this runner.");
@@ -558,7 +559,7 @@ describe("a process that cannot be started", () => {
   it("is a start failure with the reason for any other error", async () => {
     const { home, fake } = setUp({ throws: new Error("permission denied") });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toBe(
@@ -572,7 +573,7 @@ describe("a process that cannot be started", () => {
       throws: Object.assign(new Error("spawn failed"), { code: "ENOENT" }),
     });
 
-    const error = await failureOf(open(fake, home, { cwd: "/nonexistent/work-folder" }));
+    const error = await runAndReadFailure(open(fake, home, { cwd: "/nonexistent/work-folder" }));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toContain("could not be started");
@@ -589,7 +590,7 @@ describe("a process that cannot be started", () => {
       stderrLines: ["", "panic: could not open the database", "goroutine 1 [running]:"],
     });
 
-    const error = await failureOf(open(fake, home));
+    const error = await runAndReadFailure(open(fake, home));
 
     expect(error).toBeInstanceOf(AdapterFailed);
     expect(error.message).toContain("Antigravity could not be started on this runner");
@@ -650,7 +651,7 @@ describe("closing the scope", () => {
   it("does the same when the start fails", async () => {
     const { home, fake } = setUp({ workerLogs: { authenticate: [] } });
 
-    await failureOf(open(fake, home));
+    await runAndReadFailure(open(fake, home));
 
     expect(fake.spawns[0]!.signals).toEqual(["SIGTERM"]);
     expect(fake.spawns[0]!.hasExited).toBe(true);

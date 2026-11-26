@@ -447,7 +447,9 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
         ),
       );
 
-      expect(error.message).toContain("but not with a login of this account.");
+      expect(error.message).toContain(
+        "Antigravity did not confirm that it uses this account's own login, so Hercule does not use it.",
+      );
     },
     30_000,
   );

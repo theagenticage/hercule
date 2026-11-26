@@ -211,6 +211,8 @@ export interface FakeAgyOptions {
   readonly throws?: Error;
   /** What `agy --version` prints. `null` makes the command fail. */
   readonly version?: string | null;
+  /** Makes `agy --version` never end. */
+  readonly hangVersion?: boolean;
 }
 
 /**
@@ -275,6 +277,7 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
   };
   const run: Run = (command) => {
     ran.push(command);
+    if (options.hangVersion === true) return Effect.never;
     return Effect.succeed(
       options.version === null
         ? { code: 1, stdout: "", stderr: "agy: broken" }

@@ -22,7 +22,7 @@ import type {
   ResumeSessionRequest,
   SessionSettings,
 } from "@hercule/acp";
-import { VERSION } from "@hercule/home/version";
+import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
 import type { AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
 import { describeError } from "../../report";
 import {
@@ -559,7 +559,7 @@ export const openSignedInAgy = (
       if (!hasNewWorker || !signals.allUseOwnLogin) {
         return yield* Effect.fail(
           buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} is signed in, but not with a login of this account.`,
+            `${ANTIGRAVITY_NAME} did not confirm that it uses this account's own login, so Hercule does not use it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
           ),
         );
       }

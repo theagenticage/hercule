@@ -40,6 +40,15 @@ import {
 import { readLoginFile, readRegularFile } from "./harness-home";
 import { buildModelCatalog } from "./model-catalog";
 
+/**
+ * The answer `agy` gives to `session/resume` for a conversation it has no
+ * files for: the error -32603 with text that starts "Failed to read session"
+ * (measured on a real `agy`). The probe replaces its conversation only for
+ * this answer. It is a dependency on the wording of `agy`.
+ */
+const MISSING_CONVERSATION_CODE = -32603;
+const MISSING_CONVERSATION_TEXT = "Failed to read session";
+
 /** How long `session/close` may take. `agy` keeps the conversation either way, and the process ends next. */
 const CLOSE_DEADLINE = Duration.seconds(2);
 
@@ -157,13 +166,17 @@ const buildDecliningHandlers = Effect.map(Effect.context<never>(), (services): A
 }));
 
 /**
- * Resumes the conversation `storedId`. Returns undefined when `agy` refuses to
- * resume it, for example because its files are gone, and logs that: the caller
- * makes a new conversation. Fails with the error for every other failure. A
- * missing sign-in fails with `HarnessLoginMissing`, so it can never make a
- * signed-in account look signed out by replacing the conversation. A resume
- * that is unreadable, times out or ends with the connection is not known to
- * have failed for good, so none of them replaces the stored conversation.
+ * Resumes the conversation `storedId`. Returns undefined when `agy` says it has
+ * no such conversation (`MISSING_CONVERSATION_CODE` with
+ * `MISSING_CONVERSATION_TEXT`), for example because its files are gone, and
+ * logs that: the caller makes a new conversation. Fails with the error for
+ * every other failure, so an `agy` that refuses `session/resume` for another
+ * reason costs no conversation per probe, and the probe reports the words of
+ * `agy`. A missing sign-in fails with `HarnessLoginMissing`, so it can never
+ * make a signed-in account look signed out by replacing the conversation. A
+ * resume that is unreadable, times out or ends with the connection is not
+ * known to have failed for good, so none of them replaces the stored
+ * conversation either.
  */
 const resumeConversation = (
   agy: SignedInAgy,
@@ -174,10 +187,13 @@ const resumeConversation = (
     .resumeConversation({ nativeSessionId: storedId, cwd: folder, mcpServers: [] })
     .pipe(
       Effect.catch((error) =>
-        error._tag === "AcpError" && error.reason === "refused"
+        error._tag === "AcpError" &&
+        error.reason === "refused" &&
+        error.code === MISSING_CONVERSATION_CODE &&
+        (error.harnessMessage ?? "").includes(MISSING_CONVERSATION_TEXT)
           ? Effect.as(
               Effect.logWarning(
-                `${ANTIGRAVITY_NAME} refused to resume the conversation of its check, so a new one is made: ${error.message}`,
+                `${ANTIGRAVITY_NAME} has no conversation to resume for its check, so a new one is made: ${error.message}`,
               ),
               undefined,
             )
@@ -343,11 +359,10 @@ const buildProbeResult = (
  * carries the version of `agy` when it was read in time.
  *
  * The version and the account are read at the same time, and each gets
- * `PROBE_DEADLINE` (15 seconds) for its work. That is not a wall for the whole
- * probe. When the work ends or is interrupted, the process is stopped the
- * normal way: SIGTERM, and SIGKILL after the grace of `stopChild` (2 seconds).
- * That comes on top of the 15 seconds, inside the 20 seconds the controller
- * waits.
+ * `PROBE_DEADLINE` for its work. That is not a wall for the whole probe. When
+ * the work ends or is interrupted, the process is stopped the normal way:
+ * SIGTERM, and SIGKILL after `STOP_GRACE`. That comes on top of
+ * `PROBE_DEADLINE`, and the controller waits for a probe long enough for both.
  */
 export const makeProbe =
   (seam: AgySeam) =>

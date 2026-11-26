@@ -26,7 +26,7 @@ import { TestClock } from "effect/testing";
 import { answerWith, type HarnessScript } from "@hercule/acp/testing";
 import type { ProbeResult } from "@hercule/protocol";
 import { PROBE_DEADLINE } from "../probe";
-import { cleanupHomes, createScratchHome, waitUntil } from "../testing";
+import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import { APP_DATA_DIR } from "./harness-home";
 import {
@@ -197,6 +197,26 @@ describe("a signed-in account", () => {
     expect(result.auth.status).toBe("ok");
   });
 
+  it("is ok with no version, within the deadline, when agy --version never ends", async () => {
+    const { home, fake } = setUp({ hangVersion: true });
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const probing = yield* Effect.forkChild(probeWith(home, fake));
+        // The account is read by the time the process has been stopped.
+        yield* Effect.promise(() =>
+          waitUntil("stopped the process", () => fake.spawns[0]?.hasExited === true),
+        );
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust(PROBE_DEADLINE);
+        return yield* Fiber.join(probing);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(result.harnessVersion).toBeNull();
+    expect(result.auth.status).toBe("ok");
+  });
+
   it("declines what agy asks while the account is checked, and logs it without the message's raw text", async () => {
     const warnings: Array<string> = [];
     const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
@@ -270,6 +290,19 @@ describe("a stored conversation that cannot be resumed", () => {
     const result = await probeAccount(home, fake);
 
     expect(result.auth.status).toBe("error");
+    expect(receivedMethods(fake)).not.toContain("session/new");
+    expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
+  });
+
+  it("fails the probe with agy's words, and makes no new conversation, when the resume is refused for any other reason", async () => {
+    const { home, fake } = storedConversation({
+      scripts: { "session/resume": refuse(-32601, "Method not found: session/resume") },
+    });
+
+    const result = await probeAccount(home, fake);
+
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toContain("Method not found: session/resume");
     expect(receivedMethods(fake)).not.toContain("session/new");
     expect(readStoredId(home)).toBe(`${CONVERSATION}\n`);
   });
@@ -491,6 +524,27 @@ describe("a probe that cannot keep its conversation", () => {
       fake,
       /^Could not make the working folder for the Antigravity check/,
     );
+  });
+
+  it("is an error that says why when the id cannot be stored", async () => {
+    const { home, fake } = setUp({
+      scripts: {
+        "session/new": (call, harness) => {
+          // The read found no file. A folder with something in it now takes the
+          // file's place, so the rename that stores the id fails.
+          mkdirSync(join(storedIdPath(home), "inside"), { recursive: true });
+          return answerNewSession(home)(call, harness);
+        },
+      },
+    });
+
+    const result = await probeAccount(home, fake);
+
+    expect(result.auth.status).toBe("error");
+    expect(result.auth.message).toMatch(
+      /^Could not remember the conversation of the Antigravity check on this runner: /,
+    );
+    expect(receivedMethods(fake)).toContain("session/new");
   });
 
   it("is an error, and stores nothing, when agy gives an id that is not a UUID", async () => {
