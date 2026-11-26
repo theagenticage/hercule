@@ -109,12 +109,13 @@ interface AgyOnGateway {
 const withAgy = async (
   tools: ReadonlyArray<FakeTool>,
   body: (gateway: AgyOnGateway) => Promise<void>,
+  listed: ReadonlyArray<string> = [SERVER_NAME],
 ): Promise<void> => {
   const upstream = await startFakeUpstream({ tools });
   const started: Array<RealAgySession> = [];
   try {
     await withAntigravityGatewayRig(
-      { upstream, serverNames: [SERVER_NAME], listed: [SERVER_NAME] },
+      { upstream, serverNames: [SERVER_NAME], listed },
       async (rig) => {
         try {
           await body({
@@ -283,9 +284,9 @@ describe.skipIf(skipReason !== undefined)(
             const request = await session.waitFor("asked about the call", (events) =>
               findToolApproval(events),
             );
-            expect(request.detail, session.describe()).toMatchObject({
-              toolName: expect.stringContaining("whoami"),
-            });
+            expect((request.detail as { toolName: string }).toolName, session.describe()).toContain(
+              "whoami",
+            );
 
             // While the Request is open the call is held: not at the gateway, not at the server.
             await sleep(QUIET_MS);
@@ -396,6 +397,35 @@ describe.skipIf(skipReason !== undefined)(
             detail: { server: SERVER_NAME, name: "second", kind: "mcp" },
           });
         });
+      },
+      REAL_AGY_TEST_MS,
+    );
+
+    it(
+      "works in a session that started with an empty list: the model has no tool, and after a server is added its tool is called",
+      async () => {
+        await withAgy(
+          [WHOAMI_TOOL],
+          async ({ rig, upstream, start }) => {
+            const session = await start("full-access");
+            const empty = await session.runTurn(
+              "List the MCP tools you have. If you have none, reply NO TOOL and do nothing else: run no command and read no file.",
+            );
+            expect(readCompletedMcpCalls(empty.events), session.describe()).toEqual([]);
+            expect(readUpstreamTools(upstream), session.describe()).toEqual([]);
+
+            await rig.setList([SERVER_NAME]);
+            const turn = await session.runTurn(buildCallPrompt("whoami"));
+            const why = `${session.describe()}\n${dumpRequests(rig)}`;
+
+            expect(readUpstreamTools(upstream), why).toEqual(["whoami"]);
+            expect(readCompletedMcpCalls(turn.events)[0], why).toMatchObject({
+              status: "completed",
+              detail: { server: SERVER_NAME, name: "whoami", kind: "mcp" },
+            });
+          },
+          [],
+        );
       },
       REAL_AGY_TEST_MS,
     );
