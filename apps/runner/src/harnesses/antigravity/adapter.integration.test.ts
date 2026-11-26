@@ -54,6 +54,9 @@ const pinnedBinary = findAgyTestBinary();
 const FILE_STORAGE_LINE = "Using file-based token storage because SSH session detected";
 const UPDATE_LINE = "Spawned background update process";
 
+/** How long each arm of the update test waits for the updater to start. */
+const UPDATE_WAIT_MS = 6000;
+
 /** The start of the name of a folder the adapter makes in a Harness Home for the log of one `agy` process. */
 const LOG_FOLDER_PREFIX = "hercule-log-";
 
@@ -272,13 +275,15 @@ const leaveConversation = (account: Account): Promise<string> =>
     Effect.scoped(
       Effect.gen(function* () {
         const cwd = makeTempFolder("cwd");
-        const { connection } = yield* openSignedInAgy(spawnAgy, account.ctx, binary, {
-          cwd,
-          handlers: ignoringHandlers,
-        });
-        const { nativeSessionId } = yield* connection.newSession({ cwd, mcpServers: [] });
-        yield* connection.closeSession(nativeSessionId);
-        return nativeSessionId;
+        const { connection, newConversation } = yield* openSignedInAgy(
+          spawnAgy,
+          account.ctx,
+          binary,
+          { cwd, handlers: ignoringHandlers },
+        );
+        const { id } = yield* newConversation({ cwd, mcpServers: [] });
+        yield* connection.closeSession(id);
+        return id;
       }),
     ),
   );
@@ -357,6 +362,8 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     expect(listLogFolders(home)).toEqual([]);
     expect(existsSync(join(home, "log"))).toBe(false);
     expect(existsSync(join(appData, "log"))).toBe(false);
+    // `agy` keeps nothing in the account's `HOME`.
+    expect(listTree(account.userHome)).toEqual([]);
 
     // Control: a new conversation does add a row, so the checks above can fail.
     await leaveConversation(account);
@@ -401,11 +408,11 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
       Effect.scoped(
         Effect.gen(function* () {
           const cwd = makeTempFolder("cwd");
-          const { connection } = yield* openSignedInAgy(spawn, account.ctx, binary, {
+          const { newConversation } = yield* openSignedInAgy(spawn, account.ctx, binary, {
             cwd,
             handlers: ignoringHandlers,
           });
-          yield* connection.newSession({ cwd, mcpServers: [] });
+          yield* newConversation({ cwd, mcpServers: [] });
           // The log folder is removed with the scope, so it is read here.
           return readWorkerLogs(readLogFolder(spawned[0]!.command));
         }),
@@ -445,40 +452,39 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     30_000,
   );
 
-  it("does not update itself with the adapter's environment, and does without it", async () => {
-    const account = makeAccount();
-    const adapterEnv = buildLoginCommand(account.ctx, binary).env;
-    const withoutGuard = { ...adapterEnv };
-    delete withoutGuard["AGY_CLI_DISABLE_AUTO_UPDATE"];
-    const hashBefore = hashFile(binary);
-    const runModels = (env: Record<string, string | undefined>): Promise<unknown> =>
-      Effect.runPromise(runProcess([binary, "models"], env));
-    const waitForUpdateLine = async (limitMs: number): Promise<boolean> => {
-      const until = Date.now() + limitMs;
-      while (Date.now() < until) {
-        if (readFilesBelow(account.userHome).some((text) => text.includes(UPDATE_LINE)))
-          return true;
-        await sleep(250);
+  it.each([
+    { setting: undefined, updates: true, meaning: "unset" },
+    // The value `1` looks like the natural way to switch it off, and does nothing.
+    { setting: "1", updates: true, meaning: "1" },
+    { setting: "true", updates: false, meaning: "true" },
+  ])(
+    "$meaning for the update switch: the updater starts is $updates",
+    async ({ setting, updates }) => {
+      const account = makeAccount();
+      const env: Record<string, string | undefined> = {
+        ...buildLoginCommand(account.ctx, binary).env,
+      };
+      // Starts from the adapter's own environment and sets only the switch.
+      if (setting === undefined) delete env["AGY_CLI_DISABLE_AUTO_UPDATE"];
+      else env["AGY_CLI_DISABLE_AUTO_UPDATE"] = setting;
+      const hashBefore = hashFile(binary);
+
+      await Effect.runPromise(runProcess([binary, "models"], env));
+      // An update starts a moment after the command, so every arm waits as long
+      // for it to show, and the arms that must not update wait all of it.
+      const until = Date.now() + UPDATE_WAIT_MS;
+      let started = false;
+      while (!started && Date.now() < until) {
+        started = readFilesBelow(account.userHome).some((text) => text.includes(UPDATE_LINE));
+        if (!started) await sleep(250);
       }
-      return false;
-    };
 
-    await runModels(adapterEnv);
-    // An update starts a moment after the command, so give it time to show.
-    const updatedWithGuard = await waitForUpdateLine(4000);
-    const hashAfterGuarded = hashFile(binary);
-
-    await runModels(withoutGuard);
-    // Control: the same command does start the updater when the variable is
-    // missing, which shows that the check above can fail.
-    const updatedWithoutGuard = await waitForUpdateLine(10_000);
-    const hashAfterControl = hashFile(binary);
-
-    expect(updatedWithGuard).toBe(false);
-    expect(updatedWithoutGuard).toBe(true);
-    expect(hashAfterGuarded).toBe(hashBefore);
-    expect(hashAfterControl).toBe(hashBefore);
-  }, 60_000);
+      expect(started).toBe(updates);
+      // The proxies keep an update from downloading anything.
+      expect(hashFile(binary)).toBe(hashBefore);
+    },
+    30_000,
+  );
 
   it("starts the sign-in with a link, opens no browser, and reports a refused code", async () => {
     // Stubs of the commands a program uses to open a browser, first on the
@@ -504,9 +510,11 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
       const submitted = await Effect.runPromise(logins.submit("account-1", "not-a-real-code"));
 
       expect(submitted._tag).toBe("loginFailed");
-      expect("message" in submitted ? submitted.message : "").toBe(
-        "The code was refused. This sign-in cannot take another code; start it again for a new link.",
-      );
+      const message = "message" in submitted ? submitted.message : "";
+      expect(message.startsWith("The sign-in did not finish:")).toBe(true);
+      expect(
+        message.endsWith("This sign-in cannot take another code; start it again for a new link."),
+      ).toBe(true);
       expect(existsSync(opened)).toBe(false);
       // The runner removes the log folder once the process has exited, which
       // can be a moment after the answer.

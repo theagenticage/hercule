@@ -39,17 +39,17 @@ export const CONVERSATION = "558eccc9-5c63-48a1-bf9f-14edaf5a58a5";
 
 const tokenPath = (home: string): string => join(home, APP_DATA_DIR, "antigravity-oauth-token");
 
-/** What a worker of a process that uses the account's own login writes in its log. */
+/** What a worker of a process that uses the account's own login writes in its log (a line of a real `agy`). */
 export const FILE_STORAGE_LINE =
-  "I1126 10:00:00.000000    4000 token_store.go:41] Using file-based token storage because SSH session detected";
+  "I1125 16:54:06.115838      87 composite_token_storage.go:176] Using file-based token storage because SSH session detected";
 
 /** What a worker writes when it kept looking for the login in the keychain. */
 export const KEYRING_LINE =
   "W1126 10:00:00.000000    4000 token_store.go:38] Failed to load stored token from keyring, falling back to file";
 
-/** What a worker writes when it could not reach Google to check an expired login. */
+/** What a worker writes when it could not reach Google to check an expired login (a line of a real `agy`). */
 export const NETWORK_ERROR_LINE =
-  "W1126 10:00:00.000000    4000 token_store.go:77] token validation failed due to network error (token may still be valid)";
+  'W1125 16:54:07.765336     286 keyring.go:74] keyringAuth: token validation failed due to network error (token may still be valid): Post "https://oauth2.googleapis.com/token": proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused';
 
 /** What a worker writes when Google's reply says it holds the account for verification. */
 export const HELD_BY_GOOGLE_LINE =

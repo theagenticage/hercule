@@ -96,23 +96,33 @@ export interface SignedInAgy {
  * log also holds the account's email address. Its text never leaves
  * `readWorkerLogSignals`, and nothing of it leaves the runner.
  *
- * `FILE_STORAGE_LINE` is the line a worker writes when it keeps its login in
+ * A line of the log has a header (level letter, date, time, thread id and
+ * `file:line]`) and then the message. The first two phrases must start or
+ * be the whole message, so that a line that only mentions them, such as one
+ * that echoes a path, does not count.
+ *
+ * `FILE_STORAGE_MESSAGE` is what a worker writes when it keeps its login in
  * the file of the Harness Home. It shows that the process uses this account's
- * login and not the machine's keychain. The phrase must end the line, after
- * the prefix the logger adds, so a line that only mentions it, such as a path,
- * does not count.
+ * login and not the machine's keychain. It is the whole message.
  */
-const FILE_STORAGE_LINE =
-  /(?:^|[\]\s])Using file-based token storage because SSH session detected\s*$/;
+const FILE_STORAGE_MESSAGE = "Using file-based token storage because SSH session detected";
 
 /**
- * The line a worker writes when `agy` could not reach Google to check an
- * expired login. `agy` answers that case exactly as it answers a missing
- * login, so this line is the only way to tell them apart. Only a note in
- * parentheses may follow the phrase.
+ * The start of the message a worker writes when `agy` could not reach Google
+ * to check an expired login. `agy` answers that case exactly as it answers a
+ * missing login, so this line is the only way to tell them apart. The reason
+ * follows it on the same line.
  */
-const NETWORK_ERROR_LINE =
-  /(?:^|[\]\s])token validation failed due to network error(?:\s*\([^)]*\))?\s*$/;
+const NETWORK_ERROR_MESSAGE_START = "keyringAuth: token validation failed due to network error";
+
+/** The header of a log line, such as `I1125 16:54:06.115838      87 file.go:176] `. */
+const LOG_LINE_HEADER = /^[IWEF]\d{4} \d{2}:\d{2}:\d{2}\.\d+ +\d+ \S+:\d+\] /;
+
+/** Returns the message of a log line, or undefined for a line that has no header. */
+const readLogMessage = (line: string): string | undefined => {
+  const header = LOG_LINE_HEADER.exec(line);
+  return header === null ? undefined : line.slice(header[0].length).trimEnd();
+};
 
 /**
  * The reason in the 403 reply of Google that a worker logs when Google holds
@@ -364,8 +374,11 @@ const readWorkerLogSignals = (folder: string): Effect.Effect<WorkerLogSignals, A
       for (const name of workers) {
         const { text } = await readRegularFile(join(folder, name), LOG_LIMIT);
         const lines = text.split("\n");
-        if (!lines.some((line) => FILE_STORAGE_LINE.test(line))) allUseOwnLogin = false;
-        if (lines.some((line) => NETWORK_ERROR_LINE.test(line))) hasNetworkError = true;
+        const messages = lines.map(readLogMessage);
+        if (!messages.some((message) => message === FILE_STORAGE_MESSAGE)) allUseOwnLogin = false;
+        if (messages.some((message) => message?.startsWith(NETWORK_ERROR_MESSAGE_START))) {
+          hasNetworkError = true;
+        }
         if (lines.some((line) => HELD_BY_GOOGLE_PHRASE.test(line))) isHeldByGoogle = true;
       }
       return { workers, allUseOwnLogin, hasNetworkError, isHeldByGoogle };

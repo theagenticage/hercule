@@ -310,11 +310,17 @@ describe("a refused authenticate", () => {
     );
   });
 
-  it("does not take a path that holds the network phrase for the network error", async () => {
+  it.each([
+    ["inside a path", "read /tmp/keyringAuth: token validation failed due to network error/x"],
+    [
+      "in the middle of a message",
+      "retry after keyringAuth: token validation failed due to network error",
+    ],
+  ])("does not take the network phrase %s for the network error", async (_where, message) => {
     const { home, fake } = setUp({
       scripts: { authenticate: RUN_LOGIN },
       workerLogs: {
-        authenticate: `${FILE_STORAGE_LINE}\nI1126 10:00:00.000000 4000 files.go:9] read /tmp/token validation failed due to network error/x`,
+        authenticate: `${FILE_STORAGE_LINE}\nW1125 16:54:07.765336     286 files.go:9] ${message}`,
       },
     });
 
@@ -384,8 +390,23 @@ describe("the sign that a process uses the account's own login", () => {
       {
         workerLogs: {
           authenticate:
-            "I1126 10:00:00.000000    4000 files.go:9] opened /tmp/Using file-based token storage because SSH session detected/x",
+            "I1125 16:54:06.115838      87 files.go:9] opened /tmp/Using file-based token storage because SSH session detected/x",
         },
+      },
+    ],
+    [
+      "the phrase is in the middle of a message",
+      {
+        workerLogs: {
+          authenticate:
+            "I1125 16:54:06.115838      87 files.go:9] note: Using file-based token storage because SSH session detected",
+        },
+      },
+    ],
+    [
+      "the line has no log header",
+      {
+        workerLogs: { authenticate: "Using file-based token storage because SSH session detected" },
       },
     ],
     [
