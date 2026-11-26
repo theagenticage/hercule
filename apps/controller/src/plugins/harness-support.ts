@@ -53,6 +53,10 @@ interface HarnessRefusal {
   readonly reason: string;
 }
 
+/** Returns `harnessId` when the caller named a harness, else `providerAccountId`. */
+const selectRefusedField = (harnessId?: string | null): HarnessRefusal["field"] =>
+  harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId";
+
 /**
  * Decides which harness a Provider Account runs in and whether it can. The
  * harness is `harnessId` when given, else `account.defaultHarnessId`. Returns
@@ -99,7 +103,7 @@ export const decideProviderAccountHarness = (
     };
   }
   const wanted = harnessId ?? account.defaultHarnessId;
-  const field = harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId";
+  const field = selectRefusedField(harnessId);
   const harness = harnesses.find((candidate) => candidate.id === wanted);
   if (harness === undefined) {
     return { _tag: "refused", field, reason: `this build carries no ${wanted} harness` };
@@ -130,5 +134,37 @@ export const decideProviderAccountHarness = (
       credentialVariable: supportedKind.credentialVariable,
       credentialSecretName: findCredentialSecretName(kind),
     },
+  };
+};
+
+/**
+ * Decides whether a Provider Account can make text generations in a harness.
+ * Takes the same parameters as `decideProviderAccountHarness` and returns the
+ * same result. Returns that decision's refusal unchanged, and refuses when the
+ * chosen harness declares `textGeneration: "unsupported"`; the refusal's
+ * `field` follows the same rule (`harnessId` when the caller named the
+ * harness, else `providerAccountId`). Otherwise returns the choice.
+ *
+ * It is the one place that decides this, so `settings.update`, Automatic,
+ * `controller.read` and the Model Profile entries cannot disagree.
+ */
+export const decideTextGenerationHarness = (
+  providers: ReadonlyArray<RegisteredProvider>,
+  harnesses: ReadonlyArray<RegisteredHarness>,
+  account: {
+    readonly providerId: string;
+    readonly kind: string;
+    readonly defaultHarnessId: string;
+  },
+  harnessId?: string | null,
+): HarnessChoice | HarnessRefusal => {
+  const decision = decideProviderAccountHarness(providers, harnesses, account, harnessId);
+  if (decision._tag === "refused" || decision.harness.declared.textGeneration === "supported") {
+    return decision;
+  }
+  return {
+    _tag: "refused",
+    field: selectRefusedField(harnessId),
+    reason: `${decision.harness.displayName} makes no text generations; pick another model in Settings › System, or Automatic`,
   };
 };

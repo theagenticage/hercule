@@ -1,6 +1,6 @@
 /**
  * Builds what Settings > System shows about text generation: the choices for
- * the `textGeneration.model` setting, and the line about the last failure.
+ * the `textGeneration.model` setting, and the line about why text generation does not work.
  * The web app and the desktop app both read them from here, so neither screen
  * holds a rule of its own about what Automatic means or when a failure is
  * worth showing. The desktop's first run names the model with
@@ -110,23 +110,25 @@ const buildModelKey = (
 
 /**
  * Returns the model select: Automatic first, then one choice for each entry
- * the Model Profiles hold, then Off. An entry offered by several profiles
- * appears once, and a model offered in two harnesses appears twice, the
- * second with "in <harness>" after its name. An entry that cannot run now,
- * such as one whose account is signed out on a machine that is offline,
- * stays pickable and carries a few words of the reason in parentheses
- * (`describeEntryProblem`), not the controller's whole sentence: the setting is
- * long-lived, so a stored choice must not read "(not offered)" while a
- * machine is away.
+ * the Model Profiles hold, then Off. The rules:
  *
- * Automatic names the model it resolves to only while it is the stored
- * setting. With any other setting, `status.model` is that setting's own model,
- * so it tells nothing about what Automatic would pick.
- *
- * A stored model that no profile entry offers any more (the account was
- * deleted, or the model was taken out) stays in the list as "(not offered)".
- * The setting is the user's choice and does not silently change; the
- * controller reports the failures it causes.
+ * - An entry whose `canGenerateText` is false is left out (see the contract
+ *   field), so the picker offers nothing `settings.update` would refuse; a
+ *   stored pick of one reads "(not offered)".
+ * - An entry offered by several profiles appears once. A model offered in two
+ *   harnesses appears twice, the second with "in <harness>" after its name.
+ * - An entry that cannot run now, such as one whose account is signed out on
+ *   a machine that is offline, stays pickable and carries a few words of the
+ *   reason in parentheses (`describeEntryProblem`), not the controller's
+ *   whole sentence: the setting is long-lived, so a stored choice must not
+ *   read "(not offered)" while a machine is away.
+ * - Automatic names the model it resolves to only while it is the stored
+ *   setting. With any other setting, `status.model` is that setting's own
+ *   model, so it tells nothing about what Automatic would pick.
+ * - A stored model that no profile entry offers any more (the account was
+ *   deleted, or the model was taken out) stays in the list as "(not
+ *   offered)". The setting is the user's choice and does not silently
+ *   change; the controller reports the failures it causes.
  */
 export const buildTextGenerationField = (
   stored: TextGenerationModel | undefined,
@@ -147,7 +149,7 @@ export const buildTextGenerationField = (
   const offered: TextGenerationChoice[] = [];
   for (const entry of modelProfiles.flatMap(listProfileEntries)) {
     const account = accounts.find((each) => each.id === entry.providerAccountId);
-    if (account === undefined) continue;
+    if (account === undefined || !entry.canGenerateText) continue;
     const inDefaultHarness = entry.resolvedHarnessId === account.defaultHarnessId;
     const choice: ProviderAccountModel = {
       providerAccountId: account.id,
@@ -208,23 +210,31 @@ const FAILURE_REASON_WORDS = {
 } as const;
 
 /**
- * Returns the line about the last failed text generation, such as
- * "Last failure 5 minutes ago - timed out: The model did not answer in time."
- * Returns null when there is nothing to show: no failure is known, or text
- * generation is off, because a failure from before it was turned off no
- * longer applies to the current setting.
+ * Returns the line shown under the model setting about why text generation
+ * does not work, or null when there is nothing to show. It is:
  *
- * The line names no model. The status does not carry which model failed. It
- * does not need to: the controller returns a failure only while the setting
- * and the model it resolves to are the ones the failed call ran on, so the
- * line is always about the model shown beside it.
+ * - null when the setting is `off`: a failure from before it was turned off,
+ *   or a reason it cannot run, no longer applies;
+ * - `Unavailable: <reason>` when the status holds a reason no text generation
+ *   can run now. It comes first because it is true now, so the user sees it
+ *   before a call fails and a failure from before does not hide it;
+ * - otherwise the last failed call, such as "Last failure 5 minutes ago -
+ *   timed out: The model did not answer in time.", when one is known;
+ * - otherwise null.
+ *
+ * The failure line names no model. The status does not carry which model
+ * failed. It does not need to: the controller returns a failure only while
+ * the setting and the model it resolves to are the ones the failed call ran
+ * on, so the line is always about the model shown beside it.
  */
-export const describeTextGenerationFailure = (
+export const describeTextGenerationProblem = (
   stored: TextGenerationModel | undefined,
   status: TextGenerationStatus,
   now: Date,
 ): string | null => {
-  if (stored === "off" || status.lastFailure === null) return null;
+  if (stored === "off") return null;
+  if (status.unavailableReason !== null) return `Unavailable: ${status.unavailableReason}`;
+  if (status.lastFailure === null) return null;
   const { reason, message, at } = status.lastFailure;
   return `Last failure ${describeAge(at, now)} - ${FAILURE_REASON_WORDS[reason]}: ${message}`;
 };

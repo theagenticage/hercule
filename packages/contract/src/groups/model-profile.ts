@@ -148,6 +148,14 @@ export const ResolvedModelProfileEntry = Schema.Struct({
   imageInput: Schema.NullOr(ImageInputCapability),
   /** What stops the entry from running now; `null` when it can run. */
   problem: Schema.NullOr(EntryProblem),
+  /**
+   * Whether this entry can be chosen as `textGeneration.model`: its account
+   * can run in `resolvedHarnessId` and that harness makes text generations
+   * (spec 06 section 14). It does not depend on runners: an entry whose
+   * machines are offline or signed out is still true, and `problem` says what
+   * stops it now.
+   */
+  canGenerateText: Schema.Boolean,
 });
 
 export type ResolvedModelProfileEntry = Schema.Schema.Type<typeof ResolvedModelProfileEntry>;

@@ -10,7 +10,12 @@ import {
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, withTransaction } from "../db";
-import { buildHarnessDefinition, buildPluginStack, createPluginFixture } from "../plugins/testing";
+import {
+  buildHarnessDefinition,
+  buildPluginStack,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../plugins/testing";
 import { readEventsOfKind } from "../events/testing";
 import { Settings, SettingsLayer } from "./repository";
 import { SettingsOperations, SettingsOperationsLayer } from "./service";
@@ -530,19 +535,20 @@ describe("the workspace expiry windows", () => {
   });
 });
 
-describe("the text generation model", () => {
-  const readFirstAccount = async (
-    base: string,
-    token: string,
-  ): Promise<{ readonly id: string; readonly defaultHarnessId: string }> => {
-    const response = await get(base, "/api/v1/provider-accounts", token);
-    const accounts = (await response.json()) as ReadonlyArray<{
-      readonly id: string;
-      readonly defaultHarnessId: string;
-    }>;
-    return accounts[0]!;
-  };
+/** Reads the oldest Provider Account over the API. */
+const readFirstAccount = async (
+  base: string,
+  token: string,
+): Promise<{ readonly id: string; readonly defaultHarnessId: string }> => {
+  const response = await get(base, "/api/v1/provider-accounts", token);
+  const accounts = (await response.json()) as ReadonlyArray<{
+    readonly id: string;
+    readonly defaultHarnessId: string;
+  }>;
+  return accounts[0]!;
+};
 
+describe("the text generation model", () => {
   it("accepts off, automatic and an existing provider account with a model, in a harness or not", async () => {
     await withSettings(async (base, token) => {
       const account = await readFirstAccount(base, token);
@@ -631,19 +637,111 @@ describe("the text generation model", () => {
   });
 });
 
-describe("the Thread default account", () => {
-  const readFirstAccount = async (
-    base: string,
-    token: string,
-  ): Promise<{ readonly id: string; readonly defaultHarnessId: string }> => {
-    const response = await get(base, "/api/v1/provider-accounts", token);
-    const accounts = (await response.json()) as ReadonlyArray<{
-      readonly id: string;
-      readonly defaultHarnessId: string;
-    }>;
-    return accounts[0]!;
-  };
+describe("the text generation model in a harness that makes no text generations", () => {
+  /**
+   * One provider whose default harness `tg/nongenerating` declares no text
+   * generations, and that also runs in `tg/capable`, which does.
+   */
+  const nonGeneratingPlugin = createPluginFixture({
+    id: "tg",
+    capabilities: ["harnesses", "providers"],
+    definitions: ["nongenerating", "capable"].map((name) =>
+      buildHarnessDefinition(
+        name,
+        [
+          {
+            providerId: "tg/provider",
+            kinds: [{ kind: "api-key", modelArgument: "{model}" }],
+            models: "all",
+          },
+        ],
+        name === "nongenerating" ? { textGeneration: "unsupported" } : {},
+      ),
+    ),
+    providers: [buildProviderDefinition("provider", ["tg/nongenerating", "tg/capable"])],
+  }).plugin;
 
+  const withAccountInNonGeneratingHarness = (
+    body: (
+      base: string,
+      token: string,
+      account: { readonly id: string; readonly defaultHarnessId: string },
+    ) => Promise<void>,
+  ): Promise<void> =>
+    withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        await body(harness.base, token, await readFirstAccount(harness.base, token));
+      },
+      { plugins: [nonGeneratingPlugin] },
+    );
+
+  const readIssues = async (
+    response: Response,
+  ): Promise<ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>> =>
+    ((await response.json()) as { error: { details: { issues: never } } }).error.details.issues;
+
+  const REFUSAL =
+    "Harness nongenerating makes no text generations; pick another model in Settings › System";
+
+  it("rejects a model of an account whose default harness makes none, naming the account", async () => {
+    await withAccountInNonGeneratingHarness(async (base, token, account) => {
+      expect(account.defaultHarnessId).toBe("tg/nongenerating");
+
+      const response = await patchSettings(base, token, {
+        controller: { "textGeneration.model": { providerAccountId: account.id, model: "fast" } },
+      });
+
+      expect(await readIssues(response)).toEqual([
+        {
+          path: ["controller", "textGeneration.model", "providerAccountId"],
+          message: expect.stringContaining(REFUSAL) as unknown,
+        },
+      ]);
+      expect((await readSettings(base, token)).controller).not.toHaveProperty(
+        "textGeneration.model",
+      );
+    });
+  });
+
+  it("rejects a model that names a harness that makes none, naming the harness", async () => {
+    await withAccountInNonGeneratingHarness(async (base, token, account) => {
+      const response = await patchSettings(base, token, {
+        controller: {
+          "textGeneration.model": {
+            providerAccountId: account.id,
+            harnessId: "tg/nongenerating",
+            model: "fast",
+          },
+        },
+      });
+
+      expect(await readIssues(response)).toEqual([
+        {
+          path: ["controller", "textGeneration.model", "harnessId"],
+          message: expect.stringContaining(REFUSAL) as unknown,
+        },
+      ]);
+    });
+  });
+
+  it("accepts the same account in a harness that does, and as the Thread default", async () => {
+    await withAccountInNonGeneratingHarness(async (base, token, account) => {
+      const model = { providerAccountId: account.id, harnessId: "tg/capable", model: "fast" };
+      const chosen = await patchSettings(base, token, {
+        controller: { "textGeneration.model": model },
+      });
+      expect(chosen.status, await chosen.clone().text()).toBe(200);
+
+      const thread = await patchSettings(base, token, {
+        user: { "thread.providerAccountId": account.id },
+      });
+      expect(thread.status, await thread.clone().text()).toBe(200);
+    });
+  });
+});
+
+describe("the Thread default account", () => {
   it("accepts an existing provider account, with the harness it can run or none", async () => {
     await withSettings(async (base, token) => {
       const account = await readFirstAccount(base, token);

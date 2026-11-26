@@ -290,6 +290,7 @@ const buildBootPlugin = (id: string, failure?: string): Plugin => ({
         mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
     }),
   activate: () =>

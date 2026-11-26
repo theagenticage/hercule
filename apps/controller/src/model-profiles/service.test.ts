@@ -44,6 +44,7 @@ import {
   buildHarnessDefinition,
   buildProviderDefinition,
   createPluginFixture,
+  declareNoTextGeneration,
 } from "../plugins/testing";
 import type { ModelDescriptor } from "@hercule/protocol";
 import { buildModel, runWithProfiles, storeCatalog } from "./testing";
@@ -837,6 +838,35 @@ describe("resolving entries", () => {
     expect(resolved.options.map((option) => option.id)).toEqual(["effort"]);
   });
 
+  describe("canGenerateText", () => {
+    /** Runs the entry in the fixture harness `alpha`, which declares `textGeneration`, with no runner connected. */
+    const resolveEntryInAlpha = (textGeneration: "supported" | "unsupported") =>
+      runWithProfiles(
+        Effect.gen(function* () {
+          const accountId = yield* addReadyKeyAccount("work");
+          return yield* putEntry(accountId, "current");
+        }),
+        buildAccountPlugins().map((plugin) =>
+          plugin.manifest.id === "alpha" && textGeneration === "unsupported"
+            ? declareNoTextGeneration(plugin)
+            : plugin,
+        ),
+      );
+
+    it("is true in a harness that makes text generations, even with no machine connected", async () => {
+      const resolved = await resolveEntryInAlpha("supported");
+
+      expect(resolved.canGenerateText).toBe(true);
+      expect(resolved.problem?.reason).toBe("no-runner");
+    });
+
+    it("is false in a harness that declares it makes none", async () => {
+      const resolved = await resolveEntryInAlpha("unsupported");
+
+      expect(resolved.canGenerateText).toBe(false);
+    });
+  });
+
   it("takes the harness from the entry, else the section, else the account", async () => {
     const resolved = await runWithProfiles(
       Effect.gen(function* () {
@@ -1033,6 +1063,8 @@ describe("resolving entries", () => {
       reason: "harness-not-allowed",
       message: expect.stringContaining("cannot run") as unknown,
     });
+    // beta declares text generation, but cannot run this account, so nothing may be picked there.
+    expect(resolved.canGenerateText).toBe(false);
   });
 
   it("reports no runner when none is connected", async () => {

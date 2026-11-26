@@ -41,6 +41,7 @@ const definition: HarnessDefinition = {
     disallowedTools: "unsupported",
     // ACP takes no output schema for a prompt.
     structuredOutput: "unsupported",
+    textGeneration: "unsupported",
   },
   // The login of a Google subscription lives in the Harness Home, so that kind
   // has no credential variable. Antigravity accepts every model the account

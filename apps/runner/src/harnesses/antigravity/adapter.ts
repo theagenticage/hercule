@@ -181,9 +181,11 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
 
     deleteSessionFiles,
 
+    // The harness declares `textGeneration: "unsupported"`, so a controller never
+    // sends this; one of an older version can, and this answers it.
     generateText: () =>
       Effect.fail(
-        `${ANTIGRAVITY_NAME} runs no text generations. Pick another model for it in Settings.`,
+        `${ANTIGRAVITY_NAME} makes no text generations. Pick another model for it in Settings.`,
       ),
 
     login: { methods: ["sign-in"], build: buildLoginCommand },

@@ -27,6 +27,11 @@ export const DeclaredCapabilities = Schema.Struct({
   mcpPassthrough: Support,
   disallowedTools: Support,
   structuredOutput: Schema.Literals(["supported", "unsupported"]),
+  /**
+   * `unsupported` means the harness makes no text generations (spec 06 section 14), so the
+   * controller never offers or picks a model in it for `textGeneration.model`.
+   */
+  textGeneration: Schema.Literals(["supported", "unsupported"]),
 });
 
 export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilities>;

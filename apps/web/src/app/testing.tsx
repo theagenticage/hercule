@@ -289,6 +289,7 @@ export const buildMainProfile = (accounts: readonly ProviderAccount[]): ModelPro
         name: model.name,
         options: model.options,
         imageInput: model.imageInput,
+        canGenerateText: true,
         problem: runnable ? null : { reason: "not-signed-in" as const, message: "not signed in" },
       }));
     return {

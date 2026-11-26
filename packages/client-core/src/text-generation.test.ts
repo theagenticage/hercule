@@ -1,6 +1,6 @@
 /**
  * Tests the model select of Settings > System (`buildTextGenerationField`)
- * and the line about the last failure (`describeTextGenerationFailure`).
+ * and the line about the last failure (`describeTextGenerationProblem`).
  */
 import { describe, expect, it } from "vitest";
 import type { TextGenerationStatus } from "@hercule/contract";
@@ -18,7 +18,7 @@ import {
 } from "./providers.testing";
 import {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   describeTextGenerationModel,
   describeTextGenerationRecap,
 } from "./text-generation";
@@ -81,6 +81,44 @@ describe("buildTextGenerationField", () => {
       "OpenAI · GPT-6",
       "Anthropic · Haiku 5",
       "Z.ai · GLM 5.3 Flash (not signed in)",
+      "Off",
+    ]);
+  });
+
+  it("leaves out an entry that cannot generate text, and labels a stored setting that names it", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(OPENAI_IDENTITY, [
+        buildProfileEntry(OPENAI_IDENTITY, "gpt-6-luna", { name: "GPT-6 Luna" }),
+        // Picked to run in a harness that makes no text generations, so the controller marks
+        // it, while the entry in the account's own harness stays offered.
+        buildProfileEntry(OPENAI_IDENTITY, "gpt-6", {
+          name: "GPT-6",
+          harnessId: "pi/pi",
+          resolvedHarnessId: "pi/pi",
+          canGenerateText: false,
+        }),
+      ]),
+    ]);
+    const args = [PROVIDERS, [CODEX], HARNESSES, [profile], NOTHING] as const;
+
+    const unset = buildTextGenerationField(undefined, ...args);
+    expect(unset.choices.map((choice) => choice.label)).toEqual([
+      "Automatic - no model available",
+      "OpenAI · GPT-6 Luna",
+      "Off",
+    ]);
+
+    // Names the left-out entry exactly: same account, model and harness.
+    const setting = { providerAccountId: CODEX.id, harnessId: "pi/pi", model: "gpt-6" };
+    const stored = buildTextGenerationField(setting, ...args);
+    const notOffered = stored.choices.filter((choice) => choice.setting === setting);
+    expect(notOffered).toHaveLength(1);
+    expect(notOffered[0]!.label).toBe("OpenAI · gpt-6 (not offered)");
+    expect(stored.selectedKey).toBe(notOffered[0]!.key);
+    expect(stored.choices.map((choice) => choice.label)).toEqual([
+      "Automatic",
+      "OpenAI · GPT-6 Luna",
+      "OpenAI · gpt-6 (not offered)",
       "Off",
     ]);
   });
@@ -288,7 +326,7 @@ describe("buildTextGenerationField", () => {
   });
 });
 
-describe("describeTextGenerationFailure", () => {
+describe("describeTextGenerationProblem", () => {
   const failed = (
     reason: "unavailable" | "failed" | "timeout" | "invalid-output",
   ): TextGenerationStatus => ({
@@ -298,17 +336,17 @@ describe("describeTextGenerationFailure", () => {
   });
 
   it("reads the reason, the message and how long ago it was", () => {
-    expect(describeTextGenerationFailure(undefined, failed("timeout"), NOW)).toBe(
+    expect(describeTextGenerationProblem(undefined, failed("timeout"), NOW)).toBe(
       "Last failure 5 minutes ago - timed out: The call went wrong.",
     );
-    expect(describeTextGenerationFailure("automatic", failed("unavailable"), NOW)).toBe(
+    expect(describeTextGenerationProblem("automatic", failed("unavailable"), NOW)).toBe(
       "Last failure 5 minutes ago - unavailable: The call went wrong.",
     );
-    expect(describeTextGenerationFailure("automatic", failed("failed"), NOW)).toBe(
+    expect(describeTextGenerationProblem("automatic", failed("failed"), NOW)).toBe(
       "Last failure 5 minutes ago - failed: The call went wrong.",
     );
     expect(
-      describeTextGenerationFailure(
+      describeTextGenerationProblem(
         { providerAccountId: CODEX.id, model: "gpt-6" },
         failed("invalid-output"),
         NOW,
@@ -316,12 +354,39 @@ describe("describeTextGenerationFailure", () => {
     ).toBe("Last failure 5 minutes ago - invalid output: The call went wrong.");
   });
 
-  it("returns null when there is no failure", () => {
-    expect(describeTextGenerationFailure(undefined, NOTHING, NOW)).toBeNull();
+  it("returns null when there is no failure and no reason text generation cannot run", () => {
+    expect(describeTextGenerationProblem(undefined, NOTHING, NOW)).toBeNull();
+  });
+
+  it("reads the reason text generation cannot run when there is no failure", () => {
+    const status: TextGenerationStatus = {
+      ...NOTHING,
+      unavailableReason: "Codex makes no text generations",
+    };
+
+    expect(describeTextGenerationProblem(undefined, status, NOW)).toBe(
+      "Unavailable: Codex makes no text generations",
+    );
+  });
+
+  it("prefers the reason text generation cannot run now over the last failure", () => {
+    const status: TextGenerationStatus = {
+      ...failed("timeout"),
+      unavailableReason: "no runner is signed in",
+    };
+
+    expect(describeTextGenerationProblem("automatic", status, NOW)).toBe(
+      "Unavailable: no runner is signed in",
+    );
   });
 
   it("returns null while text generation is off", () => {
-    expect(describeTextGenerationFailure("off", failed("timeout"), NOW)).toBeNull();
+    const status: TextGenerationStatus = {
+      ...failed("timeout"),
+      unavailableReason: "text generation is off in Settings",
+    };
+
+    expect(describeTextGenerationProblem("off", status, NOW)).toBeNull();
   });
 });
 

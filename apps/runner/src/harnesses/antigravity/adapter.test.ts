@@ -114,7 +114,7 @@ describe("a text generation", () => {
     );
 
     expect(failure).toBe(
-      "Antigravity runs no text generations. Pick another model for it in Settings.",
+      "Antigravity makes no text generations. Pick another model for it in Settings.",
     );
   });
 });

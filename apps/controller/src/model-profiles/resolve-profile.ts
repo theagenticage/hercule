@@ -23,6 +23,7 @@ import {
 } from "@hercule/contract";
 import {
   decideProviderAccountHarness,
+  decideTextGenerationHarness,
   findCredentialSecretName,
   type RegisteredHarness,
   type RegisteredProvider,
@@ -139,6 +140,9 @@ const resolveEntry = (
     options: runDescriptor?.options ?? [],
     imageInput: runDescriptor?.imageInput ?? null,
     problem: findEntryProblem(entry, account, resolvedHarnessId, catalog, world),
+    canGenerateText:
+      decideTextGenerationHarness(world.providers, world.harnesses, account, resolvedHarnessId)
+        ._tag === "chosen",
   };
 };
 

@@ -23,8 +23,8 @@ const omitKey = (key: string) => {
 };
 
 describe("the host API version", () => {
-  it("is 10", () => {
-    expect(HOST_API).toBe(10);
+  it("is 11", () => {
+    expect(HOST_API).toBe(11);
   });
 });
 

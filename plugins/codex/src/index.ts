@@ -33,6 +33,7 @@ const definition: HarnessDefinition = {
     // The app-server exposes no per-turn tool denylist.
     disallowedTools: "unsupported",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
   // The login of a ChatGPT subscription lives in the Harness Home, so that
   // kind has no credential variable. An API key is handed over in
