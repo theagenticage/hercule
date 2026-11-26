@@ -315,19 +315,14 @@ export interface PromptReply {
  */
 export interface AcpPipes {
   /**
-   * Writes `text` to the harness's stdin. It is one whole line. A throw, or a
-   * returned promise that rejects, means the write failed and ends the
-   * connection; the reply of an open request is then reported as not written
-   * (`replyWritten`). The connection waits for a returned promise before it
+   * Writes `text` to the harness's stdin. It is one whole line. The returned
+   * promise resolves when the process has accepted the line, and rejects when
+   * the write failed (for example EPIPE, or the process is gone). A rejection
+   * ends the connection; the reply of an open request is then reported as not
+   * written (`replyWritten`). The connection waits for the promise before it
    * reports a reply as written.
-   *
-   * A write that returns nothing and never throws, such as the `write` of a
-   * `FramedChild`, cannot fail: a write to a dead process is lost silently, and
-   * the connection notices the death by `exited` or the end of `stdout`, which
-   * may be after a reply was reported as written. A pipe that can detect a dead
-   * process returns a promise that rejects.
    */
-  readonly write: (text: string) => void | Promise<void>;
+  readonly write: (text: string) => Promise<void>;
   /** The harness's stdout. Each item is one whole line, without its newline. */
   readonly stdout: AsyncIterable<string>;
   /**
@@ -396,9 +391,19 @@ export interface AcpConnection {
    * its value is a second effect that waits until the turn ends, which may take
    * as long as the agent works.
    *
-   * The first effect fails with `closed` when the write failed or the
-   * connection ended before the line was written: the harness did not get the
-   * prompt, and no reply will come. The second effect fails when the
+   * The first effect succeeds when the write succeeded, and also when the
+   * harness's reply arrives before the write is acknowledged: the reply proves
+   * the harness got the prompt. It fails in two ways that differ for a caller
+   * that wants to send the prompt again:
+   *
+   * - `not-sent`: the harness certainly did not get the prompt. The write
+   *   failed, or the connection had ended before the line was written. Sending
+   *   it again cannot run it twice.
+   * - `closed`: the connection ended while the write was in flight. It is not
+   *   known whether the harness got the prompt, so sending it again may run it
+   *   twice.
+   *
+   * No reply comes after either failure. The second effect fails when the
    * connection ends first, with `refused` when the harness reports an error for
    * the turn, and with `unreadable` when the reply has no stop reason this
    * version knows. Updates the harness sent before its reply are handled before

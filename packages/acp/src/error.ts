@@ -15,8 +15,20 @@ import * as Schema from "effect/Schema";
  *   vendored client.
  * - `timed-out`: no reply came in time. It is not known whether the harness
  *   did what was asked.
+ * - `not-sent`: only `sendPrompt`'s first stage fails with it. The request line
+ *   certainly did not reach the harness: the write of it failed, or the
+ *   connection had ended before it was written. The call can be made again
+ *   without the risk of doing it twice. A `closed` failure of that stage means
+ *   the connection ended while the write was in flight: the harness may have
+ *   got the prompt.
  */
-export const AcpErrorReason = Schema.Literals(["refused", "closed", "unreadable", "timed-out"]);
+export const AcpErrorReason = Schema.Literals([
+  "refused",
+  "closed",
+  "unreadable",
+  "timed-out",
+  "not-sent",
+]);
 export type AcpErrorReason = typeof AcpErrorReason.Type;
 
 /**

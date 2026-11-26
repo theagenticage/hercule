@@ -121,8 +121,11 @@ export const answerWith =
 
 /** A harness process the way the runner talks to it: lines in both directions, ended or killed. */
 export interface FakeHarness {
-  /** Takes what the client writes. A message is handled once its line is complete. */
-  readonly write: (text: string) => void;
+  /**
+   * Takes what the client writes. A message is handled once its line is
+   * complete. The promise rejects after `failWrites`.
+   */
+  readonly write: (text: string) => Promise<void>;
   /** The harness's output, one whole line per item, without the newline. */
   readonly stdout: AsyncIterable<string>;
   /** Always empty. It ends when the harness does. */
@@ -138,7 +141,7 @@ export interface FakeHarness {
   readonly sendLine: (text: string) => void;
   /** Makes `stdout` fail with `error` after the lines already sent, the way a broken pipe does. */
   readonly failOutput: (error: unknown) => void;
-  /** Makes every later `write` throw `error`. */
+  /** Makes every later `write` reject with `error`. */
   readonly failWrites: (error?: unknown) => void;
   /** Whether the client stopped reading `stdout` before its end. */
   readonly isReadingStopped: () => boolean;
@@ -411,15 +414,22 @@ export const startFakeHarness = (
   };
 
   const harness: FakeHarness = {
-    write: (text) => {
-      if (writeFailure !== undefined) throw writeFailure.error;
-      if (closed) return;
-      pendingText += text;
-      const lines = pendingText.split("\n");
-      pendingText = lines.pop() ?? "";
-      for (const line of lines) handleLine(line);
-      onChange();
-    },
+    write: (text) =>
+      new Promise<void>((resolve, reject) => {
+        if (writeFailure !== undefined) {
+          // oxlint-disable-next-line typescript/prefer-promise-reject-errors
+          reject(writeFailure.error);
+          return;
+        }
+        if (!closed) {
+          pendingText += text;
+          const lines = pendingText.split("\n");
+          pendingText = lines.pop() ?? "";
+          for (const line of lines) handleLine(line);
+          onChange();
+        }
+        resolve();
+      }),
     stdout: stdout.lines,
     stderr: stderr.lines,
     end: () => {

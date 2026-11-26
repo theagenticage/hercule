@@ -126,10 +126,17 @@ type LoggedMessage = typeof LoggedMessage.Type;
 const readIncomingMessages = Schema.decodeUnknownOption(Schema.Array(LoggedMessage));
 const readOutgoingMessage = Schema.decodeUnknownOption(LoggedMessage);
 
-/** Returns the `id` of the JSON-RPC request in `line`, or `undefined` when the line is not a JSON object with a string or number `id`. */
+/**
+ * Returns the `id` of the JSON-RPC request in `line`, or `undefined` when the
+ * line is not a JSON object with a `method` and a string or number `id`. A
+ * response we write has an `id` too, possibly equal to the `id` of a request of
+ * ours, so only a line with a `method` counts.
+ */
 const readRequestId = (line: string): string | number | undefined => {
   try {
-    const id: unknown = (JSON.parse(line) as { id?: unknown } | null)?.id;
+    const message = JSON.parse(line) as { id?: unknown; method?: unknown } | null;
+    const id = message?.id;
+    if (typeof message?.method !== "string") return undefined;
     return typeof id === "string" || typeof id === "number" ? id : undefined;
   } catch {
     return undefined;
@@ -282,7 +289,10 @@ export const openAcpConnection = (options: {
     let lastLine = "";
     let incoming: ReadonlyArray<LoggedMessage> = [];
     // The calls of ours that wait for their reply, by the id of their request.
-    const waitingCalls = new Map<string, { reply: unknown }>();
+    const waitingCalls = new Map<
+      string,
+      { reply: unknown; written?: Deferred.Deferred<void, AcpError> }
+    >();
     // Requests of the harness that are not answered yet, by the id the client's handlers get.
     const openRequests = new Map<string, { readonly method: string; readonly params: unknown }>();
     // The ids of requests of the harness whose reply is not written yet. An id
@@ -368,6 +378,33 @@ export const openAcpConnection = (options: {
     const replies = new Map<string, Deferred.Deferred<void, AcpError>>();
     // The calls that wait for their request line to be written, by request id.
     const unwrittenRequests = new Map<string, Deferred.Deferred<void, AcpError>>();
+    // The calls of `unwrittenRequests` whose line has been handed to the pipe
+    // but not yet acknowledged by it. The harness may already have read it.
+    const writesInFlight = new Set<Deferred.Deferred<void, AcpError>>();
+    /**
+     * Fails `written` because its request line did not reach the harness, or
+     * may not have. A line that was never handed to the pipe, or whose write
+     * failed, fails with `not-sent`: the harness certainly did not get it. A line
+     * whose write was still in flight fails with `closed`, because the harness
+     * may have read it already.
+     */
+    const failUnwritten = (written: Deferred.Deferred<void, AcpError>, detail: string): void => {
+      const unknown = writesInFlight.delete(written);
+      Deferred.doneUnsafe(
+        written,
+        Effect.fail(
+          unknown
+            ? new AcpError({
+                reason: "closed",
+                message: `The connection to the harness ended while the request was being written, so it is not known whether the harness got it: ${detail}`,
+              })
+            : new AcpError({
+                reason: "not-sent",
+                message: `The request was not handed to the harness: ${detail}`,
+              }),
+        ),
+      );
+    };
     // Completed once, with the first reason the connection ended. Once it is
     // complete, the harness's output is no longer read.
     const closed = Deferred.makeUnsafe<AcpError>();
@@ -389,15 +426,7 @@ export const openAcpConnection = (options: {
       }
       for (const [key, written] of [...unwrittenRequests]) {
         unwrittenRequests.delete(key);
-        Deferred.doneUnsafe(
-          written,
-          Effect.fail(
-            new AcpError({
-              reason: "closed",
-              message: `The request was not handed to the harness, because the connection ended before it was written: ${message}`,
-            }),
-          ),
-        );
+        failUnwritten(written, `the connection ended: ${message}`);
       }
       Deferred.doneUnsafe(closed, Effect.succeed(new AcpError({ reason: "closed", message })));
     };
@@ -415,7 +444,24 @@ export const openAcpConnection = (options: {
         const key = acpRequestIdentity(id);
         const written = unwrittenRequests.get(key);
         unwrittenRequests.delete(key);
-        if (written !== undefined) Deferred.doneUnsafe(written, Effect.void);
+        if (written === undefined) continue;
+        writesInFlight.delete(written);
+        Deferred.doneUnsafe(written, Effect.void);
+      }
+    };
+
+    /** Calls `visit` with each waiting call whose request line is in `text`. */
+    const forEachUnwrittenRequestIn = (
+      text: string,
+      visit: (key: string, written: Deferred.Deferred<void, AcpError>) => void,
+    ): void => {
+      if (unwrittenRequests.size === 0) return;
+      for (const line of text.split("\n")) {
+        const id = readRequestId(line);
+        if (id === undefined) continue;
+        const key = acpRequestIdentity(id);
+        const written = unwrittenRequests.get(key);
+        if (written !== undefined) visit(key, written);
       }
     };
 
@@ -526,27 +572,42 @@ export const openAcpConnection = (options: {
         Stream.interruptWhen(Deferred.await(closed)),
       ),
       stdout: () =>
-        Sink.forEach((chunk: string | Uint8Array) =>
-          Effect.try({
+        Sink.forEach((chunk: string | Uint8Array) => {
+          let text = "";
+          /** Fails the calls waiting for this chunk as not sent, then ends the connection. */
+          const failWrite = (cause: unknown) => {
+            forEachUnwrittenRequestIn(text, (key, written) => {
+              unwrittenRequests.delete(key);
+              writesInFlight.delete(written);
+              failUnwritten(
+                written,
+                `Could not write to the harness: ${quoteHarnessText(String(cause))}`,
+              );
+            });
+            return failPipe("write", "Could not write to the harness", cause);
+          };
+          return Effect.try({
             try: () => {
-              const text = typeof chunk === "string" ? chunk : decoder.decode(chunk);
-              return { pending: pipes.write(text), text };
+              if (Deferred.isDoneUnsafe(closed)) {
+                throw new Error("The connection to the harness is over.");
+              }
+              text = typeof chunk === "string" ? chunk : decoder.decode(chunk);
+              // From here the harness may read the line, whatever happens to the acknowledgement.
+              forEachUnwrittenRequestIn(text, (_key, written) => writesInFlight.add(written));
+              return { pending: pipes.write(text) };
             },
-            catch: (cause) => failPipe("write", "Could not write to the harness", cause),
+            catch: failWrite,
           }).pipe(
             // The vendored client reports a reply as written only after this
             // effect succeeds, so a write that fails here is never reported as done.
-            Effect.flatMap(({ pending, text }) =>
+            Effect.flatMap(({ pending }) =>
               (pending instanceof Promise
-                ? Effect.tryPromise({
-                    try: () => pending,
-                    catch: (cause) => failPipe("write", "Could not write to the harness", cause),
-                  })
+                ? Effect.tryPromise({ try: () => pending, catch: failWrite })
                 : Effect.void
               ).pipe(Effect.tap(() => Effect.sync(() => markRequestsWritten(text)))),
             ),
-          ),
-        ),
+          );
+        }),
       stderr: () => Sink.drain,
     });
 
@@ -565,6 +626,13 @@ export const openAcpConnection = (options: {
               const key = acpRequestIdentity(requestId);
               const call = waitingCalls.get(key);
               if (call !== undefined && exit._tag === "Success") call.reply = exit.value;
+              // A reply proves the harness read the request, even if the pipe has
+              // not acknowledged the write yet.
+              if (call?.written !== undefined) {
+                unwrittenRequests.delete(key);
+                writesInFlight.delete(call.written);
+                Deferred.doneUnsafe(call.written, Effect.void);
+              }
               waitingCalls.delete(key);
             }
           } else {
@@ -932,20 +1000,12 @@ export const openAcpConnection = (options: {
                 stopReason: reply.stopReason,
                 ...(reply.usage == null ? {} : { usage: reply.usage }),
               })),
-              // A call that ends before its line was written never wrote it.
-              Effect.tapError((error) => Deferred.fail(written, error)),
+              // A call that ends before the write is acknowledged: the line was
+              // never written, or the write was still in flight (see `failUnwritten`).
+              Effect.tapError((error) => Effect.sync(() => failUnwritten(written, error.message))),
               Effect.ensuring(
                 Effect.sync(() =>
-                  Deferred.doneUnsafe(
-                    written,
-                    Effect.fail(
-                      new AcpError({
-                        reason: "closed",
-                        message:
-                          "The prompt was dropped before its request was written to the harness.",
-                      }),
-                    ),
-                  ),
+                  failUnwritten(written, "The prompt was dropped before its request was written."),
                 ),
               ),
             ),

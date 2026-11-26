@@ -267,18 +267,118 @@ it.effect("sendPrompt succeeds once the request is written, before the reply", (
   }),
 );
 
-it.effect("sendPrompt fails when the write of the request is rejected", () =>
+it.effect("sendPrompt fails with not-sent when the write of the request is rejected", () =>
   Effect.gen(function* () {
     const harness = createTestHarness({
-      writeWith: (write) => (text) =>
-        text.includes('"session/prompt"') ? Promise.reject(new Error("EPIPE")) : write(text),
+      writeWith: (write) => async (text) => {
+        if (text.includes('"session/prompt"')) throw new Error("EPIPE");
+        await write(text);
+      },
     });
     const connection = yield* harness.open;
 
     const error = yield* Effect.flip(connection.sendPrompt(SESSION, TEXT));
 
-    expect(error).toMatchObject({ reason: "closed" });
+    expect(error).toMatchObject({ reason: "not-sent" });
     expect(error.message).toContain("not handed to the harness");
+  }),
+);
+
+it.effect(
+  "sendPrompt fails with not-sent when the connection ended before the line was written",
+  () =>
+    Effect.gen(function* () {
+      const harness = createTestHarness();
+      const connection = yield* harness.open;
+      harness.fake.end();
+      yield* connection.awaitClosed;
+
+      const error = yield* Effect.flip(connection.sendPrompt(SESSION, TEXT));
+
+      expect(error).toMatchObject({ reason: "not-sent" });
+      expect(harness.fake.received.some(isMethod("session/prompt"))).toBe(false);
+    }),
+);
+
+it.effect(
+  "sendPrompt fails with closed, not not-sent, when the harness read the line and the connection ended before the write was acknowledged",
+  () =>
+    Effect.gen(function* () {
+      const release = Promise.withResolvers<void>();
+      const harness = createTestHarness({
+        scripts: { "session/prompt": () => [] },
+        writeWith: (write) => async (text) => {
+          await write(text);
+          if (text.includes('"session/prompt"')) await release.promise;
+        },
+      });
+      const connection = yield* harness.open;
+
+      const sending = yield* Effect.forkChild(Effect.flip(connection.sendPrompt(SESSION, TEXT)));
+      yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+      harness.fake.end();
+      yield* connection.awaitClosed;
+      const error = yield* Fiber.join(sending);
+      release.resolve();
+
+      expect(error).toMatchObject({ reason: "closed" });
+      expect(error.message).toContain("not known whether the harness got");
+    }),
+);
+
+it.effect("sendPrompt succeeds when the reply arrives before the write is acknowledged", () =>
+  Effect.gen(function* () {
+    const release = Promise.withResolvers<void>();
+    const harness = createTestHarness({
+      writeWith: (write) => async (text) => {
+        await write(text);
+        if (text.includes('"session/prompt"')) await release.promise;
+      },
+    });
+    const connection = yield* harness.open;
+
+    const sending = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+    // The default script of the fake answers the prompt at once, while the write is still held.
+    const waitForReply = yield* Fiber.join(sending);
+    release.resolve();
+
+    expect(yield* waitForReply).toMatchObject({ stopReason: expect.any(String) as unknown });
+  }),
+);
+
+it.effect("does not take a response we write for the request of the same id as written", () =>
+  Effect.gen(function* () {
+    const releaseResponse = Promise.withResolvers<void>();
+    const releasePrompt = Promise.withResolvers<void>();
+    const harness = createTestHarness({
+      scripts: { "session/prompt": () => [] },
+      writeWith: (write) => async (text) => {
+        await write(text);
+        if (text.includes('"result"')) await releaseResponse.promise;
+        if (text.includes('"session/prompt"')) await releasePrompt.promise;
+      },
+    });
+    const connection = yield* harness.open;
+    // The request ids the client uses count up, so the next call gets the next number.
+    const promptId =
+      Math.max(...harness.fake.received.map((message) => Number(message.id ?? -1))) + 1;
+
+    // The response to the harness's request has the id the prompt is about to get.
+    // It is written (and held in flight) while the prompt waits behind it.
+    harness.say(buildRequest(promptId, "session/request_permission", APPROVAL_PARAMS));
+    yield* harness.whenWritten("the response", isReplyTo(promptId));
+    const sending = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    // Lets the prompt register its request before the response is acknowledged.
+    for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow;
+    releaseResponse.resolve();
+    yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+    expect(harness.fake.received.find(isMethod("session/prompt"))?.id).toBe(promptId);
+    yield* Effect.yieldNow;
+
+    expect(sending.pollUnsafe()).toBeUndefined();
+    releasePrompt.resolve();
+    yield* Fiber.join(sending);
   }),
 );
 
@@ -288,9 +388,9 @@ it.effect("gives each overlapping sendPrompt its own write signal", () =>
     let promptWrites = 0;
     const harness = createTestHarness({
       scripts: { "session/prompt": () => [] },
-      writeWith: (write) => (text) => {
-        write(text);
-        if (text.includes('"session/prompt"') && promptWrites++ === 1) return release.promise;
+      writeWith: (write) => async (text) => {
+        await write(text);
+        if (text.includes('"session/prompt"') && promptWrites++ === 1) await release.promise;
       },
     });
     const connection = yield* harness.open;
@@ -942,10 +1042,10 @@ it.effect(
       const written = yield* Deferred.make<void>();
       let replyWrites = 0;
       const harness = createTestHarness({
-        writeWith: (write) => (text) => {
-          write(text);
+        writeWith: (write) => async (text) => {
+          await write(text);
           if (text.includes('"id":"p"') && replyWrites++ === 0)
-            return Effect.runPromise(Deferred.await(written));
+            await Effect.runPromise(Deferred.await(written));
         },
       });
       const connection = yield* harness.open;
@@ -1332,23 +1432,13 @@ it.effect(
     }),
 );
 
-it.effect.each([
-  {
-    name: "returns a promise that rejects",
-    write: (): void | Promise<void> => Promise.reject(new Error("EPIPE")),
-  },
-  {
-    name: "throws",
-    write: (): void | Promise<void> => {
-      throw new Error("EPIPE");
-    },
-  },
-])(
-  "reports a reply as not written when the write of the reply $name, while the output is open",
-  ({ write }) =>
+it.effect(
+  "reports a reply as not written when the write of the reply rejects, while the output is open",
+  () =>
     Effect.gen(function* () {
       const harness = createTestHarness({
-        writeWith: (realWrite) => (text) => (text.includes('"result"') ? write() : realWrite(text)),
+        writeWith: (realWrite) => (text) =>
+          text.includes('"result"') ? Promise.reject(new Error("EPIPE")) : realWrite(text),
       });
       yield* harness.open;
 

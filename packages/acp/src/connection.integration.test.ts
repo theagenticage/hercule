@@ -215,8 +215,8 @@ const replayRecording = (name: RecordingName) =>
     const scope = yield* Scope.make();
     const connection: AcpConnection = yield* openAcpConnection({
       pipes: {
-        write: (text) => {
-          fake.write(text);
+        write: async (text) => {
+          await fake.write(text);
           progress.notifyChange();
         },
         stdout: fake.stdout,

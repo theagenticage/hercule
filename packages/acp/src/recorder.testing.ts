@@ -161,8 +161,10 @@ export const createTestHarness = (
     readonly answers?: Answers;
     /** Replaces the exit of the fake, for a process that exits while its output stays open. */
     readonly exited?: Promise<number>;
-    /** Replaces the fake's `write`, for a pipe whose write returns a promise. `write` is the fake's own. */
-    readonly writeWith?: (write: (text: string) => void) => (text: string) => void | Promise<void>;
+    /** Replaces the fake's `write`, for a pipe whose write is slow or fails. `write` is the fake's own. */
+    readonly writeWith?: (
+      write: (text: string) => Promise<void>,
+    ) => (text: string) => Promise<void>;
   } = {},
 ) => {
   const { answers = {} } = options;
