@@ -61,7 +61,7 @@ The interface in `index.ts` stays the same, so nothing outside `connection.ts` c
 
 ## Recordings of `agy`
 
-`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 (not in this repository) added 46 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more. Personal values were replaced: the Linux user name with `user`, and the controller's address with `controller.example`. No email address or token appears in them.
+`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 (not in this repository) added 50 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more. Personal values were replaced: the Linux user name with `user`, and the controller's address with `controller.example`. No email address or token appears in them.
 
 ## Lint, formatting and tests
 

@@ -411,9 +411,16 @@ const replayRecording = (name: RecordingName) =>
  * - `subagent-approval2` ends with the recorder closing the harness while a
  *   prompt was open, so the prompt's error reply comes from the recorder, not
  *   from the harness.
+ * - `stop-bg` ends with the recorder stopping the harness process while a
+ *   prompt was open, so the prompt's error reply comes from the recorder.
+ * - `stop-cancel` sends `session/cancel` twice, once as a request and once as a
+ *   notification, to measure what the harness answers; no single script
+ *   reproduces that.
  */
 const RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY: ReadonlyArray<RecordingName> = [
   "resume",
+  "stop-bg",
+  "stop-cancel",
   "subagent-approval2",
   "tmpdir-resume",
 ];
