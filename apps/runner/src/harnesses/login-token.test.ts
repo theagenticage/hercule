@@ -201,10 +201,13 @@ describe("making a token", () => {
   it("reads a URL and a token that the terminal wrapped across lines", async () => {
     const narrow: HarnessAdapter = {
       ...claudeCode,
-      login: (ctx, binary, method) => ({
-        ...claudeCode.login!(ctx, binary, method),
-        terminal: { cols: 20, rows: 60 },
-      }),
+      login: {
+        ...claudeCode.login!,
+        build: (ctx, binary, method) => ({
+          ...claudeCode.login!.build(ctx, binary, method),
+          terminal: { cols: 20, rows: 60 },
+        }),
+      },
     };
     const driver = makeLogins(spawnLogin);
 
@@ -320,14 +323,17 @@ describe("making a token", () => {
     let folder: string | undefined;
     const failing: HarnessAdapter = {
       ...claudeCode,
-      login: (): LoginCommand => {
-        folder = mkdtempSync(join(tmpdir(), "hercule-token-test-start-"));
-        return {
-          command: ["claude"],
-          env: {},
-          scratchFolder: folder,
-          terminal: { cols: 80, rows: 24 },
-        };
+      login: {
+        ...claudeCode.login!,
+        build: (): LoginCommand => {
+          folder = mkdtempSync(join(tmpdir(), "hercule-token-test-start-"));
+          return {
+            command: ["claude"],
+            env: {},
+            scratchFolder: folder,
+            terminal: { cols: 80, rows: 24 },
+          };
+        },
       },
     };
     const driver = makeLogins(() => {
@@ -356,7 +362,7 @@ describe("making a token", () => {
 describe("the Claude Code token login command", () => {
   it("runs setup-token in a wide terminal and a folder of its own", () => {
     const ctx = contextFor("success");
-    const command = claudeCode.login!(ctx, fakeClaude, "create-token");
+    const command = claudeCode.login!.build(ctx, fakeClaude, "create-token");
     try {
       expect(command.command).toEqual([fakeClaude, "setup-token"]);
       expect(command.terminal).toEqual({ cols: 1000, rows: 60 });
@@ -374,7 +380,7 @@ describe("the Claude Code token login command", () => {
 
   it("keeps the sign-in command as it was", () => {
     const ctx = contextFor("success");
-    const command = claudeCode.login!(ctx, fakeClaude, "sign-in");
+    const command = claudeCode.login!.build(ctx, fakeClaude, "sign-in");
     expect(command.command).toEqual([fakeClaude, "auth", "login"]);
     expect(command.terminal).toBeUndefined();
     expect(command.scratchFolder).toBeUndefined();

@@ -417,13 +417,22 @@ const listOtherSpellings = (path: string, home: string): ReadonlyArray<string> =
   return spellings;
 };
 
+/**
+ * The whitespace at the start or end of a text that Go's `strings.TrimSpace`
+ * removes (`agy` is written in Go): `\t`, `\n`, `\v`, `\f`, `\r`, space,
+ * U+0085, U+00A0 and the Unicode White_Space characters. JavaScript's `trim`
+ * differs: it keeps U+0085.
+ */
+const GO_SPACE_AT_ENDS =
+  /^[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+|[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$/g;
+
 /** Reads where an edit tool writes, with the identities of the existing part of the path and every folder above it. */
 const buildEditTarget = (cwd: string, path: string, home: string): EditTarget => {
   const paths: Array<string> = [];
   const identities: Array<string> = [];
   // `agy` may trim the `Path` before it writes (not measured), so the trimmed
   // reading is compared too. Over-denying a path that ends in whitespace is harmless.
-  const trimmed = path.trim();
+  const trimmed = path.replace(GO_SPACE_AT_ENDS, "");
   const readings = trimmed === path ? [path] : [path, trimmed];
   for (const spelling of readings.flatMap((reading) => [
     reading,
@@ -544,9 +553,9 @@ const buildGuardedPlaces = (cwd: string, rules: HookRules): ReadonlyArray<Guarde
 /**
  * The characters an HFS+ volume ignores when it compares names, so
  * `hooks\u200C.json` opens `hooks.json` there: U+200C to U+200F, U+202A to
- * U+202E, U+206A to U+206F and U+FEFF. The list is Apple's, from the case
- * folding of TN1150 (HFS Plus Volume Format); the table itself was not
- * reachable, so the list is the one the format is known by.
+ * U+202E, U+206A to U+206F and U+FEFF. They are the ignorable code points of
+ * HFS+ case-insensitive name comparison, as Apple documents it in TN1150 (HFS
+ * Plus Volume Format).
  */
 const HFS_IGNORED_CHARACTERS = /[\u200C-\u200F\u202A-\u202E\u206A-\u206F\uFEFF]/g;
 

@@ -259,7 +259,10 @@ describe("starting a login", () => {
   it("leaves a running login alone when the request asks for a method the harness does not support", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
-    const signInOnly: HarnessAdapter = { ...claudeCode, loginMethods: ["sign-in"] };
+    const signInOnly: HarnessAdapter = {
+      ...claudeCode,
+      login: { ...claudeCode.login!, methods: ["sign-in"] },
+    };
 
     const answer = await run(
       Effect.gen(function* () {
@@ -519,11 +522,14 @@ describe("a plain-pipe login that ends at its exit", () => {
 
   const adapterWith = (endsAtExit: boolean): HarnessAdapter => ({
     ...claudeCode,
-    login: () => ({
-      command: ["agy", "acp", "--login"],
-      env: {},
-      ...(endsAtExit ? { endsAtExit } : {}),
-    }),
+    login: {
+      methods: ["sign-in", "create-token"],
+      build: () => ({
+        command: ["agy", "acp", "--login"],
+        env: {},
+        ...(endsAtExit ? { endsAtExit } : {}),
+      }),
+    },
   });
 
   /** Starts the login, which prints its link and instructions before it waits for the code. */

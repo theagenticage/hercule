@@ -2054,12 +2054,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
      * account's own home directories, like a session does, so the credential
      * is saved where the app-server looks for it.
      */
-    loginMethods: ["sign-in"],
-    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
-      command: [binary, "login", "--device-auth"],
-      env: prepareEnv(ctx),
-      userCode: USER_CODE,
-    }),
+    login: {
+      methods: ["sign-in"],
+      build: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
+        command: [binary, "login", "--device-auth"],
+        env: prepareEnv(ctx),
+        userCode: USER_CODE,
+      }),
+    },
 
     install: makeCodexInstall(seam.run),
   };

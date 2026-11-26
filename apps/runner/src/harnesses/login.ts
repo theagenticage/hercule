@@ -573,14 +573,14 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             `The harness ${adapter.harnessId} has no login in this runner build`,
           );
         }
-        const buildCommand = adapter.login.bind(adapter);
+        const buildCommand = adapter.login.build;
         const binary = ctx.binary;
         if (binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);
         }
         // Before the running login is stopped: a request this harness cannot
         // serve must leave it alone.
-        if (adapter.loginMethods?.includes(method) !== true) {
+        if (!adapter.login.methods.includes(method)) {
           return buildLoginFailed(
             `The harness ${adapter.harnessId} cannot ${method === "create-token" ? "create a token" : "sign in"} in this runner build`,
           );

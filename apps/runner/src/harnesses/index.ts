@@ -354,19 +354,23 @@ export interface HarnessAdapter {
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
   /**
-   * The login methods `login` supports. A request for another method is
-   * refused before anything else happens, so it cannot stop a login that is
-   * running. Set whenever `login` is.
+   * The login of this harness, if it has one. `methods` lists the login
+   * methods it supports: a request for another method is refused before
+   * anything else happens, so it cannot stop a login that is running.
+   * `build` returns the command that makes the login `method` for the account
+   * in `ctx`, and is only called with a method in `methods`. It takes the
+   * binary separately, because a login needs a machine that already has the
+   * harness. The command may name a scratch folder it made; the caller must
+   * then start the command, which removes the folder when the login ends.
    */
-  readonly loginMethods?: ReadonlyArray<LoginMethod>;
-  /**
-   * Returns the command that makes the login `method` for the account in `ctx`.
-   * Only called with a method in `loginMethods`. Takes the binary
-   * separately, because a login needs a machine that already has the harness.
-   * The command may name a scratch folder it made; the caller must then
-   * start the command, which removes the folder when the login ends.
-   */
-  readonly login?: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod) => LoginCommand;
+  readonly login?: {
+    readonly methods: ReadonlyArray<LoginMethod>;
+    readonly build: (
+      ctx: HarnessRunnerContext,
+      binary: string,
+      method: LoginMethod,
+    ) => LoginCommand;
+  };
   /**
    * Set by a harness whose sign-in must not run beside its other processes on
    * the same Harness Home (see `antigravity/harness-home-leases.ts`). Takes the exclusive

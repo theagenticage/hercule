@@ -73,7 +73,7 @@ const buildLoginMachine = (exitOnCode: number) => {
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestClock.layer()));
 
-const failureOf = (answer: LoginAnswer): string =>
+const readLoginFailure = (answer: LoginAnswer): string =>
   answer._tag === "loginFailed" ? answer.message : `not a failure: ${answer._tag}`;
 
 describe("a sign-in while sessions and probes run", () => {
@@ -88,7 +88,7 @@ describe("a sign-in while sessions and probes run", () => {
     await run(adapter.startSession(SESSION, SPEC, ctx));
     const refused = await run(logins.start(REQUEST, ACCOUNT, adapter, ctx, "sign-in"));
 
-    expect(failureOf(refused)).toContain("1 session");
+    expect(readLoginFailure(refused)).toContain("1 session");
     expect(machine.spawned).toHaveLength(0);
     expect(fake.spawns[0]!.hasExited).toBe(false);
 
@@ -119,7 +119,7 @@ describe("a sign-in while sessions and probes run", () => {
       }),
     );
 
-    expect(failureOf(refused)).toContain("a check of this account");
+    expect(readLoginFailure(refused)).toContain("a check of this account");
   });
 
   it("does not touch another account's home", async () => {
