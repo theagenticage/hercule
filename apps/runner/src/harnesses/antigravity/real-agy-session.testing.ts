@@ -175,43 +175,54 @@ export const prepareRealAgy = async (): Promise<RealAgyRig> => {
     return folder;
   };
 
-  const binaryPath = join(makeScratchFolder("binary"), "agy");
-  copyFileSync(pinnedBinary, binaryPath);
-  chmodSync(binaryPath, 0o755);
-  const userHome = makeScratchFolder("home");
-  const harnessHome = makeScratchFolder("harness-home");
-  chmodSync(harnessHome, 0o700);
-  mkdirSync(join(harnessHome, APP_DATA_DIR), { recursive: true });
-  writeFileSync(
-    join(harnessHome, APP_DATA_DIR, "antigravity-oauth-token"),
-    readFileSync(loginFile),
-    { mode: 0o600 },
-  );
-  const baseEnvironment: Record<string, string> = {
-    HOME: userHome,
-    PATH: "/usr/bin:/bin",
-    DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
-  };
-
   const eventsBySession = new Map<string, Array<HarnessEvent>>();
-  const collector = Effect.runFork(
-    Stream.runForEach(adapter.events, (event) =>
-      Effect.sync(() => eventsBySession.get(event.sessionId)?.push(event)),
-    ),
-  );
+  let collector: Fiber.Fiber<void, unknown> | undefined;
 
   const dispose = async (): Promise<void> => {
     for (const id of eventsBySession.keys()) {
       await Effect.runPromise(adapter.stopSession(id, "stopped")).catch(() => undefined);
     }
-    await Effect.runPromise(Fiber.interrupt(collector));
+    if (collector !== undefined) await Effect.runPromise(Fiber.interrupt(collector));
     for (const folder of scratchFolders.splice(0)) {
       makeTreeWritable(folder);
       rmSync(folder, { recursive: true, force: true });
     }
   };
 
+  // A run that is killed still removes the copy of the lent login when its process exits.
+  process.once("exit", () => {
+    for (const folder of scratchFolders) {
+      makeTreeWritable(folder);
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  // The folders exist from the first line of the setup, so a failure anywhere in it must remove them.
   try {
+    const binaryPath = join(makeScratchFolder("binary"), "agy");
+    copyFileSync(pinnedBinary, binaryPath);
+    chmodSync(binaryPath, 0o755);
+    const userHome = makeScratchFolder("home");
+    const harnessHome = makeScratchFolder("harness-home");
+    chmodSync(harnessHome, 0o700);
+    mkdirSync(join(harnessHome, APP_DATA_DIR), { recursive: true });
+    writeFileSync(
+      join(harnessHome, APP_DATA_DIR, "antigravity-oauth-token"),
+      readFileSync(loginFile),
+      { mode: 0o600 },
+    );
+    const baseEnvironment: Record<string, string> = {
+      HOME: userHome,
+      PATH: "/usr/bin:/bin",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
+    };
+
+    collector = Effect.runFork(
+      Stream.runForEach(adapter.events, (event) =>
+        Effect.sync(() => eventsBySession.get(event.sessionId)?.push(event)),
+      ),
+    );
+
     const probed = await Effect.runPromise(
       adapter.probe(buildContext(harnessHome, binaryPath, baseEnvironment), { readUsage: false }),
     );

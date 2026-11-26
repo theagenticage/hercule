@@ -382,6 +382,20 @@ describe("the websearch recording", () => {
   });
 });
 
+describe("a text item whose first chunk holds the start of the token", () => {
+  it("carries none of the chunk in its start event", () => {
+    const secret = "sess-tok-7f3a91c2e8";
+    const hide = makeEventSecretHider(secret);
+    const state = freshState();
+    openTurn(state, "t");
+    const events = [
+      ...normalizeUpdate(state, buildChunk(`Bearer ${secret.slice(0, -1)}`)),
+      ...normalizeUpdate(state, buildChunk(secret.slice(-1))),
+    ].flatMap((event) => hide([event]));
+    expect(JSON.stringify(events)).not.toContain(secret.slice(0, 8));
+  });
+});
+
 describe("a web search with a domain", () => {
   it("shows the domain beside the query", () => {
     const state = freshState();

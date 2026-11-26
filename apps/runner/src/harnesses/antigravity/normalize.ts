@@ -534,7 +534,6 @@ const appendText = (
   state: NormalizerState,
   kind: TextRecord["kind"],
   text: string,
-  notification: SessionUpdateNotification,
 ): HarnessEvent[] => {
   if (text === "") return [];
   const events = state.text?.kind === kind ? [] : closeTextItem(state);
@@ -545,7 +544,9 @@ const appendText = (
     turn.running.add(itemId);
     events.push(
       ...turnEvents,
-      buildItemStarted(state, { turnId: turn.id, itemId, kind }, notification),
+      // No raw message: it holds the chunk's text, which the secret hiding of
+      // the deltas could not cover when a token is split over two chunks.
+      buildItemStarted(state, { turnId: turn.id, itemId, kind }),
     );
   }
   events.push({
@@ -904,12 +905,7 @@ const routeUpdate = (
       const text = readChunkText(update);
       return text === undefined
         ? buildUnknownItem(state, name, notification)
-        : appendText(
-            state,
-            decision === "message" ? "assistant_message" : "reasoning",
-            text,
-            notification,
-          );
+        : appendText(state, decision === "message" ? "assistant_message" : "reasoning", text);
     }
     case "toolStart":
     case "toolUpdate": {
