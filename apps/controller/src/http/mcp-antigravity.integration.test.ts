@@ -373,8 +373,8 @@ describe.skipIf(skipReason !== undefined)(
      * (`initialize` and an MCP session), `agy` listed the tools once per
      * process and never again. The real gateway serves the 2026-07-28 era,
      * which `agy` takes (`server/discover`, no `initialize`, no MCP session),
-     * and there `agy` asks for the list again before each call, so the new
-     * tool is usable at once. This test pins what the real gateway shows, so
+     * and there `agy` asks for the list again when the server sends
+     * `list_changed`, so the new tool is usable at once. This test pins what the real gateway shows, so
      * that a change of `agy` shows up here.
      */
     it(

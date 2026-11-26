@@ -51,8 +51,27 @@ describe("the exclusive lease", () => {
 
     const message = expectRefused(leases.acquireExclusive(HOME));
 
-    expect(message).toContain("2 sessions");
-    expect(message).toContain("a check of this account");
+    expect(message).toBe(
+      "Cannot sign in now: 2 sessions and a check of this account run on this runner. Stop the sessions, wait for the check to end, and try again.",
+    );
+  });
+
+  it("names only the sessions when only sessions run", () => {
+    const leases = makeHarnessHomeLeases();
+    expectHeld(leases.acquireRead(HOME, "session"));
+
+    expect(expectRefused(leases.acquireExclusive(HOME))).toBe(
+      "Cannot sign in now: 1 session of this account runs on this runner. Stop the session and try again.",
+    );
+  });
+
+  it("names only the check when only a probe runs", () => {
+    const leases = makeHarnessHomeLeases();
+    expectHeld(leases.acquireRead(HOME, "probe"));
+
+    expect(expectRefused(leases.acquireExclusive(HOME))).toBe(
+      "Cannot sign in now: a check of this account runs on this runner. Wait for the check to end and try again.",
+    );
   });
 
   it("is granted once every read lease is released, and a repeated release changes nothing", () => {
@@ -102,7 +121,7 @@ describe("two homes", () => {
 const verifyAfterSignIn = (leases: ReturnType<typeof makeHarnessHomeLeases>): void => {
   const lease = leases.acquireExclusive(HOME);
   if (!lease.acquired) throw new Error("refused");
-  lease.verify?.();
+  lease.startVerifying?.();
 };
 
 describe("a home whose sign-in succeeded", () => {

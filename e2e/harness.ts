@@ -741,8 +741,10 @@ function findMissingBinary(name: string): string | undefined {
  *
  * - Claude Code: either of the two routes documented at `LENT_CREDENTIALS`.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the account's `CODEX_HOME`. Two live copies of an OAuth login can
- *   rotate each other out, so prefer a file written by `codex login
+ *   into the account's `CODEX_HOME`. A lent copy of an OAuth login and the
+ *   owner's own copy share one refresh token, and whichever refreshes first can
+ *   invalidate the other (this is not the sign-in against running processes
+ *   that spec 06 section 10.5 says Codex needs no lease for), so prefer a file written by `codex login
  *   --with-api-key`, which holds no refresh token. `codex` must be on the
  *   `PATH`.
  * - Antigravity: `HERCULE_E2E_AGY_TOKEN` names an `antigravity-oauth-token`
@@ -800,9 +802,8 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
   {
     harnessId: "antigravity/antigravity",
     label: "Antigravity",
-    // Antigravity's skill syntax is not known yet (it belongs to #1293). A
-    // slash command is the closest guess, so the skill tests may fail on
-    // this harness until that ticket lands.
+    // An input that starts with a slash is sent to `agy` as it is, and `agy`
+    // runs the command (spec 06 section 8, `available_commands_update`).
     invokeSkill: (name) => `/${name}`,
     invokeRepositorySkill: (_checkout, name) => `/${name}`,
     isCheapModel: (slug) => slug.includes("flash"),

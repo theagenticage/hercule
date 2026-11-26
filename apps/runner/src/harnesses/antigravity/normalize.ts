@@ -270,7 +270,7 @@ export const makeEventSecretHider = (secret: string) => {
     return released;
   };
 
-  const hideOne = (event: HarnessEvent): HarnessEvent[] => {
+  const hideSecretInEvent = (event: HarnessEvent): HarnessEvent[] => {
     if (event._tag === "content.delta") {
       const key = readStreamKey(event);
       const text = `${held.get(key)?.delta ?? ""}${event.delta}`.replaceAll(secret, "[hidden]");
@@ -289,7 +289,7 @@ export const makeEventSecretHider = (secret: string) => {
     return [...released, hideSecret(event, secret)];
   };
 
-  return (events: ReadonlyArray<HarnessEvent>): HarnessEvent[] => events.flatMap(hideOne);
+  return (events: ReadonlyArray<HarnessEvent>): HarnessEvent[] => events.flatMap(hideSecretInEvent);
 };
 
 /** Returns the `raw` field for an event built from `message`, or nothing when there is none. */

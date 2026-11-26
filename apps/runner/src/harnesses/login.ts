@@ -45,11 +45,21 @@ import {
   type LoginResult,
   type LoginUrl,
 } from "@hercule/protocol";
-import type { LeaseHeld } from "./harness-home-leases";
 import type { HarnessAdapter, HarnessRunnerContext } from "./index";
 import { stopChild, type StopSignal } from "./process";
 import { TerminalScreen } from "./terminal-screen";
 import { truncateFact } from "./text";
+
+/** A lease on a Harness Home that a harness takes for the sign-in, or the reason it is refused. */
+export type LoginLeaseResult =
+  | { readonly acquired: false; readonly message: string }
+  | {
+      readonly acquired: true;
+      /** Gives the lease back. Safe to call more than once. */
+      readonly release: () => void;
+      /** Ends the lease and leaves the home verifying (see `antigravity/harness-home-leases.ts`). */
+      readonly startVerifying?: () => void;
+    };
 
 export interface LoginChild {
   readonly stdout: AsyncIterable<string>;
@@ -399,7 +409,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     requestId: string,
     providerAccountId: string,
     command: LoginCommand,
-    lease: LeaseHeld | undefined,
+    lease: Extract<LoginLeaseResult, { acquired: true }> | undefined,
   ): Effect.Effect<Held> =>
     Effect.gen(function* () {
       const removeScratchFolder = (): void => {
@@ -430,9 +440,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       const cleanUp = (exit: number | undefined): void => {
         removeScratchFolder();
         // A login that succeeded leaves the home verifying until the
-        // controller has probed the new login (see `harness-home-leases.ts`).
+        // controller has probed the new login (see `antigravity/harness-home-leases.ts`).
         // A login the runner stopped is no sign-in, whatever its exit code.
-        if (exit === 0 && !stopped && lease?.verify !== undefined) lease.verify();
+        if (exit === 0 && !stopped && lease?.startVerifying !== undefined) lease.startVerifying();
         else lease?.release();
       };
       const cleanedUp = child.exited.then(cleanUp, () => cleanUp(undefined));
@@ -663,7 +673,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     submit: (providerAccountId, code) =>
       Effect.gen(function* () {
         const login = held.get(providerAccountId);
-        if (login === undefined) return buildLoginFailed(NO_LOGIN);
+        // A login that is being stopped stays held until it is reaped, but
+        // nothing can be submitted to it.
+        if (login === undefined || login.stopping !== undefined) return buildLoginFailed(NO_LOGIN);
         // For a device login the user types the code into the browser, and the
         // browser completes the login with the vendor. The child reads nothing,
         // so there is nothing to submit and nothing to wait for.

@@ -62,7 +62,7 @@ export interface LeaseHeld {
    * Only on the exclusive lease. Ends it and starts the verifying state of the
    * home (see the module comment). Does nothing after `release`.
    */
-  readonly verify?: () => void;
+  readonly startVerifying?: () => void;
 }
 
 /**
@@ -102,23 +102,38 @@ const VERIFYING =
 const SIGN_IN_RUNNING =
   "A sign-in of this account is in progress on this runner. Finish or cancel it, then try again.";
 
-const plural = (count: number, noun: string): string =>
+const formatCount = (count: number, noun: string): string =>
   `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 
-/** Describes what runs on a home, for the refusal of a sign-in. */
-const describeRunning = (state: HomeState): string => {
-  const parts = [
-    ...(state.sessions > 0 ? [plural(state.sessions, "session")] : []),
-    ...(state.probes > 0 ? ["a check of this account"] : []),
+/** Builds the refusal of a sign-in: what runs on the home, and what the user can do about it. */
+const buildSignInRefusal = (state: HomeState): string => {
+  const sessions = state.sessions > 0 ? formatCount(state.sessions, "session") : undefined;
+  const check = state.probes > 0 ? "a check" : undefined;
+  const running =
+    sessions !== undefined && check !== undefined
+      ? `${sessions} and ${check} of this account run`
+      : sessions !== undefined
+        ? `${sessions} of this account ${state.sessions === 1 ? "runs" : "run"}`
+        : "a check of this account runs";
+  const actions = [
+    ...(sessions === undefined
+      ? []
+      : [state.sessions === 1 ? "stop the session" : "stop the sessions"]),
+    ...(check === undefined ? [] : ["wait for the check to end"]),
   ];
-  return `Cannot sign in now: ${parts.join(" and ")} of this account run on this runner. Stop the sessions, wait for the check to end, and try again.`;
+  const advice =
+    actions.length === 1
+      ? `${actions[0]!} and try again.`
+      : `${actions.join(", ")}, and try again.`;
+  const sentence = `${advice.charAt(0).toUpperCase()}${advice.slice(1)}`;
+  return `Cannot sign in now: ${running} on this runner. ${sentence}`;
 };
 
 /** Makes an empty registry. */
 export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases => {
   const homes = new Map<string, HomeState>();
 
-  const takeState = (home: string): { key: string; state: HomeState } => {
+  const readOrCreateHomeState = (home: string): { key: string; state: HomeState } => {
     const key = resolve(home);
     let state = homes.get(key);
     if (state === undefined) {
@@ -133,7 +148,7 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
   };
 
   /** Forgets a home no lease holds any more, so the map does not grow with every account. */
-  const tidy = (key: string, state: HomeState): void => {
+  const forgetIdleHome = (key: string, state: HomeState): void => {
     if (
       !state.exclusive &&
       state.sessions === 0 &&
@@ -145,7 +160,7 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
   };
 
   /** Returns a release that does its work once. */
-  const once = (release: () => void): (() => void) => {
+  const makeRunOnce = (release: () => void): (() => void) => {
     let done = false;
     return () => {
       if (done) return;
@@ -156,10 +171,10 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
 
   return {
     acquireRead: (home, kind) => {
-      const { key, state } = takeState(home);
+      const { key, state } = readOrCreateHomeState(home);
       if (state.exclusive || (kind === "session" && state.verifyingUntil !== undefined)) {
         const message = state.exclusive ? SIGN_IN_RUNNING : VERIFYING;
-        tidy(key, state);
+        forgetIdleHome(key, state);
         return { acquired: false, message };
       }
       // The first probe that starts while the home verifies ends the state when it finishes.
@@ -168,21 +183,21 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
       else state.probes += 1;
       return {
         acquired: true,
-        release: once(() => {
+        release: makeRunOnce(() => {
           if (kind === "session") state.sessions -= 1;
           else state.probes -= 1;
           if (endsVerifying) state.verifyingUntil = undefined;
-          tidy(key, state);
+          forgetIdleHome(key, state);
         }),
       };
     },
 
     acquireExclusive: (home) => {
-      const { key, state } = takeState(home);
+      const { key, state } = readOrCreateHomeState(home);
       if (state.exclusive) return { acquired: false, message: SIGN_IN_RUNNING };
       if (state.sessions > 0 || state.probes > 0) {
-        const message = describeRunning(state);
-        tidy(key, state);
+        const message = buildSignInRefusal(state);
+        forgetIdleHome(key, state);
         return { acquired: false, message };
       }
       // A new sign-in replaces the verifying state of the one before it.
@@ -194,9 +209,9 @@ export const makeHarnessHomeLeases = (now: Now = Date.now): HarnessHomeLeases =>
         ended = true;
         state.exclusive = false;
         if (verify) state.verifyingUntil = now() + VERIFYING_BOUND_MS;
-        tidy(key, state);
+        forgetIdleHome(key, state);
       };
-      return { acquired: true, release: () => end(false), verify: () => end(true) };
+      return { acquired: true, release: () => end(false), startVerifying: () => end(true) };
     },
   };
 };

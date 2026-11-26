@@ -1082,7 +1082,7 @@ describe("the lease of a login on the Harness Home", () => {
       acquireLoginLease: () => ({
         acquired: true,
         release: () => calls.push("release"),
-        verify: () => calls.push("verify"),
+        startVerifying: () => calls.push("verify"),
       }),
     };
     return { adapter, calls };
