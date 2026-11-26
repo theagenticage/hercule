@@ -91,9 +91,19 @@ interface Fake {
   readonly exitWithOutputOpen: (code: number) => void;
   readonly closeOutput: () => void;
   readonly killed: () => boolean;
+  /** The signals the child was sent, in order. */
+  readonly signals: ReadonlyArray<string | undefined>;
 }
 
-const createMachine = () => {
+/** How a fake child answers a signal. */
+interface KillBehavior {
+  /** The child exits only for SIGKILL, as a process that ignores SIGTERM. */
+  readonly ignoresTerm?: boolean;
+  /** The exit code of a killed child. */
+  readonly exitCode?: number;
+}
+
+const createMachine = (behavior: KillBehavior = {}) => {
   const children: Array<Fake> = [];
   const spawn: LoginSpawn = (command, env) => {
     const out = createPipe();
@@ -104,6 +114,7 @@ const createMachine = () => {
       settle = resolve;
     });
     let killed = false;
+    const signals: Array<string | undefined> = [];
     const endChild = (code: number): void => {
       out.end();
       err.end();
@@ -116,9 +127,10 @@ const createMachine = () => {
       // A killed child's pipes may not close before it exits, so this fake
       // never closes them. That checks the login code does not rely on the
       // pipes closing after a kill.
-      kill: () => {
+      kill: (signal) => {
         killed = true;
-        settle(143);
+        signals.push(signal);
+        if (behavior.ignoresTerm !== true || signal === "SIGKILL") settle(behavior.exitCode ?? 143);
       },
       exited,
     };
@@ -136,6 +148,7 @@ const createMachine = () => {
         err.end();
       },
       killed: () => killed,
+      signals,
     });
     return child;
   };
@@ -1058,5 +1071,86 @@ describe("a device login", () => {
       expect(afterClose).toBe(0);
       expect(nextConnection).toBe(SENTINEL_REQUEST);
     });
+  });
+});
+
+describe("the lease of a login on the Harness Home", () => {
+  const buildLeasedAdapter = () => {
+    const calls: Array<string> = [];
+    const adapter: HarnessAdapter = {
+      ...claudeCode,
+      acquireLoginLease: () => ({
+        acquired: true,
+        release: () => calls.push("release"),
+        verify: () => calls.push("verify"),
+      }),
+    };
+    return { adapter, calls };
+  };
+
+  /** Starts a login and stops it, advancing the clock by `advance` while the stop waits. */
+  const startThenStop = (
+    behavior: KillBehavior,
+    advance: Duration.Duration,
+  ): Promise<{
+    readonly calls: ReadonlyArray<string>;
+    readonly signals: ReadonlyArray<string | undefined>;
+    readonly callsBeforeGrace: ReadonlyArray<string>;
+  }> => {
+    const { spawn, children } = createMachine(behavior);
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+    return run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        const stopping = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.zero);
+        const callsBeforeGrace = [...calls];
+        yield* TestClock.adjust(advance);
+        yield* Fiber.join(stopping);
+        return { calls: [...calls], signals: children[0]!.signals, callsBeforeGrace };
+      }),
+    );
+  };
+
+  it("ends only after a child that ignores SIGTERM has been killed", async () => {
+    const result = await startThenStop({ ignoresTerm: true }, Duration.seconds(3));
+
+    expect(result.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    // Nothing was released while the child still ran.
+    expect(result.callsBeforeGrace).toEqual([]);
+    expect(result.calls).toEqual(["release"]);
+  });
+
+  it("does not start the verifying state for a stopped login that exits with 0", async () => {
+    const result = await startThenStop({ exitCode: 0 }, Duration.zero);
+
+    expect(result.calls).toEqual(["release"]);
+  });
+
+  it("starts the verifying state when the login exits with 0 on its own", async () => {
+    const { spawn, children } = createMachine();
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+
+    await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        yield* Effect.sync(() => children[0]!.exit(0));
+        yield* TestClock.adjust(Duration.zero);
+      }),
+    );
+
+    expect(calls).toEqual(["verify"]);
   });
 });

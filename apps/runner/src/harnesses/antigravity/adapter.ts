@@ -82,42 +82,52 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
       if (binary === undefined) {
         return Effect.succeed(buildFailedProbe(null, `no ${ANTIGRAVITY_BINARY} on this machine`));
       }
-      return Effect.suspend(() => {
-        const lease = leases.acquireRead(ctx.home, "probe");
-        if (!lease.acquired) return Effect.succeed(buildFailedProbe(null, lease.message));
-        return probe(ctx, binary).pipe(Effect.ensuring(Effect.sync(lease.release)));
-      });
+      // The lease and its release are one `acquireRelease`, so an interrupt cannot take the lease and skip the release.
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const lease = yield* Effect.acquireRelease(
+            Effect.sync(() => leases.acquireRead(ctx.home, "probe")),
+            (held) => (held.acquired ? Effect.sync(held.release) : Effect.void),
+          );
+          if (!lease.acquired) return buildFailedProbe(null, lease.message);
+          return yield* probe(ctx, binary);
+        }),
+      );
     },
 
     startSession: (sessionId, spec, ctx) =>
-      Effect.gen(function* () {
-        // The id stays held until the session has exited, so a second `agy`
-        // never serves the same conversation.
-        if (hosted.has(sessionId)) return yield* Effect.fail(buildSessionAlreadyRunning());
-        // Taken before the session reads the account's login, so a sign-in that
-        // is in progress is never read half written.
-        const lease = leases.acquireRead(ctx.home, "session");
-        if (!lease.acquired) return yield* Effect.fail(buildAdapterFailed(lease.message));
-        hosted.set(sessionId, "starting");
-        // The session's own scope: closing it stops its process, which happens when it exits or fails to start.
-        const scope = Scope.makeUnsafe();
-        // Added first, so it runs last: the lease ends after the process is gone.
-        yield* Scope.addFinalizer(scope, Effect.sync(lease.release));
-        const session = yield* startAgySession(seam, sessionId, spec, ctx, emit).pipe(
-          Scope.provide(scope),
-          // Also on interruption: an interrupted start must not hold the id for good.
-          Effect.onError(() =>
-            Effect.suspend(() => {
-              hosted.delete(sessionId);
-              return Scope.close(scope, Exit.void);
-            }),
-          ),
-        );
-        const entry = { session, scope };
-        hosted.set(sessionId, entry);
-        yield* Effect.forkDetach(Effect.andThen(session.exited, release(sessionId, entry)));
-        return session.binding;
-      }),
+      // Uninterruptible up to the start of `agy` itself, so an interrupt cannot
+      // take the lease or the session id without the finalizer that gives it back.
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          // The id stays held until the session has exited, so a second `agy`
+          // never serves the same conversation.
+          if (hosted.has(sessionId)) return yield* Effect.fail(buildSessionAlreadyRunning());
+          // Taken before the session reads the account's login, so a sign-in that
+          // is in progress is never read half written.
+          const lease = leases.acquireRead(ctx.home, "session");
+          if (!lease.acquired) return yield* Effect.fail(buildAdapterFailed(lease.message));
+          hosted.set(sessionId, "starting");
+          // The session's own scope: closing it stops its process, which happens when it exits or fails to start.
+          const scope = Scope.makeUnsafe();
+          // Added first, so it runs last: the lease ends after the process is gone.
+          yield* Scope.addFinalizer(scope, Effect.sync(lease.release));
+          const session = yield* restore(startAgySession(seam, sessionId, spec, ctx, emit)).pipe(
+            Scope.provide(scope),
+            // Also on interruption: an interrupted start must not hold the id for good.
+            Effect.onError(() =>
+              Effect.suspend(() => {
+                hosted.delete(sessionId);
+                return Scope.close(scope, Exit.void);
+              }),
+            ),
+          );
+          const entry = { session, scope };
+          hosted.set(sessionId, entry);
+          yield* Effect.forkDetach(Effect.andThen(session.exited, release(sessionId, entry)));
+          return session.binding;
+        }),
+      ),
     sendInput: (sessionId, input) =>
       Effect.suspend(() => {
         const entry = readHosted(sessionId);

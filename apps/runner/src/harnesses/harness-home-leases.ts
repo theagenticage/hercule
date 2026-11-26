@@ -22,20 +22,26 @@
  * `daemon.sock` (`credentials/socket.ts`, `serveCredentialSocket`).
  *
  * A sign-in that succeeded does not free the home at once. Its lease becomes
- * a "verifying" state, because the controller has not yet checked the new
- * login (it marks the runner's snapshot of the account as not signed in when
- * it accepts the code, but a start frame sent before that, or in flight, can
- * still reach this runner). While a home verifies:
+ * a "verifying" state: a best-effort exclusion of session starts while the
+ * first probe after the sign-in runs. It is not a check that the new login
+ * belongs to the right person. The controller does that judging, from the
+ * probe's result, after the probe has finished. While a home verifies:
  *
  * - a session start is refused;
- * - a probe is allowed, and is how the check happens;
+ * - a probe is allowed, and is how the controller reads the new login;
  * - a new sign-in replaces the state.
  *
- * Verifying ends when the first probe that started after the login exited has
- * finished, whatever its outcome, or after `VERIFYING_BOUND`. A start that
- * reaches the runner during the controller's check is therefore refused, and
- * the controller puts the input back to waiting. A sign-in that fails, is
- * cancelled, times out or is stopped frees the home at once.
+ * Verifying ends when the first probe that started after the sign-in has
+ * finished, whatever its outcome, or after `VERIFYING_BOUND_MS`. A sign-in that
+ * fails, is cancelled, times out or is stopped frees the home at once, and so
+ * does a login whose process the runner killed, even if it exited with 0.
+ *
+ * A race remains, and not only for Antigravity: a session start that reached
+ * the runner before the sign-in and waited in workspace preparation can read
+ * the new login before the controller has judged it. Every harness that reads
+ * its login when it starts has this. The fix binds a start to the credential
+ * generation the controller accepted. It needs the start frame, the controller
+ * and every adapter, so it is tracked in #1306.
  *
  * Homes are keyed by their resolved path, not by account id: the path is the
  * resource that is shared.

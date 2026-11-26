@@ -242,8 +242,8 @@ export const spawnLogin: LoginSpawn = (command, env, options): LoginChild => {
       void child.stdin.write(value);
       void child.stdin.flush();
     },
-    kill: () => {
-      child.kill();
+    kill: (signal) => {
+      child.kill(signal);
     },
     exited: child.exited,
   };
@@ -289,8 +289,8 @@ const spawnLoginInTerminal = (
     write: (value) => {
       child.terminal?.write(value);
     },
-    kill: () => {
-      child.kill();
+    kill: (signal) => {
+      child.kill(signal);
     },
     exited: child.exited,
   };

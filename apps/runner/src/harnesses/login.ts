@@ -24,9 +24,11 @@
  *
  * A harness may ask for a lease on its Harness Home (`acquireLoginLease`). The
  * lease is taken before the login command is built and released when the login
- * process has exited, whatever ended it. A login that exits with 0 leaves the
- * home verifying instead of free. A new login for the same account
- * waits for the process it replaces to exit before it takes the lease.
+ * process has exited, whatever ended it. The runner stops a login with SIGTERM
+ * and, after a grace period, SIGKILL, and a stop returns only once the process
+ * has exited. A login that exits with 0 on its own leaves the home verifying
+ * instead of free; a login the runner stopped does not. A new login for the
+ * same account stops the one it replaces before it takes the lease.
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
@@ -45,7 +47,7 @@ import {
 } from "@hercule/protocol";
 import type { LeaseHeld } from "./harness-home-leases";
 import type { HarnessAdapter, HarnessRunnerContext } from "./index";
-import { STOP_GRACE } from "./process";
+import { STOP_GRACE, stopChild, type StopSignal } from "./process";
 import { TerminalScreen } from "./terminal-screen";
 import { truncateFact } from "./text";
 
@@ -54,7 +56,8 @@ export interface LoginChild {
   readonly stderr: AsyncIterable<string>;
   /** Writes text to the child's stdin unchanged. */
   readonly write: (text: string) => void;
-  readonly kill: () => void;
+  /** Sends a signal to the process. Without one it sends SIGTERM. */
+  readonly kill: (signal?: StopSignal) => void;
   readonly exited: Promise<number>;
 }
 
@@ -258,6 +261,8 @@ interface Held {
   readonly address: () => string | undefined;
   /** Resolves `printed` with `undefined`, for a child that was killed before it printed. */
   readonly abandon: () => void;
+  /** Records that the runner stopped this login, so a later exit of 0 does not count as a sign-in. */
+  readonly markStopped: () => void;
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
   /** What the child showed, ending with the latest. A token the command printed is removed. */
@@ -338,13 +343,25 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       return login.idle === undefined ? Effect.void : Fiber.interrupt(login.idle);
     });
 
+  /**
+   * Stops a login and waits until its process has exited: SIGTERM, then SIGKILL
+   * after a grace period (see `stopChild`). The process's lease on the Harness
+   * Home ends only at its exit, so a stop that returned earlier could let a
+   * session start while the process still writes the login.
+   */
   const stopLogin = (providerAccountId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
-      login.child.kill();
+      login.markStopped();
       // A killed child's pipes do not always close, so the stdout reader cannot
       // be relied on to resolve `printed`.
       login.abandon();
-      return forgetLogin(providerAccountId, login);
+      return Effect.andThen(
+        forgetLogin(providerAccountId, login),
+        Effect.andThen(
+          stopChild(login.child),
+          Effect.promise(() => login.cleanedUp),
+        ),
+      );
     });
 
   /**
@@ -401,17 +418,20 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           }),
         ),
       );
+      let stopped = false;
       // Remove the folder and release the lease only once the child is gone: a
       // child that is still running could write into either again.
       const cleanUp = (exit: number | undefined): void => {
         removeScratchFolder();
         // A login that succeeded leaves the home verifying until the
         // controller has probed the new login (see `harness-home-leases.ts`).
-        if (exit === 0 && lease?.verify !== undefined) lease.verify();
+        // A login the runner stopped is no sign-in, whatever its exit code.
+        if (exit === 0 && !stopped && lease?.verify !== undefined) lease.verify();
         else lease?.release();
       };
       const cleanedUp = child.exited.then(cleanUp, () => cleanUp(undefined));
       const pattern = command.userCode;
+      const refusal = command.refusal;
       const screen =
         command.terminal === undefined ? undefined : new TerminalScreen(command.terminal.cols);
       const complaints: Array<(line: string) => void> = [];
@@ -460,9 +480,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           ? readLines(child.stdout, scanLine)
           : readScreen(child.stdout, screen, (lines) => {
               for (const line of lines) scanLine(line);
-              if (command.refusal === undefined || complaints.length === 0) return;
+              if (refusal === undefined || complaints.length === 0) return;
               const refused = lines.find(
-                (line) => !linesBeforeCode.has(line) && command.refusal!.test(line),
+                (line) => !linesBeforeCode.has(line) && refusal.test(line),
               );
               if (refused === undefined) return;
               for (const waiting of complaints.splice(0)) waiting(removeToken(command, refused));
@@ -487,6 +507,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         address: () => url,
         abandon: () => {
           settle(undefined);
+        },
+        markStopped: () => {
+          stopped = true;
         },
         printed,
         nextComplaint: () =>
@@ -546,39 +569,44 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             `The harness ${adapter.harnessId} has no login in this runner build`,
           );
         }
-        if (ctx.binary === undefined) {
+        const buildCommand = adapter.login.bind(adapter);
+        const binary = ctx.binary;
+        if (binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);
         }
         // A pasted code only works with the URL of the child that printed it,
-        // so only one login per Provider Account can be waiting. The lease of
-        // the old login is released when its process exits, so wait for that
-        // before asking for the lease again.
+        // so only one login per Provider Account can be waiting. Stopping the
+        // old login returns only once its process has exited and released its
+        // lease, so the lease can be asked for again.
         const previous = held.get(providerAccountId);
-        if (previous !== undefined) {
-          yield* stopLogin(providerAccountId, previous);
-          yield* Effect.timeoutOption(
-            Effect.promise(() => previous.cleanedUp),
-            STOP_GRACE,
-          );
-        }
-        const lease = adapter.acquireLoginLease?.(ctx);
-        if (lease !== undefined && !lease.acquired) return buildLoginFailed(lease.message);
-        // The hook may make a scratch folder, so nothing that can fail runs
-        // between it and `openLogin`, which removes the folder if the spawn fails.
-        const command = yield* Effect.try({
-          try: () => adapter.login!(ctx, ctx.binary!, method),
-          catch: (error) => error,
-        }).pipe(
-          Effect.onError(() => Effect.sync(() => lease?.release())),
-          Effect.orDie,
+        if (previous !== undefined) yield* stopLogin(providerAccountId, previous);
+        // Uninterruptible, because an interrupt between taking the lease and
+        // the child that releases it would leave the Harness Home held for
+        // good. Nothing in it waits.
+        const opened = yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const lease = adapter.acquireLoginLease?.(ctx);
+            if (lease !== undefined && !lease.acquired) return buildLoginFailed(lease.message);
+            // The hook may make a scratch folder, so nothing that can fail runs
+            // between it and `openLogin`, which removes the folder if the spawn fails.
+            const command = yield* Effect.try({
+              try: () => buildCommand(ctx, binary, method),
+              catch: (error) => error,
+            }).pipe(
+              Effect.onError(() => Effect.sync(() => lease?.release())),
+              Effect.orDie,
+            );
+            if (command === undefined) {
+              lease?.release();
+              return buildLoginFailed(
+                `The harness ${adapter.harnessId} cannot ${method === "create-token" ? "create a token" : "sign in"} in this runner build`,
+              );
+            }
+            return yield* openLogin(requestId, providerAccountId, command, lease);
+          }),
         );
-        if (command === undefined) {
-          lease?.release();
-          return buildLoginFailed(
-            `The harness ${adapter.harnessId} cannot ${method === "create-token" ? "create a token" : "sign in"} in this runner build`,
-          );
-        }
-        const login = yield* openLogin(requestId, providerAccountId, command, lease);
+        if ("_tag" in opened) return opened;
+        const login = opened;
         const printed = yield* Effect.promise(() => login.printed);
         if (printed === undefined) {
           yield* stopLogin(providerAccountId, login);
@@ -688,9 +716,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       return Effect.forEach(
         entries,
         ([providerAccountId, login]) => stopLogin(providerAccountId, login),
-        {
-          discard: true,
-        },
+        { discard: true, concurrency: "unbounded" },
       ).pipe(
         // The runner is about to exit, and a folder whose removal is still
         // waiting on a child's exit would be left behind.
