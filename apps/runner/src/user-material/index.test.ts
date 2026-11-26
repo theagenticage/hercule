@@ -503,22 +503,62 @@ describe("Antigravity's material", () => {
     ]);
   });
 
-  it.skipIf(RUNS_AS_ROOT)("skips a file it cannot read and logs a warning for it", () => {
+  it.skipIf(RUNS_AS_ROOT)(
+    "skips a rule it cannot read and logs a warning, and does not read the fixed files",
+    () => {
+      const { home, harnessHome } = createHomes();
+      const gemini = join(home, ".gemini");
+      // The fixed files are found by a stat, not read: reading them is the job of
+      // `readUserInstructions`, which warns when it cannot.
+      const unreadable = writeUnreadableFile(join(gemini, "GEMINI.md"));
+      const agents = writeFile(join(gemini, "AGENTS.md"));
+      const rule = join(gemini, "config", "rules", "locked.md");
+      writeUnreadableFile(rule);
+
+      const { material, warnings } = provisionCapturingWarnings(ANTIGRAVITY, harnessHome, {
+        HOME: home,
+      });
+
+      expect(material.instructionsFiles).toEqual([unreadable, agents]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(`Did not read ${rule} into the Thread's instructions: `);
+    },
+  );
+
+  it("warns about a path that cannot be looked at, and still returns the others", () => {
     const { home, harnessHome } = createHomes();
     const gemini = join(home, ".gemini");
-    const unreadable = writeUnreadableFile(join(gemini, "GEMINI.md"));
+    const rules = join(gemini, "config", "rules");
+    // A link to itself: a stat of it fails with ELOOP, which is not a missing file.
+    mkdirSync(rules, { recursive: true });
+    symlinkSync(join(gemini, "GEMINI.md"), join(gemini, "GEMINI.md"));
+    symlinkSync(join(rules, "loop.md"), join(rules, "loop.md"));
     const agents = writeFile(join(gemini, "AGENTS.md"));
-    const rule = join(gemini, "config", "rules", "locked.md");
-    writeUnreadableFile(rule);
+    const rule = writeFile(join(rules, "ok.md"), ALWAYS_ON);
 
     const { material, warnings } = provisionCapturingWarnings(ANTIGRAVITY, harnessHome, {
       HOME: home,
     });
 
-    expect(material.instructionsFiles).toEqual([agents]);
+    expect(material.instructionsFiles).toEqual([agents, rule]);
     expect(warnings).toHaveLength(2);
-    expect(warnings[0]).toContain(`Did not read ${unreadable} into the Thread's instructions: `);
-    expect(warnings[1]).toContain(`Did not read ${rule} into the Thread's instructions: `);
+    expect(warnings[0]).toContain(`Did not read ${join(gemini, "GEMINI.md")} into the Thread's`);
+    expect(warnings[0]).toContain("ELOOP");
+    expect(warnings[1]).toContain(`Did not read ${join(rules, "loop.md")} into the Thread's`);
+  });
+
+  it("writes a control character of a file name into a warning escaped", () => {
+    const { home, harnessHome } = createHomes();
+    const rules = join(home, ".gemini", "config", "rules");
+    mkdirSync(rules, { recursive: true });
+    const name = join(rules, "forged\nWARN fake line.md");
+    symlinkSync(name, name);
+
+    const { warnings } = provisionCapturingWarnings(ANTIGRAVITY, harnessHome, { HOME: home });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).not.toContain("\n");
+    expect(warnings[0]).toContain("forged\\u{a}WARN fake line.md");
   });
 });
 

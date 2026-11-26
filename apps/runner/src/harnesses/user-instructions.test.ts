@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Logger } from "effect";
@@ -82,5 +82,53 @@ describe("readUserInstructions", () => {
 
     expect(text).toBeUndefined();
     expect(warnings).toHaveLength(1);
+  });
+
+  it("reads at most 64 KiB of a file and warns how much it left out", () => {
+    const big = writeFile("big.md", `${"a".repeat(64 * 1024)}${"b".repeat(1000)}`);
+
+    const { text, warnings } = readCapturingWarnings([big]);
+
+    expect(text).toBe("a".repeat(64 * 1024));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`Cut ${big} `);
+    expect(warnings[0]).toContain("left out the last 1000 of its 66536 bytes");
+  });
+
+  it("reads at most 256 KiB of all files, and leaves out the files after that with a warning", () => {
+    const names = ["one", "two", "three", "four", "five"];
+    const paths = names.map((name) => writeFile(`${name}.md`, `${name[0]}`.repeat(64 * 1024)));
+
+    const { text, warnings } = readCapturingWarnings(paths);
+
+    expect(text).toBe(
+      paths
+        .slice(0, 4)
+        .map((_, index) => `${names[index]?.[0]}`.repeat(64 * 1024))
+        .join("\n\n"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`Left ${paths[4]} out of the Thread's instructions`);
+  });
+
+  it("does not wait on a named pipe, and skips it with a warning", () => {
+    const pipe = join(scratch, "pipe.md");
+    Bun.spawnSync(["mkfifo", pipe]);
+
+    const { text, warnings } = readCapturingWarnings([pipe]);
+
+    expect(text).toBeUndefined();
+    expect(warnings[0]).toContain("it is not a regular file");
+  });
+
+  it("writes a control character of a path into a warning escaped", () => {
+    const path = join(scratch, "forged\nWARN fake line.md");
+    symlinkSync(path, path);
+
+    const { warnings } = readCapturingWarnings([path]);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).not.toContain("\n");
+    expect(warnings[0]).toContain("forged\\u{a}WARN fake line.md");
   });
 });

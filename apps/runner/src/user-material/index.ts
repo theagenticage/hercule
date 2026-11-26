@@ -19,13 +19,10 @@
  * takes the paths as flags.
  */
 import {
-  closeSync,
   existsSync,
   lstatSync,
-  openSync,
   readFileSync,
   readdirSync,
-  readSync,
   readlinkSync,
   renameSync,
   rmSync,
@@ -38,7 +35,9 @@ import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import { ANTIGRAVITY, CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../harnesses";
 import { isMissingPath } from "../harnesses/session-files";
-import { describeError } from "../report";
+import { MAX_FRONTMATTER_BYTES, readFrontmatter } from "../frontmatter";
+import { readFileStart } from "../read-file-start";
+import { describeError, escapeControlCharacters } from "../report";
 
 /**
  * User Material with no paths. A Claude Code Thread always gets it, because
@@ -72,20 +71,19 @@ interface FoundMaterial {
 /**
  * Picks the user's instructions file: the first of `candidates` that is a
  * regular file (following symlinks), can be read, and has text `isUsable`
- * accepts. Returns that file as a list of one, or an empty list when no
- * candidate qualifies, and a warning for each candidate that exists but could
- * not be read.
+ * accepts. Returns that file, or undefined when no candidate qualifies, and a
+ * warning for each candidate that exists but could not be read.
  *
  * A candidate that is missing, is not a regular file, has text `isUsable`
- * refuses, or is a file already tried under another name is skipped quietly. That is how Codex and pi themselves
- * pick the file. A read error is skipped too, as both harnesses skip it, but
+ * refuses, or is a file already tried under another name is skipped quietly.
+ * That is how Codex and pi themselves pick the file. A read error is skipped too, as both harnesses skip it, but
  * the user is told: otherwise their instructions would disappear without a
  * trace.
  */
 const findInstructionsFile = (
   candidates: ReadonlyArray<string>,
   isUsable: (text: string) => boolean,
-): { readonly paths: ReadonlyArray<string>; readonly warnings: ReadonlyArray<string> } => {
+): { readonly path: string | undefined; readonly warnings: ReadonlyArray<string> } => {
   const warnings: Array<string> = [];
   const tried = new Set<string>();
   for (const path of candidates) {
@@ -96,16 +94,19 @@ const findInstructionsFile = (
       const identity = `${String(stats.dev)}:${String(stats.ino)}`;
       if (tried.has(identity)) continue;
       tried.add(identity);
-      if (stats.isFile() && isUsable(readFileSync(path, "utf8")))
-        return { paths: [path], warnings };
+      if (stats.isFile() && isUsable(readFileSync(path, "utf8"))) return { path, warnings };
     } catch (error) {
       if (isMissingPath(error)) continue;
       const reason = error instanceof Error ? error.message : String(error);
       warnings.push(`Did not read ${path} into the Thread's instructions: ${reason}`);
     }
   }
-  return { paths: [], warnings };
+  return { path: undefined, warnings };
 };
+
+/** Returns `path` as a list of one, or an empty list when there is none. */
+const listPath = (path: string | undefined): ReadonlyArray<string> =>
+  path === undefined ? [] : [path];
 
 /**
  * Makes `target` a symlink to `source`, or removes a symlink at `target` when
@@ -223,7 +224,7 @@ const findCodexMaterial = (
     (text) => text.trim() !== "",
   );
   return {
-    material: { ...NO_PATHS, instructionsFiles: instructions.paths },
+    material: { ...NO_PATHS, instructionsFiles: listPath(instructions.path) },
     warnings: instructions.warnings,
   };
 };
@@ -260,7 +261,7 @@ const findPiMaterial = (home: string): FoundMaterial => {
   return {
     material: {
       promptTemplateDirs: [join(agentDir, "prompts")].filter((path) => existsSync(path)),
-      instructionsFiles: instructions.paths,
+      instructionsFiles: listPath(instructions.path),
     },
     warnings: instructions.warnings,
   };
@@ -269,85 +270,55 @@ const findPiMaterial = (home: string): FoundMaterial => {
 /** The most entries of `config/rules` that are checked for rules that are always on. */
 const MAX_ANTIGRAVITY_RULE_ENTRIES = 100;
 
-/** The most bytes of a rule file read to find its frontmatter. */
-const MAX_RULE_FRONTMATTER_BYTES = 64 * 1024;
-
 /**
- * Reads at most the first `MAX_RULE_FRONTMATTER_BYTES` bytes of the file at
- * `path` as text. Throws when the file cannot be opened or read.
- */
-const readFileStart = (path: string): string => {
-  const descriptor = openSync(path, "r");
-  try {
-    const buffer = Buffer.alloc(MAX_RULE_FRONTMATTER_BYTES);
-    const length = readSync(descriptor, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, length).toString("utf8");
-  } finally {
-    closeSync(descriptor);
-  }
-};
-
-/**
- * Checks whether the text of an Antigravity rule file starts with YAML
- * frontmatter (between a first line `---` and the next line `---`) that has
- * `trigger` set to exactly the text `always_on`. Returns false for a file with
- * no frontmatter, frontmatter that is not valid YAML, or any other trigger:
- * Antigravity does not load such a rule into every conversation either.
+ * Checks whether the start of an Antigravity rule file has YAML frontmatter
+ * with `trigger` set to exactly the text `always_on`. Returns false for a file
+ * with no frontmatter, frontmatter that is not valid YAML, or any other
+ * trigger: Antigravity does not load such a rule into every conversation
+ * either.
  */
 const isAlwaysOnRule = (text: string): boolean => {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
-  if (lines[0]?.trimEnd() !== "---") return false;
-  const end = lines.findIndex((line, index) => index > 0 && line.trimEnd() === "---");
-  if (end === -1) return false;
-  try {
-    const frontmatter: unknown = Bun.YAML.parse(lines.slice(1, end).join("\n"));
-    return (
-      typeof frontmatter === "object" &&
-      frontmatter !== null &&
-      "trigger" in frontmatter &&
-      frontmatter.trigger === "always_on"
-    );
-  } catch {
-    return false;
-  }
+  const parsed = readFrontmatter(text);
+  return (
+    parsed.status === "found" &&
+    typeof parsed.value === "object" &&
+    parsed.value !== null &&
+    "trigger" in parsed.value &&
+    parsed.value.trigger === "always_on"
+  );
 };
 
 /**
- * Returns the paths of the `always_on` rule files in `rulesDir`, sorted by
- * file name in byte order, and a warning for each problem it met. Looks at
- * no more than `MAX_ANTIGRAVITY_RULE_ENTRIES` entries and warns once when it
- * skipped the rest. Only regular files (following symlinks) with a `.md`
- * extension count. A missing folder is not a problem.
+ * Returns the paths of the `.md` entries of `rulesDir`, sorted by file name in
+ * byte order, and a warning when the folder cannot be read. Looks at no more
+ * than `MAX_ANTIGRAVITY_RULE_ENTRIES` entries and warns once when it skipped
+ * the rest. Whether an entry is a regular file is left to the caller. A
+ * missing folder is not a problem.
  */
-const findAlwaysOnRules = (
+const listRuleCandidates = (
   rulesDir: string,
 ): { readonly paths: ReadonlyArray<string>; readonly warnings: ReadonlyArray<string> } => {
-  const warnings: Array<string> = [];
   let names: Array<string>;
   try {
     names = readdirSync(rulesDir).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
   } catch (error) {
-    if (!isMissingPath(error)) {
-      warnings.push(`Did not read the rules in ${rulesDir}: ${describeError(error)}`);
-    }
-    return { paths: [], warnings };
+    return {
+      paths: [],
+      warnings: isMissingPath(error)
+        ? []
+        : [`Did not read the rules in ${rulesDir}: ${describeError(error)}`],
+    };
   }
-  if (names.length > MAX_ANTIGRAVITY_RULE_ENTRIES) {
-    warnings.push(
-      `${rulesDir} has ${String(names.length)} entries; only the first ${String(MAX_ANTIGRAVITY_RULE_ENTRIES)} by name were checked for rules that are always on`,
-    );
-  }
-  const paths: Array<string> = [];
-  for (const name of names.slice(0, MAX_ANTIGRAVITY_RULE_ENTRIES)) {
-    if (!name.endsWith(".md")) continue;
-    const path = join(rulesDir, name);
-    try {
-      if (statSync(path).isFile() && isAlwaysOnRule(readFileStart(path))) paths.push(path);
-    } catch (error) {
-      if (isMissingPath(error)) continue;
-      warnings.push(`Did not read ${path} into the Thread's instructions: ${describeError(error)}`);
-    }
-  }
+  const warnings =
+    names.length > MAX_ANTIGRAVITY_RULE_ENTRIES
+      ? [
+          `${rulesDir} has ${String(names.length)} entries; only the first ${String(MAX_ANTIGRAVITY_RULE_ENTRIES)} by name were checked for rules that are always on`,
+        ]
+      : [];
+  const paths = names
+    .slice(0, MAX_ANTIGRAVITY_RULE_ENTRIES)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => join(rulesDir, name));
   return { paths, warnings };
 };
 
@@ -356,7 +327,7 @@ const findAlwaysOnRules = (
  * instruction files, which Antigravity reads from its gemini directory,
  * `.gemini` under the user's home. It holds no prompt templates apart from
  * skills, so `promptTemplateDirs` stays empty. Also returns a warning for
- * each file that exists but could not be read.
+ * each file or folder it could not look at.
  *
  * Antigravity reads all of these into every conversation, and reads both
  * `GEMINI.md` and `AGENTS.md` when a place has both. The files are returned
@@ -369,6 +340,13 @@ const findAlwaysOnRules = (
  *   or with another trigger, is not put into every conversation, so it is
  *   left out.
  *
+ * Each path is looked at once, with one `stat`. A missing path is skipped
+ * quietly, and so is anything that is not a regular file (following
+ * symlinks). Any other error, such as a symlink loop, is a warning. The four
+ * fixed files are not read here, only the start of each rule file is, to find
+ * its frontmatter; a fixed file that cannot be read is reported when its text
+ * is read into the session's instructions.
+ *
  * A file that is the same file as an earlier one, such as an `AGENTS.md` that
  * is a symlink to `GEMINI.md`, is returned once, at its first place.
  *
@@ -377,30 +355,53 @@ const findAlwaysOnRules = (
  */
 const findAntigravityMaterial = (home: string): FoundMaterial => {
   const geminiDir = join(home, ".gemini");
-  const fixed = [
+  const warnings: Array<string> = [];
+  const seen = new Set<string>();
+  const instructionsFiles: Array<string> = [];
+
+  // Returns true when `path` is a regular file no earlier path has led to.
+  const claimRegularFile = (path: string): boolean => {
+    let stats: ReturnType<typeof statSync>;
+    try {
+      stats = statSync(path);
+    } catch (error) {
+      if (!isMissingPath(error)) {
+        warnings.push(
+          `Did not read ${path} into the Thread's instructions: ${describeError(error)}`,
+        );
+      }
+      return false;
+    }
+    if (!stats.isFile()) return false;
+    const identity = `${String(stats.dev)}:${String(stats.ino)}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  };
+
+  for (const path of [
     join(geminiDir, "GEMINI.md"),
     join(geminiDir, "AGENTS.md"),
     join(geminiDir, "config", "GEMINI.md"),
     join(geminiDir, "config", "AGENTS.md"),
-  ].map((path) => findInstructionsFile([path], () => true));
-  const rules = findAlwaysOnRules(join(geminiDir, "config", "rules"));
-  const seen = new Set<string>();
-  const instructionsFiles = [...fixed.flatMap((found) => found.paths), ...rules.paths].filter(
-    (path) => {
-      const stats = statSync(path, { throwIfNoEntry: false });
-      // A file that vanished since it was found stays in the list; reading it
-      // then fails with a warning.
-      if (stats === undefined) return true;
-      const identity = `${String(stats.dev)}:${String(stats.ino)}`;
-      if (seen.has(identity)) return false;
-      seen.add(identity);
-      return true;
-    },
-  );
-  return {
-    material: { ...NO_PATHS, instructionsFiles },
-    warnings: [...fixed.flatMap((found) => found.warnings), ...rules.warnings],
-  };
+  ]) {
+    if (claimRegularFile(path)) instructionsFiles.push(path);
+  }
+
+  const rules = listRuleCandidates(join(geminiDir, "config", "rules"));
+  warnings.push(...rules.warnings);
+  const buffer = Buffer.alloc(MAX_FRONTMATTER_BYTES);
+  for (const path of rules.paths) {
+    if (!claimRegularFile(path)) continue;
+    try {
+      const start = readFileStart(path, buffer);
+      if (start !== undefined && isAlwaysOnRule(start.text)) instructionsFiles.push(path);
+    } catch (error) {
+      if (isMissingPath(error)) continue;
+      warnings.push(`Did not read ${path} into the Thread's instructions: ${describeError(error)}`);
+    }
+  }
+  return { material: { ...NO_PATHS, instructionsFiles }, warnings };
 };
 
 /**
@@ -437,6 +438,8 @@ export const provisionUserMaterial = (
           return { material: NO_PATHS, warnings: [] };
       }
     });
-    for (const warning of found.warnings) yield* Effect.logWarning(warning);
+    // A file name can hold a line break, which would forge a log line.
+    for (const warning of found.warnings)
+      yield* Effect.logWarning(escapeControlCharacters(warning));
     return found.material;
   });
