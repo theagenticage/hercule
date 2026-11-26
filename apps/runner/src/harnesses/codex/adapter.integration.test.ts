@@ -75,7 +75,7 @@ import {
   startMockModel,
 } from "./mock-model.testing";
 import type { SessionStartContext } from "../index";
-import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
+import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL } from "../testing";
 import { findCodexTestBinary } from "./codex-binary.testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
@@ -188,14 +188,12 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
 
   it("shows a Thread the user's instructions, but not the user's skills", async () => {
     const userHome = createUserHome();
-    const instructionsFile = join(createScratchDir("instructions"), "AGENTS.md");
-    writeFileSync(instructionsFile, INSTRUCTIONS);
     const ctx = buildContext(createScratchDir("home"));
 
     const prompt = await renderPrompt({
       ...ctx,
       env: { ...ctx.env, HOME: userHome },
-      userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+      userMaterial: { ...NO_USER_MATERIAL, instructions: INSTRUCTIONS },
     });
 
     // A Thread's skills come from the Skill Library. The user's own
@@ -466,7 +464,7 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
           {
             ...ctx,
             env: { ...ctx.env, HOME: userHome, HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
-            userMaterial: NO_USER_MATERIAL_PATHS,
+            userMaterial: NO_USER_MATERIAL,
             librarySkillsFolder,
           },
         ),

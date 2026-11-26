@@ -190,6 +190,8 @@ const readHarnessDescription = (reply: Compat.InitializeResponse): HarnessDescri
     ...(reply.agentInfo?.version === undefined ? {} : { version: reply.agentInfo.version }),
     acceptsImages: capabilities?.promptCapabilities?.image === true,
     acceptsHttpMcpServers: capabilities?.mcpCapabilities?.http === true,
+    // The harness announces support with an object, which may be empty (`{}`).
+    acceptsAdditionalDirectories: capabilities?.sessionCapabilities?.additionalDirectories != null,
     ...(capabilities?._meta == null ? {} : { meta: capabilities._meta }),
   };
 };
@@ -233,7 +235,12 @@ const isFormElicitation = (
 const hasToolCall = (params: unknown): boolean =>
   typeof params === "object" && params !== null && "toolCall" in params;
 
-/** Returns the MCP servers and `_meta` of a session request in the format of `session/new`. */
+/**
+ * Returns the MCP servers, `_meta` and additional directories of a session
+ * request in the format of `session/new`. The directories are left out when
+ * the request has none, because a harness that does not announce support for
+ * them may refuse a request that names the field.
+ */
 const buildSessionParams = (request: NewSessionRequest) => ({
   cwd: request.cwd,
   mcpServers: request.mcpServers.map(({ name, url, headers }) => ({
@@ -242,6 +249,9 @@ const buildSessionParams = (request: NewSessionRequest) => ({
     url,
     headers,
   })),
+  ...(request.additionalDirectories === undefined
+    ? {}
+    : { additionalDirectories: request.additionalDirectories }),
   ...(request.meta === undefined ? {} : { _meta: request.meta }),
 });
 

@@ -42,6 +42,7 @@ import {
   type RepositorySkillFolder,
   type SkippedRepositorySkill,
 } from "@hercule/protocol";
+import { MAX_FRONTMATTER_BYTES, parseFrontmatter } from "../frontmatter";
 import { describeError, escapeControlCharacters } from "../report";
 import type { RegisteredCheckout } from "../workspaces/registry";
 import {
@@ -63,12 +64,6 @@ import { findSkillFolderProblem } from "./skill-folder";
 
 /** The folders of a checkout that hold repository skills, in the order they win a name. */
 const SKILL_FOLDERS: ReadonlyArray<RepositorySkillFolder> = [".agents/skills", ".claude/skills"];
-
-/**
- * How much of a `SKILL.md` is read. The frontmatter is at the top of the
- * file, and a repository can hold a file of any size.
- */
-const MAX_FRONTMATTER_BYTES = 64 * 1024;
 
 /**
  * The most characters of a value the repository controls, such as a folder
@@ -200,26 +195,23 @@ export const parseSkillFrontmatter = (
   folderName: string,
   textWasCut = false,
 ): { description: string } | { problem: string } => {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
-  const end = lines.findIndex((line, index) => index > 0 && line.trimEnd() === "---");
-  if (lines[0]?.trimEnd() !== "---") {
+  const parsed = parseFrontmatter(text);
+  if (parsed.status === "missing") {
     return { problem: "its SKILL.md has no frontmatter between two `---` lines" };
   }
-  if (end === -1) {
+  if (parsed.status === "unclosed") {
     return {
       problem: textWasCut
         ? `its frontmatter is longer than ${String(MAX_FRONTMATTER_BYTES / 1024)} KiB`
         : "its SKILL.md has no frontmatter between two `---` lines",
     };
   }
-  let frontmatter: unknown;
-  try {
-    frontmatter = Bun.YAML.parse(lines.slice(1, end).join("\n"));
-  } catch (error) {
+  if (parsed.status === "invalid") {
     return {
-      problem: `the frontmatter of its SKILL.md is not valid YAML: ${describeError(error)}`,
+      problem: `the frontmatter of its SKILL.md is not valid YAML: ${describeError(parsed.error)}`,
     };
   }
+  const frontmatter = parsed.value;
   const fields = typeof frontmatter === "object" && frontmatter !== null ? frontmatter : {};
   // `name:` with no value parses to null and counts as no name, like `name: ""`.
   const declaredName = "name" in fields && fields.name !== null ? fields.name : undefined;

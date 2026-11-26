@@ -47,7 +47,7 @@ import {
   MAX_PENDING_BYTES,
   MAX_PENDING_THREADS,
 } from "./threads";
-import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
+import { NO_USER_MATERIAL, PNG_BYTES, writeTestImage } from "../testing";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -628,7 +628,7 @@ describe("the home directories a session's app-server gets", () => {
     const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, HOME: "/Users/someone" },
-      userMaterial: NO_USER_MATERIAL_PATHS,
+      userMaterial: NO_USER_MATERIAL,
     };
 
     await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
@@ -642,6 +642,22 @@ describe("the home directories a session's app-server gets", () => {
     // Codex reads an `AGENTS.md` in its home for every session of the
     // account, so the user's instructions must never be placed there.
     expect(readdirSync(codexHome)).toEqual([]);
+  });
+
+  it("reports what the user's instructions lost as a warning of the session, after session.started", async () => {
+    const run = createDriving();
+    const warning = "Cut /Users/someone/.codex/AGENTS.md in the Thread's instructions";
+
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...run.ctx,
+        userMaterial: { ...NO_USER_MATERIAL, warnings: [warning] },
+      }),
+    );
+
+    const tags = run.seen.map((event) => event._tag);
+    expect(filterByTag(run.seen, "runtime.warning")).toMatchObject([{ message: warning }]);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
   });
 
   it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
@@ -660,7 +676,7 @@ describe("the home directories a session's app-server gets", () => {
     };
 
     // The quotes in the path are escaped, so the value still parses as TOML.
-    expect((await startWith(NO_USER_MATERIAL_PATHS)).slice(-2)).toEqual([
+    expect((await startWith(NO_USER_MATERIAL)).slice(-2)).toEqual([
       "-c",
       'shell_environment_policy.set.HOME="/Users/some \\"one\\""',
     ]);
@@ -1249,36 +1265,6 @@ describe("what an input does to a Codex session", () => {
       expect(new Set(input.slice(1).map((item) => item.path)).size).toBe(2);
     });
 
-    it("adds one item for a skill referenced twice", async () => {
-      const review = stageLibrarySkill("review");
-
-      const input = await sendWithSkills([review, { ...review, start: 20, end: 27 }]);
-
-      expect(input).toHaveLength(2);
-    });
-
-    it("leaves out a skill whose SKILL.md is gone, and keeps the text", async () => {
-      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
-
-      const input = await sendWithSkills([gone]);
-
-      expect(input).toHaveLength(1);
-    });
-
-    it("leaves out a skill whose SKILL.md resolves outside the skill folder", async () => {
-      const secret = join(scratch, "secret.txt");
-      writeFileSync(secret, "not a skill");
-      const swapped = stageLibrarySkill("swapped");
-      const target = join(realpathSync(swapped.folder), "SKILL.md");
-      rmSync(target);
-      symlinkSync(secret, target);
-
-      const input = await sendWithSkills([swapped]);
-
-      expect(input).toHaveLength(1);
-      expect(JSON.stringify(input)).not.toContain(secret);
-    });
-
     it("records on the user message only the skills it gave Codex an item for", async () => {
       const review = stageLibrarySkill("review");
       const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
@@ -1301,6 +1287,40 @@ describe("what an input does to a Codex session", () => {
         (event) => event.kind === "user_message",
       );
       expect(reported?.detail).toEqual({ text: "$review $gone", skills: ["review"] });
+    });
+
+    it("warns the user, after the user message, about a skill it gave Codex no item for", async () => {
+      const review = stageLibrarySkill("review");
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startTestSession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "$review $gone", skillReferences: [review, gone] }),
+      );
+
+      const warnings = filterByTag(run.seen, "runtime.warning");
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          turnId: sent.turnId,
+          message:
+            "Hercule could not give Codex the skill $gone: its SKILL.md is missing, is not a regular file, or leads outside the skill's folder. The message was sent without it. Check the skill's folder, then send the message again.",
+        }),
+      ]);
+      const tags = run.seen.map((event) => event._tag);
+      expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.lastIndexOf("item.completed"));
+    });
+
+    it("sends no warning when every skill got an item", async () => {
+      const run = await startTestSession();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "$review",
+          skillReferences: [stageLibrarySkill("review")],
+        }),
+      );
+
+      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
     });
 
     it("refuses to steer an input with a skill into a running turn, before it changes anything", async () => {
@@ -2150,21 +2170,14 @@ describe("hercule-as-a-tool on a Codex thread", () => {
 describe("the user's own instructions on a Codex Thread", () => {
   const USER_INSTRUCTIONS = "Always answer in English.\nKeep commits small.";
 
-  /** Writes the user's instructions file into a scratch directory and returns its path. */
-  const writeInstructions = (text: string): string => {
-    const file = join(createCodexHome(), "AGENTS.md");
-    writeFileSync(file, text);
-    return file;
-  };
-
-  /** Returns a context for a Thread whose user's instructions file is `instructionsFile`. */
+  /** Returns a context for a Thread whose user's instructions text is `instructions`. */
   const buildThreadContext = (
     ctx: SessionStartContext,
-    instructionsFile: string,
+    instructions: string,
   ): SessionStartContext => ({
     ...ctx,
     herculeTool: TOOL,
-    userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+    userMaterial: { ...NO_USER_MATERIAL, instructions },
   });
 
   const RESUME: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "resume" };
@@ -2200,72 +2213,17 @@ describe("the user's own instructions on a Codex Thread", () => {
   ];
 
   it.each(OPENINGS)(
-    "sends the file's text between the system prompt and the skill on %s",
+    "sends the user's instructions between the system prompt and the skill on %s",
     async (method, spec, instructions) => {
       const { adapter, ctx, requests } = createDriving();
-      const file = writeInstructions(USER_INSTRUCTIONS);
 
-      await Effect.runPromise(adapter.startSession(SESSION, spec, buildThreadContext(ctx, file)));
+      await Effect.runPromise(
+        adapter.startSession(SESSION, spec, buildThreadContext(ctx, USER_INSTRUCTIONS)),
+      );
 
       expect(listSentParams(requests, method)).toEqual([
         expect.objectContaining({ developerInstructions: instructions }),
       ]);
-    },
-  );
-
-  it("reads the file again for each thread it opens, so a resumed thread gets the current text", async () => {
-    const file = writeInstructions("The old text.");
-    const first = createDriving();
-    await Effect.runPromise(
-      first.adapter.startSession(SESSION, SPEC, buildThreadContext(first.ctx, file)),
-    );
-    writeFileSync(file, "The new text.");
-    const second = createDriving();
-
-    await Effect.runPromise(
-      second.adapter.startSession(
-        SESSION,
-        { ...SPEC, continue: RESUME },
-        buildThreadContext(second.ctx, file),
-      ),
-    );
-
-    expect(listSentParams(second.requests, "thread/resume")).toEqual([
-      expect.objectContaining({
-        developerInstructions: `${TOOL.orientation}\n\nThe new text.\n\n${TOOL.skill}`,
-      }),
-    ]);
-  });
-
-  it.each([
-    ["a file that no longer exists", () => join(createCodexHome(), "AGENTS.md"), "ENOENT"],
-    ["a directory", () => createCodexHome(), "it is not a regular file"],
-  ])(
-    "starts the Thread with only the orientation and the skill, and logs a warning, when the instructions are %s",
-    async (_, makePath, reason) => {
-      const { adapter, ctx, requests } = createDriving();
-      const path = makePath();
-      const warnings: Array<string> = [];
-      const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(String(message));
-      });
-
-      await Effect.runPromise(
-        Effect.provide(
-          adapter.startSession(SESSION, SPEC, buildThreadContext(ctx, path)),
-          Logger.layer([collecting]),
-        ),
-      );
-
-      // The user's own files never stop a Thread from starting.
-      expect(listSentParams(requests, "thread/start")).toEqual([
-        expect.objectContaining({
-          developerInstructions: `${TOOL.orientation}\n\n${TOOL.skill}`,
-        }),
-      ]);
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain(`Did not read ${path} into the Thread's instructions: `);
-      expect(warnings[0]).toContain(reason);
     },
   );
 });

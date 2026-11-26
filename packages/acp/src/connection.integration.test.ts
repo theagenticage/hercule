@@ -77,12 +77,14 @@ const ClientParams = {
   authenticate: Schema.Struct({ methodId: Schema.String }),
   "session/new": Schema.Struct({
     cwd: Schema.String,
+    additionalDirectories: Schema.optionalKey(Schema.Array(Schema.String)),
     mcpServers: Schema.Array(McpServerSchema),
     _meta: Schema.optionalKey(SessionMeta),
   }),
   "session/resume": Schema.Struct({
     sessionId: Schema.String,
     cwd: Schema.String,
+    additionalDirectories: Schema.optionalKey(Schema.Array(Schema.String)),
     mcpServers: Schema.Array(McpServerSchema),
     _meta: Schema.optionalKey(SessionMeta),
   }),
@@ -128,6 +130,7 @@ interface RecordedInitializeResult {
   readonly agentCapabilities: {
     readonly promptCapabilities: { readonly image: boolean };
     readonly mcpCapabilities: { readonly http: boolean };
+    readonly sessionCapabilities: { readonly additionalDirectories?: object };
     readonly _meta: unknown;
   };
 }
@@ -291,6 +294,9 @@ const replayRecording = (name: RecordingName) =>
           const request = Schema.decodeUnknownSync(ClientParams["session/new"])(params);
           const reply = yield* connection.newSession({
             cwd: request.cwd,
+            ...(request.additionalDirectories === undefined
+              ? {}
+              : { additionalDirectories: request.additionalDirectories }),
             mcpServers: request.mcpServers,
             ...(request._meta === undefined ? {} : { meta: request._meta }),
           });
@@ -302,6 +308,9 @@ const replayRecording = (name: RecordingName) =>
           yield* connection.resumeSession({
             nativeSessionId: request.sessionId,
             cwd: request.cwd,
+            ...(request.additionalDirectories === undefined
+              ? {}
+              : { additionalDirectories: request.additionalDirectories }),
             mcpServers: request.mcpServers,
             ...(request._meta === undefined ? {} : { meta: request._meta }),
           });
@@ -406,8 +415,13 @@ const replayRecording = (name: RecordingName) =>
  * Recordings that the generic replay below cannot play, with the reason. Tests
  * of their own cover them.
  *
- * - `resume`, `tmpdir-resume` and `t3-resume` hold several harness processes in one file,
- *   each starting with its own `initialize`. The replay opens one connection.
+ * - `resume`, `tmpdir-resume`, `t3-resume`, `instructions-files`,
+ *   `skills-additional-directory`, `skills-git-walk` and `skills-resume` hold
+ *   several harness processes in one file, each starting with its own
+ *   `initialize`. The replay opens one connection.
+ * - `gemini-dir-default` ends at the refused `authenticate`: the recorder ran
+ *   `agy` with no sign-in, to see where it keeps its files. The replay expects
+ *   `authenticate` to succeed.
  * - `subagent-approval2` ends with the recorder closing the harness while a
  *   prompt was open, so the prompt's error reply comes from the recorder, not
  *   from the harness.
@@ -418,7 +432,12 @@ const replayRecording = (name: RecordingName) =>
  *   reproduces that.
  */
 const RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY: ReadonlyArray<RecordingName> = [
+  "gemini-dir-default",
+  "instructions-files",
   "resume",
+  "skills-additional-directory",
+  "skills-git-walk",
+  "skills-resume",
   "stop-bg",
   "stop-cancel",
   "subagent-approval2",
@@ -505,6 +524,9 @@ it.live.each(
       version: recordedInitialize.agentInfo.version,
       acceptsImages: recordedInitialize.agentCapabilities.promptCapabilities.image,
       acceptsHttpMcpServers: recordedInitialize.agentCapabilities.mcpCapabilities.http,
+      acceptsAdditionalDirectories:
+        recordedInitialize.agentCapabilities.sessionCapabilities.additionalDirectories !==
+        undefined,
       meta: recordedInitialize.agentCapabilities._meta,
     });
     for (const { reply, recordedReply } of played.authentications) {

@@ -102,7 +102,7 @@ export interface HarnessRunnerContext {
     readonly claudePluginDir: string;
   };
   /**
-   * The paths of the user's own material this session's harness is given.
+   * The user's own material this session's harness is given.
    * The field being present is what marks the session as one that sees User
    * Material: a Thread on the controller's local runner, whose start frame
    * has the `userMaterial` flag set (spec 06 section 9.1). The field is
@@ -261,9 +261,9 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
 };
 
 /**
- * The paths of the user's own material that an adapter passes to its harness
- * for one process. Each path existed on this machine when the runner looked
- * for it; a source that does not exist is left out.
+ * The user's own material that an adapter gives its harness for one process.
+ * A path existed on this machine when the runner looked for it; a source that
+ * does not exist is left out.
  *
  * Every field is empty for a harness that reads the material through links
  * in its Harness Home instead. Claude Code is that harness: it reads the
@@ -276,8 +276,27 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
 export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
-  /** The user's personal instructions file, or undefined when the user has none. */
+  /**
+   * The text of the user's instruction files, joined by a blank line, for the
+   * harnesses that take their instructions as text (Codex and Antigravity).
+   * Read when the runner provisions the material, so it is as current as the
+   * files at each start, resume and fork. Undefined when the user has none.
+   */
+  readonly instructions: string | undefined;
+  /**
+   * The path of the user's instructions file, for the harness that reads the
+   * file itself (pi). Undefined when the user has none.
+   */
   readonly instructionsFile: string | undefined;
+  /**
+   * A warning for each part of the user's material the runner found but could
+   * not use in full: a file cut at its size limit, a file left out because
+   * the total limit was reached, a file that could not be read. The adapter
+   * of a harness that takes instructions as text or as a file reports each
+   * as a `runtime.warning` after `session.started`, so the user learns what
+   * the agent does not see. Empty when nothing was left out.
+   */
+  readonly warnings: ReadonlyArray<string>;
 }
 
 /**

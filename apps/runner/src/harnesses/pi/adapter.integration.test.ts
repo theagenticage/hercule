@@ -32,7 +32,7 @@ import {
   cleanupHomes,
   createScratchHome,
   filterByTag,
-  NO_USER_MATERIAL_PATHS,
+  NO_USER_MATERIAL,
   waitUntil,
 } from "../testing";
 import {
@@ -469,7 +469,7 @@ describe.skipIf(binary === undefined)(
 
         const request = await sendFirstRequest(null, createScratchDir(), {
           home,
-          material: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+          material: { ...NO_USER_MATERIAL, instructionsFile },
           librarySkillsFolder,
         });
 

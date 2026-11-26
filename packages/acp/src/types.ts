@@ -240,6 +240,8 @@ export interface HarnessDescription {
   readonly acceptsImages: boolean;
   /** Whether `session/new` may name MCP servers that are reached over HTTP. */
   readonly acceptsHttpMcpServers: boolean;
+  /** Whether `session/new` and `session/resume` may name additional directories to add to the workspace. */
+  readonly acceptsAdditionalDirectories: boolean;
   /** The `_meta` of the harness's capabilities, where harness-specific features are announced. */
   readonly meta?: unknown;
 }
@@ -258,6 +260,13 @@ export interface McpServer {
 export interface NewSessionRequest {
   readonly cwd: string;
   readonly mcpServers: ReadonlyArray<McpServer>;
+  /**
+   * Absolute paths of folders the harness adds to the workspace of this
+   * session only. Sent whenever the field is present, even as an empty list:
+   * leave it out when there are no folders. Check
+   * `HarnessDescription.acceptsAdditionalDirectories` before naming any.
+   */
+  readonly additionalDirectories?: ReadonlyArray<string>;
   /** Sent as `_meta`, where a harness announces its own options, such as an appended system prompt. */
   readonly meta?: Readonly<Record<string, Schema.Json>>;
 }

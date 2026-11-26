@@ -6,9 +6,9 @@
  * recording's handshake only and writes the messages itself. Time runs on a
  * `TestClock`.
  */
-import { lstatSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -18,8 +18,17 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import type { HarnessScript, JsonRpcMessage } from "@hercule/acp/testing";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
-import type { AdapterTurnInput } from "../index";
-import { cleanupHomes, CWD, settle, waitUntil, writeTestImage } from "../testing";
+import { buildLoadedSkills, resolveSkillReferences } from "../../skills";
+import type { AdapterTurnInput, SessionStartContext } from "../index";
+import {
+  cleanupHomes,
+  createScratchHome,
+  CWD,
+  NO_USER_MATERIAL,
+  settle,
+  waitUntil,
+  writeTestImage,
+} from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import {
   answerConfigChange,
@@ -63,6 +72,10 @@ interface HarnessOptions {
   /** The fake's options, which may depend on the Harness Home the test gets. */
   readonly fake?: FakeAgyOptions | ((home: string) => FakeAgyOptions);
   readonly orientation?: string;
+  /** The skill text of the Hercule tool. */
+  readonly skill?: string;
+  /** What every start of the test changes in the runner's context, which may depend on the Harness Home. */
+  readonly context?: (home: string) => Partial<SessionStartContext>;
   /** The folder the session works in. Defaults to `CWD`, which does not exist. */
   readonly cwd?: string;
   /** What every start of the test changes in `SPEC`. */
@@ -114,7 +127,12 @@ const buildHarness = (options: HarnessOptions = {}) =>
       ...buildContext(home, BINARY),
       cwd: options.cwd ?? CWD,
       mcpServers: [],
-      herculeTool: { ...buildContext(home).herculeTool, orientation: options.orientation ?? "" },
+      herculeTool: {
+        ...buildContext(home).herculeTool,
+        orientation: options.orientation ?? "",
+        skill: options.skill ?? "",
+      },
+      ...options.context?.(home),
     };
     const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
       seen.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
@@ -360,6 +378,282 @@ describe("starting a session", () => {
         expect(h.tags("session.exited")).toHaveLength(0);
       }),
     ));
+});
+
+/**
+ * Lays out the skills of a session as the runner does: the library skills in
+ * `<sessionSkillsFolder>/skills/<name>`. A skill in `withoutFile` has no
+ * `SKILL.md`. Returns the context fields that give them to a start, and a
+ * builder of inputs whose Skill References name the library skills.
+ */
+const createSessionSkills = (options: {
+  readonly library: ReadonlyArray<string>;
+  readonly withoutFile?: ReadonlyArray<string>;
+}) => {
+  const sessionSkillsFolder = join(createScratchHome("agy-session-skills"), "session-skills");
+  for (const name of options.library) {
+    const folder = join(sessionSkillsFolder, "skills", name);
+    mkdirSync(folder, { recursive: true });
+    if (!options.withoutFile?.includes(name)) writeFileSync(join(folder, "SKILL.md"), "# skill\n");
+  }
+  const loaded = buildLoadedSkills({
+    libraryFolder: sessionSkillsFolder,
+    libraryNames: options.library,
+    repositorySkills: [],
+  });
+  return {
+    sessionSkillsFolder,
+    context: { sessionSkillsFolder, librarySkillsFolder: sessionSkillsFolder },
+    buildInput: (text: string): AdapterTurnInput => ({
+      text,
+      skillReferences: resolveSkillReferences(text, loaded),
+    }),
+  };
+};
+
+/** Returns a fake whose Harness Home already holds the conversation, so that a start can resume it. */
+const withConversation = (home: string): FakeAgyOptions => {
+  createConversationFiles(home, CONVERSATION);
+  return {};
+};
+
+const RESUME = { continue: { nativeSessionId: CONVERSATION, mode: "resume" } } as const;
+
+describe("the skills folder of a session", () => {
+  it("is passed to a new conversation as an additional directory", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.received("session/new")[0]?.params).toMatchObject({
+            additionalDirectories: [skills.sessionSkillsFolder],
+          });
+        }),
+      { context: () => skills.context },
+    );
+  });
+
+  it("is told to the thread after session.started when a repository skill has the name of a library skill", () => {
+    const skills = createSessionSkills({ library: ["release"] });
+    const repository = join(skills.sessionSkillsFolder, "repositories", "webshop");
+    mkdirSync(join(repository, "skills", "release"), { recursive: true });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          const tags = h.seen.map((event) => event._tag);
+          const warnings = h.tags("runtime.warning");
+          expect(warnings).toHaveLength(1);
+          expect(warnings[0]?.message).toContain("$webshop:release (same name as $release)");
+          expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+        }),
+      {
+        context: () => ({ ...skills.context, repositorySkillsFolders: [repository] }),
+      },
+    );
+  });
+
+  it("is not warned about when no two skills share a name", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.tags("runtime.warning")).toEqual([]);
+        }),
+      { context: () => skills.context },
+    );
+  });
+
+  it("is passed to a resumed conversation too", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(RESUME);
+
+          expect(h.received("session/resume")[0]?.params).toMatchObject({
+            additionalDirectories: [skills.sessionSkillsFolder],
+          });
+        }),
+      { fake: withConversation, context: () => skills.context },
+    );
+  });
+
+  it("is passed resolved when it is reached through a link, as the pointer lines name resolved paths", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    const link = join(createScratchHome("agy-session-link"), "linked");
+    symlinkSync(skills.sessionSkillsFolder, link);
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.received("session/new")[0]?.params).toMatchObject({
+            additionalDirectories: [realpathSync(skills.sessionSkillsFolder)],
+          });
+        }),
+      { context: () => ({ sessionSkillsFolder: link, librarySkillsFolder: link }) },
+    );
+  });
+
+  it("fails the start, and spawns nothing, when agy does not take additional directories", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("additionalDirectories");
+          expect(h.received("session/new")).toHaveLength(0);
+          expect(h.tags("session.started")).toHaveLength(0);
+        }),
+      {
+        fake: { withoutAdditionalDirectoriesCapability: true },
+        context: () => skills.context,
+      },
+    );
+  });
+
+  it("fails the start with the staging error, and spawns nothing, when the .git file cannot be written", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    writeFileSync(join(skills.sessionSkillsFolder, ".git"), "");
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure._tag).toBe("AdapterFailed");
+          expect(failure.message).toContain("could not prepare the session's skills folder");
+          expect(h.fake.spawns).toHaveLength(0);
+        }),
+      { context: () => skills.context },
+    );
+  });
+
+  it("is left out of a start with no skills, which needs no additional directories capability", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.tags("session.started")).toHaveLength(1);
+          expect(h.received("session/new")[0]?.params).not.toHaveProperty("additionalDirectories");
+        }),
+      { fake: { withoutAdditionalDirectoriesCapability: true } },
+    ));
+});
+
+describe("the instructions of a session", () => {
+  const PARTS = {
+    systemPrompt: "Persona.",
+    coordination: "Coordination.",
+    memory: "Memory.",
+  };
+  const ALL_PARTS = (user: string) =>
+    `Orientation.\n\nPersona.\n\n${user}\n\nSkill.\n\nCoordination.\n\nMemory.`;
+  const expectedMeta = (append: string) => ({ antigravity: { systemPrompt: { append } } });
+
+  it.each(["new", "resume"] as const)(
+    "hold the orientation, persona, user's instructions, skill, coordination and memory, in that order, on a %s start",
+    (kind) =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start(kind === "resume" ? { ...PARTS, ...RESUME } : PARTS);
+
+            const method = kind === "resume" ? "session/resume" : "session/new";
+            expect(h.received(method)[0]?.params).toMatchObject({
+              _meta: expectedMeta(ALL_PARTS("User.")),
+            });
+          }),
+        {
+          orientation: "Orientation.",
+          skill: "Skill.",
+          fake: withConversation,
+          context: () => ({ userMaterial: { ...NO_USER_MATERIAL, instructions: "User." } }),
+        },
+      ),
+  );
+
+  it("tells the thread after session.started what the user's instructions lost", () => {
+    const warning = "Cut /Users/someone/.gemini/AGENTS.md in the Thread's instructions";
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(PARTS);
+
+          const tags = h.seen.map((event) => event._tag);
+          expect(h.tags("runtime.warning")).toMatchObject([{ message: warning }]);
+          expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+        }),
+      { context: () => ({ userMaterial: { ...NO_USER_MATERIAL, warnings: [warning] } }) },
+    );
+  });
+
+  it("hold nothing of the user's own files when the session has no User Material", () => {
+    const userHome = createScratchHome("agy-user-home");
+    mkdirSync(join(userHome, ".gemini"));
+    writeFileSync(join(userHome, ".gemini", "GEMINI.md"), "The user's marker.");
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(PARTS);
+
+          const params = JSON.stringify(h.received("session/new")[0]?.params);
+          expect(params).toContain("Persona.");
+          expect(params).not.toContain("The user's marker.");
+        }),
+      { context: (home) => ({ env: { ...buildContext(home).env, HOME: userHome } }) },
+    );
+  });
+});
+
+describe("an input with Skill References", () => {
+  /** Returns the `detail` of the `user_message` the session reported. */
+  const readUserMessageDetail = (h: Harness) =>
+    h.tags("item.started").find((event) => event.kind === "user_message")?.detail;
+
+  it("sends a pointer line for each skill with a file, records only those, and warns about the rest after the user message", () => {
+    const skills = createSessionSkills({ library: ["review", "gone"], withoutFile: ["gone"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const file = join(skills.sessionSkillsFolder, "skills", "review", "SKILL.md");
+
+          const sent = yield* h.adapter.sendInput(
+            SESSION,
+            skills.buildInput("do $gone and $review"),
+          );
+          yield* h.untilReceived("session/prompt");
+
+          const prompt = h.received("session/prompt")[0]?.params as {
+            prompt: ReadonlyArray<{ text: string }>;
+          };
+          expect(prompt.prompt[0]?.text).toContain(JSON.stringify(file));
+          // Only the skill that got a line is recorded, because a client draws a chip for each one.
+          expect(readUserMessageDetail(h)).toMatchObject({ skills: ["review"] });
+          yield* h.until("reported the warning", () => h.tags("runtime.warning").length > 0);
+          const warnings = h.tags("runtime.warning");
+          expect(warnings.map(({ turnId, message }) => ({ turnId, message }))).toEqual([
+            {
+              turnId: sent.turnId,
+              message:
+                "Hercule could not give Antigravity the skill $gone: its SKILL.md is missing, is not a regular file, or leads outside the skill's folder. The message was sent without it. Check the skill's folder, then send the message again.",
+            },
+          ]);
+          const tags = h.seen.map((event) => event._tag);
+          expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("item.completed"));
+        }),
+      { fake: { recording: "bad-model" }, context: () => skills.context },
+    );
+  });
 });
 
 describe("the temporary folder of a process", () => {

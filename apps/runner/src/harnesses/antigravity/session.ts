@@ -22,7 +22,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
-import type { AcpConnection, AcpHandlers, PromptContent } from "@hercule/acp";
+import type { AcpConnection, AcpHandlers, NewSessionRequest, PromptContent } from "@hercule/acp";
 import { SteerRefused } from "@hercule/protocol";
 import type {
   AccessMode,
@@ -51,11 +51,14 @@ import {
 import { readAttachmentBase64 } from "../attachments";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
-import { buildHarnessPrompt, joinInstructions } from "../prompt";
+import { joinInstructions } from "../prompt";
 import { escapeControlCharacters } from "../../report";
+import type { ResolvedSkillReference } from "../../skills";
 import { truncateFact, truncateMessage } from "../text";
 import { ANTIGRAVITY_NAME, checkAccountUsable, chooseAgyMode, openSignedInAgy } from "./agy";
 import type { AgySeam } from "./agy";
+import { buildAgyPrompt } from "./skill-prompt";
+import { buildShadowedSkillsWarning, stageAgySkills } from "./skills";
 import {
   createConfigChange,
   describeSetting,
@@ -158,11 +161,23 @@ export interface AgySession {
   readonly exited: Effect.Effect<void>;
 }
 
-/** Returns the text the session's `agy` appends to its system prompt, or undefined when there is none. */
-const buildInstructions = (ctx: SessionStartContext, spec: SessionSpec): string | undefined =>
+/**
+ * Returns the text the session's `agy` appends to its system prompt, or
+ * undefined when there is none. The parts come in this order (spec 06 section
+ * 9.3): the orientation, the session's system prompt, the user's own
+ * instructions (undefined when there are none), the skill of the Hercule tool,
+ * the coordination text and the memory.
+ */
+const buildInstructions = (
+  ctx: SessionStartContext,
+  spec: SessionSpec,
+  userInstructions: string | undefined,
+): string | undefined =>
   joinInstructions([
     ctx.herculeTool.orientation,
     spec.systemPrompt,
+    userInstructions,
+    ctx.herculeTool.skill,
     spec.coordination,
     spec.memory,
   ]);
@@ -554,22 +569,31 @@ export const startAgySession = (
       });
 
     const start = Effect.gen(function* () {
-      const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
+      // Staged before the process exists, so a failure here spawns nothing. A
+      // resume stages again: every start has a fresh session skills folder.
+      const staged = yield* stageAgySkills(ctx);
+      const skillsFolder = staged?.folder;
+      const instructions = buildInstructions(ctx, spec, ctx.userMaterial?.instructions);
+      // Built before `agy` opens, because `openSignedInAgy` checks that `agy`
+      // takes what the request uses. A field that needs `agy` to announce
+      // support for it gets its check there.
+      const request: NewSessionRequest = {
         cwd,
-        handlers,
-        purpose: { kind: "session", accessMode },
-      }).pipe(Scope.provide(processScope));
-      const connection: AcpConnection = agy.connection;
-
-      const instructions = buildInstructions(ctx, spec);
-      const request = {
-        cwd,
-        // The MCP Gateway is handed to `agy` by a later change.
+        ...(skillsFolder === undefined ? {} : { additionalDirectories: [skillsFolder] }),
+        // The MCP Gateway is handed to `agy` here by a later change, together
+        // with its capability check in `openSignedInAgy`.
         mcpServers: [],
         ...(instructions === undefined
           ? {}
           : { meta: { antigravity: { systemPrompt: { append: instructions } } } }),
       };
+      const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
+        cwd,
+        handlers,
+        purpose: { kind: "session", accessMode, request },
+      }).pipe(Scope.provide(processScope));
+      const connection: AcpConnection = agy.connection;
+
       // From the reply on, updates are the session's own. Before it, they are a resume's replay.
       const startReading = (id: string) =>
         Effect.sync(() => {
@@ -586,11 +610,8 @@ export const startAgySession = (
         });
       const conversation = yield* (
         spec.continue === undefined
-          ? agy.newConversation(request, startReading)
-          : agy.resumeConversation(
-              { ...request, nativeSessionId: spec.continue.nativeSessionId },
-              startReading,
-            )
+          ? agy.newConversation(startReading)
+          : agy.resumeConversation(spec.continue.nativeSessionId, startReading)
       ).pipe(
         Effect.mapError((error) =>
           error._tag === "AcpError" ? buildStartFailure(ANTIGRAVITY_NAME, error.message) : error,
@@ -667,6 +688,21 @@ export const startAgySession = (
           },
         ]);
       }
+      // What the user's instructions lost, so the user knows what `agy` does not see.
+      for (const warning of ctx.userMaterial?.warnings ?? []) {
+        emitEvents([
+          { _tag: "runtime.warning", ...buildBase(), message: truncateMessage(warning) },
+        ]);
+      }
+      if (staged !== undefined && staged.shadowed.length > 0) {
+        emitEvents([
+          {
+            _tag: "runtime.warning",
+            ...buildBase(),
+            message: buildShadowedSkillsWarning(staged.shadowed),
+          },
+        ]);
+      }
       // What `agy` sent while the start was prepared is now output with no input.
       emitEvents(releaseTurn(state));
       yield* Effect.forkIn(
@@ -701,8 +737,12 @@ export const startAgySession = (
       stopping || generation !== inputGeneration;
 
     /**
-     * Reads the images and sets the model, and returns the prompt for `agy` with
-     * the part of `PREPARATION_BUDGET` that is left for the handoff of the prompt. Fails with
+     * Reads the images, sets the model and builds the prompt, and returns the
+     * prompt for `agy`, the Skill References its text translated, the names of
+     * the ones that got no pointer line, and the part of `PREPARATION_BUDGET`
+     * that is left for the handoff of the prompt. Building the prompt reads the
+     * skill files with synchronous calls, so the budget cannot interrupt them:
+     * they only count toward the time spent. Fails with
      * `InputNotDelivered` when an interrupt or a stop voids the input, with the
      * failures of the model change, and with `AdapterFailed` when an image cannot
      * be read or the budget runs out.
@@ -711,7 +751,12 @@ export const startAgySession = (
       input: AdapterTurnInput,
       inputGeneration: number,
     ): Effect.Effect<
-      { readonly prompt: ReadonlyArray<PromptContent>; readonly handoffBudget: Duration.Duration },
+      {
+        readonly prompt: ReadonlyArray<PromptContent>;
+        readonly skillReferences: ReadonlyArray<ResolvedSkillReference>;
+        readonly skippedSkills: ReadonlyArray<string>;
+        readonly handoffBudget: Duration.Duration;
+      },
       AdapterError
     > =>
       Effect.gen(function* () {
@@ -725,14 +770,19 @@ export const startAgySession = (
           if (changed.kind !== "applied")
             return yield* Effect.fail(buildInputConfigFailure(changed));
         }
+        const { text, skillReferences, skipped } = buildAgyPrompt(input);
         // The last wait before the write is over, so an interrupt that came during it is checked here.
         if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
-        return images;
+        return {
+          prompt: [{ type: "text", text } as const, ...images],
+          skillReferences,
+          skippedSkills: skipped,
+        };
       }).pipe(
         Effect.timeoutOption(PREPARATION_BUDGET),
-        Effect.flatMap((images) =>
-          Option.isSome(images)
-            ? Effect.succeed(images.value)
+        Effect.flatMap((prepared) =>
+          Option.isSome(prepared)
+            ? Effect.succeed(prepared.value)
             : Effect.fail(
                 buildAdapterFailed(
                   `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
@@ -740,8 +790,8 @@ export const startAgySession = (
               ),
         ),
         Effect.timed,
-        Effect.map(([elapsed, images]) => ({
-          prompt: [{ type: "text", text: buildHarnessPrompt(input) } as const, ...images],
+        Effect.map(([elapsed, prepared]) => ({
+          ...prepared,
           handoffBudget: Duration.subtract(PREPARATION_BUDGET, elapsed),
         })),
       );

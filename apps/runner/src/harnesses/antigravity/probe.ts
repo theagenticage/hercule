@@ -171,10 +171,9 @@ const buildDecliningHandlers = Effect.map(Effect.context<never>(), (services): A
 const resumeConversation = (
   agy: SignedInAgy,
   storedId: string,
-  folder: string,
 ): Effect.Effect<OpenedConversation | undefined, AcpError | AdapterError> =>
   agy
-    .resumeConversation({ nativeSessionId: storedId, cwd: folder, mcpServers: [] })
+    .resumeConversation(storedId)
     .pipe(
       Effect.catch((error) =>
         error._tag === "ResumeTranscriptMissing"
@@ -207,9 +206,8 @@ const resumeConversation = (
 const makeConversation = (
   agy: SignedInAgy,
   home: string,
-  folder: string,
 ): Effect.Effect<OpenedConversation, AcpError | AdapterError> =>
-  agy.newConversation({ cwd: folder, mcpServers: [] }, (id) => writeConversationId(home, id));
+  agy.newConversation((id) => writeConversationId(home, id));
 
 /** Tells `agy` the conversation is over. It never fails and never takes longer than `CLOSE_DEADLINE`. */
 const closeConversation = (connection: AcpConnection, id: string): Effect.Effect<void> =>
@@ -249,9 +247,8 @@ const openProbeConversation = (
       handlers,
       purpose: { kind: "probe" },
     });
-    const resumed =
-      storedId === undefined ? undefined : yield* resumeConversation(agy, storedId, folder);
-    const conversation = resumed ?? (yield* makeConversation(agy, ctx.home, folder));
+    const resumed = storedId === undefined ? undefined : yield* resumeConversation(agy, storedId);
+    const conversation = resumed ?? (yield* makeConversation(agy, ctx.home));
     yield* closeConversation(agy.connection, conversation.id);
     return {
       settings: conversation.settings,

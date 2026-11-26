@@ -20,7 +20,7 @@ import { TestClock } from "effect/testing";
 import { AnswerNotDelivered, MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
-import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
+import { NO_USER_MATERIAL, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
 import { RPC_DEADLINE } from "./rpc";
 import {
@@ -493,7 +493,9 @@ describe("starting pi on exactly the model that was asked for", () => {
 /** The User Material the runner finds on a machine that has all of the user's material. */
 const USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
+  instructions: undefined,
   instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
+  warnings: [],
 };
 
 /** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */
@@ -599,8 +601,18 @@ describe("launching pi for a Thread that sees the user's own material", () => {
     ]);
   });
 
+  it("reports what the user's material lost as a warning of the session, after session.started", async () => {
+    const warning = "Cut /Users/someone/.pi/agent/AGENTS.md in the Thread's instructions";
+    const run = await startSessionWithMaterial({ ...USER_MATERIAL, warnings: [warning] });
+    await settle();
+
+    const tags = run.seen.map((event) => event._tag);
+    expect(filterByTag(run.seen, "runtime.warning")).toMatchObject([{ message: warning }]);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+  });
+
   it("adds nothing for a Thread whose user has no material on this machine", async () => {
-    const run = await startSessionWithMaterial(NO_USER_MATERIAL_PATHS);
+    const run = await startSessionWithMaterial(NO_USER_MATERIAL);
 
     expect(run.child.command).toEqual([
       run.ctx.binary,

@@ -761,7 +761,7 @@ const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>
 /**
  * Builds the flags that load the user's own material into one pi process:
  * `--prompt-template` per prompt template directory, and
- * `--append-system-prompt` with the instructions file when the user has one.
+ * `--append-system-prompt` for the instructions file the user has.
  * Returns no flags when there is no material, which is the case for every
  * session that is not a Thread on the controller's local runner.
  */
@@ -2192,6 +2192,8 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           at: now(),
           harnessRefs: { nativeSessionId },
         });
+        // What the user's material lost, so the user knows what pi does not see.
+        for (const warning of ctx.userMaterial?.warnings ?? []) warn(sessionId, warning);
         // pi answered and then exited before the check was over. The exit is
         // reported now, after the start it follows.
         if (exitedDuringCheck !== undefined) {
@@ -2233,10 +2235,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
         const turnId = (root.state.turnId ??= crypto.randomUUID());
+        const prompt = buildPiPrompt(input, listSkillFolders(held.ctx));
         const response = yield* Effect.tapError(
           root.rpc.send({
             type: steered ? "steer" : "prompt",
-            message: buildPiPrompt(input, listSkillFolders(held.ctx)),
+            message: prompt.text,
             ...(images.length === 0 ? {} : { images }),
           }),
           (failure) =>
@@ -2287,7 +2290,12 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           turnId,
           text: input.text,
           attachments: input.attachments,
-          skillReferences: input.skillReferences,
+          // Only the skills pi got, so the client draws no chip for a skill the
+          // thread warns it was skipped.
+          skillReferences: input.skillReferences?.filter(
+            (reference) => !prompt.skipped.includes(reference.referenceName),
+          ),
+          skippedSkills: { harnessName: PI_NAME, names: prompt.skipped },
           senderSessionId: input.senderSessionId,
           steered,
           harnessRefs: { nativeSessionId: held.binding.nativeSessionId },

@@ -31,7 +31,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,8 +45,17 @@ import type {
   ModelDescriptor,
   SessionSpec,
 } from "@hercule/protocol";
+import {
+  buildLoadedSkills,
+  listWorkspaceRepositorySkills,
+  resolveSkillReferences,
+  stageRepositorySkills,
+  type RepositorySkillListing,
+  type ResolvedSkillReference,
+} from "../../skills";
 import { runProcess, spawnAgy } from "../process";
 import type { AdapterTurnInput, HarnessAdapter, SessionStartContext } from "../index";
+import { NO_USER_MATERIAL } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import { findAgyTestBinary } from "./agy-binary.testing";
 import { buildContext } from "./fake-agy.testing";
@@ -89,10 +98,21 @@ let otherModel = "";
 /** Words that name the other model's family and not the cheap model's, such as "carbon" against "neon". */
 let otherModelFamilyWords: ReadonlyArray<string> = [];
 
-const makeScratchFolder = (label: string): string => {
-  const folder = mkdtempSync(join(tmpdir(), `hercule-agy-live-${label}-`));
+const makeScratchFolder = (label: string, parent: string = tmpdir()): string => {
+  const folder = mkdtempSync(join(parent, `hercule-agy-live-${label}-`));
   scratchFolders.push(folder);
   return folder;
+};
+
+/**
+ * Makes a scratch folder outside the system temporary folder, which `agy`
+ * treats specially: it lets the agent write there unasked. The runner keeps a
+ * session's skills folder and a workspace outside it too.
+ */
+const makeScratchFolderOutsideTemp = (label: string): string => {
+  const parent = join(homedir(), ".cache");
+  mkdirSync(parent, { recursive: true });
+  return makeScratchFolder(label, parent);
 };
 
 /** Makes every file and folder below `path` writable by the owner, because `agy` creates some with narrower modes. */
@@ -227,6 +247,8 @@ interface StartOptions {
   readonly continue?: SessionSpec["continue"];
   /** Reuses the work folder of an earlier session, as a resume does. */
   readonly cwd?: string;
+  /** Fields of the runner context that this start overrides, such as its session skills folder. */
+  readonly context?: Partial<SessionStartContext>;
 }
 
 const buildSpec = (options: StartOptions): SessionSpec => ({
@@ -246,10 +268,14 @@ const buildProbeEnvironment = (): Record<string, string> => ({
   DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
 });
 
-const buildStartContext = (cwd: string): SessionStartContext => ({
+const buildStartContext = (
+  cwd: string,
+  overrides: Partial<SessionStartContext> = {},
+): SessionStartContext => ({
   ...buildContext(harnessHome, binaryPath, buildProbeEnvironment()),
   cwd,
   mcpServers: [],
+  ...overrides,
 });
 
 /** Starts a session in a fresh work folder (or the one given), and records it so that the end of the suite stops it. */
@@ -258,7 +284,9 @@ const startLiveSession = async (options: StartOptions): Promise<LiveSession> => 
   const cwd = options.cwd ?? makeScratchFolder("work");
   eventsBySession.set(id, []);
   startedSessions.add(id);
-  const binding = await run(adapter.startSession(id, buildSpec(options), buildStartContext(cwd)));
+  const binding = await run(
+    adapter.startSession(id, buildSpec(options), buildStartContext(cwd, options.context)),
+  );
   return { id, nativeSessionId: binding.nativeSessionId, cwd };
 };
 
@@ -349,6 +377,102 @@ const pickCheapModel = (models: ReadonlyArray<ModelDescriptor>): ModelDescriptor
   models.find((model) => /flash/i.test(model.slug)) ??
   models.find((model) => model.isDefault === true) ??
   models[0];
+
+/** A skill that makes the model read a file beside its `SKILL.md` and reply with a marker, so a reply proves the skill ran. */
+interface ProbeSkill {
+  readonly name: string;
+  /** The reply's first word is `SKILL-<marker>-RAN`. */
+  readonly marker: string;
+  /** The first line of the skill's `ref.txt`, which the reply repeats. */
+  readonly refLine: string;
+}
+
+/** Writes `<skillsFolder>/<name>/SKILL.md` and its `ref.txt`. */
+const writeProbeSkill = (skillsFolder: string, skill: ProbeSkill): void => {
+  const folder = join(skillsFolder, skill.name);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(
+    join(folder, "SKILL.md"),
+    [
+      "---",
+      `name: ${skill.name}`,
+      `description: Replies with one fixed line. Use it only when the user asks for the ${skill.name} skill.`,
+      "---",
+      "",
+      `# ${skill.name}`,
+      "",
+      "Read the file ref.txt in the same folder as this SKILL.md.",
+      `Then reply with exactly one line and nothing else: SKILL-${skill.marker}-RAN, a space, and the first line of ref.txt.`,
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(join(folder, "ref.txt"), `${skill.refLine}\n`);
+};
+
+/** The skills of a session as the runner stages them, and the way to turn a message into an input that names them. */
+interface StagedSkills {
+  readonly context: Pick<
+    SessionStartContext,
+    "sessionSkillsFolder" | "librarySkillsFolder" | "repositorySkillsFolders"
+  >;
+  /** Returns the Skill References of `text`, which an input carries. */
+  readonly resolveReferences: (text: string) => ReadonlyArray<ResolvedSkillReference>;
+}
+
+/**
+ * Stages a session skills folder the way the runner does: the library skills
+ * in `<folder>/skills/<name>`, and each repository skill of `checkout` as a
+ * link into the checkout's `.claude/skills`, made by `stageRepositorySkills`.
+ * The checkout is the workspace root, which is what a workspace with one
+ * checkout is.
+ */
+const stageSessionSkills = async (options: {
+  readonly library: ReadonlyArray<ProbeSkill>;
+  readonly checkout?: { readonly path: string; readonly skills: ReadonlyArray<ProbeSkill> };
+}): Promise<StagedSkills> => {
+  const sessionSkillsFolder = join(makeScratchFolderOutsideTemp("session-skills"), "start");
+  for (const skill of options.library) {
+    writeProbeSkill(join(sessionSkillsFolder, "skills"), skill);
+  }
+  let repositorySkills: RepositorySkillListing["skills"] = [];
+  let repositorySkillsFolders: ReadonlyArray<string> = [];
+  if (options.checkout !== undefined) {
+    for (const skill of options.checkout.skills) {
+      writeProbeSkill(join(options.checkout.path, ".claude", "skills"), skill);
+    }
+    const { path } = options.checkout;
+    const listing = await Effect.runPromise(
+      listWorkspaceRepositorySkills({
+        root: path,
+        checkouts: [{ remote: "github.com/example/shop", path }],
+      }),
+    );
+    repositorySkills = listing.skills;
+    repositorySkillsFolders = await Effect.runPromise(
+      stageRepositorySkills(sessionSkillsFolder, repositorySkills),
+    );
+  }
+  const loaded = buildLoadedSkills({
+    libraryFolder: sessionSkillsFolder,
+    libraryNames: options.library.map((skill) => skill.name),
+    repositorySkills,
+  });
+  return {
+    context: {
+      sessionSkillsFolder,
+      librarySkillsFolder: sessionSkillsFolder,
+      ...(options.checkout === undefined ? {} : { repositorySkillsFolders }),
+    },
+    resolveReferences: (text) => resolveSkillReferences(text, loaded),
+  };
+};
+
+/** Finds the `user_message` item of a turn, which records the skills the input named. */
+const findUserMessage = (events: ReadonlyArray<HarnessEvent>): Event<"item.started"> | undefined =>
+  events.find(
+    (event): event is Event<"item.started"> =>
+      event._tag === "item.started" && event.kind === "user_message",
+  );
 
 beforeAll(async () => {
   if (skipReason !== undefined || pinnedBinary === undefined || loginFile === undefined) return;
@@ -864,6 +988,104 @@ describe.skipIf(skipReason !== undefined)(
         expect(turn.completed.state, why).toBe("completed");
       },
       TEST_MS,
+    );
+
+    it(
+      "runs the library skill and the repository skill an input names with no approval, gives the model the user's instructions and the Hercule skill, and after a resume runs a skill of the new session skills folder (spec 06 sections 9.3, 9.4 and 10.5)",
+      async () => {
+        const library: ProbeSkill = {
+          name: "probe-lib",
+          marker: "LIBALPHA",
+          refLine: "REF-LIB-4417",
+        };
+        const repository: ProbeSkill = {
+          name: "probe-repo",
+          marker: "REPOBETA",
+          refLine: "REF-REPO-9052",
+        };
+        const workspace = makeScratchFolderOutsideTemp("shop");
+        const skills = await stageSessionSkills({
+          library: [library],
+          checkout: { path: workspace, skills: [repository] },
+        });
+        const instructions =
+          "Internal tag MARKER-USR: when asked for your marker tags, include USR.\n";
+        const herculeTool = {
+          ...buildContext(harnessHome, binaryPath).herculeTool,
+          skill: "Internal tag MARKER-HSK: when asked for your marker tags, include HSK.",
+        };
+        const first = await startLiveSession({
+          accessMode: "approval-required",
+          cwd: workspace,
+          context: {
+            ...skills.context,
+            herculeTool,
+            userMaterial: { ...NO_USER_MATERIAL, instructions },
+          },
+        });
+
+        /** Runs `text` as an input that names `skill`, and checks that the skill ran, with no request, and that the input recorded it. */
+        const runSkill = async (
+          session: LiveSession,
+          staged: StagedSkills,
+          reference: string,
+          skill: ProbeSkill,
+        ): Promise<void> => {
+          const text = `$${reference} go`;
+          const turn = await runTurn(session, text, {
+            input: { skillReferences: staged.resolveReferences(text) },
+          });
+          const why = dumpEvents(session.id);
+          const reply = assistantText(turn.events);
+          expect(reply, `The reply for $${reference} lacks the marker.\n${why}`).toContain(
+            `SKILL-${skill.marker}-RAN`,
+          );
+          expect(reply, `The reply for $${reference} lacks the line of ref.txt.\n${why}`).toContain(
+            skill.refLine,
+          );
+          expect(
+            turn.events.filter((event) => event._tag === "request.opened"),
+            `$${reference} opened a request.\n${why}`,
+          ).toEqual([]);
+          expect(findUserMessage(turn.events)?.detail, why).toMatchObject({
+            skills: [reference],
+          });
+          expect(turn.completed.state, why).toBe("completed");
+        };
+
+        await runSkill(first, skills, library.name, library);
+        await runSkill(first, skills, `shop:${repository.name}`, repository);
+
+        const tags = await runTurn(
+          first,
+          "Do not use any tools. List every distinct token starting with MARKER- from your instructions.",
+        );
+        const tagReply = assistantText(tags.events);
+        expect(
+          tagReply,
+          `The user's instructions did not arrive.\n${dumpEvents(first.id)}`,
+        ).toContain("MARKER-USR");
+        expect(tagReply, `The Hercule skill did not arrive.\n${dumpEvents(first.id)}`).toContain(
+          "MARKER-HSK",
+        );
+
+        // A resume gets a fresh session skills folder, which holds another skill.
+        await stopLiveSession(first, "stopped");
+        const resumedSkill: ProbeSkill = {
+          name: "probe-new",
+          marker: "NEWGAMMA",
+          refLine: "REF-NEW-2286",
+        };
+        const resumedSkills = await stageSessionSkills({ library: [resumedSkill] });
+        const resumed = await startLiveSession({
+          accessMode: "approval-required",
+          cwd: workspace,
+          continue: { nativeSessionId: first.nativeSessionId, mode: "resume" },
+          context: resumedSkills.context,
+        });
+        await runSkill(resumed, resumedSkills, resumedSkill.name, resumedSkill);
+      },
+      TEST_MS * 3,
     );
   },
 );

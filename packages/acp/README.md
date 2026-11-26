@@ -65,10 +65,11 @@ The interface in `index.ts` stays the same, so nothing outside `connection.ts` c
 
 ## Recordings of `agy`
 
-`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 added 50 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more.
+`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 added 82 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more.
 
 - The recorder is not in `main`. It lives on the branch `research/antigravity-sessions-1282`, under `docs/research/antigravity/sessions-recorder/`.
-- The first line of each of these recordings is a `{"note": ...}` line that says which scenario made it, with which flags, in which mode, with which `TMPDIR`, in which work folder and with which files in place. The replay skips every `note` line.
+- #1293 added 16 more (skills, instructions files, the default Harness Home) with its own recorder. It is not in `main` either. It lives on the branch `research/antigravity-skills-1293`, under `docs/research/antigravity/skills-recorder/`. Each of its recordings has a first `note` line (scenario, argv, `TMPDIR`, work folder, files placed) and a last `note` line with what was seen outside ACP: listings of folders, hook marker files, and the lines `agy` wrote in its own transcript.
+- The first line of each of the #1282 recordings is a `{"note": ...}` line that says which scenario made it, with which flags, in which mode, with which `TMPDIR`, in which work folder and with which files in place. The replay skips every `note` line.
 - Personal values were replaced: the Linux user name with `user`, the machine's host name with `runner-host`, and the controller's address with `controller.example`. No email address or token appears in them.
 
 ## Lint, formatting and tests
@@ -106,6 +107,7 @@ Then:
      - T3 logs an outgoing request (`decoded`, `_tag: "Request"`) in the fiber of the caller. `connection.ts` relies on it: `CurrentCall`, provided in `callHarness`, is how a request finds its call, so each call is told its own reply. If a sync logs it in another fiber, replies are named wrongly or not at all (the test of many overlapping calls fails).
      - A reply that T3 cannot decode fails the call with a `Schema.SchemaError` defect, not with a typed error, and the issue paths start with `value`. `callHarness` turns it into `unreadable`.
      - A request of the harness whose id is still open is never handed to a handler, but T3 answers it with an error under the same id, which a reply hook cannot tell from the original's reply. `connection.ts` therefore ends the connection when it arrives, which fails every waiting `replyWritten`.
+   - `sessionCapabilities.additionalDirectories` of the `initialize` reply, which `connection.ts` turns into `acceptsAdditionalDirectories`, and the `additionalDirectories` field of the `session/new` and `session/resume` requests, which `connection.ts` passes through. Both are in the schemas of `compat.ts` and `_generated/`; a sync that renames or drops them breaks the skills `agy` loads from an added folder.
    - `errors.ts`, `compat.ts` and `_generated/`: the shapes `src/types.ts` must still satisfy. `pnpm typecheck` shows a required field that went away or changed type in `connection.ts`. An optional field is not checked that way: `src/connection.integration.test.ts` plays the recordings of a real harness through the connection and compares each update, tool call, form and answer with the recorded one, so a rename or a dropped field fails there.
    - The Effect version T3 uses (the `effect` entry of `catalog` in T3 Code's `pnpm-workspace.yaml`) against ours (`effect` in `package.json`). At the pinned commit T3 is on Effect 4.1.5 and we are on 4.0.7. When they differ, the copy may call an API our Effect version does not have.
    - Any new import in the copy other than `effect`: `pnpm dep-lint` fails on it.
