@@ -22,7 +22,7 @@
  * guards against stale or misplaced links only, not against another process
  * that swaps paths while this code runs.
  */
-import { constants, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
@@ -223,10 +223,6 @@ const buildConversation = (
 
 /** Returns the step a transcript line records. */
 const buildStep = (line: Schema.Schema.Type<typeof TranscriptLine>): AgyStep => {
-  const hasUsage =
-    line.input_tokens !== undefined ||
-    line.cache_read_tokens !== undefined ||
-    line.output_tokens !== undefined;
   const error = line.error;
   return {
     index: line.step_index,
@@ -248,13 +244,15 @@ const buildStep = (line: Schema.Schema.Type<typeof TranscriptLine>): AgyStep => 
       ),
     })),
     ...(line.model === undefined ? {} : { model: line.model }),
-    // `agy` leaves out a count that is zero, so a missing count is zero.
-    ...(hasUsage
+    // A step with some of the three counts missing has no usage: a missing count is not taken to be zero.
+    ...(line.input_tokens !== undefined &&
+    line.cache_read_tokens !== undefined &&
+    line.output_tokens !== undefined
       ? {
           usage: {
-            inputTokens: line.input_tokens ?? 0,
-            cacheReadTokens: line.cache_read_tokens ?? 0,
-            outputTokens: line.output_tokens ?? 0,
+            inputTokens: line.input_tokens,
+            cacheReadTokens: line.cache_read_tokens,
+            outputTokens: line.output_tokens,
           },
         }
       : {}),
@@ -276,20 +274,21 @@ const buildLink = (conversation: Conversation, parentId: string): AgySubagentLin
 });
 
 /**
- * Opens the reader for the conversation `conversationId` in the Harness Home
- * `home`. Nothing is read until `read` is called, except when `skipExisting`
- * is true (a resumed session): then every transcript that exists now is
- * marked as read up to its current end, and the subagents that exist now are
- * known but announced only when they produce a new step. That scan runs here,
- * before the caller sends its first prompt, so that the first steps of the new
- * turn are not mistaken for old ones. It assumes the existing transcripts end
- * at a line end, which holds between turns.
+ * Returns the reader for the conversation `conversationId` in the Harness Home
+ * `home`. Never fails. Nothing is read until `read` is called, except when
+ * `skipExisting` is true (a resumed session): then every transcript that
+ * exists now is marked as read up to its current end, and the subagents that
+ * exist now are known but announced only when they produce a new step. That
+ * scan runs when this effect runs, so the caller must run it before it sends
+ * its first prompt: a scan at the first `read` would mistake the first steps
+ * of the new turn for old ones. It assumes the existing transcripts end at a
+ * line end, which holds between turns.
  */
 export const openSessionFiles = (input: {
   readonly home: string;
   readonly conversationId: string;
   readonly skipExisting: boolean;
-}): SessionFiles => {
+}): Effect.Effect<SessionFiles> => {
   const { home, skipExisting } = input;
   const root = buildConversation(input.conversationId, undefined, false);
   const conversations = new Map<string, Conversation>([[root.id, root]]);
@@ -297,7 +296,7 @@ export const openSessionFiles = (input: {
   const order: Array<Conversation> = [root];
   let childCount = 0;
 
-  const folderOf = (base: string, conversation: Conversation): string =>
+  const buildConversationFolder = (base: string, conversation: Conversation): string =>
     join(base, conversation.id, ".system_generated");
 
   const addChild = (id: string, parentId: string, isDormant: boolean): Conversation => {
@@ -307,43 +306,6 @@ export const openSessionFiles = (input: {
     childCount += 1;
     return child;
   };
-
-  if (skipExisting) {
-    try {
-      const base = join(realpathSync(home), APP_DATA_DIR, "brain");
-      const scan = (conversation: Conversation): void => {
-        const folder = folderOf(base, conversation);
-        try {
-          const path = join(folder, "logs", "transcript.jsonl");
-          if (realpathSync(join(folder, "logs")) === join(folder, "logs")) {
-            const info = lstatSync(path);
-            if (info.isFile()) {
-              conversation.offset = info.size;
-              conversation.inode = info.ino;
-            }
-          }
-        } catch {
-          // Nothing to skip. If the file is a link, `read` reports it.
-        }
-        try {
-          const subagents = join(folder, "subagents");
-          if (realpathSync(subagents) !== subagents) return;
-          for (const name of readdirSync(subagents).sort()) {
-            const id = name.slice(0, -".json".length);
-            if (!name.endsWith(".json") || !UUID_PATTERN.test(id) || conversations.has(id))
-              continue;
-            if (childCount >= MAX_SUBAGENTS) return;
-            scan(addChild(id, conversation.id, true));
-          }
-        } catch {
-          // No subagents folder, or one `read` will report.
-        }
-      };
-      scan(root);
-    } catch {
-      // The Harness Home does not exist yet, so nothing exists to skip.
-    }
-  }
 
   /** Fails with an error naming the cause when `path`, or a folder above it below the home, is a link. */
   const requireNoLinks = async (path: string): Promise<void> => {
@@ -433,7 +395,7 @@ export const openSessionFiles = (input: {
     if (parent === undefined) return;
     try {
       const { text, isTruncated } = await readRegularFile(
-        join(folderOf(base, parent), "subagents", `${child.id}.json`),
+        join(buildConversationFolder(base, parent), "subagents", `${child.id}.json`),
         MAX_SMALL_FILE_BYTES,
       );
       const json = decodeJson(text);
@@ -456,7 +418,7 @@ export const openSessionFiles = (input: {
    */
   const findLaunchMessage = async (base: string, child: Conversation): Promise<void> => {
     if (child.launch !== undefined || child.parentId === undefined) return;
-    const folder = join(folderOf(base, child), "messages");
+    const folder = join(buildConversationFolder(base, child), "messages");
     let names: ReadonlyArray<string>;
     try {
       await requireNoLinks(folder);
@@ -529,24 +491,34 @@ export const openSessionFiles = (input: {
     conversation.held = [];
   };
 
+  /** Returns the ids of the subagents registered in `<conversation>/subagents/`, sorted. None when the folder is missing. */
+  const listSubagentIds = async (
+    base: string,
+    conversation: Conversation,
+  ): Promise<ReadonlyArray<string>> => {
+    const folder = join(buildConversationFolder(base, conversation), "subagents");
+    try {
+      await requireNoLinks(folder);
+      const names = await readdir(folder);
+      return names
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => name.slice(0, -".json".length))
+        .filter((id) => UUID_PATTERN.test(id))
+        .sort();
+    } catch (error) {
+      if (isMissingPath(error)) return [];
+      throw error;
+    }
+  };
+
   /** Adds each subagent registered in `<conversation>/subagents/` that is not known yet. */
   const discoverSubagents = async (
     base: string,
     conversation: Conversation,
     out: Array<SessionFileObservation>,
   ): Promise<void> => {
-    const folder = join(folderOf(base, conversation), "subagents");
-    let names: ReadonlyArray<string>;
-    try {
-      await requireNoLinks(folder);
-      names = await readdir(folder);
-    } catch (error) {
-      if (isMissingPath(error)) return;
-      throw error;
-    }
-    for (const name of [...names].sort()) {
-      const id = name.slice(0, -".json".length);
-      if (!name.endsWith(".json") || !UUID_PATTERN.test(id) || conversations.has(id)) continue;
+    for (const id of await listSubagentIds(base, conversation)) {
+      if (conversations.has(id)) continue;
       if (childCount >= MAX_SUBAGENTS) {
         const extra = buildConversation(id, conversation.id, false);
         extra.isUnreadable = true;
@@ -559,6 +531,33 @@ export const openSessionFiles = (input: {
         continue;
       }
       addChild(id, conversation.id, false);
+    }
+  };
+
+  /**
+   * Marks the transcript of `conversation` as read up to its current end, and
+   * does the same for every subagent below it, each of them dormant. A file
+   * that is a link or cannot be read is left alone: `read` reports it.
+   */
+  const skipExistingFiles = async (base: string, conversation: Conversation): Promise<void> => {
+    const logs = join(buildConversationFolder(base, conversation), "logs");
+    try {
+      await requireNoLinks(logs);
+      const info = await lstat(join(logs, "transcript.jsonl"));
+      if (info.isFile()) {
+        conversation.offset = info.size;
+        conversation.inode = info.ino;
+      }
+    } catch {
+      // Nothing to skip.
+    }
+    try {
+      for (const id of await listSubagentIds(base, conversation)) {
+        if (conversations.has(id) || childCount >= MAX_SUBAGENTS) continue;
+        await skipExistingFiles(base, addChild(id, conversation.id, true));
+      }
+    } catch {
+      // `read` reports a subagents folder it cannot read.
     }
   };
 
@@ -585,7 +584,7 @@ export const openSessionFiles = (input: {
       let failure: unknown;
       const fresh: Array<AgyStep> = [];
       try {
-        await collectNewSteps(conversation, folderOf(base, conversation), fresh);
+        await collectNewSteps(conversation, buildConversationFolder(base, conversation), fresh);
       } catch (error) {
         failure = error;
       }
@@ -611,5 +610,14 @@ export const openSessionFiles = (input: {
     return out;
   };
 
-  return { read: Effect.promise(readAll) };
+  return Effect.promise(async () => {
+    if (skipExisting) {
+      try {
+        await skipExistingFiles(join(await realpath(home), APP_DATA_DIR, "brain"), root);
+      } catch {
+        // The Harness Home does not exist yet, so nothing exists to skip.
+      }
+    }
+    return { read: Effect.promise(readAll) };
+  });
 };

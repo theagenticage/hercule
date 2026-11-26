@@ -28,10 +28,10 @@ const createHomeFromFixture = (scenario: string): string => {
   return home;
 };
 
-const folderOf = (home: string, id: string): string =>
+const buildConversationFolder = (home: string, id: string): string =>
   join(home, APP_DATA_DIR, "brain", id, ".system_generated");
 const transcriptOf = (home: string, id: string): string =>
-  join(folderOf(home, id), "logs", "transcript.jsonl");
+  join(buildConversationFolder(home, id), "logs", "transcript.jsonl");
 
 const write = (path: string, text: string): void => {
   mkdirSync(dirname(path), { recursive: true });
@@ -42,8 +42,8 @@ const write = (path: string, text: string): void => {
 const line = (index: number, extra: Record<string, unknown> = {}): string =>
   `${JSON.stringify({ step_index: index, type: "GENERIC", status: "DONE", ...extra })}\n`;
 
-const open = (home: string, conversationId: string, skipExisting = false): SessionFiles =>
-  openSessionFiles({ home, conversationId, skipExisting });
+const open = (home: string, conversationId: string, skipExisting = false): Promise<SessionFiles> =>
+  Effect.runPromise(openSessionFiles({ home, conversationId, skipExisting }));
 const read = (files: SessionFiles) => Effect.runPromise(files.read);
 
 /** Describes each observation as one short string, to compare whole reads. */
@@ -57,7 +57,7 @@ const describeAll = (observations: ReadonlyArray<SessionFileObservation>): Reado
 /** Registers a child below `parent`, the way `agy` does. */
 const registerChild = (home: string, parent: string, child: string): void => {
   write(
-    join(folderOf(home, parent), "subagents", `${child}.json`),
+    join(buildConversationFolder(home, parent), "subagents", `${child}.json`),
     JSON.stringify({
       conversationId: child,
       subagentDescriptor: { typeName: "self", role: "Helper" },
@@ -69,7 +69,7 @@ const registerChild = (home: string, parent: string, child: string): void => {
 /** Writes the message in which `parent` started `child`. */
 const writeLaunchMessage = (home: string, parent: string, child: string, callId: string): void => {
   write(
-    join(folderOf(home, child), "messages", `${randomUUID()}.json`),
+    join(buildConversationFolder(home, child), "messages", `${randomUUID()}.json`),
     JSON.stringify({
       sender: parent,
       sourceMetadata: {
@@ -88,7 +88,7 @@ const writeLaunchMessage = (home: string, parent: string, child: string, callId:
 
 describe("a recorded conversation with a subagent", () => {
   it("returns the steps of both conversations, and the child linked to the parent's tool call before its steps", async () => {
-    const files = open(createHomeFromFixture("subagent-full"), FULL_ROOT);
+    const files = await open(createHomeFromFixture("subagent-full"), FULL_ROOT);
 
     const observations = await read(files);
 
@@ -114,7 +114,7 @@ describe("a recorded conversation with a subagent", () => {
   });
 
   it("decodes the model, the usage and the arguments of a tool call", async () => {
-    const files = open(createHomeFromFixture("subagent-full"), FULL_ROOT);
+    const files = await open(createHomeFromFixture("subagent-full"), FULL_ROOT);
 
     const steps = (await read(files)).flatMap((o) => (o.kind === "step" ? [o.step] : []));
 
@@ -129,8 +129,19 @@ describe("a recorded conversation with a subagent", () => {
     expect(steps[0]?.usage).toBeUndefined();
   });
 
+  it("gives no usage to a step with some of the three counts missing", async () => {
+    const home = createScratchHome("session-files");
+    const id = randomUUID();
+    write(transcriptOf(home, id), line(0, { input_tokens: 5, output_tokens: 7 }));
+
+    const [observation] = await read(await open(home, id));
+
+    expect(observation).toMatchObject({ kind: "step", step: { index: 0 } });
+    expect(observation).not.toHaveProperty("step.usage");
+  });
+
   it("never returns the thinking signature of the launch message", async () => {
-    const files = open(createHomeFromFixture("subagent-full"), FULL_ROOT);
+    const files = await open(createHomeFromFixture("subagent-full"), FULL_ROOT);
 
     expect(JSON.stringify(await read(files))).not.toContain("thinkingSignature");
   });
@@ -141,7 +152,7 @@ describe("a conversation that grows", () => {
     const home = createScratchHome("session-files");
     const id = randomUUID();
     write(transcriptOf(home, id), line(0) + line(1));
-    const files = open(home, id);
+    const files = await open(home, id);
 
     expect(describeAll(await read(files))).toEqual([
       `step ${id.slice(0, 4)} 0`,
@@ -165,7 +176,7 @@ describe("a conversation that grows", () => {
   it("is not an error when the files are not there yet", async () => {
     const home = createScratchHome("session-files");
     const id = randomUUID();
-    const files = open(home, id);
+    const files = await open(home, id);
 
     expect(await read(files)).toEqual([]);
 
@@ -182,7 +193,7 @@ describe("a conversation that grows", () => {
     for (let i = 0; i < total; i += 1) {
       appendFileSync(transcriptOf(home, id), line(i, { content: "x".repeat(100 * 1024) }));
     }
-    const files = open(home, id);
+    const files = await open(home, id);
 
     const first = await read(files);
     const indexes = first.map((o) => (o.kind === "step" ? o.step.index : -1));
@@ -201,7 +212,7 @@ describe("a conversation that grows", () => {
 describe("skipExisting", () => {
   it("starts every transcript at its end, and announces an existing child only when it has a new step", async () => {
     const home = createHomeFromFixture("subagent-full");
-    const files = open(home, FULL_ROOT, true);
+    const files = await open(home, FULL_ROOT, true);
 
     expect(await read(files)).toEqual([]);
 
@@ -219,7 +230,7 @@ describe("skipExisting", () => {
   it("reads a transcript that did not exist yet from its start", async () => {
     const home = createScratchHome("session-files");
     const id = randomUUID();
-    const files = open(home, id, true);
+    const files = await open(home, id, true);
 
     write(transcriptOf(home, id), line(0));
 
@@ -248,7 +259,7 @@ describe("a file that is not as agy writes it", () => {
     "reports %s once, keeps the lines before it, and keeps reading the other conversations",
     async (_name, bad) => {
       const { home, root, child } = createRootAndChild();
-      const files = open(home, root);
+      const files = await open(home, root);
       await read(files);
 
       appendFileSync(transcriptOf(home, root), line(1) + bad + line(2));
@@ -267,7 +278,7 @@ describe("a file that is not as agy writes it", () => {
 
   it("reports a transcript that was replaced by another file", async () => {
     const { home, root } = createRootAndChild();
-    const files = open(home, root);
+    const files = await open(home, root);
     await read(files);
 
     // The new file is made before the old one goes, so it cannot get the old inode.
@@ -281,7 +292,7 @@ describe("a file that is not as agy writes it", () => {
 
   it("reports a transcript that got shorter", async () => {
     const { home, root } = createRootAndChild();
-    const files = open(home, root);
+    const files = await open(home, root);
     appendFileSync(transcriptOf(home, root), line(1));
     await read(files);
 
@@ -294,7 +305,9 @@ describe("a file that is not as agy writes it", () => {
     const { home, root } = createRootAndChild();
     write(transcriptOf(home, root), line(0, { content: "x".repeat(5 * 1024 * 1024) }));
 
-    expect(describeAll(await read(open(home, root)))).toEqual([`unreadable ${root.slice(0, 4)}`]);
+    expect(describeAll(await read(await open(home, root)))).toEqual([
+      `unreadable ${root.slice(0, 4)}`,
+    ]);
   });
 
   it("refuses a transcript that is a link", async () => {
@@ -305,7 +318,7 @@ describe("a file that is not as agy writes it", () => {
     mkdirSync(dirname(transcriptOf(home, id)), { recursive: true });
     symlinkSync(elsewhere, transcriptOf(home, id));
 
-    expect(describeAll(await read(open(home, id)))).toEqual([`unreadable ${id.slice(0, 4)}`]);
+    expect(describeAll(await read(await open(home, id)))).toEqual([`unreadable ${id.slice(0, 4)}`]);
   });
 
   it("refuses a transcript below a folder that is a link", async () => {
@@ -313,10 +326,10 @@ describe("a file that is not as agy writes it", () => {
     const id = randomUUID();
     const elsewhere = createScratchHome("session-files-elsewhere");
     write(join(elsewhere, "transcript.jsonl"), line(0));
-    mkdirSync(folderOf(home, id), { recursive: true });
-    symlinkSync(elsewhere, join(folderOf(home, id), "logs"));
+    mkdirSync(buildConversationFolder(home, id), { recursive: true });
+    symlinkSync(elsewhere, join(buildConversationFolder(home, id), "logs"));
 
-    expect(describeAll(await read(open(home, id)))).toEqual([`unreadable ${id.slice(0, 4)}`]);
+    expect(describeAll(await read(await open(home, id)))).toEqual([`unreadable ${id.slice(0, 4)}`]);
   });
 
   it("refuses an app data folder that is a link", async () => {
@@ -326,7 +339,7 @@ describe("a file that is not as agy writes it", () => {
     write(transcriptOf(elsewhere, id), line(0));
     symlinkSync(join(elsewhere, APP_DATA_DIR), join(home, APP_DATA_DIR));
 
-    expect(describeAll(await read(open(home, id)))).toEqual([`unreadable ${id.slice(0, 4)}`]);
+    expect(describeAll(await read(await open(home, id)))).toEqual([`unreadable ${id.slice(0, 4)}`]);
   });
 });
 
@@ -338,7 +351,7 @@ describe("subagents", () => {
     write(transcriptOf(home, root), line(0));
     registerChild(home, root, child);
     write(transcriptOf(home, child), line(0));
-    const files = open(home, root);
+    const files = await open(home, root);
 
     expect(describeAll(await read(files))).toEqual([`step ${root.slice(0, 4)} 0`]);
 
@@ -361,12 +374,12 @@ describe("subagents", () => {
     registerChild(home, root, child);
     write(transcriptOf(home, child), line(0));
     // Not a launch: the file that lists read messages, and a message from a task.
-    write(join(folderOf(home, child), "messages", "read.json"), "{}");
+    write(join(buildConversationFolder(home, child), "messages", "read.json"), "{}");
     write(
-      join(folderOf(home, child), "messages", `${randomUUID()}.json`),
+      join(buildConversationFolder(home, child), "messages", `${randomUUID()}.json`),
       JSON.stringify({ sender: `${root}/task-2`, content: "finished" }),
     );
-    const files = open(home, root);
+    const files = await open(home, root);
     await read(files);
 
     const observations = await read(files);
@@ -387,7 +400,7 @@ describe("subagents", () => {
     const child = randomUUID();
     write(transcriptOf(home, root), line(0));
     registerChild(home, root, child);
-    const files = open(home, root);
+    const files = await open(home, root);
 
     expect(describeAll(await read(files))).toEqual([`step ${root.slice(0, 4)} 0`]);
 
@@ -411,7 +424,7 @@ describe("subagents", () => {
     write(transcriptOf(home, grandchild), line(0));
     writeLaunchMessage(home, child, grandchild, "call_2");
 
-    const observations = await read(open(home, root));
+    const observations = await read(await open(home, root));
 
     expect(describeAll(observations)).toEqual([
       `step ${root.slice(0, 4)} 0`,
@@ -431,7 +444,7 @@ describe("subagents", () => {
     write(transcriptOf(home, root), line(0));
     const children = Array.from({ length: 66 }, () => randomUUID()).sort();
     for (const child of children) registerChild(home, root, child);
-    const files = open(home, root);
+    const files = await open(home, root);
 
     const first = await read(files);
 
