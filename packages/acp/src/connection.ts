@@ -604,10 +604,9 @@ export const openAcpConnection = (options: {
             // The vendored client reports a reply as written only after this
             // effect succeeds, so a write that fails here is never reported as done.
             Effect.flatMap(({ pending }) =>
-              (pending instanceof Promise
-                ? Effect.tryPromise({ try: () => pending, catch: failWrite })
-                : Effect.void
-              ).pipe(Effect.tap(() => Effect.sync(() => writing.forEach(settleWritten)))),
+              Effect.tryPromise({ try: () => pending, catch: failWrite }).pipe(
+                Effect.tap(() => Effect.sync(() => writing.forEach(settleWritten))),
+              ),
             ),
           );
         }),

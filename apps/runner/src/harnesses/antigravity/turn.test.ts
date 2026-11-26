@@ -505,6 +505,26 @@ describe("the follow-up after a deny", () => {
       }),
     ));
 
+  it("ends interrupted, with no follow-up, when an interrupt comes while the open Requests are cancelled", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* askAndDecide(h, buildTool("edit_file", "call-1"), "deny");
+        const second = buildTool("run_command", "call-2");
+        const asking = yield* Effect.forkChild(h.openApproval(second.request));
+        yield* Effect.yieldNow;
+
+        yield* h.reply(0, "end_turn");
+        yield* Fiber.join(asking);
+        // The Turn now waits for the write of the cancelled Request; the interrupt comes in that wait.
+        yield* Effect.yieldNow;
+        yield* h.turn.interrupt;
+        yield* Deferred.succeed(second.written, undefined);
+        yield* h.turn.ended;
+        expect(h.prompts).toHaveLength(1);
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+      }),
+    ));
+
   it("sends another follow-up for a deny during the follow-up", () =>
     run((h) =>
       Effect.gen(function* () {
@@ -617,6 +637,21 @@ describe("interrupt", () => {
           action: "decline",
         });
         expect(h.tags("request.opened")).toHaveLength(0);
+      }),
+    ));
+
+  it("sends session/cancel again for an interrupt that comes after an unresponsive one", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const first = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+        yield* TestClock.adjust(Duration.seconds(5));
+        expect(yield* Fiber.join(first)).toBe("unresponsive");
+
+        const second = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 2);
+        yield* h.reply(0, "cancelled");
+        expect(yield* Fiber.join(second)).toBe("stopped");
       }),
     ));
 

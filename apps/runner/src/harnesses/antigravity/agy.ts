@@ -63,26 +63,45 @@ export type AgyPurpose =
  * That needs code execution as the runner's user, which already reaches
  * everything this user can.
  */
-const removeHooksFile = (home: string): Effect.Effect<void, AdapterFailed> => {
-  const path = join(home, "config", "hooks.json");
+const removeHooksFile = (home: string): Effect.Effect<void, AdapterFailed> =>
+  removeOwnedFile(
+    join(home, "config", "hooks.json"),
+    "hooks file",
+    `Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
+  );
+
+/**
+ * Removes `<home>/antigravity-acp/settings.json`, the settings file of the
+ * Harness Home, and logs that it did. `toolPermission` in it works under
+ * `agy acp`, so a value an earlier session wrote would change every later
+ * session. `agy` does not create the file. Same rules as `removeHooksFile`.
+ */
+const removeSettingsFile = (home: string): Effect.Effect<void, AdapterFailed> =>
+  removeOwnedFile(
+    join(home, APP_DATA_DIR, "settings.json"),
+    "settings file",
+    `Hercule owns the settings of the Harness Home, because a tool permission in them would change every session of the account.`,
+  );
+
+const removeOwnedFile = (
+  path: string,
+  label: string,
+  reason: string,
+): Effect.Effect<void, AdapterFailed> => {
   return Effect.tryPromise({
     try: () => unlink(path).then(() => true),
     catch: (error) =>
       isMissingPath(error)
         ? "missing"
         : buildAdapterFailed(
-            `${ANTIGRAVITY_NAME} could not start, because Hercule could not remove the hooks file ${path}: ${describeFileFailure(error)}`,
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not remove the ${label} ${path}: ${describeFileFailure(error)}`,
           ),
   }).pipe(
     Effect.catch((failure) =>
       failure === "missing" ? Effect.succeed(false) : Effect.fail(failure),
     ),
     Effect.flatMap((wasRemoved) =>
-      wasRemoved
-        ? Effect.logWarning(
-            `Removed the hooks file ${path}: Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
-          )
-        : Effect.void,
+      wasRemoved ? Effect.logWarning(`Removed the ${label} ${path}: ${reason}`) : Effect.void,
     ),
   );
 };
@@ -656,7 +675,10 @@ export const openSignedInAgy = (
     if ((yield* readLoginFile(ctx.home)) === undefined)
       return yield* Effect.fail(buildHarnessLoginMissing(ANTIGRAVITY_NAME));
 
-    if (options.purpose.kind === "session") yield* removeHooksFile(ctx.home);
+    if (options.purpose.kind === "session") {
+      yield* removeHooksFile(ctx.home);
+      yield* removeSettingsFile(ctx.home);
+    }
 
     const folder = yield* makeSessionLogFolder(ctx.home);
     const command = [

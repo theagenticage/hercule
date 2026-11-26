@@ -12,11 +12,22 @@
  * flips between `/tmp/...` and `/private/tmp/...` within one call.
  */
 import type { ToolCall } from "@hercule/acp";
-import type { ApprovalRequest, ItemKind } from "@hercule/protocol";
+import { MAX_FACT_LENGTH, type ApprovalRequest, type ItemKind } from "@hercule/protocol";
 import type * as Schema from "effect/Schema";
 import { buildEditedPathFields } from "../edited-paths";
 import { splitGatewayToolName } from "../gateway-tool-name";
-import { truncateFact, truncateMessage } from "../text";
+import { truncateFact, truncateMessage, truncateWithMarker } from "../text";
+
+/**
+ * Returns the search query with ` site:<domain>` after it, at most
+ * `MAX_FACT_LENGTH` long. The query is cut first, so a long query never loses
+ * its domain.
+ */
+const buildSearchQuery = (query: string, domain: string | undefined): string => {
+  if (domain === undefined) return truncateFact(query);
+  const suffix = truncateWithMarker(` site:${domain}`, MAX_FACT_LENGTH - 2);
+  return `${truncateWithMarker(query, MAX_FACT_LENGTH - suffix.length)}${suffix}`;
+};
 
 /**
  * The fields of a tool call known so far. A call arrives in pieces, and a field
@@ -179,7 +190,7 @@ export const buildToolItem = (call: ToolCallFields): ToolItem => {
       if (query === undefined) return { kind, detail: {} };
       return {
         kind,
-        detail: { query: truncateFact(domain === undefined ? query : `${query} site:${domain}`) },
+        detail: { query: buildSearchQuery(query, domain) },
       };
     }
     case "subagent": {

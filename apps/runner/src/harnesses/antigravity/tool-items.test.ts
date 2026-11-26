@@ -17,6 +17,18 @@ const buildCommand = (rawOutput?: unknown) => ({
 });
 
 describe("buildToolItem", () => {
+  it("cuts a long search query, never its domain", () => {
+    const item = buildToolItem({
+      toolCallId: "c1",
+      name: "search_web",
+      rawInput: { query: "q".repeat(MAX_FACT_LENGTH * 2), domain: "example.com" },
+    });
+
+    const query = (item.detail as { query: string }).query;
+    expect(query).toHaveLength(MAX_FACT_LENGTH);
+    expect(query.endsWith("… site:example.com")).toBe(true);
+  });
+
   it("maps each Antigravity tool by its name to an item kind and detail", () => {
     const cases = [
       [

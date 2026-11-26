@@ -895,4 +895,32 @@ describe("the hooks file of the Harness Home", () => {
     expect(failure.message).toContain("hooks file");
     expect(fake.spawns).toHaveLength(0);
   });
+
+  it("removes the settings file in the app data folder too, and keeps what a link points to", async () => {
+    const { home, fake } = setUp();
+    const target = join(createScratchHome("agy-target"), "settings.json");
+    writeFileSync(target, "{}");
+    mkdirSync(join(home, "antigravity-acp"), { recursive: true });
+    symlinkSync(target, join(home, "antigravity-acp", "settings.json"));
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(join(home, "antigravity-acp", "settings.json"))).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("{}");
+  });
+
+  it("leaves the settings file alone for a probe, and fails a session start that cannot remove it", async () => {
+    const probe = setUp();
+    mkdirSync(join(probe.home, "antigravity-acp"), { recursive: true });
+    writeFileSync(join(probe.home, "antigravity-acp", "settings.json"), "{}");
+    await Effect.runPromise(Effect.scoped(open(probe.fake, probe.home)));
+    expect(existsSync(join(probe.home, "antigravity-acp", "settings.json"))).toBe(true);
+
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "antigravity-acp", "settings.json", "inner"), { recursive: true });
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain("settings file");
+    expect(fake.spawns).toHaveLength(0);
+  });
 });

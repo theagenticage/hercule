@@ -84,6 +84,8 @@ export const RECORDING_NAMES = [
   "t6-search-accept-edits-strict",
   "t6-search-default-plain",
   "t6-search-default-strict",
+  "t7-always-proceed",
+  "t7-proceed-in-sandbox",
   "tmpdir-a-work-in-tmp",
   "tmpdir-b-work-in-tmpdir",
   "tmpdir-resume",

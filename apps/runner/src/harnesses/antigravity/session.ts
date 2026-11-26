@@ -574,6 +574,8 @@ export const startAgySession = (
       const startReading = (id: string) =>
         Effect.sync(() => {
           nativeSessionId = id;
+          // After a resume the reply's mode is the truth: a mode seen in the replay before it is stale.
+          if (spec.continue !== undefined) currentMode = undefined;
           normalizing = buildNormalizerState({
             sessionId,
             nativeSessionId: id,
@@ -634,7 +636,8 @@ export const startAgySession = (
         }
         // An update that came since the reply is newer than the reply's snapshot.
         currentMode ??= modes.currentModeId;
-        if (currentMode !== modeId) {
+        // A resume always sets the mode, because it is the only way to learn that `agy` kept it. `agy` sends no update when the mode does not change, and `awaitMode` then ends at once.
+        if (currentMode !== modeId || spec.continue !== undefined) {
           yield* connection.setMode(conversation.id, modeId).pipe(
             Effect.andThen(awaitMode(modeId)),
             Effect.timeoutOption(MODE_CONFIRMATION_DEADLINE),

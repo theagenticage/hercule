@@ -606,7 +606,13 @@ export const startTurn = (
             Effect.flatMap((outcome) =>
               outcome.kind === "proven" ? sendCancel : Effect.succeed("stopped" as const),
             ),
-            Effect.flatMap((value) => Deferred.succeed(result, value)),
+            Effect.flatMap((value) =>
+              Effect.suspend(() => {
+                // A finished interrupt is forgotten, so the next one sends `session/cancel` again.
+                if (pendingInterrupt === result) pendingInterrupt = undefined;
+                return Deferred.succeed(result, value);
+              }),
+            ),
           ),
           scope,
         );
@@ -761,6 +767,8 @@ export const startTurn = (
           // A Request still open belongs to the prompt that is over, so it must not stay answerable.
           yield* cancelOpenRequests;
           yield* Effect.forEach(pendingResolutions, Fiber.await, { discard: true });
+          // An interrupt that came while the Requests were cancelled ends the Turn, with no follow-up sent.
+          if (interrupted) return yield* finish("interrupted");
           waiting = Effect.flatten(connection.sendPrompt(nativeSessionId, followUp));
           continue;
         }

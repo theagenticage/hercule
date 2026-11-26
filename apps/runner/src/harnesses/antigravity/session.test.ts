@@ -755,6 +755,60 @@ describe("the mode of a start", () => {
       },
     ));
 
+  /** A resume whose reply names `replyMode`, after `before` lines that come ahead of the reply. */
+  const resumeIn = (replyMode: string, before: ReadonlyArray<JsonRpcMessage> = []) => ({
+    fake: (home: string) => {
+      createConversationFiles(home, CONVERSATION);
+      return {
+        scripts: {
+          "session/resume": (call, harness) => {
+            const lines = answerResume(home)(call, harness);
+            const result = (lines[0] as { result: { modes?: { currentModeId: string } } }).result;
+            if (result.modes !== undefined) result.modes.currentModeId = replyMode;
+            return [...before, ...lines];
+          },
+        } satisfies Record<string, HarnessScript>,
+      };
+    },
+  });
+  const RESUME_ACCEPT_EDITS: Partial<SessionSpec> = {
+    ...ACCEPT_EDITS,
+    continue: { nativeSessionId: CONVERSATION, mode: "resume" },
+  };
+
+  it("sets the mode on a resume whose reply already names it, and starts", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(RESUME_ACCEPT_EDITS);
+
+          expect(h.received("session/set_mode")[0]?.params).toMatchObject({
+            modeId: "accept-edits",
+          });
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      resumeIn("accept-edits"),
+    ));
+
+  it("takes the reply's mode over an update before it, so a resume sets the asked mode", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(RESUME_ACCEPT_EDITS);
+
+          expect(h.received("session/set_mode")[0]?.params).toMatchObject({
+            modeId: "accept-edits",
+          });
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      {
+        fake: (home) => {
+          const { scripts } = resumeIn("default", [buildModeUpdate("accept-edits")]).fake(home);
+          return { scripts: { ...scripts, "session/set_mode": confirmMode("accept-edits") } };
+        },
+      },
+    ));
+
   it("sets nothing when agy is already in the mode", () =>
     run((h) =>
       Effect.gen(function* () {
