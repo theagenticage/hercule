@@ -77,12 +77,14 @@ const ClientParams = {
   authenticate: Schema.Struct({ methodId: Schema.String }),
   "session/new": Schema.Struct({
     cwd: Schema.String,
+    additionalDirectories: Schema.optionalKey(Schema.Array(Schema.String)),
     mcpServers: Schema.Array(McpServerSchema),
     _meta: Schema.optionalKey(SessionMeta),
   }),
   "session/resume": Schema.Struct({
     sessionId: Schema.String,
     cwd: Schema.String,
+    additionalDirectories: Schema.optionalKey(Schema.Array(Schema.String)),
     mcpServers: Schema.Array(McpServerSchema),
     _meta: Schema.optionalKey(SessionMeta),
   }),
@@ -292,6 +294,9 @@ const replayRecording = (name: RecordingName) =>
           const request = Schema.decodeUnknownSync(ClientParams["session/new"])(params);
           const reply = yield* connection.newSession({
             cwd: request.cwd,
+            ...(request.additionalDirectories === undefined
+              ? {}
+              : { additionalDirectories: request.additionalDirectories }),
             mcpServers: request.mcpServers,
             ...(request._meta === undefined ? {} : { meta: request._meta }),
           });
@@ -303,6 +308,9 @@ const replayRecording = (name: RecordingName) =>
           yield* connection.resumeSession({
             nativeSessionId: request.sessionId,
             cwd: request.cwd,
+            ...(request.additionalDirectories === undefined
+              ? {}
+              : { additionalDirectories: request.additionalDirectories }),
             mcpServers: request.mcpServers,
             ...(request._meta === undefined ? {} : { meta: request._meta }),
           });
