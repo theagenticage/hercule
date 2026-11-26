@@ -91,8 +91,8 @@ import {
 } from "./normalize";
 import type { NormalizerState } from "./normalize";
 import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
-import { openSessionFiles, readRootConversationFact } from "./session-files";
-import type { SessionFileObservation, SessionFiles } from "./session-files";
+import { openAgyFiles, readRootConversationFact } from "./agy-files";
+import type { AgyFileObservation, AgyFiles } from "./agy-files";
 import {
   buildSubagentsState,
   endUnreadableSubagent,
@@ -405,7 +405,7 @@ export const startAgySession = (
     /** The wait that closes an open synthetic turn when `agy` goes quiet. */
     let syntheticTurnBound: Fiber.Fiber<void> | undefined;
     /** The reader of `agy`'s session files. Undefined until the conversation is open, and again once the session's own files proved unreadable. */
-    let files: SessionFiles | undefined;
+    let files: AgyFiles | undefined;
     /** Whether a subagent's files, or the session's own, could not be read. The session's usage is then incomplete. */
     let filesWereUnreadable = false;
     /** Whether the reader showed a step of the session's own conversation. `agy` writes the first prompt there within seconds, so a Turn that replied with none shown means it wrote no transcript. */
@@ -748,7 +748,7 @@ export const startAgySession = (
         return yield* Effect.die(new Error("The conversation was not read."));
 
       // Opened before any prompt, because a resume marks what the files hold now as already shown, and the files of this process's first turn must not count as old.
-      files = yield* openSessionFiles({
+      files = yield* openAgyFiles({
         home: ctx.home,
         conversationId: conversation.id,
         skipExisting: spec.continue !== undefined,
@@ -906,7 +906,7 @@ export const startAgySession = (
      * events that follow from it. A step of the session's own conversation goes
      * to the running Turn, which emits what it shows itself.
      */
-    const routeObservation = (observation: SessionFileObservation): HarnessEvent[] => {
+    const routeObservation = (observation: AgyFileObservation): HarnessEvent[] => {
       switch (observation.kind) {
         case "step":
           if (observation.conversationId === nativeId) {

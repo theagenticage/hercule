@@ -12,9 +12,9 @@ import * as Effect from "effect/Effect";
 import { TestClock } from "effect/testing";
 import { cleanupHomes, createScratchHome } from "../testing";
 import { APP_DATA_DIR } from "./harness-home";
-import { openSessionFiles, readRootConversationFact, readStepErrorText } from "./session-files";
-import type { AgyStep } from "./session-files";
-import type { SessionFileObservation, SessionFiles } from "./session-files";
+import { openAgyFiles, readRootConversationFact, readStepErrorText } from "./agy-files";
+import type { AgyStep } from "./agy-files";
+import type { AgyFileObservation, AgyFiles } from "./agy-files";
 
 afterEach(() => {
   cleanupHomes();
@@ -56,11 +56,11 @@ const launchLine = (index: number, count = 1): string =>
  * before read `i`. Returns the second read as `early`, the third as `late`
  * and the fourth as `after`; the first read finds the child's first step.
  */
-const readOnTestClock = (files: SessionFiles, advances: ReadonlyArray<number>) =>
+const readOnTestClock = (files: AgyFiles, advances: ReadonlyArray<number>) =>
   Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const results: Array<ReadonlyArray<SessionFileObservation>> = [];
+        const results: Array<ReadonlyArray<AgyFileObservation>> = [];
         for (const advance of advances) {
           yield* TestClock.adjust(Duration.millis(advance));
           results.push((yield* files.read).observations);
@@ -71,12 +71,12 @@ const readOnTestClock = (files: SessionFiles, advances: ReadonlyArray<number>) =
     ),
   );
 
-const open = (home: string, conversationId: string, skipExisting = false): Promise<SessionFiles> =>
-  Effect.runPromise(openSessionFiles({ home, conversationId, skipExisting }));
-const read = async (files: SessionFiles) => (await Effect.runPromise(files.read)).observations;
+const open = (home: string, conversationId: string, skipExisting = false): Promise<AgyFiles> =>
+  Effect.runPromise(openAgyFiles({ home, conversationId, skipExisting }));
+const read = async (files: AgyFiles) => (await Effect.runPromise(files.read)).observations;
 
 /** Describes each observation as one short string, to compare whole reads. */
-const describeAll = (observations: ReadonlyArray<SessionFileObservation>): ReadonlyArray<string> =>
+const describeAll = (observations: ReadonlyArray<AgyFileObservation>): ReadonlyArray<string> =>
   observations.map((o) => {
     if (o.kind === "step") return `step ${o.conversationId.slice(0, 4)} ${String(o.step.index)}`;
     if (o.kind === "subagent") return `subagent ${o.link.conversationId.slice(0, 4)}`;

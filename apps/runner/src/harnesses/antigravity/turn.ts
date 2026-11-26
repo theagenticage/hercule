@@ -52,7 +52,7 @@ import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
 import type { ResolvedSkillReference } from "../../skills";
 import { ANTIGRAVITY_NAME, isQuotaError } from "./agy";
-import type { RootConversationFact } from "./session-files";
+import type { RootConversationFact } from "./agy-files";
 import {
   addPromptUsage,
   closeTurn,

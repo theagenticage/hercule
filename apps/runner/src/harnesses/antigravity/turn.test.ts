@@ -23,7 +23,7 @@ import type { HarnessEvent } from "@hercule/protocol";
 import { buildPlanFilePaths } from "./harness-home";
 import { buildNormalizerState, closeTurn, holdTurn, normalizeUpdate, openTurn } from "./normalize";
 import { startTurn, type PreparedInput } from "./turn";
-import type { RootConversationFact } from "./session-files";
+import type { RootConversationFact } from "./agy-files";
 
 const FIRST_PROMPT: ReadonlyArray<PromptContent> = [{ type: "text", text: "go" }];
 

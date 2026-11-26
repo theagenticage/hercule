@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import { cleanupHomes, createScratchHome } from "../testing";
 import { APP_DATA_DIR } from "./harness-home";
-import { openSessionFiles, type AgyStep } from "./session-files";
+import { openAgyFiles, type AgyStep } from "./agy-files";
 import {
   buildSubagentsState,
   endUnreadableSubagent,
@@ -46,7 +46,7 @@ const playFixture = async (
     recursive: true,
   });
   const files = await Effect.runPromise(
-    openSessionFiles({ home, conversationId: root, skipExisting: false }),
+    openAgyFiles({ home, conversationId: root, skipExisting: false }),
   );
   const { observations } = await Effect.runPromise(files.read);
   const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: root, known: [] });

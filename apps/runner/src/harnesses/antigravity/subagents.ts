@@ -26,7 +26,7 @@ import { buildEnvelope } from "../normalize";
 import { buildUsage, buildZeroTotals, type Totals } from "./normalize";
 import { buildUserMessage } from "../events";
 import { truncateFact, truncateMessage } from "../text";
-import { readStepErrorText, type AgyStep, type AgySubagentLink } from "./session-files";
+import { readStepErrorText, type AgyStep, type AgySubagentLink } from "./agy-files";
 import {
   buildFailedToolItem,
   buildToolItem,

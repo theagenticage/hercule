@@ -105,14 +105,14 @@ export interface AgySubagentLink {
   readonly brief?: string;
 }
 
-export type SessionFileObservation =
+export type AgyFileObservation =
   | { readonly kind: "step"; readonly conversationId: string; readonly step: AgyStep }
   | { readonly kind: "subagent"; readonly link: AgySubagentLink }
   | { readonly kind: "unreadable"; readonly conversationId: string; readonly reason: string };
 
-/** What one call of `SessionFiles.read` returns. */
-export interface SessionFilesRead {
-  readonly observations: ReadonlyArray<SessionFileObservation>;
+/** What one call of `AgyFiles.read` returns. */
+export interface AgyFilesRead {
+  readonly observations: ReadonlyArray<AgyFileObservation>;
   /**
    * True while the reader holds the steps of a subagent that it has not
    * announced yet, and will announce or report by itself within
@@ -122,12 +122,12 @@ export interface SessionFilesRead {
   readonly isAwaitingLink: boolean;
 }
 
-export interface SessionFiles {
+export interface AgyFiles {
   /**
    * Returns what is new in the files since the last call, in order: for each
    * conversation its steps in file order, and a child's `subagent`
    * observation before any of its steps, and whether it still awaits a link
-   * (see `SessionFilesRead`). Never fails: a file that is not as
+   * (see `AgyFilesRead`). Never fails: a file that is not as
    * `agy` writes it becomes one `unreadable` observation for its conversation,
    * and that conversation is not read again. Calls must not overlap.
    *
@@ -142,7 +142,7 @@ export interface SessionFiles {
    * `LAUNCH_MESSAGE_WAIT_MS` of waiting for that step it is announced without
    * the step's number.
    */
-  readonly read: Effect.Effect<SessionFilesRead>;
+  readonly read: Effect.Effect<AgyFilesRead>;
 }
 
 const decodeJson = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown));
@@ -363,11 +363,11 @@ const buildLink = (
  * of the new turn for old ones. It assumes the existing transcripts end at a
  * line end, which holds between turns.
  */
-export const openSessionFiles = (input: {
+export const openAgyFiles = (input: {
   readonly home: string;
   readonly conversationId: string;
   readonly skipExisting: boolean;
-}): Effect.Effect<SessionFiles> => {
+}): Effect.Effect<AgyFiles> => {
   const { home, skipExisting } = input;
   const root = buildConversation(input.conversationId, undefined, false);
   const conversations = new Map<string, Conversation>([[root.id, root]]);
@@ -561,7 +561,7 @@ export const openSessionFiles = (input: {
   const releaseSteps = async (
     base: string,
     conversation: Conversation,
-    out: Array<SessionFileObservation>,
+    out: Array<AgyFileObservation>,
     now: number,
   ): Promise<void> => {
     const parentId = conversation.parentId;
@@ -676,8 +676,8 @@ export const openSessionFiles = (input: {
     }
   };
 
-  const readAll = async (now: number): Promise<SessionFilesRead> => {
-    const out: Array<SessionFileObservation> = [];
+  const readAll = async (now: number): Promise<AgyFilesRead> => {
+    const out: Array<AgyFileObservation> = [];
     let base: string;
     try {
       base = join(await realpath(home), APP_DATA_DIR, "brain");
