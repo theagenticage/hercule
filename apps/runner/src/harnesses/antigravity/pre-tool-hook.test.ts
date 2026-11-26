@@ -403,7 +403,7 @@ describe("the guard of the approval files", () => {
     expect(decide(folder, "resumes/new.md", env)).toBe("");
   });
 
-  it("reads a Path that starts with ~ or is a file:// URL as the path it may name, and guards both", () => {
+  it("reads a Path that starts with ~ or is a file: URL as the path it may name, and guards both", () => {
     const { root, cwd } = setUpRepo();
     const hooks = join(root, ".agents", "hooks.json");
     const home = root;
@@ -411,6 +411,10 @@ describe("the guard of the approval files", () => {
 
     expect(isDenied(answerPreToolCall(editInput(cwd, "~/.agents/hooks.json"), env))).toBe(true);
     expect(isDenied(decide(cwd, `file://${hooks}`))).toBe(true);
+    expect(isDenied(decide(cwd, `FILE://${hooks}`))).toBe(true);
+    expect(isDenied(decide(cwd, `File:${hooks}`))).toBe(true);
+    expect(isDenied(decide(cwd, `file:${hooks}`))).toBe(true);
+    expect(decide(cwd, `FILE://${join(root, "src", "a.ts")}`)).toBe("");
     expect(decide(cwd, "~/src/a.ts")).toBe("");
   });
 
@@ -429,6 +433,16 @@ describe("the guard of the approval files", () => {
       expect(isDenied(decide(cwd, "../myplugins/p/hooks.json"))).toBe(true);
       expect(isDenied(decide(cwd, join(absolute, "p", "plugin.json")))).toBe(true);
       expect(decide(cwd, "../other/p/hooks.json")).toBe("");
+    });
+
+    it("guards the folder an entry `.` names, saying that the manifest lists it", () => {
+      const { root, cwd } = setUpRepo();
+      writePluginsFile(root, JSON.stringify({ entries: [{ path: "." }] }));
+
+      const reason = readReason(decide(cwd, "src/a.ts"));
+
+      expect(reason).toContain(`${join(root, ".agents", "plugins.json")} lists a plugin folder`);
+      expect(reason).not.toContain("it decides what the agent may do without asking");
     });
 
     it("lists no folder for a manifest with no entries, and the fixed guard stays", () => {

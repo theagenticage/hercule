@@ -14,7 +14,7 @@
  * - Approval required: web search, and every change to a guarded place.
  * - Every other mode: every change to a guarded place.
  * A rules value that is missing or does not decode is Hercule's own setup
- * being wrong, so the hook denies the same as in Approval required and says so.
+ * being wrong, so the hook denies every edit and every web search, and says so.
  *
  * One call goes through one straight line: read the rules, decode the call,
  * take the edit-watch mark (spec 19 section 4.1), then decide. The mark is
@@ -240,10 +240,15 @@ const buildPlacesFailureReason = (failure: GuardedPlacesFailure): string =>
     : `This folder is more than ${String(failure.limit)} folders below the top of the file system and no git root is above it, so Hercule cannot tell which configuration folders the agent reads and cannot check the change. Work in a less deep folder, or ask the user, or switch the thread to Full access.`;
 
 /** Returns the reason for a change to `path`, which is in `place`. */
-const buildGuardReason = (path: string, place: GuardedPlace): string =>
-  place.isReadOnlyFolder
-    ? `Hercule gives the agent this folder to read, not to change: ${path}. Ask the user to change it.`
-    : `Hercule does not let the agent change ${path}: it decides what the agent may do without asking. Ask the user to change it.`;
+const buildGuardReason = (path: string, place: GuardedPlace): string => {
+  if (place.isReadOnlyFolder) {
+    return `Hercule gives the agent this folder to read, not to change: ${path}. Ask the user to change it.`;
+  }
+  if (place.listedIn !== undefined) {
+    return `Hercule does not let the agent change ${path}: ${place.listedIn} lists a plugin folder that holds it, and plugins can approve what the agent does without asking. Ask the user to change it.`;
+  }
+  return `Hercule does not let the agent change ${path}: it decides what the agent may do without asking. Ask the user to change it.`;
+};
 
 /** Returns the decoded call, or undefined when `input` is missing, is not JSON, or lacks a top-level field. */
 const decodeCall = (input: RawInput): DecodedCall | undefined => {
@@ -381,23 +386,28 @@ interface EditTarget {
  * `identity` is its file identity when it exists, which stays equal when a
  * filesystem spells it differently. `isReadOnlyFolder` is true for a folder
  * Hercule gives the agent to read, which has its own reason for a denial.
+ * `listedIn` is the `plugins.json` that lists the folder, for a folder that
+ * is guarded only because a `plugins.json` lists it; it has its own reason
+ * too, because the folder may be the session's own (an entry `.`).
  */
 interface GuardedPlace {
   readonly isFolder: boolean;
   readonly isReadOnlyFolder: boolean;
+  readonly listedIn: string | undefined;
   readonly paths: ReadonlyArray<string>;
   readonly identity: string | undefined;
 }
 
 /**
  * Returns the other spellings of `path` that `agy` may read as a path: with a
- * leading `~` replaced by the home folder, and a `file://` URL as the path it
- * names. Whether `agy` expands either is not measured, so both are guarded.
+ * leading `~` replaced by the home folder, and a `file:` URL as the path it
+ * names (the scheme in any case, with or without `//`). Whether `agy` expands
+ * either is not measured, so both are guarded.
  */
 const listOtherSpellings = (path: string, home: string): ReadonlyArray<string> => {
   const spellings: Array<string> = [];
   if (path === "~" || path.startsWith("~/")) spellings.push(join(home, path.slice(1)));
-  if (path.startsWith("file://")) {
+  if (/^file:/i.test(path)) {
     try {
       spellings.push(fileURLToPath(path));
     } catch {
@@ -428,11 +438,16 @@ const buildEditTarget = (cwd: string, path: string, home: string): EditTarget =>
 };
 
 /** Builds the guarded place at `path`, an absolute path. */
-const buildPlace = (path: string, isFolder: boolean, isReadOnlyFolder = false): GuardedPlace => {
+const buildPlace = (
+  path: string,
+  isFolder: boolean,
+  { isReadOnlyFolder = false, listedIn }: { isReadOnlyFolder?: boolean; listedIn?: string } = {},
+): GuardedPlace => {
   const lexicalPath = resolve(path);
   return {
     isFolder,
     isReadOnlyFolder,
+    listedIn,
     paths: [lexicalPath, resolveLikeOperatingSystem(lexicalPath)],
     identity: readIdentity(lexicalPath),
   };
@@ -510,11 +525,12 @@ const buildGuardedPlaces = (cwd: string, rules: HookRules): ReadonlyArray<Guarde
       } catch {
         throw new GuardedPlacesError({ kind: "manifest", file: manifest });
       }
-      for (const plugins of listed) places.push(buildPlace(plugins, true));
+      for (const plugins of listed) places.push(buildPlace(plugins, true, { listedIn: manifest }));
     }
   }
   for (const path of rules.harnessHomePaths) places.push(buildPlace(path, true));
-  for (const folder of rules.readOnlyFolders) places.push(buildPlace(folder, true, true));
+  for (const folder of rules.readOnlyFolders)
+    places.push(buildPlace(folder, true, { isReadOnlyFolder: true }));
   return places;
 };
 
@@ -601,8 +617,10 @@ const decideEdit = (
  * Decides what the hook answers for one call: a denial, or undefined to let
  * it run. It fails closed. Unless the rules say Full access, a call that could
  * not be decoded is denied, because the hook cannot tell what it would change.
- * Rules that are missing or do not decode (`rules` undefined) deny the same
- * calls as Approval required does, with a reason that says the setup is wrong.
+ * Rules that are missing or do not decode (`rules` undefined) deny every edit
+ * tool call (guarded place or not), every web search and every call that could
+ * not be decoded, with a reason that says the setup is wrong. A shell command
+ * runs, because `agy` asks about it.
  */
 const decide = (
   call: DecodedCall | undefined,
