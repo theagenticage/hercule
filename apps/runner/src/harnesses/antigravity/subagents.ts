@@ -23,6 +23,7 @@
  */
 import type { HarnessEvent, ItemStatus, SubagentId, Usage } from "@hercule/protocol";
 import { buildEnvelope } from "../normalize";
+import { buildUsage, buildZeroTotals, type Totals } from "./normalize";
 import { buildUserMessage } from "../events";
 import { truncateFact, truncateMessage } from "../text";
 import { readStepErrorText, type AgyStep, type AgySubagentLink } from "./session-files";
@@ -32,13 +33,6 @@ import {
   LAUNCH_TOOL_NAME,
   type ToolCallFields,
 } from "./tool-items";
-
-/** The token counts of one scope (a turn, or the process), added up. */
-interface Totals {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-}
 
 /** A tool item that has started and has no result yet. */
 interface PendingTool {
@@ -92,15 +86,6 @@ export interface SubagentsState {
   /** The subagents this process may get steps of, by conversation id. */
   readonly agents: Map<string, Subagent>;
 }
-
-const buildZeroTotals = (): Totals => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 });
-
-const buildUsage = (totals: Totals): Usage => ({
-  inputTokens: totals.inputTokens,
-  outputTokens: totals.outputTokens,
-  cacheReadTokens: totals.cacheReadTokens,
-  cacheWriteTokens: 0,
-});
 
 const buildSubagent = (input: {
   readonly subagentId: SubagentId;
