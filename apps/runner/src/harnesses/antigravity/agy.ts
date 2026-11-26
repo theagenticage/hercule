@@ -5,8 +5,9 @@
  * them can run as another account.
  */
 import { mkdtempSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -205,16 +206,27 @@ const STDERR_LINES = 5;
  * - `AGY_CLI_DISABLE_AUTO_UPDATE` must be exactly `true`. The value `1` has no
  *   effect, and `agy` then replaces its own binary in the background.
  *
+ * - `TMPDIR` is `tempFolder` when one is given. In its `default` mode `agy`
+ *   lets the agent write under the system's temporary folder without asking,
+ *   and `agy` finds that folder through `$TMPDIR`. Pointing it at a private
+ *   folder (`makeAgyTempFolder`) makes that folder the only place the agent
+ *   writes to unasked. The sign-in and `agy --version` run no tools, so they
+ *   pass no folder and keep the runner's own `TMPDIR`.
+ *
  * `HOME` stays: `agy` writes nothing below it when it is given `--gemini-dir`
  * and `--log-file`.
  */
-const buildAgyEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> => {
+const buildAgyEnv = (
+  ctx: HarnessRunnerContext,
+  tempFolder?: string,
+): Record<string, string | undefined> => {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(ctx.env)) {
     if (!/^(GEMINI_|GOOGLE_|AGY_)/.test(name)) env[name] = value;
   }
   env["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 0";
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
+  if (tempFolder !== undefined) env["TMPDIR"] = tempFolder;
   return env;
 };
 
@@ -245,31 +257,107 @@ const buildAccountFlags = (home: string, logFolder: string): ReadonlyArray<strin
 const createLoginLogFolder = (home: string): string => mkdtempSync(join(home, LOG_FOLDER_PREFIX));
 
 /**
- * Makes an empty folder for the log of a session or probe process, like
- * `createLoginLogFolder`, and removes it with everything in it when the scope
+ * Makes an empty folder with `mkdtemp` at `prefix`, readable by the runner's
+ * user only (mode 0700), and removes it with everything in it when the scope
  * closes. A failed removal is logged as a warning with the reason the
  * operating system gave and nothing of the folder's contents. Fails with an
- * `AdapterFailed` when the folder cannot be made. A runner that crashes
- * leaves the folder behind, and nothing removes it later.
+ * `AdapterFailed` that names `what` when the folder cannot be made. A runner
+ * that crashes leaves the folder behind, and nothing removes it later.
  */
-const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+const makeRemovedFolder = (
+  prefix: string,
+  what: string,
+): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.try({
-      try: () => mkdtempSync(join(home, LOG_FOLDER_PREFIX)),
+      try: () => mkdtempSync(prefix),
       catch: (error) =>
         buildAdapterFailed(
-          `Could not make a log folder for ${ANTIGRAVITY_NAME} on this runner: ${describeFileFailure(error)}`,
+          `Could not make ${what} for ${ANTIGRAVITY_NAME} on this runner: ${describeFileFailure(error)}`,
         ),
     }),
     (folder) =>
       Effect.tryPromise(() => rm(folder, { recursive: true, force: true })).pipe(
         Effect.catch((error) =>
           Effect.logWarning(
-            `Could not remove a log folder of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}`,
+            `Could not remove ${what} of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}`,
           ),
         ),
       ),
   );
+
+/**
+ * Makes an empty folder for the log of a session or probe process, like
+ * `createLoginLogFolder`, and removes it when the scope closes (see
+ * `makeRemovedFolder`).
+ */
+const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+  makeRemovedFolder(join(home, LOG_FOLDER_PREFIX), "a log folder");
+
+/**
+ * Makes the temporary folder of one `agy` process and removes it with
+ * everything in it when the scope closes, so the agent's temporary files end
+ * with the process. `buildAgyEnv` hands it to `agy` as `TMPDIR`, which is
+ * what makes it the only folder the agent may write to without asking.
+ *
+ * The path is short on purpose: programs the agent runs create Unix sockets
+ * below `TMPDIR`, and a socket path of more than about 104 bytes fails on
+ * macOS, where the system's temporary folder is already long.
+ */
+const makeAgyTempFolder = (): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+  makeRemovedFolder(join(tmpdir(), "hercule-agy-"), "a temporary folder");
+
+const HOOKS_FILE = join(".agents", "hooks.json");
+
+/**
+ * Finds the file of Antigravity hooks that `agy` would read for a session
+ * that works in `cwd`, and returns its path, or undefined when there is none.
+ * `agy` reads `.agents/hooks.json` from `cwd` and from the git root of `cwd`:
+ * the nearest folder at or above `cwd` that holds `.git`, a folder or a file.
+ * It reads none from a parent folder that is not a git root, from a
+ * subfolder, or from the real `HOME` (measured on `agy` 1.5.15).
+ *
+ * Any kind of entry counts, a link included, even a dangling one. Fails with
+ * an `AdapterFailed` when an entry cannot be looked at for a reason other
+ * than "not found", because the runner then cannot tell whether hooks exist.
+ *
+ * A hook can answer `auto_approve`, which makes a call run unasked in
+ * `default`, and its script runs as soon as the agent calls a tool. No
+ * setting of `agy` turns workspace hooks off.
+ */
+export const findAgyHooksFile = (cwd: string): Effect.Effect<string | undefined, AdapterFailed> =>
+  Effect.gen(function* () {
+    const exists = (path: string) =>
+      Effect.tryPromise({
+        try: () => lstat(path).then(() => true),
+        catch: (error) => error,
+      }).pipe(
+        Effect.catch((error) =>
+          isNotFound(error)
+            ? Effect.succeed(false)
+            : Effect.fail(
+                buildAdapterFailed(
+                  `Could not check whether ${path} exists, so ${ANTIGRAVITY_NAME} was not started: ${describeFileFailure(error)}`,
+                ),
+              ),
+        ),
+      );
+    const inCwd = join(cwd, HOOKS_FILE);
+    if (yield* exists(inCwd)) return inCwd;
+    for (let folder = cwd; ; folder = dirname(folder)) {
+      if (yield* exists(join(folder, ".git"))) {
+        const atRoot = join(folder, HOOKS_FILE);
+        return folder !== cwd && (yield* exists(atRoot)) ? atRoot : undefined;
+      }
+      if (dirname(folder) === folder) return undefined;
+    }
+  });
+
+const isNotFound = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error.code === "ENOENT" || error.code === "ENOTDIR");
 
 /**
  * Builds the command that signs the account in. `agy` prints a link, reads one
@@ -552,7 +640,10 @@ const authenticateAccount = (
  *
  * The process runs in `options.cwd`, with its own log in a private folder of
  * the Harness Home. When the scope closes, the connection is closed first, then
- * the process is stopped and awaited, and then the log folder is removed. A
+ * the process is stopped and awaited, and then its temporary folder and its
+ * log folder are removed. The temporary folder is the process's `TMPDIR`: it
+ * is the only folder the agent may write to without asking, and the agent's
+ * temporary files end with the process (`makeAgyTempFolder`). A
  * failure leaves what was started in place until the scope closes, so the
  * caller runs this in a scope that closes on failure.
  *
@@ -591,7 +682,8 @@ export const openSignedInAgy = (
         : []),
       ...buildAccountFlags(ctx.home, folder),
     ];
-    const env = buildAgyEnv(ctx);
+    const tempFolder = yield* makeAgyTempFolder();
+    const env = buildAgyEnv(ctx, tempFolder);
     const child = yield* Effect.acquireRelease(
       Effect.try({
         try: () => spawn(command, env, options.cwd),

@@ -6,6 +6,8 @@
  * recording's handshake only and writes the messages itself. Time runs on a
  * `TestClock`.
  */
+import { lstatSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -16,7 +18,14 @@ import { TestClock } from "effect/testing";
 import type { HarnessScript, JsonRpcMessage } from "@hercule/acp/testing";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
 import type { AdapterTurnInput } from "../index";
-import { cleanupHomes, CWD, settle, waitUntil, writeTestImage } from "../testing";
+import {
+  cleanupHomes,
+  createScratchHome,
+  CWD,
+  settle,
+  waitUntil,
+  writeTestImage,
+} from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
 import {
   answerConfigChange,
@@ -60,6 +69,8 @@ interface HarnessOptions {
   /** The fake's options, which may depend on the Harness Home the test gets. */
   readonly fake?: FakeAgyOptions | ((home: string) => FakeAgyOptions);
   readonly orientation?: string;
+  /** The folder the session works in. Defaults to `CWD`, which does not exist. */
+  readonly cwd?: string;
   /** What every start of the test changes in `SPEC`. */
   readonly spec?: Partial<SessionSpec>;
   /**
@@ -107,7 +118,7 @@ const buildHarness = (options: HarnessOptions = {}) =>
     yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
     const ctx = {
       ...buildContext(home, BINARY),
-      cwd: CWD,
+      cwd: options.cwd ?? CWD,
       mcpServers: [],
       herculeTool: { ...buildContext(home).herculeTool, orientation: options.orientation ?? "" },
     };
@@ -358,6 +369,121 @@ describe("starting a session", () => {
         expect(h.tags("session.exited")).toHaveLength(0);
       }),
     ));
+});
+
+describe("the temporary folder of a process", () => {
+  it("is private, short, the process's TMPDIR, and removed when the session ends", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.start();
+        const folder = h.fake.spawns[0]?.env["TMPDIR"];
+
+        expect(folder).toMatch(/hercule-agy-/);
+        expect(folder!.length).toBeLessThanOrEqual(30);
+        expect(lstatSync(folder!).mode & 0o777).toBe(0o700);
+
+        yield* h.adapter.stopSession(SESSION, "stopped");
+        expect(() => lstatSync(folder!)).toThrow();
+      }),
+    ));
+
+  it("is new for every process", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.start();
+        yield* h.adapter.stopSession(SESSION, "stopped");
+        yield* h.start();
+
+        const [first, second] = h.fake.spawns.map((spawned) => spawned.env["TMPDIR"]);
+        expect(first).toBeDefined();
+        expect(second).toBeDefined();
+        expect(first).not.toBe(second);
+      }),
+    ));
+});
+
+describe("the hooks of a repository", () => {
+  const MODES = ["approval-required", "auto-accept-edits"] as const;
+
+  /** Makes a folder that holds `.agents/hooks.json`, and returns the folder. */
+  const makeHooksFolder = (folder: string): string => {
+    mkdirSync(join(folder, ".agents"), { recursive: true });
+    writeFileSync(join(folder, ".agents", "hooks.json"), "{}");
+    return folder;
+  };
+
+  for (const accessMode of MODES) {
+    it(`fail a start in ${accessMode} that names the file, and start no process`, () => {
+      const cwd = makeHooksFolder(createScratchHome("hooks"));
+      return run(
+        (h) =>
+          Effect.gen(function* () {
+            const failure = yield* Effect.flip(h.start({ accessMode }));
+
+            expect(failure._tag).toBe("AdapterFailed");
+            expect(failure.message).toContain(join(cwd, ".agents", "hooks.json"));
+            expect(failure.message).toContain("Full access");
+            expect(h.fake.spawns).toHaveLength(0);
+            expect(h.tags("session.started")).toHaveLength(0);
+          }),
+        { cwd },
+      );
+    });
+  }
+
+  it("do not fail a start in full-access", () => {
+    const cwd = makeHooksFolder(createScratchHome("hooks"));
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start({ accessMode: "full-access" });
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      { cwd },
+    );
+  });
+
+  it("are found at the git root of the folder, whether .git is a folder or a file", () => {
+    const root = makeHooksFolder(createScratchHome("hooks"));
+    mkdirSync(join(root, "sub"));
+    writeFileSync(join(root, ".git"), "gitdir: elsewhere");
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+
+          expect(failure.message).toContain(join(root, ".agents", "hooks.json"));
+        }),
+      { cwd: join(root, "sub") },
+    );
+  });
+
+  it("are not read from a parent folder that is no git root", () => {
+    const parent = makeHooksFolder(createScratchHome("hooks"));
+    mkdirSync(join(parent, "sub"));
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      { cwd: join(parent, "sub") },
+    );
+  });
+
+  it("count when the file is a link, even a dangling one", () => {
+    const cwd = createScratchHome("hooks");
+    mkdirSync(join(cwd, ".agents"));
+    symlinkSync(join(cwd, "nowhere.json"), join(cwd, ".agents", "hooks.json"));
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const failure = yield* Effect.flip(h.start());
+          expect(failure._tag).toBe("AdapterFailed");
+        }),
+      { cwd },
+    );
+  });
 });
 
 describe("the model and level of a start", () => {

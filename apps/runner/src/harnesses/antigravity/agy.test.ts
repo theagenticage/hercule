@@ -163,7 +163,7 @@ describe("how the process is started", () => {
     expect(spawned.cwd).toBe(cwd);
   });
 
-  it("gives the sign-in, the version command and a session the same environment: the runner's own agy settings and credentials dropped, the two variables set", async () => {
+  it("gives the sign-in, the version command and a session the same environment: the runner's own agy settings and credentials dropped, the two variables set, and a TMPDIR of its own only for the process that runs tools", async () => {
     const { home, fake } = setUp();
     const ctx = buildContext(home, BINARY, RUNNER_ENV);
     const versionEnvs: Array<Readonly<Record<string, string | undefined>>> = [];
@@ -184,7 +184,9 @@ describe("how the process is started", () => {
     await Effect.runPromise(readAgyVersion(run, ctx, BINARY));
     const login = buildLoginCommand(ctx, BINARY);
 
-    expect(fake.spawns[0]!.env).toEqual(AGY_ENV);
+    const { TMPDIR, ...sessionEnv } = fake.spawns[0]!.env;
+    expect(TMPDIR).toContain("hercule-agy-");
+    expect(sessionEnv).toEqual(AGY_ENV);
     expect(versionEnvs).toEqual([AGY_ENV]);
     expect(login.env).toEqual(AGY_ENV);
   });

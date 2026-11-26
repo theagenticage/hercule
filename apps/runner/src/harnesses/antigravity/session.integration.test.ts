@@ -704,6 +704,55 @@ describe.skipIf(skipReason !== undefined)(
     );
 
     it(
+      "asks before a write to a file directly under /tmp in approval-required, because the process's TMPDIR is its own folder (spec 06 section 8.1)",
+      async () => {
+        const session = await startLiveSession({ accessMode: "approval-required" });
+        const target = join("/tmp", `hercule-agy-live-${crypto.randomUUID()}.txt`);
+
+        try {
+          const turn = await runTurn(
+            session,
+            `Create the file ${target} containing the line: hello. Do nothing else.`,
+            { decide: () => "deny" },
+          );
+          const why = dumpEvents(session.id);
+
+          const asked = turn.events.filter(
+            (event) => event._tag === "request.opened" && event.request.kind !== "question",
+          );
+          expect(asked.length, why).toBeGreaterThan(0);
+          expect(existsSync(target), why).toBe(false);
+        } finally {
+          rmSync(target, { force: true });
+        }
+      },
+      TEST_MS,
+    );
+
+    it(
+      "refuses to start in approval-required in a workspace that has .agents/hooks.json (spec 06 section 8.1)",
+      async () => {
+        const cwd = makeScratchFolder("hooks");
+        mkdirSync(join(cwd, ".agents"));
+        writeFileSync(join(cwd, ".agents", "hooks.json"), "{}");
+
+        const error = await Effect.runPromise(
+          Effect.flip(
+            adapter.startSession(
+              crypto.randomUUID(),
+              buildSpec({ accessMode: "approval-required" }),
+              buildStartContext(cwd),
+            ),
+          ),
+        );
+
+        expect(error._tag).toBe("AdapterFailed");
+        expect(error.message).toContain(join(cwd, ".agents", "hooks.json"));
+      },
+      TEST_MS,
+    );
+
+    it(
       "asks nothing for a command under full-access (spec 06 section 8.1)",
       async () => {
         const session = await startLiveSession({ accessMode: "full-access" });
