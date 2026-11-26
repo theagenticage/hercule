@@ -110,14 +110,16 @@ const buildModelKey = (
 
 /**
  * Returns the model select: Automatic first, then one choice for each entry
- * the Model Profiles hold, then Off. An entry offered by several profiles
- * appears once, and a model offered in two harnesses appears twice, the
- * second with "in <harness>" after its name. An entry that cannot run now,
- * such as one whose account is signed out on a machine that is offline,
- * stays pickable and carries a few words of the reason in parentheses
- * (`describeEntryProblem`), not the controller's whole sentence: the setting is
- * long-lived, so a stored choice must not read "(not offered)" while a
- * machine is away.
+ * the Model Profiles hold, then Off. An entry that can never be the text
+ * generation model (`canGenerateText` is false, as the controller decides) is
+ * left out, so the picker offers nothing `settings.update` would refuse. An
+ * entry offered by several profiles appears once, and a model offered in two
+ * harnesses appears twice, the second with "in <harness>" after its name. An
+ * entry that cannot run now, such as one whose account is signed out on a
+ * machine that is offline, stays pickable and carries a few words of the
+ * reason in parentheses (`describeEntryProblem`), not the controller's whole
+ * sentence: the setting is long-lived, so a stored choice must not read
+ * "(not offered)" while a machine is away.
  *
  * Automatic names the model it resolves to only while it is the stored
  * setting. With any other setting, `status.model` is that setting's own model,
@@ -147,7 +149,7 @@ export const buildTextGenerationField = (
   const offered: TextGenerationChoice[] = [];
   for (const entry of modelProfiles.flatMap(listProfileEntries)) {
     const account = accounts.find((each) => each.id === entry.providerAccountId);
-    if (account === undefined) continue;
+    if (account === undefined || !entry.canGenerateText) continue;
     const inDefaultHarness = entry.resolvedHarnessId === account.defaultHarnessId;
     const choice: ProviderAccountModel = {
       providerAccountId: account.id,

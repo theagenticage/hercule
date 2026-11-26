@@ -85,6 +85,34 @@ describe("buildTextGenerationField", () => {
     ]);
   });
 
+  it("leaves out an entry that cannot generate text, and labels a stored setting that names it", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(OPENAI_IDENTITY, [
+        buildProfileEntry(OPENAI_IDENTITY, "gpt-6-luna", { name: "GPT-6 Luna" }),
+        buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6", canGenerateText: false }),
+      ]),
+    ]);
+    const args = [PROVIDERS, [CODEX], HARNESSES, [profile], NOTHING] as const;
+
+    const unset = buildTextGenerationField(undefined, ...args);
+    expect(unset.choices.map((choice) => choice.label)).toEqual([
+      "Automatic - no model available",
+      "OpenAI · GPT-6 Luna",
+      "Off",
+    ]);
+
+    const stored = buildTextGenerationField(
+      { providerAccountId: CODEX.id, model: "gpt-6" },
+      ...args,
+    );
+    expect(stored.choices.map((choice) => choice.label)).toEqual([
+      "Automatic",
+      "OpenAI · GPT-6 Luna",
+      "OpenAI · GPT-6 (not offered)",
+      "Off",
+    ]);
+  });
+
   it("names the model Automatic resolves to while Automatic is the setting", () => {
     const status: TextGenerationStatus = {
       model: { providerAccountId: CODEX.id, harnessId: "codex/codex", model: "gpt-6-luna" },

@@ -10,7 +10,12 @@ import {
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, withTransaction } from "../db";
-import { buildHarnessDefinition, buildPluginStack, createPluginFixture } from "../plugins/testing";
+import {
+  buildHarnessDefinition,
+  buildPluginStack,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../plugins/testing";
 import { readEventsOfKind } from "../events/testing";
 import { Settings, SettingsLayer } from "./repository";
 import { SettingsOperations, SettingsOperationsLayer } from "./service";
@@ -627,6 +632,114 @@ describe("the text generation model", () => {
         });
         expect(await readErrorCode(response), JSON.stringify(model)).toBe("validation");
       }
+    });
+  });
+});
+
+describe("the text generation model in a harness that makes no text generations", () => {
+  /**
+   * One provider whose default harness `tg/textless` declares no text
+   * generations, and that also runs in `tg/capable`, which does.
+   */
+  const textlessPlugin = createPluginFixture({
+    id: "tg",
+    capabilities: ["harnesses", "providers"],
+    definitions: ["textless", "capable"].map((name) =>
+      buildHarnessDefinition(
+        name,
+        [
+          {
+            providerId: "tg/provider",
+            kinds: [{ kind: "api-key", modelArgument: "{model}" }],
+            models: "all",
+          },
+        ],
+        name === "textless" ? { textGeneration: "unsupported" } : {},
+      ),
+    ),
+    providers: [{ ...buildProviderDefinition("provider", ["tg/textless", "tg/capable"]) }],
+  }).plugin;
+
+  const withTextlessAccount = (
+    body: (
+      base: string,
+      token: string,
+      account: { readonly id: string; readonly defaultHarnessId: string },
+    ) => Promise<void>,
+  ): Promise<void> =>
+    withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const response = await get(harness.base, "/api/v1/provider-accounts", token);
+        const accounts = (await response.json()) as ReadonlyArray<{
+          readonly id: string;
+          readonly defaultHarnessId: string;
+        }>;
+        await body(harness.base, token, accounts[0]!);
+      },
+      { plugins: [textlessPlugin] },
+    );
+
+  const readIssues = async (
+    response: Response,
+  ): Promise<ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>> =>
+    ((await response.json()) as { error: { details: { issues: never } } }).error.details.issues;
+
+  const REFUSAL = "Harness textless runs no text generations; pick a model of an account";
+
+  it("rejects a model of an account whose default harness makes none, naming the account", async () => {
+    await withTextlessAccount(async (base, token, account) => {
+      expect(account.defaultHarnessId).toBe("tg/textless");
+
+      const response = await patchSettings(base, token, {
+        controller: { "textGeneration.model": { providerAccountId: account.id, model: "fast" } },
+      });
+
+      expect(await readIssues(response)).toEqual([
+        {
+          path: ["controller", "textGeneration.model", "providerAccountId"],
+          message: expect.stringContaining(REFUSAL) as unknown,
+        },
+      ]);
+      expect((await readSettings(base, token)).controller).not.toHaveProperty(
+        "textGeneration.model",
+      );
+    });
+  });
+
+  it("rejects a model that names a harness that makes none, naming the harness", async () => {
+    await withTextlessAccount(async (base, token, account) => {
+      const response = await patchSettings(base, token, {
+        controller: {
+          "textGeneration.model": {
+            providerAccountId: account.id,
+            harnessId: "tg/textless",
+            model: "fast",
+          },
+        },
+      });
+
+      expect(await readIssues(response)).toEqual([
+        {
+          path: ["controller", "textGeneration.model", "harnessId"],
+          message: expect.stringContaining(REFUSAL) as unknown,
+        },
+      ]);
+    });
+  });
+
+  it("accepts the same account in a harness that does, and as the Thread default", async () => {
+    await withTextlessAccount(async (base, token, account) => {
+      const model = { providerAccountId: account.id, harnessId: "tg/capable", model: "fast" };
+      const chosen = await patchSettings(base, token, {
+        controller: { "textGeneration.model": model },
+      });
+      expect(chosen.status, await chosen.clone().text()).toBe(200);
+
+      const thread = await patchSettings(base, token, {
+        user: { "thread.providerAccountId": account.id },
+      });
+      expect(thread.status, await thread.clone().text()).toBe(200);
     });
   });
 });

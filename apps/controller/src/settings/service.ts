@@ -32,7 +32,7 @@ import { connectionRepository, isGithubConnection } from "../connections";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { mcpServerListRule, requireMcpManage } from "../mcp-servers";
-import { decideProviderAccountHarness, PluginHost } from "../plugins";
+import { decideProviderAccountHarness, decideTextGenerationHarness, PluginHost } from "../plugins";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
 
@@ -96,9 +96,13 @@ const make = Effect.gen(function* () {
    * `harnessId` is absent or null). Fails with a validation error otherwise,
    * because a setting pointing at such a pair could never run. The error names
    * the part that is wrong and says why. `pathOf` gives the path of the
-   * account or of the harness within the patch.
+   * account or of the harness within the patch. `decide` is the rule for
+   * whether the pair can run: `decideProviderAccountHarness` for a setting
+   * that starts sessions, `decideTextGenerationHarness` for one that makes
+   * text generations.
    */
   const validateProviderAccountHarness = (
+    decide: typeof decideProviderAccountHarness,
     providerAccountId: string,
     harnessId: string | null | undefined,
     pathOf: (field: "providerAccountId" | "harnessId") => ReadonlyArray<string>,
@@ -110,7 +114,7 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: pathOf("providerAccountId"), message: NO_SUCH_ACCOUNT }]),
         );
       }
-      const choice = decideProviderAccountHarness(
+      const choice = decide(
         yield* host.providers(),
         yield* host.harnesses(),
         account.value,
@@ -123,17 +127,22 @@ const make = Effect.gen(function* () {
       }
     });
 
-  /** Checks the account and harness of `textGeneration.model`, when the patch chooses a model. */
+  /**
+   * Checks the account and harness of `textGeneration.model`, when the patch
+   * chooses a model. Besides the checks of any account and harness, it
+   * refuses a harness that cannot make text generations.
+   */
   const validateTextGenerationProviderAccount = (
     patch: SettingsPatch,
   ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> => {
     const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
     if (chosen === undefined || typeof chosen === "string") return Effect.void;
-    return validateProviderAccountHarness(chosen.providerAccountId, chosen.harnessId, (field) => [
-      "controller",
-      TEXT_GENERATION_MODEL,
-      field,
-    ]);
+    return validateProviderAccountHarness(
+      decideTextGenerationHarness,
+      chosen.providerAccountId,
+      chosen.harnessId,
+      (field) => ["controller", TEXT_GENERATION_MODEL, field],
+    );
   };
 
   /**
@@ -158,6 +167,7 @@ const make = Effect.gen(function* () {
       const providerAccountId = patched[THREAD_PROVIDER_ACCOUNT] ?? stored[THREAD_PROVIDER_ACCOUNT];
       if (providerAccountId === undefined) return;
       yield* validateProviderAccountHarness(
+        decideProviderAccountHarness,
         providerAccountId,
         patched[THREAD_HARNESS] === undefined ? stored[THREAD_HARNESS] : patched[THREAD_HARNESS],
         (field) => ["user", field === "harnessId" ? THREAD_HARNESS : THREAD_PROVIDER_ACCOUNT],

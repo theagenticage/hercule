@@ -742,6 +742,7 @@ export const FIXTURE_MODEL_PROFILE: ModelProfile = {
           options: model.options,
           imageInput: model.imageInput,
           problem: null,
+          canGenerateText: true,
         }),
       ),
       newModels: [],

@@ -369,6 +369,7 @@ export const buildProfileEntry = (
   model: string,
   fields: Partial<ResolvedModelProfileEntry> = {},
 ): ResolvedModelProfileEntry => ({
+  canGenerateText: true,
   providerAccountId: identity.id,
   model,
   harnessId: null,

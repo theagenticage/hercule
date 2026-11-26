@@ -837,6 +837,56 @@ describe("resolving entries", () => {
     expect(resolved.options.map((option) => option.id)).toEqual(["effort"]);
   });
 
+  describe("canGenerateText", () => {
+    /** Runs the entry on a fixture harness `alpha` that declares `textGeneration`, with no runner connected. */
+    const resolveIn = (textGeneration: "supported" | "unsupported") =>
+      runWithProfiles(
+        Effect.gen(function* () {
+          const accountId = yield* addReadyKeyAccount("work");
+          return yield* putEntry(accountId, "current");
+        }),
+        [
+          ...buildAccountPlugins().slice(0, 1),
+          createPluginFixture({
+            id: "alpha",
+            definitions: [
+              buildHarnessDefinition(
+                "alpha",
+                [
+                  {
+                    providerId: ACME_PROVIDER_ID,
+                    kinds: [
+                      {
+                        kind: KEY_KIND,
+                        modelArgument: "acme/{model}",
+                        credentialVariable: "ACME_API_KEY",
+                      },
+                    ],
+                    models: "own-list",
+                  },
+                ],
+                { textGeneration },
+              ),
+            ],
+          }).plugin,
+          ...buildAccountPlugins().slice(2),
+        ],
+      );
+
+    it("is true in a harness that makes text generations, even with no machine connected", async () => {
+      const resolved = await resolveIn("supported");
+
+      expect(resolved.canGenerateText).toBe(true);
+      expect(resolved.problem?.reason).toBe("no-runner");
+    });
+
+    it("is false in a harness that declares it makes none", async () => {
+      const resolved = await resolveIn("unsupported");
+
+      expect(resolved.canGenerateText).toBe(false);
+    });
+  });
+
   it("takes the harness from the entry, else the section, else the account", async () => {
     const resolved = await runWithProfiles(
       Effect.gen(function* () {

@@ -5,15 +5,21 @@
  *
  * - `off`: nothing runs.
  * - A chosen account and model: exactly that, in the chosen harness or else
- *   the account's default harness. It is never replaced by another account
+ *   the account's default harness. If that harness cannot make text
+ *   generations, nothing runs. It is never replaced by another account
  *   or harness, so a user who chose OpenAI never has a call quietly go to
  *   Anthropic.
  * - `automatic` (the default when the setting is unset): the oldest account
- *   (in the order they were added) that can run in its default harness on a
- *   runner that could make the call, and whose provider names a suggested
- *   text generation model that the account's Model Catalog holds. Choosing
- *   the model is visible, not hidden: Settings shows what `automatic`
- *   resolves to.
+ *   (in the order they were added) that meets all of these:
+ *   - its default harness is carried by this build, the account can run in it,
+ *     and it makes text generations (as `decideTextGenerationHarness`
+ *     decides);
+ *   - its provider names a suggested text generation model that the
+ *     account's Model Catalog holds;
+ *   - it can run now on a runner able to make the call.
+ *
+ *   Choosing the model is visible, not hidden: Settings shows what
+ *   `automatic` resolves to.
  *
  * A runner could make the call when it is placeable (online, active, not
  * reserved), has negotiated the text generation capability, and can run the
@@ -30,7 +36,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { TEXT_GENERATION_CAPABILITY } from "@hercule/protocol";
-import { decideProviderAccountHarness, PluginHost } from "../plugins";
+import { decideTextGenerationHarness, PluginHost } from "../plugins";
 import {
   describeProviderAccount,
   ModelCatalogs,
@@ -151,7 +157,8 @@ const make = Effect.gen(function* () {
   /**
    * Resolves one account in one harness (the account's default when
    * `harnessId` is absent) and a model to a target. An account that cannot
-   * run in the harness is `unresolved`, with the reason in the message.
+   * make text generations in the harness (it cannot run there, or the harness
+   * makes no text generations) is `unresolved`, with the reason in the message.
    */
   const resolveProviderAccountModel = (
     account: StoredProviderAccount,
@@ -161,7 +168,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const providers = yield* host.providers();
       const providerAccountName = describeProviderAccount(account, providers);
-      const choice = decideProviderAccountHarness(
+      const choice = decideTextGenerationHarness(
         providers,
         yield* host.harnesses(),
         account,
@@ -187,11 +194,16 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Finds the first account, oldest first, whose default harness this build
-   * carries and can run it, whose provider names a suggested model that the
-   * account's Model Catalog holds, and that can run now on a runner able to
-   * make the call. An account that cannot run in its default harness, as
-   * `decideProviderAccountHarness` decides, is skipped.
+   * Finds the first account, oldest first, that meets all of these:
+   *
+   * - its default harness is carried by this build, the account can run in it,
+   *   and it makes text generations (as `decideTextGenerationHarness`
+   *   decides);
+   * - its provider names a suggested model that the account's Model Catalog
+   *   holds;
+   * - it can run now on a runner able to make the call.
+   *
+   * An account that fails any of these is skipped.
    *
    * Reads the accounts, the catalogs and the runners once, then decides in
    * memory, so the number of queries does not grow with the number of
@@ -205,7 +217,7 @@ const make = Effect.gen(function* () {
       const model = providers.find(
         (one) => one.id === account.providerId,
       )?.suggestedTextGenerationModel;
-      const choice = decideProviderAccountHarness(providers, harnesses, account);
+      const choice = decideTextGenerationHarness(providers, harnesses, account);
       if (model === undefined || choice._tag === "refused") continue;
       candidates.push({ account, harnessId: choice.harness.id, model });
     }

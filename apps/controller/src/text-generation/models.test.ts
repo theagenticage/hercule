@@ -10,6 +10,7 @@ import * as Statement from "effect/sql/Statement";
 import { withTransaction } from "../db";
 import { inTransaction } from "../db/testing";
 import { PluginHost } from "../plugins";
+import type { Plugin } from "@hercule/plugin-host";
 import { buildPluginStack } from "../plugins/testing";
 import {
   ModelCatalogsLayer,
@@ -59,7 +60,37 @@ interface Fleet {
   ) => Effect.Effect<void, never, SqlClient.SqlClient>;
 }
 
-const run = <A>(
+/**
+ * Returns the shipped plugin with its harnesses declaring that they make no
+ * text generations, as the Antigravity harness does.
+ */
+const withoutTextGeneration = (plugin: Plugin): Plugin => ({
+  ...plugin,
+  register: (host) => {
+    const harnesses = host.harnesses;
+    if (harnesses === undefined) return plugin.register(host);
+    return plugin.register({
+      ...host,
+      harnesses: {
+        ...harnesses,
+        register: (definition) =>
+          harnesses.register({
+            ...definition,
+            declared: { ...definition.declared, textGeneration: "unsupported" },
+          }),
+      },
+    });
+  },
+});
+
+/** The shipped plugins, with the Codex harness (OpenAI's) unable to make text generations. */
+const pluginsWithTextlessCodex = (): ReadonlyArray<Plugin> =>
+  buildTextGenerationPlugins().map((plugin) =>
+    plugin.manifest.id === "codex" ? withoutTextGeneration(plugin) : plugin,
+  );
+
+const runWith = <A>(
+  plugins: ReadonlyArray<Plugin>,
   arrange: (
     fleet: Fleet,
   ) => Effect.Effect<
@@ -70,7 +101,7 @@ const run = <A>(
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
       return yield* arrange({
         // Added in this order, a day apart, which is the order `automatic` walks.
         openai: yield* addFixtureAccount("openai", null, "2026-10-01T00:00:00.000Z"),
@@ -87,6 +118,13 @@ const run = <A>(
       });
     }).pipe(Effect.orDie, Effect.provide(layer)),
   );
+
+const run = <
+  A,
+  R extends Settings | TextGenerationModels | SqlClient.SqlClient | PluginHost | Secrets,
+>(
+  arrange: (fleet: Fleet) => Effect.Effect<A, unknown, R>,
+) => runWith(buildTextGenerationPlugins(), arrange);
 
 const resolve = Effect.flatMap(TextGenerationModels, (models) => models.resolve());
 
@@ -401,6 +439,51 @@ describe("automatic", () => {
     );
 
     expect(target).toMatchObject({ _tag: "resolved", harnessId: "codex/codex" });
+  });
+});
+
+describe("a harness that makes no text generations", () => {
+  // OpenAI's provider names a suggested model, so only the harness keeps its account out.
+  it("skips the oldest account in automatic and takes a newer account in a harness that does", async () => {
+    const [target, zaiId] = await runWith(
+      pluginsWithTextlessCodex(),
+      ({ openai, zai, addRunner, snapshot }) =>
+        Effect.gen(function* () {
+          const runner = yield* addRunner();
+          yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+          yield* snapshot(zai, runner, probed("ok", "glm-5.3-flash"));
+          return [yield* resolve.pipe(Effect.orDie), zai.id] as const;
+        }),
+    );
+
+    expect(target).toMatchObject({
+      _tag: "resolved",
+      providerAccountId: zaiId,
+      harnessId: "pi/pi",
+    });
+  });
+
+  it("leaves a chosen model unresolved, with the reason, even on a runner that could take the call", async () => {
+    const target = await runWith(pluginsWithTextlessCodex(), ({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const settings = yield* Settings;
+        const runner = yield* addRunner();
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+        yield* inTransaction(
+          settings.set("textGeneration.model", {
+            providerAccountId: openai.id,
+            model: "gpt-6-luna",
+          }),
+        );
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target).toMatchObject({
+      _tag: "unresolved",
+      message:
+        "OpenAI cannot make text generations: Codex runs no text generations; pick a model of an account that runs in another harness, or Automatic",
+    });
   });
 });
 

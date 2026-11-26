@@ -327,6 +327,7 @@ export const buildSpecimenProfileEntry = (model: SpecimenModel): ResolvedModelPr
   options: model.options,
   imageInput: model.imageInput,
   problem: null,
+  canGenerateText: true,
 });
 
 /** Returns the section of a Model Profile that lists `models` of one account, in order. */
