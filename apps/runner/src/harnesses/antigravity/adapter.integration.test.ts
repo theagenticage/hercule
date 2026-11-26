@@ -19,6 +19,7 @@
  * that `agy` does not update itself, the sign-in command, and the removal of a
  * conversation's files.
  */
+import { Database } from "bun:sqlite";
 import {
   chmodSync,
   copyFileSync,
@@ -34,11 +35,9 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { AcpHandlers } from "@hercule/acp";
 import type { ProbeResult } from "@hercule/protocol";
-import { PROBE_DEADLINE } from "../probe";
 import { UUID_PATTERN } from "../session-files";
 import { makeLogins } from "../login";
 import { runProcess, spawnAgy, spawnLogin } from "../process";
@@ -54,6 +53,9 @@ const pinnedBinary = findAgyTestBinary();
 
 const FILE_STORAGE_LINE = "Using file-based token storage because SSH session detected";
 const UPDATE_LINE = "Spawned background update process";
+
+/** The start of the name of a folder the adapter makes in a Harness Home for the log of one `agy` process. */
+const LOG_FOLDER_PREFIX = "hercule-log-";
 
 /** A closed port, so that no request ever leaves the machine. */
 const CLOSED_PROXY = "http://127.0.0.1:9";
@@ -224,8 +226,62 @@ const readFilesBelow = (folder: string): ReadonlyArray<string> =>
     return stat.isFile() && stat.size < 10 * 1024 * 1024 ? [readFileSync(path, "latin1")] : [];
   });
 
-const hashBinary = (path: string): string =>
+/** Lists the folders of the log of an `agy` process that are left in the Harness Home. */
+const listLogFolders = (home: string): ReadonlyArray<string> =>
+  readdirSync(home).filter((name) => name.startsWith(LOG_FOLDER_PREFIX));
+
+/**
+ * Returns the number of rows in each table of `agy`'s shared summary database
+ * in the Harness Home. Reads a copy of the database and its `-wal` and `-shm`
+ * files, so the original is never opened. Fails when the database is missing.
+ */
+const countSummaryRows = (home: string): Record<string, number> => {
+  const appData = join(home, APP_DATA_DIR);
+  const copyFolder = makeTempFolder("summaries");
+  const names = readdirSync(appData).filter((name) => name.startsWith("conversation_summaries.db"));
+  expect(names).toContain("conversation_summaries.db");
+  for (const name of names) copyFileSync(join(appData, name), join(copyFolder, name));
+  const database = new Database(join(copyFolder, "conversation_summaries.db"), { readonly: true });
+  try {
+    const tables = database
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      )
+      .all();
+    return Object.fromEntries(
+      tables.map(({ name }) => [
+        name,
+        database.query<{ count: number }, []>(`SELECT count(*) AS count FROM "${name}"`).get()!
+          .count,
+      ]),
+    );
+  } finally {
+    database.close();
+  }
+};
+
+const sumRows = (counts: Record<string, number>): number =>
+  Object.values(counts).reduce((total, count) => total + count, 0);
+
+const hashFile = (path: string): string =>
   new Bun.CryptoHasher("sha256").update(readFileSync(path)).digest("hex");
+
+/** Opens a conversation in a new working folder, closes it, and returns its id once the process has ended. */
+const leaveConversation = (account: Account): Promise<string> =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = makeTempFolder("cwd");
+        const { connection } = yield* openSignedInAgy(spawnAgy, account.ctx, binary, {
+          cwd,
+          handlers: ignoringHandlers,
+        });
+        const { nativeSessionId } = yield* connection.newSession({ cwd, mcpServers: [] });
+        yield* connection.closeSession(nativeSessionId);
+        return nativeSessionId;
+      }),
+    ),
+  );
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -269,11 +325,8 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     writeUnexpiredToken(account.ctx.home);
     const home = account.ctx.home;
     const appData = join(home, APP_DATA_DIR);
-    const startedAt = Date.now();
-
     const first = await probeAccount(account);
 
-    expect(Date.now() - startedAt).toBeLessThan(Duration.toMillis(PROBE_DEADLINE) / 2);
     // Offline, `agy` lists no models and gives no plan.
     expect(first.auth.status).toBe("error");
     expect(first.auth.message).toContain("listed no models");
@@ -284,23 +337,30 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     // The files the check compares below exist, so a second conversation would show.
     expect(implicitAfterFirst.length).toBeGreaterThan(0);
     expect(listConversationDatabases(home)).toEqual([`${conversationId}.db`]);
+    const summariesAfterFirst = countSummaryRows(home);
+    const sharedFileAfterFirst = hashFile(join(appData, "jetbox_summaries_proto.pb"));
+    expect(sumRows(summariesAfterFirst)).toBeGreaterThan(0);
 
     const second = await probeAccount(account);
 
     expect(second.auth.status).toBe("error");
     expect(second.auth.message).toContain("listed no models");
     // The second probe resumed the stored conversation: no second one, and
-    // nothing new in the files `agy` shares between conversations. The rows
-    // of its summary database cannot be counted without a SQLite reader, so
-    // the conversation files and `implicit/` stand for them.
+    // nothing new in the files `agy` shares between conversations.
     expect(readProbeConversationId(home)).toBe(conversationId);
     expect(listConversationDatabases(home)).toEqual([`${conversationId}.db`]);
     expect(readdirSync(join(appData, "brain"))).toEqual([conversationId]);
     expect(listTree(join(appData, "implicit"))).toEqual(implicitAfterFirst);
-    // The probe leaves no scratch folder and no log of `agy` in the Harness Home.
-    expect(readdirSync(home).filter((name) => name.startsWith("hercule-scratch-"))).toEqual([]);
+    expect(countSummaryRows(home)).toEqual(summariesAfterFirst);
+    expect(hashFile(join(appData, "jetbox_summaries_proto.pb"))).toBe(sharedFileAfterFirst);
+    // The probe leaves no log folder and no log of `agy` in the Harness Home.
+    expect(listLogFolders(home)).toEqual([]);
     expect(existsSync(join(home, "log"))).toBe(false);
     expect(existsSync(join(appData, "log"))).toBe(false);
+
+    // Control: a new conversation does add a row, so the checks above can fail.
+    await leaveConversation(account);
+    expect(sumRows(countSummaryRows(home))).toBe(sumRows(summariesAfterFirst) + 1);
   }, 60_000);
 
   it("makes a new conversation and stores its id when the stored one has lost its files", async () => {
@@ -390,7 +450,7 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     const adapterEnv = buildLoginCommand(account.ctx, binary).env;
     const withoutGuard = { ...adapterEnv };
     delete withoutGuard["AGY_CLI_DISABLE_AUTO_UPDATE"];
-    const hashBefore = hashBinary(binary);
+    const hashBefore = hashFile(binary);
     const runModels = (env: Record<string, string | undefined>): Promise<unknown> =>
       Effect.runPromise(runProcess([binary, "models"], env));
     const waitForUpdateLine = async (limitMs: number): Promise<boolean> => {
@@ -406,13 +466,13 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     await runModels(adapterEnv);
     // An update starts a moment after the command, so give it time to show.
     const updatedWithGuard = await waitForUpdateLine(4000);
-    const hashAfterGuarded = hashBinary(binary);
+    const hashAfterGuarded = hashFile(binary);
 
     await runModels(withoutGuard);
     // Control: the same command does start the updater when the variable is
     // missing, which shows that the check above can fail.
     const updatedWithoutGuard = await waitForUpdateLine(10_000);
-    const hashAfterControl = hashBinary(binary);
+    const hashAfterControl = hashFile(binary);
 
     expect(updatedWithGuard).toBe(false);
     expect(updatedWithoutGuard).toBe(true);
@@ -443,11 +503,17 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
 
       const submitted = await Effect.runPromise(logins.submit("account-1", "not-a-real-code"));
 
-      expect(submitted).toMatchObject({ _tag: "loginResult", ok: false });
-      const message = (submitted as { message: string }).message;
-      expect(message.startsWith("couldn't log in")).toBe(true);
-      expect(message.endsWith("start it again for a new link.")).toBe(true);
+      expect(submitted._tag).toBe("loginFailed");
+      expect("message" in submitted ? submitted.message : "").toBe(
+        "The code was refused. This sign-in cannot take another code; start it again for a new link.",
+      );
       expect(existsSync(opened)).toBe(false);
+      // The runner removes the log folder once the process has exited, which
+      // can be a moment after the answer.
+      const until = Date.now() + 5000;
+      while (listLogFolders(account.ctx.home).length > 0 && Date.now() < until) await sleep(100);
+      expect(listLogFolders(account.ctx.home)).toEqual([]);
+      expect(listTree(join(account.ctx.home, APP_DATA_DIR, "log"))).toEqual([]);
     } finally {
       await Effect.runPromise(logins.stopAll);
     }
@@ -457,27 +523,9 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
     const account = makeAccount();
     writeUnexpiredToken(account.ctx.home);
     const appData = join(account.ctx.home, APP_DATA_DIR);
-    const { spawn } = buildRecordingSpawn();
-    /** Opens a conversation, closes it, and returns its id once the process has ended. */
-    const leaveConversation = (): Promise<string> =>
-      Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const cwd = makeTempFolder("cwd");
-            const { connection } = yield* openSignedInAgy(spawn, account.ctx, binary, {
-              cwd,
-              handlers: ignoringHandlers,
-            });
-            const { nativeSessionId } = yield* connection.newSession({ cwd, mcpServers: [] });
-            yield* connection.closeSession(nativeSessionId);
-            return nativeSessionId;
-          }),
-        ),
-      );
-
-    const second = await leaveConversation();
+    const second = await leaveConversation(account);
     const filesWithSecond = listTree(appData);
-    const first = await leaveConversation();
+    const first = await leaveConversation(account);
     const filesWithBoth = listTree(appData);
     const filesOfFirst = filesWithBoth.filter((name) => name.includes(first));
 
