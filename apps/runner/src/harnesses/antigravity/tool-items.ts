@@ -231,8 +231,8 @@ export const buildToolItem = (call: ToolCallFields): ToolItem => {
  */
 export const buildFailedToolItem = (call: ToolCallFields): ToolItem => {
   const item = buildToolItem(call);
-  const first = call.content?.find((entry) => entry.content?.type === "text")?.content;
-  const reason = typeof call.rawOutput === "string" ? call.rawOutput : first?.text;
+  const firstText = call.content?.find((entry) => entry.content?.type === "text")?.content;
+  const reason = typeof call.rawOutput === "string" ? call.rawOutput : firstText?.text;
   if (reason == null || reason === "") return item;
   return {
     kind: item.kind,
