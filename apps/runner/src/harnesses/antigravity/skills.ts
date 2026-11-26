@@ -4,7 +4,7 @@
  * in the one place `agy` reads skills from for a single session.
  */
 import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import * as Effect from "effect/Effect";
 import type { AdapterFailed } from "@hercule/protocol";
 import { describeFolderFailure } from "../../skills";
@@ -12,11 +12,20 @@ import { buildAdapterFailed } from "../adapter-error-builders";
 import type { HarnessRunnerContext } from "../index";
 import { describeFileFailure, readFolderNames } from "../session-files";
 
+/** A skill that `agy` does not list, because an earlier skill has its name. */
+export interface ShadowedSkill {
+  /** What a message writes to name the skill, without the `$`: `<name>`, or `<checkout>:<name>`. */
+  readonly reference: string;
+  /** What a message writes to name the skill that has the name, in the same form. */
+  readonly heldBy: string;
+}
+
 /**
  * Links every skill of the session into `<sessionSkillsFolder>/.agents/skills`
  * and returns the session skills folder with its symbolic links resolved, to
- * pass to `agy` as an additional directory. Returns undefined when the session
- * has no skill, and then nothing was written.
+ * pass to `agy` as an additional directory, with the skills it did not link
+ * (see below). Returns undefined when the session has no skill, and then
+ * nothing was written.
  *
  * The folder is resolved because the pointer line of a Skill Reference names
  * the real path of a `SKILL.md` (`resolveSkillFile`). Where the runner's
@@ -29,8 +38,11 @@ import { describeFileFailure, readFolderNames } from "../session-files";
  * itself links into the checkout). The library skills come first, then the
  * repository skills folders in order. When two skills have the same name, the
  * first one is linked and the others are skipped, because `agy` lists one
- * skill per name and drops the rest without a message. A skipped skill is
- * still reached by the pointer line of a Skill Reference.
+ * skill per name and drops the rest without a message. The skipped skills are
+ * returned as `shadowed`, so the caller can tell the user. A skipped skill is
+ * still reached by the pointer line of a Skill Reference. A repository skill
+ * is named `<checkout>:<name>`, where the checkout name is the name of its
+ * folder under `repositories/` in the session skills folder.
  *
  * The folder is passed as an additional directory of the session and is not
  * written into the Harness Home. Every place in the Harness Home is shared by
@@ -58,22 +70,38 @@ export const stageAgySkills = (
     HarnessRunnerContext,
     "sessionSkillsFolder" | "librarySkillsFolder" | "repositorySkillsFolders"
   >,
-): Effect.Effect<string | undefined, AdapterFailed> => {
+): Effect.Effect<
+  { readonly folder: string; readonly shadowed: ReadonlyArray<ShadowedSkill> } | undefined,
+  AdapterFailed
+> => {
   const { sessionSkillsFolder } = ctx;
   if (sessionSkillsFolder === undefined) return Effect.succeed(undefined);
   const linkFolder = join(sessionSkillsFolder, ".agents", "skills");
-  const skillsFolders = [ctx.librarySkillsFolder, ...(ctx.repositorySkillsFolders ?? [])].flatMap(
-    (folder) => (folder === undefined ? [] : [join(folder, "skills")]),
-  );
+  const skillsFolders = [
+    ...(ctx.librarySkillsFolder === undefined
+      ? []
+      : [{ folder: join(ctx.librarySkillsFolder, "skills"), checkout: undefined }]),
+    ...(ctx.repositorySkillsFolders ?? []).map((folder) => ({
+      folder: join(folder, "skills"),
+      checkout: basename(folder),
+    })),
+  ];
   return Effect.tryPromise({
     try: async () => {
-      const linked = new Set<string>();
+      // The reference of the skill that holds each name.
+      const holders = new Map<string, string>();
+      const shadowed: Array<ShadowedSkill> = [];
       const links: Array<{ readonly name: string; readonly target: string }> = [];
-      for (const skillsFolder of skillsFolders) {
-        for (const name of await readFolderNames(skillsFolder)) {
-          if (linked.has(name)) continue;
-          linked.add(name);
-          links.push({ name, target: relative(linkFolder, join(skillsFolder, name)) });
+      for (const { folder, checkout } of skillsFolders) {
+        for (const name of await readFolderNames(folder)) {
+          const reference = checkout === undefined ? name : `${checkout}:${name}`;
+          const heldBy = holders.get(name);
+          if (heldBy !== undefined) {
+            shadowed.push({ reference, heldBy });
+            continue;
+          }
+          holders.set(name, reference);
+          links.push({ name, target: relative(linkFolder, join(folder, name)) });
         }
       }
       if (links.length === 0) return undefined;
@@ -90,8 +118,18 @@ export const stageAgySkills = (
       for (const { name, target } of links) {
         await symlink(target, join(root, ".agents", "skills", name), "dir");
       }
-      return root;
+      return { folder: root, shadowed };
     },
     catch: (error) => buildAdapterFailed(describeFolderFailure(describeFileFailure(error))),
   });
 };
+
+/**
+ * Builds the warning that tells the user which skills `agy` does not offer to
+ * the model by itself, each with the skill that has its name. Such a skill
+ * still runs when a message names it.
+ */
+export const buildShadowedSkillsWarning = (shadowed: ReadonlyArray<ShadowedSkill>): string =>
+  `Antigravity lists one skill per name, so it does not offer some skills to the model by itself: ${shadowed
+    .map(({ reference, heldBy }) => `$${reference} (same name as $${heldBy})`)
+    .join(", ")}. Name a skill in a message to run it.`;

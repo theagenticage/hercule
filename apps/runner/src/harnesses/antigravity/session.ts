@@ -58,7 +58,7 @@ import { truncateFact, truncateMessage } from "../text";
 import { ANTIGRAVITY_NAME, checkAccountUsable, chooseAgyMode, openSignedInAgy } from "./agy";
 import type { AgySeam } from "./agy";
 import { buildAgyPrompt } from "./skill-prompt";
-import { stageAgySkills } from "./skills";
+import { buildShadowedSkillsWarning, stageAgySkills } from "./skills";
 import {
   createConfigChange,
   describeSetting,
@@ -571,7 +571,8 @@ export const startAgySession = (
     const start = Effect.gen(function* () {
       // Staged before the process exists, so a failure here spawns nothing. A
       // resume stages again: every start has a fresh session skills folder.
-      const skillsFolder = yield* stageAgySkills(ctx);
+      const staged = yield* stageAgySkills(ctx);
+      const skillsFolder = staged?.folder;
       const instructions = buildInstructions(ctx, spec, ctx.userMaterial?.instructions);
       // Built before `agy` opens, because `openSignedInAgy` checks that `agy`
       // takes what the request uses. A field that needs `agy` to announce
@@ -684,6 +685,15 @@ export const startAgySession = (
             ...buildBase(),
             message:
               "Antigravity compacts its context by itself, and Hercule cannot turn that off or see it.",
+          },
+        ]);
+      }
+      if (staged !== undefined && staged.shadowed.length > 0) {
+        emitEvents([
+          {
+            _tag: "runtime.warning",
+            ...buildBase(),
+            message: buildShadowedSkillsWarning(staged.shadowed),
           },
         ]);
       }

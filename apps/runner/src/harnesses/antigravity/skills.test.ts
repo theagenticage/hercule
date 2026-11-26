@@ -71,7 +71,7 @@ const readLinkedSkill = (ctx: SkillsContext, name: string): string =>
 describe("stageAgySkills", () => {
   it("links the library skills and returns the session skills folder", async () => {
     const ctx = createSession({ library: ["review", "release"] });
-    expect(await stage(ctx)).toBe(ctx.sessionSkillsFolder);
+    expect((await stage(ctx))?.folder).toBe(ctx.sessionSkillsFolder);
     expect(listLinked(ctx)).toEqual(["release", "review"]);
     expect(readLinkedSkill(ctx, "review")).toBe("library review\n");
   });
@@ -82,7 +82,7 @@ describe("stageAgySkills", () => {
     symlinkSync(real.sessionSkillsFolder!, linked);
     const ctx = { sessionSkillsFolder: linked, librarySkillsFolder: linked };
 
-    expect(await stage(ctx)).toBe(realpathSync(real.sessionSkillsFolder!));
+    expect((await stage(ctx))?.folder).toBe(realpathSync(real.sessionSkillsFolder!));
     expect(listLinked(real)).toEqual(["review"]);
     expect(readLinkedSkill(real, "review")).toBe("library review\n");
     expect(lstatSync(join(real.sessionSkillsFolder!, ".git")).isFile()).toBe(true);
@@ -116,7 +116,7 @@ describe("stageAgySkills", () => {
         { checkout: "api", skills: ["migrate"] },
       ],
     });
-    expect(await stage(ctx)).toBe(ctx.sessionSkillsFolder);
+    expect((await stage(ctx))?.folder).toBe(ctx.sessionSkillsFolder);
     expect(listLinked(ctx)).toEqual(["deploy", "migrate"]);
     expect(readLinkedSkill(ctx, "deploy")).toBe("webshop deploy\n");
     expect(readLinkedSkill(ctx, "migrate")).toBe("api migrate\n");
@@ -130,10 +130,22 @@ describe("stageAgySkills", () => {
         { checkout: "api", skills: ["deploy"] },
       ],
     });
-    await stage(ctx);
+    const staged = await stage(ctx);
     expect(listLinked(ctx)).toEqual(["deploy", "release"]);
     expect(readLinkedSkill(ctx, "release")).toBe("library release\n");
     expect(readLinkedSkill(ctx, "deploy")).toBe("webshop deploy\n");
+    expect(staged?.shadowed).toEqual([
+      { reference: "webshop:release", heldBy: "release" },
+      { reference: "api:deploy", heldBy: "webshop:deploy" },
+    ]);
+  });
+
+  it("returns no shadowed skill when no two skills share a name", async () => {
+    const ctx = createSession({
+      library: ["review"],
+      repositories: [{ checkout: "webshop", skills: ["deploy"] }],
+    });
+    expect((await stage(ctx))?.shadowed).toEqual([]);
   });
 
   it("returns nothing and writes nothing when the session has no skill", async () => {

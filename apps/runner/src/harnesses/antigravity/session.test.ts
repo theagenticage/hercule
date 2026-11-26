@@ -435,6 +435,40 @@ describe("the skills folder of a session", () => {
     );
   });
 
+  it("is told to the thread after session.started when a repository skill has the name of a library skill", () => {
+    const skills = createSessionSkills({ library: ["release"] });
+    const repository = join(skills.sessionSkillsFolder, "repositories", "webshop");
+    mkdirSync(join(repository, "skills", "release"), { recursive: true });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          const tags = h.seen.map((event) => event._tag);
+          const warnings = h.tags("runtime.warning");
+          expect(warnings).toHaveLength(1);
+          expect(warnings[0]?.message).toContain("$webshop:release (same name as $release)");
+          expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+        }),
+      {
+        context: () => ({ ...skills.context, repositorySkillsFolders: [repository] }),
+      },
+    );
+  });
+
+  it("is not warned about when no two skills share a name", () => {
+    const skills = createSessionSkills({ library: ["review"] });
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+
+          expect(h.tags("runtime.warning")).toEqual([]);
+        }),
+      { context: () => skills.context },
+    );
+  });
+
   it("is passed to a resumed conversation too", () => {
     const skills = createSessionSkills({ library: ["review"] });
     return run(
