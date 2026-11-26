@@ -67,6 +67,8 @@ export const RECORDING_NAMES = [
   "skills-resume",
   "skills-roots",
   "skills-slash-note",
+  "skills-walk-up",
+  "skills-walk-up-boundary",
   "skills-writes",
   "steer",
   "steer2",
@@ -104,6 +106,7 @@ export const RECORDING_NAMES = [
   "todo",
   "two-requests",
   "websearch",
+  "workflows-not-invoked",
 ] as const;
 
 export type RecordingName = (typeof RECORDING_NAMES)[number];
