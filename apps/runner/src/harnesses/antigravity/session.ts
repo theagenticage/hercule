@@ -852,7 +852,7 @@ export const startAgySession = (
       input: AdapterTurnInput,
     ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
-        if (input.modelSelection !== undefined && configChange.isChange(input.modelSelection)) {
+        if (input.modelSelection !== undefined && configChange.wouldChange(input.modelSelection)) {
           return yield* Effect.fail(
             new SteerRefused({
               message: `${ANTIGRAVITY_NAME} cannot change its model or thinking level in the middle of a turn. The input stays queued and is sent when the turn ends.`,

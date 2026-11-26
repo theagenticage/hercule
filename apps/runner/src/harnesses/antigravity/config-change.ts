@@ -87,7 +87,7 @@ export interface ConfigChange {
    * Returns whether `apply` would ask `agy` to change anything for `selection`.
    * True also when what `agy` holds is unknown, because `apply` would ask again.
    */
-  readonly isChange: (selection: ModelSelection) => boolean;
+  readonly wouldChange: (selection: ModelSelection) => boolean;
   /**
    * Takes in the options of an update `agy` sent by itself. An update that names
    * another model or level than the one held makes what is held unknown. An
@@ -215,7 +215,7 @@ export const createConfigChange = (
       return { kind: "applied" } as const;
     });
 
-  const isChange: ConfigChange["isChange"] = (selection) => {
+  const wouldChange: ConfigChange["wouldChange"] = (selection) => {
     const effort = readEffort(selection);
     return (
       held.model !== formatModelArgument(modelArgument, selection.model) ||
@@ -234,5 +234,5 @@ export const createConfigChange = (
     }
   };
 
-  return { apply, isChange, observe };
+  return { apply, wouldChange, observe };
 };
