@@ -53,6 +53,10 @@ interface HarnessRefusal {
   readonly reason: string;
 }
 
+/** Returns `harnessId` when the caller named a harness, else `providerAccountId`. */
+const selectRefusedField = (harnessId?: string | null): HarnessRefusal["field"] =>
+  harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId";
+
 /**
  * Decides which harness a Provider Account runs in and whether it can. The
  * harness is `harnessId` when given, else `account.defaultHarnessId`. Returns
@@ -99,7 +103,7 @@ export const decideProviderAccountHarness = (
     };
   }
   const wanted = harnessId ?? account.defaultHarnessId;
-  const field = harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId";
+  const field = selectRefusedField(harnessId);
   const harness = harnesses.find((candidate) => candidate.id === wanted);
   if (harness === undefined) {
     return { _tag: "refused", field, reason: `this build carries no ${wanted} harness` };
@@ -160,7 +164,7 @@ export const decideTextGenerationHarness = (
   }
   return {
     _tag: "refused",
-    field: harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId",
-    reason: `${decision.harness.displayName} runs no text generations; pick a model of an account that runs in another harness, or Automatic`,
+    field: selectRefusedField(harnessId),
+    reason: `${decision.harness.displayName} runs no text generations; pick a model that runs in another harness, or Automatic`,
   };
 };

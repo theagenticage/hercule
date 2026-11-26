@@ -49,6 +49,31 @@ import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 import { PluginObserver } from "./observer";
 
 /**
+ * Returns the plugin with every harness it registers declaring
+ * `textGeneration: "unsupported"`, as the Antigravity harness does. Use it to
+ * make a plugin from a shared fixture set unable to make text generations
+ * without rebuilding that fixture.
+ */
+export const declareNoTextGeneration = (plugin: Plugin): Plugin => ({
+  ...plugin,
+  register: (host) => {
+    const harnesses = host.harnesses;
+    if (harnesses === undefined) return plugin.register(host);
+    return plugin.register({
+      ...host,
+      harnesses: {
+        ...harnesses,
+        register: (definition) =>
+          harnesses.register({
+            ...definition,
+            declared: { ...definition.declared, textGeneration: "unsupported" },
+          }),
+      },
+    });
+  },
+});
+
+/**
  * Builds a harness definition that supports everything natively and, unless
  * `runs` says otherwise, runs no provider. `declared` replaces the capabilities
  * it names, for a harness that lacks one.

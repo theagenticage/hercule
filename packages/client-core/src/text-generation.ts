@@ -111,8 +111,11 @@ const buildModelKey = (
 /**
  * Returns the model select: Automatic first, then one choice for each entry
  * the Model Profiles hold, then Off. An entry that can never be the text
- * generation model (`canGenerateText` is false, as the controller decides) is
- * left out, so the picker offers nothing `settings.update` would refuse. An
+ * generation model is left out, so the picker offers nothing `settings.update`
+ * would refuse. The controller sets `canGenerateText` to false both when the
+ * harness makes no text generations and when the account cannot run in the
+ * harness at all (the harness is missing or not allowed). A stored pick of
+ * such an entry reads "(not offered)". An
  * entry offered by several profiles appears once, and a model offered in two
  * harnesses appears twice, the second with "in <harness>" after its name. An
  * entry that cannot run now, such as one whose account is signed out on a

@@ -80,7 +80,6 @@ const UNFORKABLE: HarnessDefinition = buildHarnessDefinition("unforkable", [], {
 /** A harness that cannot give a structured result, like Antigravity. */
 const UNSTRUCTURED: HarnessDefinition = buildHarnessDefinition("unstructured", [], {
   structuredOutput: "unsupported",
-  textGeneration: "supported",
 });
 
 /** What both multi-harness harnesses run: one provider's subscription, signed in on each machine. */

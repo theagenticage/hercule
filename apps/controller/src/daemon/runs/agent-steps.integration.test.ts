@@ -1906,7 +1906,6 @@ describe("agent steps over the runner socket", () => {
     async () => {
       const unstructured = buildHarnessDefinition("unstructured", [], {
         structuredOutput: "unsupported",
-        textGeneration: "supported",
       });
       await withFleet(
         async (arranged) => {

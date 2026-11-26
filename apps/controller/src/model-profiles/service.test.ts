@@ -44,6 +44,7 @@ import {
   buildHarnessDefinition,
   buildProviderDefinition,
   createPluginFixture,
+  declareNoTextGeneration,
 } from "../plugins/testing";
 import type { ModelDescriptor } from "@hercule/protocol";
 import { buildModel, runWithProfiles, storeCatalog } from "./testing";
@@ -838,50 +839,29 @@ describe("resolving entries", () => {
   });
 
   describe("canGenerateText", () => {
-    /** Runs the entry on a fixture harness `alpha` that declares `textGeneration`, with no runner connected. */
-    const resolveIn = (textGeneration: "supported" | "unsupported") =>
+    /** Runs the entry in the fixture harness `alpha`, which declares `textGeneration`, with no runner connected. */
+    const resolveEntryInAlpha = (textGeneration: "supported" | "unsupported") =>
       runWithProfiles(
         Effect.gen(function* () {
           const accountId = yield* addReadyKeyAccount("work");
           return yield* putEntry(accountId, "current");
         }),
-        [
-          ...buildAccountPlugins().slice(0, 1),
-          createPluginFixture({
-            id: "alpha",
-            definitions: [
-              buildHarnessDefinition(
-                "alpha",
-                [
-                  {
-                    providerId: ACME_PROVIDER_ID,
-                    kinds: [
-                      {
-                        kind: KEY_KIND,
-                        modelArgument: "acme/{model}",
-                        credentialVariable: "ACME_API_KEY",
-                      },
-                    ],
-                    models: "own-list",
-                  },
-                ],
-                { textGeneration },
-              ),
-            ],
-          }).plugin,
-          ...buildAccountPlugins().slice(2),
-        ],
+        buildAccountPlugins().map((plugin) =>
+          plugin.manifest.id === "alpha" && textGeneration === "unsupported"
+            ? declareNoTextGeneration(plugin)
+            : plugin,
+        ),
       );
 
     it("is true in a harness that makes text generations, even with no machine connected", async () => {
-      const resolved = await resolveIn("supported");
+      const resolved = await resolveEntryInAlpha("supported");
 
       expect(resolved.canGenerateText).toBe(true);
       expect(resolved.problem?.reason).toBe("no-runner");
     });
 
     it("is false in a harness that declares it makes none", async () => {
-      const resolved = await resolveIn("unsupported");
+      const resolved = await resolveEntryInAlpha("unsupported");
 
       expect(resolved.canGenerateText).toBe(false);
     });
@@ -1083,6 +1063,8 @@ describe("resolving entries", () => {
       reason: "harness-not-allowed",
       message: expect.stringContaining("cannot run") as unknown,
     });
+    // beta declares text generation, but cannot run this account, so nothing may be picked there.
+    expect(resolved.canGenerateText).toBe(false);
   });
 
   it("reports no runner when none is connected", async () => {

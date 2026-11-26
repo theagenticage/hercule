@@ -89,7 +89,14 @@ describe("buildTextGenerationField", () => {
     const profile = buildModelProfile([
       buildProfileSection(OPENAI_IDENTITY, [
         buildProfileEntry(OPENAI_IDENTITY, "gpt-6-luna", { name: "GPT-6 Luna" }),
-        buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6", canGenerateText: false }),
+        // Picked to run in a harness that makes no text generations, so the controller marks
+        // it, while the entry in the account's own harness stays offered.
+        buildProfileEntry(OPENAI_IDENTITY, "gpt-6", {
+          name: "GPT-6",
+          harnessId: "pi/pi",
+          resolvedHarnessId: "pi/pi",
+          canGenerateText: false,
+        }),
       ]),
     ]);
     const args = [PROVIDERS, [CODEX], HARNESSES, [profile], NOTHING] as const;
@@ -101,14 +108,17 @@ describe("buildTextGenerationField", () => {
       "Off",
     ]);
 
-    const stored = buildTextGenerationField(
-      { providerAccountId: CODEX.id, model: "gpt-6" },
-      ...args,
-    );
+    // Names the left-out entry exactly: same account, model and harness.
+    const setting = { providerAccountId: CODEX.id, harnessId: "pi/pi", model: "gpt-6" };
+    const stored = buildTextGenerationField(setting, ...args);
+    const notOffered = stored.choices.filter((choice) => choice.setting === setting);
+    expect(notOffered).toHaveLength(1);
+    expect(notOffered[0]!.label).toBe("OpenAI · gpt-6 (not offered)");
+    expect(stored.selectedKey).toBe(notOffered[0]!.key);
     expect(stored.choices.map((choice) => choice.label)).toEqual([
       "Automatic",
       "OpenAI · GPT-6 Luna",
-      "OpenAI · GPT-6 (not offered)",
+      "OpenAI · gpt-6 (not offered)",
       "Off",
     ]);
   });

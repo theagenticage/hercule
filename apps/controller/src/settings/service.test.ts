@@ -638,13 +638,13 @@ describe("the text generation model", () => {
 
 describe("the text generation model in a harness that makes no text generations", () => {
   /**
-   * One provider whose default harness `tg/textless` declares no text
+   * One provider whose default harness `tg/nongenerating` declares no text
    * generations, and that also runs in `tg/capable`, which does.
    */
-  const textlessPlugin = createPluginFixture({
+  const nonGeneratingPlugin = createPluginFixture({
     id: "tg",
     capabilities: ["harnesses", "providers"],
-    definitions: ["textless", "capable"].map((name) =>
+    definitions: ["nongenerating", "capable"].map((name) =>
       buildHarnessDefinition(
         name,
         [
@@ -654,13 +654,13 @@ describe("the text generation model in a harness that makes no text generations"
             models: "all",
           },
         ],
-        name === "textless" ? { textGeneration: "unsupported" } : {},
+        name === "nongenerating" ? { textGeneration: "unsupported" } : {},
       ),
     ),
-    providers: [{ ...buildProviderDefinition("provider", ["tg/textless", "tg/capable"]) }],
+    providers: [buildProviderDefinition("provider", ["tg/nongenerating", "tg/capable"])],
   }).plugin;
 
-  const withTextlessAccount = (
+  const addAccountInNonGeneratingHarness = (
     body: (
       base: string,
       token: string,
@@ -677,7 +677,7 @@ describe("the text generation model in a harness that makes no text generations"
         }>;
         await body(harness.base, token, accounts[0]!);
       },
-      { plugins: [textlessPlugin] },
+      { plugins: [nonGeneratingPlugin] },
     );
 
   const readIssues = async (
@@ -685,11 +685,11 @@ describe("the text generation model in a harness that makes no text generations"
   ): Promise<ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>> =>
     ((await response.json()) as { error: { details: { issues: never } } }).error.details.issues;
 
-  const REFUSAL = "Harness textless runs no text generations; pick a model of an account";
+  const REFUSAL = "Harness nongenerating runs no text generations; pick a model that runs";
 
   it("rejects a model of an account whose default harness makes none, naming the account", async () => {
-    await withTextlessAccount(async (base, token, account) => {
-      expect(account.defaultHarnessId).toBe("tg/textless");
+    await addAccountInNonGeneratingHarness(async (base, token, account) => {
+      expect(account.defaultHarnessId).toBe("tg/nongenerating");
 
       const response = await patchSettings(base, token, {
         controller: { "textGeneration.model": { providerAccountId: account.id, model: "fast" } },
@@ -708,12 +708,12 @@ describe("the text generation model in a harness that makes no text generations"
   });
 
   it("rejects a model that names a harness that makes none, naming the harness", async () => {
-    await withTextlessAccount(async (base, token, account) => {
+    await addAccountInNonGeneratingHarness(async (base, token, account) => {
       const response = await patchSettings(base, token, {
         controller: {
           "textGeneration.model": {
             providerAccountId: account.id,
-            harnessId: "tg/textless",
+            harnessId: "tg/nongenerating",
             model: "fast",
           },
         },
@@ -729,7 +729,7 @@ describe("the text generation model in a harness that makes no text generations"
   });
 
   it("accepts the same account in a harness that does, and as the Thread default", async () => {
-    await withTextlessAccount(async (base, token, account) => {
+    await addAccountInNonGeneratingHarness(async (base, token, account) => {
       const model = { providerAccountId: account.id, harnessId: "tg/capable", model: "fast" };
       const chosen = await patchSettings(base, token, {
         controller: { "textGeneration.model": model },
