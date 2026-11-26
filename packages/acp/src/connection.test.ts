@@ -91,7 +91,7 @@ it.effect(
 
       yield* connection.newSession(request);
       yield* connection.resumeSession({ ...request, nativeSessionId: SESSION });
-      yield* connection.prompt(SESSION, [...TEXT, image]);
+      yield* Effect.flatten(connection.sendPrompt(SESSION, [...TEXT, image]));
       yield* connection.cancel(SESSION);
       yield* connection.closeSession(SESSION);
 
@@ -185,7 +185,7 @@ it.effect("handles an update sent before the reply before the prompt returns", (
     });
     const connection = yield* harness.open;
 
-    expect(yield* connection.prompt(SESSION, TEXT)).toEqual(PROMPT_RESULT);
+    expect(yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT))).toEqual(PROMPT_RESULT);
 
     expect(harness.updates.map(({ update }) => update.sessionUpdate)).toEqual([
       "agent_message_chunk",
@@ -243,11 +243,193 @@ it.effect("lets a prompt wait for its reply as long as the harness works", () =>
     const harness = createTestHarness({ scripts: { "session/prompt": () => [] } });
     const connection = yield* harness.open;
 
-    const prompting = yield* Effect.forkChild(connection.prompt(SESSION, TEXT));
+    const prompting = yield* Effect.forkChild(Effect.flatten(connection.sendPrompt(SESSION, TEXT)));
     yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
     yield* TestClock.adjust("24 hours");
 
     expect(prompting.pollUnsafe()).toBeUndefined();
+  }),
+);
+
+it.effect("sendPrompt succeeds once the request is written, before the reply", () =>
+  Effect.gen(function* () {
+    const harness = createTestHarness({ scripts: { "session/prompt": () => [] } });
+    const connection = yield* harness.open;
+
+    const waitForReply = yield* connection.sendPrompt(SESSION, TEXT);
+    const reply = yield* Effect.forkChild(waitForReply);
+    yield* Effect.yieldNow;
+    expect(reply.pollUnsafe()).toBeUndefined();
+
+    const id = harness.fake.received.find(isMethod("session/prompt"))?.id;
+    harness.say(buildResult(id!, PROMPT_RESULT));
+    expect(yield* Fiber.join(reply)).toEqual(PROMPT_RESULT);
+  }),
+);
+
+it.effect("sendPrompt fails with not-sent when the write of the request is rejected", () =>
+  Effect.gen(function* () {
+    const harness = createTestHarness({
+      writeWith: (write) => async (text) => {
+        if (text.includes('"session/prompt"')) throw new Error("EPIPE");
+        await write(text);
+      },
+    });
+    const connection = yield* harness.open;
+
+    const error = yield* Effect.flip(connection.sendPrompt(SESSION, TEXT));
+
+    expect(error).toMatchObject({ reason: "not-sent" });
+    expect(error.message).toContain("not handed to the harness");
+  }),
+);
+
+it.effect(
+  "sendPrompt fails with not-sent when the connection ended before the line was written",
+  () =>
+    Effect.gen(function* () {
+      const harness = createTestHarness();
+      const connection = yield* harness.open;
+      harness.fake.end();
+      yield* connection.awaitClosed;
+
+      const error = yield* Effect.flip(connection.sendPrompt(SESSION, TEXT));
+
+      expect(error).toMatchObject({ reason: "not-sent" });
+      expect(harness.fake.received.some(isMethod("session/prompt"))).toBe(false);
+    }),
+);
+
+it.effect(
+  "sendPrompt fails with closed, not not-sent, when the harness read the line and the connection ended before the write was acknowledged",
+  () =>
+    Effect.gen(function* () {
+      const release = Promise.withResolvers<void>();
+      const harness = createTestHarness({
+        scripts: { "session/prompt": () => [] },
+        writeWith: (write) => async (text) => {
+          await write(text);
+          if (text.includes('"session/prompt"')) await release.promise;
+        },
+      });
+      const connection = yield* harness.open;
+
+      const sending = yield* Effect.forkChild(Effect.flip(connection.sendPrompt(SESSION, TEXT)));
+      yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+      harness.fake.end();
+      yield* connection.awaitClosed;
+      const error = yield* Fiber.join(sending);
+      release.resolve();
+
+      expect(error).toMatchObject({ reason: "closed" });
+      expect(error.message).toContain("not known whether the harness got");
+    }),
+);
+
+it.effect("sendPrompt succeeds when the reply arrives before the write is acknowledged", () =>
+  Effect.gen(function* () {
+    const release = Promise.withResolvers<void>();
+    const harness = createTestHarness({
+      writeWith: (write) => async (text) => {
+        await write(text);
+        if (text.includes('"session/prompt"')) await release.promise;
+      },
+    });
+    const connection = yield* harness.open;
+
+    const sending = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+    // The default script of the fake answers the prompt at once, while the write is still held.
+    const waitForReply = yield* Fiber.join(sending);
+    release.resolve();
+
+    expect(yield* waitForReply).toMatchObject({ stopReason: expect.any(String) as unknown });
+  }),
+);
+
+it.effect("does not take a response we write for the request of the same id as written", () =>
+  Effect.gen(function* () {
+    const releaseResponse = Promise.withResolvers<void>();
+    const releasePrompt = Promise.withResolvers<void>();
+    const harness = createTestHarness({
+      scripts: { "session/prompt": () => [] },
+      writeWith: (write) => async (text) => {
+        await write(text);
+        if (text.includes('"result"')) await releaseResponse.promise;
+        if (text.includes('"session/prompt"')) await releasePrompt.promise;
+      },
+    });
+    const connection = yield* harness.open;
+    // The request ids the client uses count up, so the next call gets the next number.
+    const promptId =
+      Math.max(...harness.fake.received.map((message) => Number(message.id ?? -1))) + 1;
+
+    // The response to the harness's request has the id the prompt is about to get.
+    // It is written (and held in flight) while the prompt waits behind it.
+    harness.say(buildRequest(promptId, "session/request_permission", APPROVAL_PARAMS));
+    yield* harness.whenWritten("the response", isReplyTo(promptId));
+    const sending = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    // Lets the prompt register its request before the response is acknowledged.
+    for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow;
+    releaseResponse.resolve();
+    yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+    expect(harness.fake.received.find(isMethod("session/prompt"))?.id).toBe(promptId);
+    yield* Effect.yieldNow;
+
+    expect(sending.pollUnsafe()).toBeUndefined();
+    releasePrompt.resolve();
+    yield* Fiber.join(sending);
+  }),
+);
+
+it.effect("keeps a request of the harness apart from our open prompt of the same id", () =>
+  Effect.gen(function* () {
+    const harness = createTestHarness({ scripts: { "session/prompt": () => [] } });
+    const connection = yield* harness.open;
+    const sending = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
+    const promptId = Number(harness.fake.received.find(isMethod("session/prompt"))?.id);
+    const waitForReply = yield* Fiber.join(sending);
+
+    // The harness sends a request with the id of our prompt, which is still open.
+    harness.say(buildRequest(promptId, "session/request_permission", APPROVAL_PARAMS));
+    yield* harness.whenWritten("the response", isReplyTo(promptId));
+    yield* Effect.yieldNow;
+
+    // Neither the prompt nor the connection took the other's id for its own.
+    const stillWaiting = yield* Effect.forkChild(waitForReply);
+    yield* Effect.yieldNow;
+    expect(stillWaiting.pollUnsafe()).toBeUndefined();
+    yield* Fiber.interrupt(stillWaiting);
+  }),
+);
+
+it.effect("gives each overlapping sendPrompt its own write signal", () =>
+  Effect.gen(function* () {
+    const release = Promise.withResolvers<void>();
+    let promptWrites = 0;
+    const harness = createTestHarness({
+      scripts: { "session/prompt": () => [] },
+      writeWith: (write) => async (text) => {
+        await write(text);
+        if (text.includes('"session/prompt"') && promptWrites++ === 1) await release.promise;
+      },
+    });
+    const connection = yield* harness.open;
+
+    const first = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    const second = yield* Effect.forkChild(connection.sendPrompt(SESSION, TEXT));
+    yield* harness.waitUntil(
+      "both lines reached the pipe",
+      () => harness.fake.received.filter(isMethod("session/prompt")).length === 2,
+    );
+    yield* Effect.yieldNow;
+    const done = () => [first, second].filter((fiber) => fiber.pollUnsafe() !== undefined);
+    expect(done()).toHaveLength(1);
+
+    release.resolve();
+    yield* Fiber.join(first);
+    yield* Fiber.join(second);
   }),
 );
 
@@ -338,7 +520,7 @@ it.effect.each([
       scripts: { "session/prompt": answerWith(reply) },
     }).open;
 
-    const error = yield* Effect.flip(connection.prompt(SESSION, TEXT));
+    const error = yield* Effect.flip(Effect.flatten(connection.sendPrompt(SESSION, TEXT)));
 
     expect(error).toMatchObject({ reason: "unreadable" });
     expect(error.message).toBe(describeUnreadableReply("session/prompt", detail));
@@ -413,7 +595,7 @@ it.effect("fails a prompt as refused when the harness reports an error for the t
     });
     const connection = yield* harness.open;
 
-    const error = yield* Effect.flip(connection.prompt(SESSION, TEXT));
+    const error = yield* Effect.flip(Effect.flatten(connection.sendPrompt(SESSION, TEXT)));
 
     expect(error).toMatchObject({
       reason: "refused",
@@ -634,7 +816,7 @@ it.effect("is not stopped by a handler that throws", () =>
     yield* harness.waitUntil("both updates arrived", () => harness.updates.length === 2);
 
     expect(seen).toEqual(["agent_message_chunk", "current_mode_update"]);
-    expect(yield* connection.prompt(SESSION, TEXT)).toEqual(PROMPT_RESULT);
+    expect(yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT))).toEqual(PROMPT_RESULT);
     expect(logged.some((line) => line.includes("onUnhandledMessage threw"))).toBe(true);
   }),
 );
@@ -660,7 +842,7 @@ it.effect(
       yield* harness.waitUntil("the next update arrived", () => harness.updates.length === 1);
 
       expect(harness.unhandled).toHaveLength(2);
-      expect(yield* connection.prompt(SESSION, TEXT)).toEqual(PROMPT_RESULT);
+      expect(yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT))).toEqual(PROMPT_RESULT);
     }),
 );
 
@@ -702,6 +884,21 @@ it.effect("hands on an approval request and an elicitation, and writes each kind
     );
     expect(written("e-decline")).toEqual(buildResult("e-decline", { action: "decline" }));
     expect(written("e-cancel")).toEqual(buildResult("e-cancel", { action: "cancel" }));
+  }),
+);
+
+it.effect("reports that the reply to an approval request and to an elicitation was written", () =>
+  Effect.gen(function* () {
+    const harness = createTestHarness();
+    yield* harness.open;
+
+    harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
+    harness.say(buildRequest("e1", "elicitation/create", ELICITATION_PARAMS));
+    yield* harness.whenWritten("both answers", isReplyTo("e1"));
+    yield* harness.whenWritten("the approval answer", isReplyTo("p1"));
+
+    yield* harness.approvalRequests[0]!.replyWritten;
+    yield* harness.elicitationRequests[0]!.replyWritten;
   }),
 );
 
@@ -833,7 +1030,7 @@ it.effect("gives each request its own raw when the harness sends several in one 
 );
 
 it.effect(
-  "reports a request whose id is still open, and the vendored client answers it with an error",
+  "ends the connection when the harness reuses the id of an open request, and reports no reply as written",
   () =>
     Effect.gen(function* () {
       const hold = yield* Deferred.make<ApprovalOutcome>();
@@ -845,27 +1042,44 @@ it.effect(
         "the first request arrived",
         () => harness.approvalRequests.length === 1,
       );
-      const second = { ...APPROVAL_PARAMS, zzSecond: 1 };
-      harness.say(buildRequest("p1", "session/request_permission", second));
-      yield* harness.waitUntil("the report", () => harness.unhandled.length === 1);
-      yield* harness.whenWritten("the answer to p1", isReplyTo("p1"));
+      const replyWritten = yield* Effect.forkChild(
+        Effect.exit(harness.approvalRequests[0]!.replyWritten),
+      );
+      harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
 
-      expect(harness.unhandled).toHaveLength(1);
-      expect(harness.unhandled[0]).toMatchObject({
-        method: "session/request_permission",
-        raw: second,
-      });
-      expect(harness.unhandled[0]?.reason).toContain("id of a request that was still open");
-      // The second request never reached the handler. The harness got one answer
-      // for the id: an error, because the vendored client interrupted the request.
+      const closed = yield* connection.awaitClosed;
+      expect(closed.message).toContain("the harness reused the id");
+      const written = yield* Fiber.join(replyWritten);
+      expect(Exit.isFailure(written)).toBe(true);
+      expect(Exit.isFailure(written) && String(written.cause)).toContain("ended before the reply");
+      // The second request never reached the handler.
       expect(harness.approvalRequests).toHaveLength(1);
-      expect(harness.fake.received.filter(isReplyTo("p1"))).toEqual([
-        buildFailure("p1", -32603, "Internal error"),
-      ]);
-      // The connection stays open.
-      const closed = yield* Effect.forkChild(connection.awaitClosed);
-      yield* Effect.yieldNow;
-      expect(closed.pollUnsafe()).toBeUndefined();
+    }),
+);
+
+it.effect(
+  "ends the connection when the harness reuses an id whose reply is queued but not written yet",
+  () =>
+    Effect.gen(function* () {
+      const written = yield* Deferred.make<void>();
+      let replyWrites = 0;
+      const harness = createTestHarness({
+        writeWith: (write) => async (text) => {
+          await write(text);
+          if (text.includes('"id":"p"') && replyWrites++ === 0)
+            await Effect.runPromise(Deferred.await(written));
+        },
+      });
+      const connection = yield* harness.open;
+      const request = buildRequest("p", "session/request_permission", APPROVAL_PARAMS);
+
+      harness.say(request);
+      yield* harness.whenWritten("the first reply", isReplyTo("p"));
+      harness.say(request);
+
+      const closed = yield* connection.awaitClosed.pipe(Effect.timeout("1 second"));
+      expect(closed.message).toContain("the harness reused the id");
+      yield* Deferred.succeed(written, undefined);
     }),
 );
 
@@ -1144,7 +1358,9 @@ it.effect(
     Effect.gen(function* () {
       const harness = createTestHarness({ scripts: { "session/prompt": () => [] } });
       const connection = yield* harness.open;
-      const prompting = yield* Effect.forkChild(Effect.flip(connection.prompt(SESSION, TEXT)));
+      const prompting = yield* Effect.forkChild(
+        Effect.flip(Effect.flatten(connection.sendPrompt(SESSION, TEXT))),
+      );
       yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
 
       harness.say("this is a log line, not JSON");
@@ -1201,7 +1417,7 @@ it.effect.each(ENDS_RIGHT_AFTER_A_REPLY)(
       });
       const connection = yield* harness.open;
 
-      expect(yield* connection.prompt(SESSION, TEXT)).toEqual(PROMPT_RESULT);
+      expect(yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT))).toEqual(PROMPT_RESULT);
       expect(yield* connection.awaitClosed).toMatchObject({ reason: "closed" });
     }),
 );
@@ -1227,10 +1443,38 @@ it.effect(
       });
       const connection = yield* harness.open;
 
-      expect(yield* connection.prompt(SESSION, TEXT)).toEqual(PROMPT_RESULT);
+      expect(yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT))).toEqual(PROMPT_RESULT);
       expect(yield* connection.awaitClosed).toMatchObject({
         message: "Could not write to the harness: Error: EPIPE",
       });
+      // The failed write is the reply to the approval request.
+      expect(yield* Effect.flip(harness.approvalRequests[0]!.replyWritten)).toMatchObject({
+        reason: "closed",
+      });
+    }),
+);
+
+it.effect(
+  "reports a reply as not written when the write of the reply rejects, while the output is open",
+  () =>
+    Effect.gen(function* () {
+      const harness = createTestHarness({
+        writeWith: (realWrite) => (text) =>
+          text.includes('"result"') ? Promise.reject(new Error("EPIPE")) : realWrite(text),
+      });
+      yield* harness.open;
+
+      harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
+      yield* harness.waitUntil(
+        "the approval request arrived",
+        () => harness.approvalRequests.length === 1,
+      );
+
+      expect(yield* Effect.flip(harness.approvalRequests[0]!.replyWritten)).toMatchObject({
+        reason: "closed",
+        message: expect.stringContaining("Could not write to the harness") as unknown,
+      });
+      expect(harness.fake.received.some(isReplyTo("p1"))).toBe(false);
     }),
 );
 
@@ -1244,7 +1488,9 @@ it.effect(
       });
       const harness = createTestHarness({ scripts: { "session/prompt": () => [] }, exited });
       const connection = yield* harness.open;
-      const prompting = yield* Effect.forkChild(Effect.flip(connection.prompt(SESSION, TEXT)));
+      const prompting = yield* Effect.forkChild(
+        Effect.flip(Effect.flatten(connection.sendPrompt(SESSION, TEXT))),
+      );
       const closed = yield* Effect.forkChild(connection.awaitClosed);
       yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
 
@@ -1306,16 +1552,23 @@ it.effect.each(ENDINGS)(
         },
       });
       const connection = yield* harness.open.pipe(Scope.provide(scope));
-      const prompting = yield* Effect.forkChild(Effect.flip(connection.prompt(SESSION, TEXT)));
+      const prompting = yield* Effect.forkChild(
+        Effect.flip(Effect.flatten(connection.sendPrompt(SESSION, TEXT))),
+      );
       yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
       harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
       yield* harness.waitUntil(
         "the handler is parked",
         () => harness.approvalRequests.length === 1,
       );
+      const replyWritten = yield* Effect.forkChild(
+        Effect.flip(harness.approvalRequests[0]!.replyWritten),
+      );
 
       yield* ending.end(harness, connection, scope);
 
+      // The reply was never written, and `replyWritten` says so.
+      expect(yield* Fiber.join(replyWritten)).toMatchObject({ reason: "closed" });
       const error = yield* Fiber.join(prompting);
       yield* Deferred.await(interrupted);
       const closed = yield* connection.awaitClosed;
@@ -1340,7 +1593,9 @@ it.effect("does not wait for a handler that will not stop when the scope closes"
       },
     });
     const connection = yield* harness.open.pipe(Scope.provide(scope));
-    const prompting = yield* Effect.forkChild(Effect.flip(connection.prompt(SESSION, TEXT)));
+    const prompting = yield* Effect.forkChild(
+      Effect.flip(Effect.flatten(connection.sendPrompt(SESSION, TEXT))),
+    );
     yield* harness.whenWritten("the prompt", isMethod("session/prompt"));
     harness.say(buildRequest("p1", "session/request_permission", APPROVAL_PARAMS));
     yield* harness.waitUntil("the handler is parked", () => harness.approvalRequests.length === 1);

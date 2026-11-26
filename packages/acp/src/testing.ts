@@ -12,20 +12,87 @@ import { readFileSync } from "node:fs";
 
 /** The names of the recordings in `./recordings`, one file per recorded run. */
 export const RECORDING_NAMES = [
+  "ask-settings",
+  "ask-shared",
+  "background-command",
   "bad-model",
+  "basic-allow",
   "cancel",
+  "cancel-during-permission",
   "cancel-permission",
   "compact",
   "deny",
+  "deny-cancelled-followup",
+  "deny-followup",
   "deny2",
   "edit-shell",
+  "failed-turn-network",
+  "hk-disable-try",
+  "hk-fakehome",
+  "hk-gitroot",
+  "hk-homecfg",
+  "hk-parent",
+  "hk-strict",
+  "hk-subfolder",
+  "hook-default-vartmp",
+  "image-prompt",
+  "interrupt-running",
+  "mode-accept-edits",
+  "mode-accept-edits-vartmp-ws",
+  "mode-default",
+  "mode-default-outside-parentdir",
+  "mode-default-outside-tmp",
+  "mode-default-outside-vartmp",
+  "mode-default-url",
+  "mode-default-vartmp-ws",
+  "model-switch",
+  "modes",
+  "nonzero-exit",
   "plan-mode",
   "question",
   "question-elicit",
+  "question-variants",
+  "read-outside",
+  "resume",
+  "sandbox-accept-edits",
+  "sandbox-default",
+  "sandbox-full",
+  "search-list-fetch-delete",
   "steer",
   "steer2",
+  "stop-bg",
+  "stop-cancel",
+  "stop-fg",
+  "strict-default",
+  "strict-fakehome",
+  "strict-wsfiles",
   "subagent",
+  "subagent-approval2",
+  "symlink-into-tmp",
+  "t1-hooks",
+  "t2-config-allow",
+  "t2-config-allowall",
+  "t2-config-deny",
+  "t2-settings-allow",
+  "t2-settings-allowall",
+  "t2-settings-deny",
+  "t2b-always",
+  "t3-resume",
+  "t4-plan",
+  "t5-stopped",
+  "t6-search-accept-edits-plain",
+  "t6-search-accept-edits-strict",
+  "t6-search-default-plain",
+  "t6-search-default-strict",
+  "t7-always-proceed",
+  "t7-proceed-in-sandbox",
+  "tmpdir-a-work-in-tmp",
+  "tmpdir-b-work-in-tmpdir",
+  "tmpdir-resume",
+  "tmpdir2-link-into-tmpdir",
+  "tmpdir2-other-vs-tmpdir",
   "todo",
+  "two-requests",
   "websearch",
 ] as const;
 
@@ -75,8 +142,11 @@ export const answerWith =
 
 /** A harness process the way the runner talks to it: lines in both directions, ended or killed. */
 export interface FakeHarness {
-  /** Takes what the client writes. A message is handled once its line is complete. */
-  readonly write: (text: string) => void;
+  /**
+   * Takes what the client writes. A message is handled once its line is
+   * complete. The promise rejects after `failWrites`.
+   */
+  readonly write: (text: string) => Promise<void>;
   /** The harness's output, one whole line per item, without the newline. */
   readonly stdout: AsyncIterable<string>;
   /** Always empty. It ends when the harness does. */
@@ -92,7 +162,7 @@ export interface FakeHarness {
   readonly sendLine: (text: string) => void;
   /** Makes `stdout` fail with `error` after the lines already sent, the way a broken pipe does. */
   readonly failOutput: (error: unknown) => void;
-  /** Makes every later `write` throw `error`. */
+  /** Makes every later `write` reject with `error`. */
   readonly failWrites: (error?: unknown) => void;
   /** Whether the client stopped reading `stdout` before its end. */
   readonly isReadingStopped: () => boolean;
@@ -365,15 +435,22 @@ export const startFakeHarness = (
   };
 
   const harness: FakeHarness = {
-    write: (text) => {
-      if (writeFailure !== undefined) throw writeFailure.error;
-      if (closed) return;
-      pendingText += text;
-      const lines = pendingText.split("\n");
-      pendingText = lines.pop() ?? "";
-      for (const line of lines) handleLine(line);
-      onChange();
-    },
+    write: (text) =>
+      new Promise<void>((resolve, reject) => {
+        if (writeFailure !== undefined) {
+          // oxlint-disable-next-line typescript/prefer-promise-reject-errors
+          reject(writeFailure.error);
+          return;
+        }
+        if (!closed) {
+          pendingText += text;
+          const lines = pendingText.split("\n");
+          pendingText = lines.pop() ?? "";
+          for (const line of lines) handleLine(line);
+          onChange();
+        }
+        resolve();
+      }),
     stdout: stdout.lines,
     stderr: stderr.lines,
     end: () => {

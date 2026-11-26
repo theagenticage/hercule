@@ -5,7 +5,8 @@
  * them can run as another account.
  */
 import { mkdtempSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -23,7 +24,8 @@ import type {
   SessionSettings,
 } from "@hercule/acp";
 import { ANTIGRAVITY_VERSION, VERSION } from "@hercule/home/version";
-import type { AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
+import { ResumeTranscriptMissing } from "@hercule/protocol";
+import type { AccessMode, AdapterError, AdapterFailed, ModelDescriptor } from "@hercule/protocol";
 import { describeError } from "../../report";
 import {
   buildAdapterFailed,
@@ -34,20 +36,99 @@ import {
 import type { HarnessRunnerContext } from "../index";
 import type { LoginCommand } from "../login";
 import { isExecutableNotFound, stopChild } from "../process";
-import type { FramedChild, Run } from "../process";
-import { describeFileFailure } from "../session-files";
+import type { CheckedFramedChild, FramedChild, Run } from "../process";
+import { describeFileFailure, isMissingPath } from "../session-files";
 import { truncateFact } from "../text";
 import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
 
 /** The name the user knows the harness by. */
 export const ANTIGRAVITY_NAME = "Antigravity";
 
+/** What a caller opens `agy` for. A session also says how much the agent may do without asking. */
+export type AgyPurpose =
+  | { readonly kind: "probe" }
+  | { readonly kind: "session"; readonly accessMode: AccessMode };
+
+/**
+ * Removes `<home>/config/hooks.json`, the hooks file of the Harness Home, and
+ * logs that it did. Does nothing when there is none. A link is removed, never
+ * what it points to. Fails with `AdapterFailed` when the file exists and cannot
+ * be removed, because then Hercule cannot tell what `agy` would load.
+ *
+ * `agy` reads this file at every tool call, and every session of an account
+ * shares the Harness Home. A hook left there (for example one that approves
+ * every command) would silently loosen every later session, in any workspace,
+ * so a session start removes it before `agy` runs. What stays possible: a
+ * session that writes the file while another session of the same account runs.
+ * That needs code execution as the runner's user, which already reaches
+ * everything this user can.
+ */
+const removeHooksFile = (home: string): Effect.Effect<void, AdapterFailed> =>
+  removeOwnedFile(
+    join(home, "config", "hooks.json"),
+    "hooks file",
+    `Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
+  );
+
+/**
+ * Removes `<home>/antigravity-acp/settings.json`, the settings file of the
+ * Harness Home, and logs that it did. `toolPermission` in it works under
+ * `agy acp`, so a value an earlier session wrote would change every later
+ * session. `agy` does not create the file. Same rules as `removeHooksFile`.
+ */
+const removeSettingsFile = (home: string): Effect.Effect<void, AdapterFailed> =>
+  removeOwnedFile(
+    join(home, APP_DATA_DIR, "settings.json"),
+    "settings file",
+    `Hercule owns the settings of the Harness Home, because a tool permission in them would change every session of the account.`,
+  );
+
+const removeOwnedFile = (
+  path: string,
+  label: string,
+  reason: string,
+): Effect.Effect<void, AdapterFailed> => {
+  return Effect.tryPromise({
+    try: () => unlink(path).then(() => true),
+    catch: (error) =>
+      isMissingPath(error)
+        ? "missing"
+        : buildAdapterFailed(
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not remove the ${label} ${path}: ${describeFileFailure(error)}`,
+          ),
+  }).pipe(
+    Effect.catch((failure) =>
+      failure === "missing" ? Effect.succeed(false) : Effect.fail(failure),
+    ),
+    Effect.flatMap((wasRemoved) =>
+      wasRemoved ? Effect.logWarning(`Removed the ${label} ${path}: ${reason}`) : Effect.void,
+    ),
+  );
+};
+
+/**
+ * Returns the id of the `agy` mode that matches a Hercule Access Mode, or
+ * undefined for `full-access`, which `agy` has no mode for: a session in it
+ * starts `agy` with `--dangerously-skip-permissions` instead (see
+ * `openSignedInAgy`) and keeps the default mode.
+ */
+export const chooseAgyMode = (accessMode: Exclude<AccessMode, "auto">): string | undefined => {
+  switch (accessMode) {
+    case "approval-required":
+      return "default";
+    case "auto-accept-edits":
+      return "accept-edits";
+    case "full-access":
+      return undefined;
+  }
+};
+
 /** Spawns an `agy` process in the folder `cwd`. */
 export type AgySpawn = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
-) => FramedChild;
+) => CheckedFramedChild;
 
 /** What the adapter needs from the machine: how to start `agy`, and how to run a command to its end. */
 export interface AgySeam {
@@ -80,19 +161,27 @@ export interface SignedInAgy {
    * does not fail for an account that cannot be used (see
    * `OpenedConversation.isHeldByGoogle` and `checkAccountUsable`).
    *
-   * `keepId`, when given, is called with the id of the new conversation as
+   * `onReply`, when given, is called with the id of the new conversation as
    * soon as `agy` replies, in the same step that cannot be interrupted, and
    * before the check of the worker's login. A caller that keeps the id there
-   * never loses a conversation to a failed check. When `keepId` fails, so does
-   * the call.
+   * never loses a conversation to a failed check. When `onReply` fails, so
+   * does the call.
    */
   readonly newConversation: (
     request: NewSessionRequest,
-    keepId?: (id: string) => Effect.Effect<void, AdapterError>,
+    onReply?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
-  /** Resumes the conversation `request.nativeSessionId`. Fails like `newConversation`. */
+  /**
+   * Resumes the conversation `request.nativeSessionId`. Fails like
+   * `newConversation`, and with `ResumeTranscriptMissing` when `agy` has no
+   * such conversation (`isConversationMissing`). `onReply` works as for
+   * `newConversation`, with the id of the resumed conversation. A caller that
+   * starts reading the conversation's updates there knows that every update
+   * before the reply was the resume's replay, and every one after it is not.
+   */
   readonly resumeConversation: (
     request: ResumeSessionRequest,
+    onReply?: (id: string) => Effect.Effect<void, AdapterError>,
   ) => Effect.Effect<OpenedConversation, AcpError | AdapterError>;
 }
 
@@ -172,16 +261,27 @@ const STDERR_LINES = 5;
  * - `AGY_CLI_DISABLE_AUTO_UPDATE` must be exactly `true`. The value `1` has no
  *   effect, and `agy` then replaces its own binary in the background.
  *
+ * - `TMPDIR` is `tempFolder` when one is given. In its `default` mode `agy`
+ *   lets the agent write under the system's temporary folder without asking,
+ *   and `agy` finds that folder through `$TMPDIR`. Pointing it at a private
+ *   folder (`makeAgyTempFolder`) makes that folder the only place the agent
+ *   writes to unasked. The sign-in and `agy --version` run no tools, so they
+ *   pass no folder and keep the runner's own `TMPDIR`.
+ *
  * `HOME` stays: `agy` writes nothing below it when it is given `--gemini-dir`
  * and `--log-file`.
  */
-const buildAgyEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> => {
+const buildAgyEnv = (
+  ctx: HarnessRunnerContext,
+  tempFolder?: string,
+): Record<string, string | undefined> => {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(ctx.env)) {
     if (!/^(GEMINI_|GOOGLE_|AGY_)/.test(name)) env[name] = value;
   }
   env["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 0";
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
+  if (tempFolder !== undefined) env["TMPDIR"] = tempFolder;
   return env;
 };
 
@@ -212,31 +312,55 @@ const buildAccountFlags = (home: string, logFolder: string): ReadonlyArray<strin
 const createLoginLogFolder = (home: string): string => mkdtempSync(join(home, LOG_FOLDER_PREFIX));
 
 /**
- * Makes an empty folder for the log of a session or probe process, like
- * `createLoginLogFolder`, and removes it with everything in it when the scope
+ * Makes an empty folder with `mkdtemp` at `prefix`, readable by the runner's
+ * user only (mode 0700), and removes it with everything in it when the scope
  * closes. A failed removal is logged as a warning with the reason the
  * operating system gave and nothing of the folder's contents. Fails with an
- * `AdapterFailed` when the folder cannot be made. A runner that crashes
- * leaves the folder behind, and nothing removes it later.
+ * `AdapterFailed` that names `what` when the folder cannot be made. A runner
+ * that crashes leaves the folder behind, and nothing removes it later.
  */
-const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+const makeScopedFolder = (
+  prefix: string,
+  what: string,
+): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.try({
-      try: () => mkdtempSync(join(home, LOG_FOLDER_PREFIX)),
+      try: () => mkdtempSync(prefix),
       catch: (error) =>
         buildAdapterFailed(
-          `Could not make a log folder for ${ANTIGRAVITY_NAME} on this runner: ${describeFileFailure(error)}`,
+          `Could not make ${what} for ${ANTIGRAVITY_NAME} on this runner: ${describeFileFailure(error)}`,
         ),
     }),
     (folder) =>
       Effect.tryPromise(() => rm(folder, { recursive: true, force: true })).pipe(
         Effect.catch((error) =>
           Effect.logWarning(
-            `Could not remove a log folder of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}`,
+            `Could not remove ${what} of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}`,
           ),
         ),
       ),
   );
+
+/**
+ * Makes an empty folder for the log of a session or probe process, like
+ * `createLoginLogFolder`, and removes it when the scope closes (see
+ * `makeScopedFolder`).
+ */
+const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+  makeScopedFolder(join(home, LOG_FOLDER_PREFIX), "a log folder");
+
+/**
+ * Makes the temporary folder of one `agy` process and removes it with
+ * everything in it when the scope closes, so the agent's temporary files end
+ * with the process. `buildAgyEnv` hands it to `agy` as `TMPDIR`, which is
+ * what makes it the only folder the agent may write to without asking.
+ *
+ * The path is short on purpose: programs the agent runs create Unix sockets
+ * below `TMPDIR`, and a socket path of more than about 104 bytes fails on
+ * macOS, where the system's temporary folder is already long.
+ */
+const makeAgyTempFolder = (): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+  makeScopedFolder(join(tmpdir(), "hercule-agy-"), "a temporary folder");
 
 /**
  * Builds the command that signs the account in. `agy` prints a link, reads one
@@ -281,6 +405,17 @@ const isSignInRequired = (error: AcpError): boolean =>
   error.reason === "refused" &&
   error.code === -32000 &&
   (error.harnessMessage ?? "").includes("Authentication required");
+
+/**
+ * Checks whether `session/resume` was refused because `agy` has no such
+ * conversation, for example because its files are gone: the error -32603 with
+ * text that starts "Failed to read session" (measured on a real `agy`). This
+ * is a dependency on the wording of `agy`.
+ */
+const isConversationMissing = (error: AcpError): boolean =>
+  error.reason === "refused" &&
+  error.code === -32603 &&
+  (error.harnessMessage ?? "").includes("Failed to read session");
 
 /**
  * Messages for an account that lists models but has no plan. Google holds an
@@ -345,6 +480,20 @@ const readPlanLabel = (meta: unknown): string | undefined => {
   return label === "" ? undefined : label;
 };
 
+const decodeSystemPromptCapability = Schema.decodeUnknownOption(
+  Schema.Struct({
+    antigravity: Schema.Struct({ systemPrompt: Schema.Struct({ append: Schema.Literal(true) }) }),
+  }),
+);
+
+/**
+ * Checks that the `_meta` of the reply to `initialize` says `agy` takes a
+ * system prompt that is added to its own (`antigravity.systemPrompt.append` is
+ * true). Anything else, including no `_meta`, is no.
+ */
+const acceptsAddedSystemPrompt = (meta: unknown): boolean =>
+  Option.isSome(decodeSystemPromptCapability(meta));
+
 /** What the worker logs of one `agy` process show. See `readWorkerLogSignals`. */
 interface WorkerLogSignals {
   /** The file names of the worker logs, such as `agy.log.4000`. A worker is new when its name is not in an earlier read. */
@@ -403,14 +552,14 @@ const readWorkerLogSignals = (folder: string): Effect.Effect<WorkerLogSignals, A
  * process ends.
  */
 const drainStderr = (
-  child: FramedChild,
+  child: Pick<FramedChild, "stderr">,
 ): { readonly lastLines: () => string; readonly ended: Promise<void> } => {
   const lines: Array<string> = [];
   const ended = (async () => {
     try {
       for await (const line of child.stderr) {
         if (line.trim() === "") continue;
-        lines.push(line.trim());
+        lines.push(truncateFact(line.trim()));
         if (lines.length > STDERR_LINES) lines.shift();
       }
     } catch {
@@ -468,7 +617,18 @@ const authenticateAccount = (
 /**
  * Starts the `agy` process of an account and signs it in over ACP. Returns the
  * open connection, the account's plan name and the two ways to open a
- * conversation (`SignedInAgy`). Fails with:
+ * conversation (`SignedInAgy`). `options.purpose` says what the process is for,
+ * so that the caller never passes a flag of `agy` itself:
+ *
+ * - A session in `full-access` starts `agy` with `--dangerously-skip-permissions`.
+ *   No other Access Mode does.
+ * - A session needs `agy` to take the system prompt as an addition to its own
+ *   (`antigravity.systemPrompt.append` in the reply to `initialize`). That is
+ *   checked before `authenticate`, so a build of `agy` without it fails with
+ *   the same message whether or not the account is signed in. A probe sends
+ *   no system prompt and does not check it.
+ *
+ * Fails with:
  *
  * - `HarnessLoginMissing` when the Harness Home has no login file (nothing is
  *   spawned), or when `agy` says there is no usable login, or Google refused
@@ -478,11 +638,15 @@ const authenticateAccount = (
  *   cannot be run, cannot be reached over ACP, or cannot reach Google to check
  *   the login, when the reason for a refused sign-in cannot be told, when its
  *   answer is not one of these, and when the process does not use this
- *   account's own login.
+ *   account's own login, or (for a session) when `agy` does not report that
+ *   it takes an added system prompt.
  *
  * The process runs in `options.cwd`, with its own log in a private folder of
  * the Harness Home. When the scope closes, the connection is closed first, then
- * the process is stopped and awaited, and then the log folder is removed. A
+ * the process is stopped and awaited, and then its temporary folder and its
+ * log folder are removed. The temporary folder is the process's `TMPDIR`: it
+ * is the only folder the agent may write to without asking, and the agent's
+ * temporary files end with the process (`makeAgyTempFolder`). A
  * failure leaves what was started in place until the scope closes, so the
  * caller runs this in a scope that closes on failure.
  *
@@ -501,20 +665,33 @@ export const openSignedInAgy = (
   spawn: AgySpawn,
   ctx: HarnessRunnerContext,
   binary: string,
-  options: { readonly cwd: string; readonly handlers: AcpHandlers },
+  options: {
+    readonly cwd: string;
+    readonly handlers: AcpHandlers;
+    readonly purpose: AgyPurpose;
+  },
 ): Effect.Effect<SignedInAgy, AdapterError, Scope.Scope> =>
   Effect.gen(function* () {
     if ((yield* readLoginFile(ctx.home)) === undefined)
       return yield* Effect.fail(buildHarnessLoginMissing(ANTIGRAVITY_NAME));
+
+    if (options.purpose.kind === "session") {
+      yield* removeHooksFile(ctx.home);
+      yield* removeSettingsFile(ctx.home);
+    }
 
     const folder = yield* makeSessionLogFolder(ctx.home);
     const command = [
       binary,
       "acp",
       "--process-per-session",
+      ...(options.purpose.kind === "session" && options.purpose.accessMode === "full-access"
+        ? ["--dangerously-skip-permissions"]
+        : []),
       ...buildAccountFlags(ctx.home, folder),
     ];
-    const env = buildAgyEnv(ctx);
+    const tempFolder = yield* makeAgyTempFolder();
+    const env = buildAgyEnv(ctx, tempFolder);
     const child = yield* Effect.acquireRelease(
       Effect.try({
         try: () => spawn(command, env, options.cwd),
@@ -555,6 +732,14 @@ export const openSignedInAgy = (
       clientVersion: VERSION,
       handlers: options.handlers,
     }).pipe(Effect.catch(failOpening));
+
+    if (options.purpose.kind === "session" && !acceptsAddedSystemPrompt(connection.harness.meta)) {
+      return yield* Effect.fail(
+        buildAdapterFailed(
+          `${ANTIGRAVITY_NAME} did not confirm that it takes the instructions of a Hercule session, so Hercule does not start a session with it. This build was tested with agy ${ANTIGRAVITY_VERSION}: if another version is installed, install the tested one on this runner.`,
+        ),
+      );
+    }
 
     const reply = yield* authenticateAccount(connection, folder, failOpening);
 
@@ -612,10 +797,10 @@ export const openSignedInAgy = (
     return {
       connection,
       planLabel: readPlanLabel(reply.meta),
-      newConversation: (request, keepId) =>
+      newConversation: (request, onReply) =>
         Effect.map(
           openConversation(connection.newSession(request), (opened) =>
-            keepId === undefined ? Effect.void : keepId(opened.nativeSessionId),
+            onReply === undefined ? Effect.void : onReply(opened.nativeSessionId),
           ),
           ([opened, isHeldByGoogle]) => ({
             id: opened.nativeSessionId,
@@ -623,9 +808,21 @@ export const openSignedInAgy = (
             isHeldByGoogle,
           }),
         ),
-      resumeConversation: (request) =>
+      resumeConversation: (request, onReply) =>
         Effect.map(
-          openConversation(connection.resumeSession(request), () => Effect.void),
+          openConversation(connection.resumeSession(request), () =>
+            onReply === undefined ? Effect.void : onReply(request.nativeSessionId),
+          ).pipe(
+            Effect.catch((error) =>
+              error._tag === "AcpError" && isConversationMissing(error)
+                ? Effect.fail(
+                    new ResumeTranscriptMissing({
+                      message: `The conversation of this session is gone from this runner, so ${ANTIGRAVITY_NAME} cannot resume it. Start a new thread to continue the work.`,
+                    }),
+                  )
+                : Effect.fail(error),
+            ),
+          ),
           ([settings, isHeldByGoogle]) => ({
             id: request.nativeSessionId,
             settings,

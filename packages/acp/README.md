@@ -24,7 +24,7 @@ The generated schemas in `src/_generated/` come from the ACP schemas `schema-v1.
 `src/connection.ts` imports these files of the copy:
 
 - `client.ts`: the client (`make`, `agent.*`, the handlers, `raw`).
-- `protocol.ts`: `acpRequestIdentity`, which names a request id the way the client's handlers do, and the log events that `connection.ts` reads (below).
+- `protocol.ts`: `acpRequestIdentity`, which names a request id the way the client's handlers do, the hooks `onOutgoingResponse` and `onOutgoingResponseFailure`, and the log events that `connection.ts` reads (below).
 - `errors.ts` and `compat.ts`: the errors and the compatibility types.
 
 Through `client.ts` the rest of the copy is linked: `rpc.ts`, `_internal/`, `schema.ts` and the generated files.
@@ -46,6 +46,10 @@ A value T3 leaves out of a reply without failing the call, such as malformed `us
 
 First remedy: sync with T3 Code (below). T3 usually has the new value by then.
 
+## `sendPrompt` is two-stage
+
+`sendPrompt` succeeds once the transport's awaited write of the `session/prompt` line succeeded (the client has no hook for a request's write, so the sink reads the request `id` from the line it just wrote, only while a call waits for it), and returns the effect that waits for the reply. A reply that arrives before the write is acknowledged also counts as written. When the write fails, or the connection had ended before the line was written, it fails with `not-sent` (the harness certainly did not get the prompt). When the connection ends while the write is in flight, it fails with `closed`, and it is not known whether the harness got the prompt. No reply is expected after either.
+
 ## If syncing is not enough
 
 Rogier decided on 2026-11-25 to start with T3's typed client: less to maintain is worth more than tolerance for unknown values. What this gains: a new tolerance in T3's schemas reaches us with a sync and no work of ours.
@@ -58,6 +62,14 @@ Move away from it when the loud failures keep coming: a harness release that we 
 - `initialize` must then send `protocolVersion: 1` itself.
 
 The interface in `index.ts` stays the same, so nothing outside `connection.ts` changes.
+
+## Recordings of `agy`
+
+`src/recordings/` holds recordings of real harness runs. On 2026-11-26, the recorder of #1282 added 50 recordings of `agy` 1.5.15, made on Linux with a paid Google account: modes, sandbox and strict runs, hook files, temporary directories, questions, subagents, cancel, resume and more.
+
+- The recorder is not in `main`. It lives on the branch `research/antigravity-sessions-1282`, under `docs/research/antigravity/sessions-recorder/`.
+- The first line of each of these recordings is a `{"note": ...}` line that says which scenario made it, with which flags, in which mode, with which `TMPDIR`, in which work folder and with which files in place. The replay skips every `note` line.
+- Personal values were replaced: the Linux user name with `user`, the machine's host name with `runner-host`, and the controller's address with `controller.example`. No email address or token appears in them.
 
 ## Lint, formatting and tests
 
@@ -88,11 +100,12 @@ Then:
    - `protocol.ts`, the hooks and events `connection.ts` leans on:
      - `acpRequestIdentity`, which names a request id the way the handlers' `context.requestId` does.
      - `onIncomingRequest(requestId, method, params)`, which gives the untouched `params` of a request of the harness before it is queued.
+     - `onOutgoingResponse(requestId)` and `onOutgoingResponseFailure(requestId, error)`, which tell when the reply to a request of the harness was handed to the output (or why it could not be). The `requestId` is named like `acpRequestIdentity` and the handlers' `context.requestId`. `connection.ts` turns them into `replyWritten` of an approval request and an elicitation. `onOutgoingResponse` must fire for the reply of a handler (an `Exit` message), after the write was acknowledged; `onOutgoingResponseFailure` must fire when that write fails. The success hook must wait for the transport's write effect (the `stdout` sink's `Sink.forEach`), because `connection.ts` makes that effect wait for a promise from `AcpPipes.write`: a write that rejects must reach `onOutgoingResponseFailure` and never `onOutgoingResponse` (test: "reports a reply as not written when the write of the reply ..."). A sync that moves or drops either makes `replyWritten` wait until the connection ends (tests in `connection.test.ts`).
      - `onTermination`, which gives the error that ended the client (output ended, line that is not JSON, transport error). `connection.ts` words it as the reason of `awaitClosed`.
      - The log events. Their payload is untyped (`unknown`). `connection.ts` reads only this shape (`LoggedMessage`): `_tag`, `id`, `requestId`, `payload`, and `exit` with `_tag`, `value` and `cause` (each with `_tag`, `error.code`, `error.message` or `defect`). For `decode_failed` it reads `operation`, `method` and `issueSummary`. A renamed field makes the reading fail silently, and only the tests notice.
      - T3 logs an outgoing request (`decoded`, `_tag: "Request"`) in the fiber of the caller. `connection.ts` relies on it: `CurrentCall`, provided in `callHarness`, is how a request finds its call, so each call is told its own reply. If a sync logs it in another fiber, replies are named wrongly or not at all (the test of many overlapping calls fails).
      - A reply that T3 cannot decode fails the call with a `Schema.SchemaError` defect, not with a typed error, and the issue paths start with `value`. `callHarness` turns it into `unreadable`.
-     - A request of the harness whose id is still open is answered by T3's RPC server as interrupted (`-32603`, "Internal error") and is never handed to a handler. `connection.ts` reports it when it arrives.
+     - A request of the harness whose id is still open is never handed to a handler, but T3 answers it with an error under the same id, which a reply hook cannot tell from the original's reply. `connection.ts` therefore ends the connection when it arrives, which fails every waiting `replyWritten`.
    - `errors.ts`, `compat.ts` and `_generated/`: the shapes `src/types.ts` must still satisfy. `pnpm typecheck` shows a required field that went away or changed type in `connection.ts`. An optional field is not checked that way: `src/connection.integration.test.ts` plays the recordings of a real harness through the connection and compares each update, tool call, form and answer with the recorded one, so a rename or a dropped field fails there.
    - The Effect version T3 uses (the `effect` entry of `catalog` in T3 Code's `pnpm-workspace.yaml`) against ours (`effect` in `package.json`). At the pinned commit T3 is on Effect 4.1.5 and we are on 4.0.7. When they differ, the copy may call an API our Effect version does not have.
    - Any new import in the copy other than `effect`: `pnpm dep-lint` fails on it.

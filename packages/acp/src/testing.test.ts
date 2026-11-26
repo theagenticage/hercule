@@ -26,7 +26,7 @@ const connect = (options: Parameters<typeof startFakeHarness>[0]) => {
     harness,
     sent,
     write: (message: Record<string, unknown>) => {
-      harness.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+      void harness.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
     },
     /** Waits until the fake has put everything it is going to send on stdout. */
     settle: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
@@ -244,7 +244,7 @@ describe("a script", () => {
         },
       },
     });
-    ending.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "a" })}\n`);
+    void ending.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "a" })}\n`);
     expect(await lines(ending)).toEqual(['{"jsonrpc":"2.0","id":1,"result":1}', "raw text"]);
 
     const failing = startFakeHarness({
@@ -255,14 +255,14 @@ describe("a script", () => {
         },
       },
     });
-    failing.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "a" })}\n`);
+    void failing.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "a" })}\n`);
     expect(await lines(failing)).toEqual([
       '{"jsonrpc":"2.0","id":1,"result":1}',
       "failed: Error: the pipe broke",
     ]);
 
     failing.failWrites(new Error("EPIPE"));
-    expect(() => failing.write("x\n")).toThrow("EPIPE");
+    await expect(failing.write("x\n")).rejects.toThrow("EPIPE");
   });
 });
 

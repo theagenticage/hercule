@@ -11,7 +11,7 @@
  */
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { AdapterFailed } from "@hercule/protocol";
@@ -182,3 +182,35 @@ export const deleteSessionFiles = (
     if (await isRealFolder(brain)) paths.push(join(brain, nativeSessionId));
     return paths;
   });
+
+/** The paths one conversation's plan files can be reported under. Each list holds every spelling of one file. */
+export interface PlanFilePaths {
+  readonly task: ReadonlyArray<string>;
+  readonly plan: ReadonlyArray<string>;
+}
+
+/**
+ * Returns the paths of a conversation's two plan files, `task.md` and
+ * `implementation_plan.md`, in `<home>/antigravity-acp/brain/<nativeSessionId>/`.
+ * Each path is absolute and normalized. On macOS, `/tmp`, `/var` and `/etc` are
+ * links to `/private/tmp`, `/private/var` and `/private/etc`, and `agy` reports
+ * the same file under either spelling, so each list then holds both. On any
+ * other platform each list holds one path. `platform` is a parameter so a test
+ * can ask for the macOS answer on any machine.
+ */
+export const buildPlanFilePaths = (
+  home: string,
+  nativeSessionId: string,
+  platform: NodeJS.Platform = process.platform,
+): PlanFilePaths => {
+  const folder = resolve(home, APP_DATA_DIR, "brain", nativeSessionId);
+  const spellings = (path: string): ReadonlyArray<string> => {
+    if (platform !== "darwin") return [path];
+    if (/^\/private\/(tmp|var|etc)(\/|$)/.test(path)) return [path, path.slice("/private".length)];
+    return /^\/(tmp|var|etc)(\/|$)/.test(path) ? [path, `/private${path}`] : [path];
+  };
+  return {
+    task: spellings(join(folder, "task.md")),
+    plan: spellings(join(folder, "implementation_plan.md")),
+  };
+};

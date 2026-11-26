@@ -24,7 +24,7 @@ interface EffortLevel {
 }
 
 /** Returns the select option with the id `id`, or `undefined` when `agy` sent none. */
-const findSelectOption = (
+export const findSelectOption = (
   configOptions: ReadonlyArray<ConfigOption>,
   id: string,
 ): (ConfigOption & { readonly type: "select" }) | undefined =>

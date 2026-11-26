@@ -161,6 +161,10 @@ export const createTestHarness = (
     readonly answers?: Answers;
     /** Replaces the exit of the fake, for a process that exits while its output stays open. */
     readonly exited?: Promise<number>;
+    /** Replaces the fake's `write`, for a pipe whose write is slow or fails. `write` is the fake's own. */
+    readonly writeWith?: (
+      write: (text: string) => Promise<void>,
+    ) => (text: string) => Promise<void>;
   } = {},
 ) => {
   const { answers = {} } = options;
@@ -190,7 +194,11 @@ export const createTestHarness = (
     /** Waits until the client stopped reading the fake's output before its end. */
     whenReadingStopped: notifier.waitUntil("the client stopped reading", fake.isReadingStopped),
     open: openAcpConnection({
-      pipes: { write: fake.write, stdout: fake.stdout, exited: options.exited ?? fake.exited },
+      pipes: {
+        write: options.writeWith?.(fake.write) ?? fake.write,
+        stdout: fake.stdout,
+        exited: options.exited ?? fake.exited,
+      },
       clientVersion: "9.9.9",
       handlers: {
         onSessionUpdate: (notification) => {
@@ -235,7 +243,7 @@ export const callEverything = (connection: AcpConnection) =>
     yield* connection.resumeSession({ nativeSessionId: SESSION, cwd: "/work", mcpServers: [] });
     yield* connection.setMode(SESSION, "auto");
     yield* connection.setConfigOption(SESSION, "model", "gemini");
-    yield* connection.prompt(SESSION, TEXT);
+    yield* Effect.flatten(connection.sendPrompt(SESSION, TEXT));
     yield* connection.cancel(SESSION);
     yield* connection.closeSession(SESSION);
   });

@@ -153,17 +153,34 @@ const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string>
   })();
 };
 
-/** Splits a stream into lines, holding back a trailing partial line until it is complete. */
-const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
+/**
+ * Splits a stream into lines and returns them in order, without the newline
+ * (a `\r` before it stays). A trailing partial line is held back until its
+ * newline arrives, and is returned at the end of the stream. Each chunk is
+ * searched for a newline once, and the pieces of a partial line are joined once
+ * when it completes, so a long line in many chunks costs time linear in its
+ * length.
+ */
+export const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
   (async function* () {
-    let buffered = "";
+    // The pieces of the line being read.
+    let pieces: Array<string> = [];
     for await (const chunk of decodeStream(stream)) {
-      buffered += chunk;
-      const parts = buffered.split("\n");
-      buffered = parts.pop() ?? "";
-      yield* parts;
+      let start = 0;
+      for (;;) {
+        const newline = chunk.indexOf("\n", start);
+        if (newline === -1) break;
+        const piece = chunk.slice(start, newline);
+        yield pieces.length === 0 ? piece : [...pieces, piece].join("");
+        pieces = [];
+        start = newline + 1;
+      }
+      if (start < chunk.length) {
+        const rest = start === 0 ? chunk : chunk.slice(start);
+        pieces.push(rest);
+      }
     }
-    if (buffered !== "") yield buffered;
+    if (pieces.length > 0) yield pieces.join("");
   })();
 
 /**
@@ -295,6 +312,14 @@ export interface FramedChild {
   readonly exited: Promise<number>;
 }
 
+/**
+ * A `FramedChild` whose `write` returns a promise that rejects when the line
+ * could not be written to the process's stdin.
+ */
+export interface CheckedFramedChild extends Omit<FramedChild, "write"> {
+  readonly write: (text: string) => Promise<void>;
+}
+
 /** The two signals the runner sends to stop a harness: a polite request, then a certain end. */
 export type StopSignal = "SIGTERM" | "SIGKILL";
 
@@ -315,9 +340,9 @@ export const STOP_GRACE: Duration.Duration = Duration.seconds(2);
  * not count the process as gone while it runs. Never fails.
  *
  * A text generation uses this to release its runner slot and remove its
- * scratch folder only after the harness is really gone. A session stops its
- * harness in its own way (see `stopSession` in the adapters) and does not use
- * this.
+ * scratch folder only after the harness is really gone. Sessions use it too:
+ * the Antigravity adapter stops its process with it, and the Codex and pi
+ * adapters use it as part of stopping theirs.
  */
 export const stopChild = (
   child: Pick<FramedChild, "kill" | "exited">,
@@ -342,7 +367,21 @@ export const stopChild = (
 
 const noop = (): void => undefined;
 
-/** Spawns a line-framed harness. Shared by the Codex, pi and Antigravity adapters. */
+/** Starts a harness process with piped stdin, stdout and stderr. */
+const startFramedProcess = (
+  command: ReadonlyArray<string>,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd: string | null | undefined,
+) =>
+  Bun.spawn([...command], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+    ...(cwd === undefined || cwd === null ? {} : { cwd }),
+  });
+
+/** Spawns a line-framed harness. Shared by the Codex and pi adapters. */
 const spawnFramed = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
@@ -354,13 +393,7 @@ const spawnFramed = (
    */
   cwd?: string | null,
 ): FramedChild => {
-  const child = Bun.spawn([...command], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-    ...(cwd === undefined || cwd === null ? {} : { cwd }),
-  });
+  const child = startFramedProcess(command, env, cwd);
   return {
     stdout: splitLines(child.stdout),
     stderr: splitLines(child.stderr),
@@ -380,9 +413,48 @@ const spawnFramed = (
   };
 };
 
+/**
+ * Spawns a line-framed harness whose `write` reports failure: it returns a
+ * promise that resolves once the line is written and flushed, and rejects when
+ * that fails. `spawnFramed` cannot do this, so a reply to a dead process looks
+ * written.
+ *
+ * Bun's stdin sink reports a dead process in two ways:
+ *
+ * - When the process is alive but closed its stdin, `write` rejects with EPIPE.
+ * - When the process has exited, Bun closes the sink, and `write` resolves with
+ *   `true` instead of a byte count and `flush` with `undefined`, and nothing
+ *   throws. A successful write resolves with the number of bytes.
+ */
+export const spawnCheckedFramed = (
+  command: ReadonlyArray<string>,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd?: string | null,
+): CheckedFramedChild => {
+  const child = startFramedProcess(command, env, cwd);
+  return {
+    stdout: splitLines(child.stdout),
+    stderr: splitLines(child.stderr),
+    write: async (text) => {
+      const written: unknown = await child.stdin.write(text);
+      await child.stdin.flush();
+      if (typeof written !== "number") {
+        throw new Error("The process has exited, so its stdin is closed.");
+      }
+    },
+    end: () => {
+      void child.stdin.end();
+    },
+    kill: (signal) => {
+      child.kill(signal);
+    },
+    exited: child.exited,
+  };
+};
+
 /** Spawns Codex's app-server, which is ended by killing it rather than by closing its stdin. */
 export const spawnAppServer: AppServerSpawn = spawnFramed;
 
 export const spawnPi: PiSpawn = spawnFramed;
 
-export const spawnAgy: AgySpawn = spawnFramed;
+export const spawnAgy: AgySpawn = spawnCheckedFramed;

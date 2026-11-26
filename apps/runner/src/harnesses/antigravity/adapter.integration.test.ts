@@ -279,7 +279,7 @@ const leaveConversation = (account: Account): Promise<string> =>
           spawnAgy,
           account.ctx,
           binary,
-          { cwd, handlers: ignoringHandlers },
+          { cwd, handlers: ignoringHandlers, purpose: { kind: "probe" } },
         );
         const { id } = yield* newConversation({ cwd, mcpServers: [] });
         yield* connection.closeSession(id);
@@ -411,6 +411,7 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
           const { newConversation } = yield* openSignedInAgy(spawn, account.ctx, binary, {
             cwd,
             handlers: ignoringHandlers,
+            purpose: { kind: "probe" },
           });
           yield* newConversation({ cwd, mcpServers: [] });
           // The log folder is removed with the scope, so it is read here.
@@ -442,6 +443,7 @@ describe.skipIf(pinnedBinary === undefined)("a real agy with a made-up login", (
             openSignedInAgy(spawn, account.ctx, binary, {
               cwd: makeTempFolder("cwd"),
               handlers: ignoringHandlers,
+              purpose: { kind: "probe" },
             }),
           ),
         ),

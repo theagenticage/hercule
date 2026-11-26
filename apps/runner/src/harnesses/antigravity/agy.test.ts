@@ -6,7 +6,15 @@
  * (`fake-agy.testing.ts`) answers over the pipes behind a spawn, and it writes
  * the worker logs the way `agy` does. The real `agy` is never started.
  */
-import { readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
@@ -20,7 +28,12 @@ import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
 import { answerWith } from "@hercule/acp/testing";
 import { buildAdapterFailed } from "../adapter-error-builders";
-import { AdapterFailed, HarnessLoginMissing, HarnessNotInstalled } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  HarnessLoginMissing,
+  HarnessNotInstalled,
+  ResumeTranscriptMissing,
+} from "@hercule/protocol";
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
 import type { Run } from "../process";
@@ -30,6 +43,7 @@ import {
   checkAccountUsable,
   openSignedInAgy,
   readAgyVersion,
+  type AgyPurpose,
   type SignedInAgy,
 } from "./agy";
 import {
@@ -77,11 +91,16 @@ const runAndReadFailure = (
 const open = (
   fake: FakeAgy,
   home: string,
-  options: { readonly env?: Record<string, string>; readonly cwd?: string } = {},
+  options: {
+    readonly env?: Record<string, string>;
+    readonly cwd?: string;
+    readonly purpose?: AgyPurpose;
+  } = {},
 ) =>
   openSignedInAgy(fake.spawn, buildContext(home, BINARY, options.env), BINARY, {
     cwd: options.cwd ?? createScratchHome("agy-work"),
     handlers: NO_HANDLERS,
+    purpose: options.purpose ?? { kind: "probe" },
   });
 
 /** Opens `agy` and returns the plan, closing the scope at the end. */
@@ -151,7 +170,7 @@ describe("how the process is started", () => {
     expect(spawned.cwd).toBe(cwd);
   });
 
-  it("gives the sign-in, the version command and a session the same environment: the runner's own agy settings and credentials dropped, the two variables set", async () => {
+  it("gives the sign-in, the version command and a session the same environment: the runner's own agy settings and credentials dropped, the two variables set, and a TMPDIR of its own only for the process that runs tools", async () => {
     const { home, fake } = setUp();
     const ctx = buildContext(home, BINARY, RUNNER_ENV);
     const versionEnvs: Array<Readonly<Record<string, string | undefined>>> = [];
@@ -165,15 +184,71 @@ describe("how the process is started", () => {
         openSignedInAgy(fake.spawn, ctx, BINARY, {
           cwd: createScratchHome("agy-work"),
           handlers: NO_HANDLERS,
+          purpose: { kind: "probe" },
         }),
       ),
     );
     await Effect.runPromise(readAgyVersion(run, ctx, BINARY));
     const login = buildLoginCommand(ctx, BINARY);
 
-    expect(fake.spawns[0]!.env).toEqual(AGY_ENV);
+    const { TMPDIR, ...sessionEnv } = fake.spawns[0]!.env;
+    expect(TMPDIR).toContain("hercule-agy-");
+    expect(sessionEnv).toEqual(AGY_ENV);
     expect(versionEnvs).toEqual([AGY_ENV]);
     expect(login.env).toEqual(AGY_ENV);
+  });
+});
+
+describe("what the process is opened for", () => {
+  const SKIP_FLAG = "--dangerously-skip-permissions";
+  const FULL_ACCESS: AgyPurpose = { kind: "session", accessMode: "full-access" };
+
+  it("adds the skip-permissions flag for a session in full-access only", async () => {
+    const modes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
+    const commands: Array<ReadonlyArray<string>> = [];
+    for (const accessMode of modes) {
+      const { home, fake } = setUp();
+      await Effect.runPromise(
+        Effect.scoped(open(fake, home, { purpose: { kind: "session", accessMode } })),
+      );
+      commands.push(fake.spawns[0]!.command);
+    }
+    const { home, fake } = setUp();
+    await Effect.runPromise(Effect.scoped(open(fake, home)));
+
+    expect(commands.map((command) => command.includes(SKIP_FLAG))).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(fake.spawns[0]!.command).not.toContain(SKIP_FLAG);
+  });
+
+  it("fails a session start before authenticate when agy does not take an added system prompt", async () => {
+    const { home, fake } = setUp({ withoutSystemPromptCapability: true });
+
+    const error = await runAndReadFailure(open(fake, home, { purpose: FULL_ACCESS }));
+
+    expect(error).toBeInstanceOf(AdapterFailed);
+    expect(error.message).toContain(`agy ${ANTIGRAVITY_VERSION}`);
+    const methods = fake.spawns[0]!.harness.received.map((message) => message.method);
+    expect(methods).toContain("initialize");
+    expect(methods).not.toContain("authenticate");
+  });
+
+  it("still reads a signed-out home as not signed in when the capability is there", async () => {
+    const { home, fake } = setUp({ scripts: { authenticate: RUN_LOGIN } });
+
+    const error = await runAndReadFailure(open(fake, home, { purpose: FULL_ACCESS }));
+
+    expect(error).toBeInstanceOf(HarnessLoginMissing);
+  });
+
+  it("does not need the capability for a probe", async () => {
+    const { home, fake } = setUp({ withoutSystemPromptCapability: true });
+
+    expect(await openAndReadPlan(fake, home)).toBe(PLAN_LABEL);
   });
 });
 
@@ -496,6 +571,16 @@ describe("opening a conversation", () => {
     expect(await isHeld(lookalike)).toBe(false);
   });
 
+  it("resuming a conversation agy has no files for fails as a missing transcript", async () => {
+    const { home, fake } = setUp();
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }),
+    );
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(ResumeTranscriptMissing);
+  });
+
   it("is not signed in when agy says authentication is required", async () => {
     const { home, fake } = setUp({
       scripts: { "session/new": refuse(-32000, "Authentication required") },
@@ -510,7 +595,7 @@ describe("opening a conversation", () => {
 
   it("passes any other refusal on as the call's own error", async () => {
     const { home, fake } = setUp({
-      scripts: { "session/resume": refuse(-32603, "Failed to read session") },
+      scripts: { "session/resume": refuse(-32603, "Internal error") },
     });
 
     const result = await withSignedIn(fake, home, (signedIn) =>
@@ -546,6 +631,23 @@ describe("opening a conversation", () => {
 
     const result = await withSignedIn(fake, home, (signedIn) =>
       signedIn.newConversation(REQUEST, (id) =>
+        Effect.sync(() => {
+          kept.push(id);
+        }),
+      ),
+    );
+
+    expect(kept).toEqual([CONVERSATION]);
+    expect(Result.isFailure(result) && result.failure.message).toBe(NOT_THIS_ACCOUNT);
+  });
+
+  it("hands the id of a resumed conversation over before it checks the worker", async () => {
+    const { home, fake } = setUp({ workerLogs: { "session/resume": KEYRING_LINE } });
+    createConversationFiles(home, CONVERSATION);
+    const kept: Array<string> = [];
+
+    const result = await withSignedIn(fake, home, (signedIn) =>
+      signedIn.resumeConversation({ ...REQUEST, nativeSessionId: CONVERSATION }, (id) =>
         Effect.sync(() => {
           kept.push(id);
         }),
@@ -649,6 +751,23 @@ describe("a process that cannot be started", () => {
     expect(listLogFolders(home)).toEqual([]);
   });
 
+  it("cuts each stderr line it names in the failure", async () => {
+    const { home, fake } = setUp({
+      scripts: {
+        initialize: (_call, harness) => {
+          harness.end();
+          return [];
+        },
+      },
+      stderrLines: ["x".repeat(5_000)],
+    });
+
+    const error = await runAndReadFailure(open(fake, home));
+
+    expect(error.message).toContain("…");
+    expect(error.message.length).toBeLessThan(1_000);
+  });
+
   it("does not wait for good for a stderr that a descendant of the process holds open", async () => {
     const { home, fake } = setUp({
       scripts: {
@@ -725,5 +844,83 @@ describe("closing the scope", () => {
     expect(fake.spawns[0]!.signals).toEqual(["SIGTERM"]);
     expect(fake.spawns[0]!.hasExited).toBe(true);
     expect(listLogFolders(home)).toEqual([]);
+  });
+});
+
+describe("the hooks file of the Harness Home", () => {
+  const SESSION: AgyPurpose = { kind: "session", accessMode: "approval-required" };
+  const HOOKS = (home: string) => join(home, "config", "hooks.json");
+
+  it("is removed before agy starts for a session", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(HOOKS(home), "{}");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(fake.spawns).toHaveLength(1);
+  });
+
+  it("is removed as a link, and what it points to stays", async () => {
+    const { home, fake } = setUp();
+    const target = join(createScratchHome("agy-target"), "hooks.json");
+    writeFileSync(target, "{}");
+    mkdirSync(join(home, "config"));
+    symlinkSync(target, HOOKS(home));
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("{}");
+  });
+
+  it("is left alone when agy is opened for a probe", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(HOOKS(home), "{}");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home)));
+
+    expect(existsSync(HOOKS(home))).toBe(true);
+  });
+
+  it("fails the start with AdapterFailed, and spawns nothing, when it cannot be removed", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(HOOKS(home), "inner"), { recursive: true });
+
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain("hooks file");
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("removes the settings file in the app data folder too, and keeps what a link points to", async () => {
+    const { home, fake } = setUp();
+    const target = join(createScratchHome("agy-target"), "settings.json");
+    writeFileSync(target, "{}");
+    mkdirSync(join(home, "antigravity-acp"), { recursive: true });
+    symlinkSync(target, join(home, "antigravity-acp", "settings.json"));
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(join(home, "antigravity-acp", "settings.json"))).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("{}");
+  });
+
+  it("leaves the settings file alone for a probe, and fails a session start that cannot remove it", async () => {
+    const probe = setUp();
+    mkdirSync(join(probe.home, "antigravity-acp"), { recursive: true });
+    writeFileSync(join(probe.home, "antigravity-acp", "settings.json"), "{}");
+    await Effect.runPromise(Effect.scoped(open(probe.fake, probe.home)));
+    expect(existsSync(join(probe.home, "antigravity-acp", "settings.json"))).toBe(true);
+
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "antigravity-acp", "settings.json", "inner"), { recursive: true });
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain("settings file");
+    expect(fake.spawns).toHaveLength(0);
   });
 });

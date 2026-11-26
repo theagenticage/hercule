@@ -99,6 +99,17 @@ export const buildSessionAlreadyRunning = (): SessionAlreadyRunning =>
 export const buildInputStopped = (): InputNotDelivered =>
   new InputNotDelivered({ message: "The session stopped before the input was delivered." });
 
+/**
+ * Builds the failure of `sendInput` for an input that was proven not to have
+ * reached the harness, because writing it failed or the connection had ended.
+ */
+export const buildInputNotWritten = (harnessName: string, reason: string): InputNotDelivered =>
+  new InputNotDelivered({
+    message: finishMessage(
+      `The input did not reach ${harnessName}, so nothing was sent: ${reason}`,
+    ),
+  });
+
 /** Builds the failure of `sendInput` for an input that the harness refused. */
 export const buildInputRefused = (harnessName: string, reason: string): InputNotDelivered =>
   new InputNotDelivered({ message: finishMessage(`${harnessName} refused the input: ${reason}`) });

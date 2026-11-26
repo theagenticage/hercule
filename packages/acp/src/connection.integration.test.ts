@@ -177,8 +177,9 @@ const isHarnessCall = ({ direction, message }: RecordedMessage): boolean =>
 const isClientCall = ({ direction, message }: RecordedMessage): boolean =>
   direction === "out" && message.method !== undefined;
 
+// A recorder note ({"note": ...}) is an "out" entry with no method and no id. It is not a reply.
 const isClientReply = ({ direction, message }: RecordedMessage): boolean =>
-  direction === "out" && message.method === undefined;
+  direction === "out" && message.method === undefined && message.id !== undefined;
 
 /** Replays one recording and returns what the handlers saw and what the calls returned. */
 const replayRecording = (name: RecordingName) =>
@@ -214,8 +215,8 @@ const replayRecording = (name: RecordingName) =>
     const scope = yield* Scope.make();
     const connection: AcpConnection = yield* openAcpConnection({
       pipes: {
-        write: (text) => {
-          fake.write(text);
+        write: async (text) => {
+          await fake.write(text);
           progress.notifyChange();
         },
         stdout: fake.stdout,
@@ -266,7 +267,7 @@ const replayRecording = (name: RecordingName) =>
       readonly recordedReply: JsonRpcMessage | undefined;
     }> = [];
     const refusals: Array<{
-      readonly effect: Effect.Effect<unknown, AcpError>;
+      readonly fiber: Fiber.Fiber<unknown, AcpError>;
       readonly recordedReply: JsonRpcMessage | undefined;
     }> = [];
 
@@ -328,7 +329,8 @@ const replayRecording = (name: RecordingName) =>
           if (recordedReply?.error === undefined) {
             yield* call;
           } else {
-            refusals.push({ effect: call, recordedReply });
+            // Forked so the request is sent now: the recording goes on after it.
+            refusals.push({ fiber: yield* Effect.forkChild(call), recordedReply });
           }
           break;
         }
@@ -336,7 +338,7 @@ const replayRecording = (name: RecordingName) =>
           const request = Schema.decodeUnknownSync(ClientParams["session/prompt"])(params);
           // A prompt waits for its reply, which comes after later messages of the client.
           const fiber = yield* Effect.forkChild(
-            connection.prompt(request.sessionId, request.prompt),
+            Effect.flatten(connection.sendPrompt(request.sessionId, request.prompt)),
           );
           prompts.push({ fiber, recordedReply });
           break;
@@ -370,8 +372,11 @@ const replayRecording = (name: RecordingName) =>
       readonly error: AcpError;
       readonly recordedReply: JsonRpcMessage;
     }> = [];
-    for (const { effect, recordedReply } of refusals) {
-      refusalErrors.push({ error: yield* Effect.flip(effect), recordedReply: recordedReply! });
+    for (const { fiber, recordedReply } of refusals) {
+      refusalErrors.push({
+        error: yield* Effect.flip(Fiber.join(fiber)),
+        recordedReply: recordedReply!,
+      });
     }
 
     // A prompt the harness never answered, like the second one of a steered turn,
@@ -397,7 +402,33 @@ const replayRecording = (name: RecordingName) =>
     };
   });
 
-it.live.each(RECORDING_NAMES)("plays the recording %s through the connection", (name) =>
+/**
+ * Recordings that the generic replay below cannot play, with the reason. Tests
+ * of their own cover them.
+ *
+ * - `resume`, `tmpdir-resume` and `t3-resume` hold several harness processes in one file,
+ *   each starting with its own `initialize`. The replay opens one connection.
+ * - `subagent-approval2` ends with the recorder closing the harness while a
+ *   prompt was open, so the prompt's error reply comes from the recorder, not
+ *   from the harness.
+ * - `stop-bg` ends with the recorder stopping the harness process while a
+ *   prompt was open, so the prompt's error reply comes from the recorder.
+ * - `stop-cancel` sends `session/cancel` twice, once as a request and once as a
+ *   notification, to measure what the harness answers; no single script
+ *   reproduces that.
+ */
+const RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY: ReadonlyArray<RecordingName> = [
+  "resume",
+  "stop-bg",
+  "stop-cancel",
+  "subagent-approval2",
+  "t3-resume",
+  "tmpdir-resume",
+];
+
+it.live.each(
+  RECORDING_NAMES.filter((name) => !RECORDINGS_THE_GENERIC_REPLAY_CANNOT_PLAY.includes(name)),
+)("plays the recording %s through the connection", (name) =>
   Effect.gen(function* () {
     const played = yield* replayRecording(name);
     const { recording } = played;

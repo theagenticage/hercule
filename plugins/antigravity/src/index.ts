@@ -28,7 +28,11 @@ const definition: HarnessDefinition = {
     accessModes: {
       "approval-required": "native",
       "auto-accept-edits": "native",
-      auto: "native",
+      // `agy` lists a mode `auto` in its description, but offered it on no
+      // account that was tried (free and paid, agy 1.5.15), so a session
+      // cannot be put in it. The controller starts a thread asked for Auto in
+      // Auto-accept edits instead.
+      auto: "unsupported",
       "full-access": "native",
     },
     // The runner's adapter does not hand the MCP Gateway to `agy` yet. With
