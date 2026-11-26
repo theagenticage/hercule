@@ -1097,7 +1097,7 @@ describe("makeEventSecretHider", () => {
     }) as HarnessEvent;
   const closing = (tag: "item.completed" | "turn.completed" | "session.exited"): HarnessEvent =>
     ({ _tag: tag, ...(fields as object) }) as HarnessEvent;
-  const textOf = (events: ReadonlyArray<HarnessEvent>): string =>
+  const joinEventText = (events: ReadonlyArray<HarnessEvent>): string =>
     events
       .map((event) => (event._tag === "content.delta" ? event.delta : `<${event._tag}>`))
       .join("");
@@ -1110,7 +1110,7 @@ describe("makeEventSecretHider", () => {
         ...hide([delta(`${SECRET.slice(at)} after`)]),
         ...hide([closing("item.completed")]),
       ];
-      expect(textOf(events)).toBe("before [hidden] after<item.completed>");
+      expect(joinEventText(events)).toBe("before [hidden] after<item.completed>");
     }
   });
 
@@ -1120,33 +1120,52 @@ describe("makeEventSecretHider", () => {
       ...[...SECRET].flatMap((character) => hide([delta(character)])),
       ...hide([closing("item.completed")]),
     ];
-    expect(textOf(events)).toBe("[hidden]<item.completed>");
+    expect(joinEventText(events)).toBe("[hidden]<item.completed>");
   });
 
-  it("releases the held start of a token before the end of its item, unchanged", () => {
+  it("hides the held start of a token when its item ends, and never publishes it", () => {
     const hide = makeEventSecretHider(SECRET);
     const first = hide([delta(`ends with ${SECRET.slice(0, 5)}`)]);
-    expect(textOf(first)).toBe("ends with ");
-    expect(textOf(hide([closing("item.completed")]))).toBe(`${SECRET.slice(0, 5)}<item.completed>`);
+    expect(joinEventText(first)).toBe("ends with ");
+    expect(joinEventText(hide([closing("item.completed")]))).toBe("[hidden]<item.completed>");
   });
 
   it.each(["turn.completed", "session.exited"] as const)(
-    "releases every held start before %s",
+    "hides every held start before %s",
     (tag) => {
       const hide = makeEventSecretHider(SECRET);
       hide([delta(SECRET.slice(0, 3), "i1"), delta(SECRET.slice(0, 4), "i2")]);
-      expect(textOf(hide([closing(tag)]))).toBe(
-        `${SECRET.slice(0, 3)}${SECRET.slice(0, 4)}<${tag}>`,
-      );
+      expect(joinEventText(hide([closing(tag)]))).toBe(`[hidden][hidden]<${tag}>`);
     },
   );
+
+  it("never publishes a turn that ends in the middle of the token", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const events = [...hide([delta(SECRET.slice(0, -1))]), ...hide([closing("turn.completed")])];
+    expect(joinEventText(events)).toBe("[hidden]<turn.completed>");
+    expect(JSON.stringify(events)).not.toContain(SECRET.slice(0, 5));
+  });
+
+  it("never publishes the start of the token that a reasoning chunk separates from its end", () => {
+    const hide = makeEventSecretHider(SECRET);
+    const state = freshState();
+    openTurn(state, "t");
+    const events = [
+      buildChunk(`text ${SECRET.slice(0, 10)}`),
+      buildChunk("thinking", "agent_thought_chunk"),
+      buildChunk(SECRET.slice(10)),
+    ].flatMap((chunk) => normalizeUpdate(state, chunk).flatMap((event) => hide([event])));
+    events.push(...hide(buildProcessEndEvents(state)));
+    expect(JSON.stringify(events)).not.toContain(SECRET.slice(0, 5));
+    expect(JSON.stringify(events)).toContain("[hidden]");
+  });
 
   it("keeps the held start of one item when another item closes", () => {
     const hide = makeEventSecretHider(SECRET);
     hide([delta(SECRET.slice(0, 3), "i1")]);
-    expect(textOf(hide([{ ...closing("item.completed"), itemId: "i2" } as HarnessEvent]))).toBe(
-      "<item.completed>",
-    );
+    expect(
+      joinEventText(hide([{ ...closing("item.completed"), itemId: "i2" } as HarnessEvent])),
+    ).toBe("<item.completed>");
   });
 
   it("leaves ids and other events as they are", () => {

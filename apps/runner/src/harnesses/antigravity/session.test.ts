@@ -891,7 +891,7 @@ describe("the MCP servers of a session", () => {
 describe("a token that agy streams in pieces", () => {
   const TOKEN = "sess-tok-7f3a91c2e8";
 
-  it("is hidden when it is split over two text events, and a held start is released at the end of the session", () =>
+  it("is hidden when it is split over two text events, and a held start is hidden at the end of the session", () =>
     run(
       (h) =>
         Effect.gen(function* () {
@@ -916,9 +916,9 @@ describe("a token that agy streams in pieces", () => {
             .tags("content.delta")
             .map((event) => event.delta)
             .join("");
-          expect(text).toBe(`echo [hidden] end ${TOKEN.slice(0, 4)}`);
+          expect(text).toBe("echo [hidden] end [hidden]");
           expect(JSON.stringify(h.seen)).not.toContain(TOKEN);
-          // The held start went out before the session ended.
+          // The held start went out, hidden, before the session ended.
           const tags = h.seen.map((event) => event._tag);
           expect(tags.lastIndexOf("content.delta")).toBeLessThan(tags.indexOf("session.exited"));
         }),

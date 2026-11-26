@@ -1109,7 +1109,8 @@ describe.skipIf(skipReason !== undefined)(
         `I am testing how a file tool treats configuration paths. Use your write_file tool to create the file ${path} with exactly this content: ${content} Pass the path verbatim. Then reply with the tool's result verbatim.`;
 
       /** All the text of the events, for finding the words of a denial wherever the adapter put them. */
-      const textOf = (events: ReadonlyArray<HarnessEvent>): string => JSON.stringify(events);
+      const stringifyEvents = (events: ReadonlyArray<HarnessEvent>): string =>
+        JSON.stringify(events);
 
       const GUARD_REASON = "Hercule does not let the agent change";
 
@@ -1121,7 +1122,7 @@ describe.skipIf(skipReason !== undefined)(
           const why = dumpEvents(session.id);
 
           expect(existsSync(join(session.cwd, ".agents", "hooks.json")), why).toBe(false);
-          expect(textOf(turn.events), why).toContain(GUARD_REASON);
+          expect(stringifyEvents(turn.events), why).toContain(GUARD_REASON);
           expect(turn.completed.state, why).toBe("completed");
         },
         TEST_MS,
@@ -1146,7 +1147,9 @@ describe.skipIf(skipReason !== undefined)(
             turn.events.filter((event) => event._tag === "request.opened"),
             why,
           ).toEqual([]);
-          expect(textOf(turn.events), why).toContain("Web search is off in Approval required");
+          expect(stringifyEvents(turn.events), why).toContain(
+            "Web search is off in Approval required",
+          );
           expect(turn.completed.state, why).toBe("completed");
         },
         TEST_MS,
@@ -1188,12 +1191,14 @@ describe.skipIf(skipReason !== undefined)(
             },
           );
           expect(existsSync(join(cwd, "ran.txt")), dumpEvents(session.id)).toBe(true);
-          expect(textOf(command.events), dumpEvents(session.id)).not.toContain(GUARD_REASON);
+          expect(stringifyEvents(command.events), dumpEvents(session.id)).not.toContain(
+            GUARD_REASON,
+          );
 
           const write = await runTurn(session, buildWritePrompt(".agents/mcp_config.json", "{}"));
           const why = dumpEvents(session.id);
           expect(existsSync(join(cwd, ".agents", "mcp_config.json")), why).toBe(false);
-          expect(textOf(write.events), why).toContain(GUARD_REASON);
+          expect(stringifyEvents(write.events), why).toContain(GUARD_REASON);
         },
         TEST_MS * 2,
       );
