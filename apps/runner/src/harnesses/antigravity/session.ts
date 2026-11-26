@@ -18,10 +18,11 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
-import type { AcpConnection, AcpError, AcpHandlers, PromptContent } from "@hercule/acp";
+import type { AcpConnection, AcpHandlers, PromptContent } from "@hercule/acp";
 import { SteerRefused } from "@hercule/protocol";
 import type {
   AccessMode,
@@ -30,9 +31,6 @@ import type {
   ApprovalDecision,
   ExitReason,
   HarnessEvent,
-  HarnessProtocolError,
-  ModelChangeRefused,
-  ModelSelection,
   QuestionAnswers,
   SendResult,
   SessionBinding,
@@ -50,26 +48,24 @@ import {
   buildSessionStopping,
   buildStartFailure,
 } from "../adapter-error-builders";
-import { formatModelArgument } from "../account";
 import { readAttachmentBase64 } from "../attachments";
 import type { AdapterTurnInput, LocalAttachment, SessionStartContext } from "../index";
 import { buildEnvelope } from "../normalize";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { escapeControlCharacters } from "../../report";
 import { truncateFact, truncateMessage } from "../text";
-import { ANTIGRAVITY_NAME, checkAccountUsable, openSignedInAgy, readAgyModeId } from "./agy";
+import { ANTIGRAVITY_NAME, checkAccountUsable, chooseAgyMode, openSignedInAgy } from "./agy";
 import type { AgySeam } from "./agy";
 import {
-  changeSetting,
+  createConfigChange,
   describeSetting,
-  readCurrentValue,
-  readEffort,
   withDeadline,
+  type ApplyFailure,
+  type ConfigChange,
   type ConfigOptions,
-  type SettingChange,
 } from "./config-change";
-import { APP_DATA_DIR } from "./harness-home";
-import { buildModelCatalog } from "./model-catalog";
+import { buildPlanFilePaths } from "./harness-home";
+import { buildModelCatalog, findSelectOption } from "./model-catalog";
 import {
   buildNormalizingState,
   closeProcess,
@@ -98,6 +94,14 @@ const MODE_CONFIRMATION_DEADLINE = Duration.seconds(5);
  */
 const PREPARATION_BUDGET = Duration.seconds(8);
 
+/**
+ * How long a synthetic turn (output `agy` sent with no input) may stay open
+ * without any update from `agy`. A text chunk opens one, and only a later
+ * update closes it, so without this bound the controller would see the session
+ * busy for ever after the last chunk.
+ */
+const SYNTHETIC_TURN_QUIET_LIMIT = Duration.seconds(10);
+
 /** How long an exit waits for the Turn to report its end once the process is gone. */
 const TURN_END_WAIT = Duration.seconds(5);
 
@@ -109,19 +113,12 @@ const ACCESS_MODE_NAMES: Readonly<Record<AccessMode, string>> = {
   "full-access": "Full access",
 };
 
-/** What `agy` holds as the model and the thinking level, as it reported them. Undefined fields are not known. */
-interface AppliedSelection {
-  /** The model as `agy` names it: the account's model argument applied to the model id. */
-  readonly model: string | undefined;
-  readonly effort: string | undefined;
-}
-
 /** A running session, as the adapter uses it. */
 export interface AgySession {
   readonly binding: SessionBinding;
   /**
-   * Runs the input as a new Turn and returns once its prompt was handed to the
-   * connection, not when `agy` replied. Fails with:
+   * Runs the input as a new Turn and returns once the handoff of its prompt is proven, not when `agy`
+   * replied. Fails with:
    *
    * - `SessionNotRunning` when the session is stopping or has exited;
    * - `SteerRefused` while a Turn runs or another input is being prepared,
@@ -171,37 +168,65 @@ const buildInstructions = (ctx: SessionStartContext, spec: SessionSpec): string 
   ]);
 
 /** Returns text `agy` sent, escaped and cut, for a message the user reads. */
-const quoteReported = (text: string): string => truncateFact(escapeControlCharacters(text));
+const escapeReportedText = (text: string): string => truncateFact(escapeControlCharacters(text));
 
-/** Returns the failure of a start when `agy` refuses or does not answer a request to change a setting. */
-const buildStartConfigFailure = (what: string, error: AcpError) =>
-  buildAdapterFailed(
-    `${ANTIGRAVITY_NAME} did not accept ${what}, so the session was not started: ${error.harnessMessage ?? error.message}`,
-  );
-
-/**
- * Returns the failure of an input whose model or level change did not work.
- * A refusal keeps the session on its model. A closed connection or a missing
- * answer leaves it unknown whether the change happened.
- */
-const buildChangeFailure = (
-  change: string,
-  error: AcpError,
-): ModelChangeRefused | HarnessProtocolError => {
-  if (error.reason === "refused") {
-    return buildModelChangeRefused(ANTIGRAVITY_NAME, change, error.harnessMessage ?? error.message);
+/** Returns the failure of a start when the model or level change did not work. */
+const buildStartConfigFailure = (failure: ApplyFailure) => {
+  const what = describeSetting(failure.change);
+  switch (failure.kind) {
+    case "failed":
+      return buildAdapterFailed(
+        `${ANTIGRAVITY_NAME} did not accept ${what}, so the session was not started: ${failure.error.harnessMessage ?? failure.error.message}`,
+      );
+    case "other":
+      return buildAdapterFailed(
+        `${ANTIGRAVITY_NAME} did not confirm ${what}: it reports ${escapeReportedText(failure.named)}, so the session was not started.`,
+      );
+    case "unconfirmed":
+      return buildAdapterFailed(
+        `${ANTIGRAVITY_NAME} did not confirm ${what}, so the session was not started.`,
+      );
   }
-  if (error.reason === "closed") return buildModelChangeLost(ANTIGRAVITY_NAME, error.message);
-  return buildHarnessProtocolError(
-    `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${error.message}`,
-  );
 };
 
-/** Returns the failure of an input whose model or level change `agy` did not confirm, so it is not known what `agy` holds. */
-const buildUnconfirmedChange = (change: string): HarnessProtocolError =>
-  buildHarnessProtocolError(
-    `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and the input was not sent.`,
-  );
+/**
+ * Returns the failure of an input whose model or level change did not work, or
+ * of one that was interrupted between the two. A refusal keeps the session on
+ * its model. A closed connection or a missing answer leaves it unknown whether
+ * the change happened, and so does a reply that names no value.
+ */
+const buildInputConfigFailure = (
+  outcome: ApplyFailure | { readonly kind: "cancelled" },
+): AdapterError => {
+  if (outcome.kind === "cancelled") return buildInputStopped();
+  const change = `switch to ${describeSetting(outcome.change)}`;
+  switch (outcome.kind) {
+    case "failed": {
+      const { error } = outcome;
+      if (error.reason === "refused") {
+        return buildModelChangeRefused(
+          ANTIGRAVITY_NAME,
+          change,
+          error.harnessMessage ?? error.message,
+        );
+      }
+      if (error.reason === "closed") return buildModelChangeLost(ANTIGRAVITY_NAME, error.message);
+      return buildHarnessProtocolError(
+        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${error.message}`,
+      );
+    }
+    case "other":
+      return buildModelChangeRefused(
+        ANTIGRAVITY_NAME,
+        change,
+        `${ANTIGRAVITY_NAME} reports the ${outcome.change.kind} ${escapeReportedText(outcome.named)} instead.`,
+      );
+    case "unconfirmed":
+      return buildHarnessProtocolError(
+        `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and the input was not sent.`,
+      );
+  }
+};
 
 /**
  * Starts `agy` for one session and returns it ready for its first input, with
@@ -235,6 +260,11 @@ export const startAgySession = (
   Effect.gen(function* () {
     const binary = ctx.binary;
     if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(ANTIGRAVITY_NAME));
+    const accessMode = spec.accessMode;
+    // Narrowed here, so everything below sees an Access Mode that `agy` has a mode for or none.
+    if (accessMode === "auto") {
+      return yield* Effect.die(new Error("Antigravity declares the Access Mode auto unsupported."));
+    }
     const cwd = ctx.cwd;
     if (cwd === null)
       return yield* Effect.die(new Error("A session starts with a working folder."));
@@ -256,8 +286,8 @@ export const startAgySession = (
     let normalizing: Normalizing | undefined;
     /** Undefined until `agy` replies to the call that opens the conversation. */
     let nativeSessionId: string | undefined;
-    let replayedUpdates = 0;
     let current: Turn | undefined;
+    /** True while an input's images are read and its model is changed, before its Turn exists. The handoff of its prompt belongs to the Turn. */
     let preparing = false;
     /** Grows at every interrupt and stop, so an input that was prepared before it knows it is void. */
     let generation = 0;
@@ -271,7 +301,10 @@ export const startAgySession = (
     /** The mode the start asked for and `agy` confirmed. Undefined in `full-access`, which has no mode to guard. */
     let guardedMode: string | undefined;
     let isStarted = false;
-    let applied: AppliedSelection | undefined;
+    /** The model and level of the conversation. Undefined until the start has read the conversation. */
+    let config: ConfigChange | undefined;
+    /** The wait that closes an open synthetic turn when `agy` goes quiet. */
+    let syntheticTurnBound: Fiber.Fiber<void> | undefined;
 
     const buildBase = (toolCallId?: string) =>
       buildEnvelope(sessionId, {
@@ -279,9 +312,40 @@ export const startAgySession = (
         ...(toolCallId === undefined ? {} : { toolCallId }),
       });
 
+    /**
+     * Starts the wait that closes the open synthetic turn, and ends the wait
+     * before it. Every update from `agy` and every emit goes through here, so
+     * the wait starts over at each one and runs out only after
+     * `SYNTHETIC_TURN_QUIET_LIMIT` with no update. With no synthetic turn open,
+     * no wait is left running.
+     */
+    const boundSyntheticTurn = (): void => {
+      if (syntheticTurnBound !== undefined) {
+        runDetached(Fiber.interrupt(syntheticTurnBound));
+        syntheticTurnBound = undefined;
+      }
+      if (normalizing === undefined || isExited()) return;
+      const state = normalizing;
+      const turnId = readSyntheticTurnId(state);
+      if (turnId === undefined) return;
+      syntheticTurnBound = Effect.runForkWith(services)(
+        Effect.sleep(SYNTHETIC_TURN_QUIET_LIMIT).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              syntheticTurnBound = undefined;
+              // Only the turn this wait was started for: a newer turn must stay open.
+              emitEvents(closeTurn(state, { state: "completed", turnId }));
+            }),
+          ),
+        ),
+      );
+    };
+
     /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
-      if (isStarted && events.length > 0) emit(events);
+      if (!isStarted) return;
+      if (events.length > 0) emit(events);
+      boundSyntheticTurn();
     };
 
     const isExited = (): boolean => Deferred.isDoneUnsafe(exitedSignal);
@@ -327,7 +391,7 @@ export const startAgySession = (
      * Ends the process of a Turn that did not answer `session/cancel`. Marks
      * the session as stopping before anything else, so no input starts on it.
      */
-    const endUnresponsive = (turnId: string): Effect.Effect<void> =>
+    const stopUnresponsiveProcess = (turnId: string): Effect.Effect<void> =>
       Effect.suspend(() => {
         if (stopping) return Effect.void;
         stopping = true;
@@ -375,7 +439,7 @@ export const startAgySession = (
             ...(turn === undefined ? {} : { turnId: turn.id }),
             class: "mode_changed",
             message: truncateMessage(
-              `Antigravity changed its own permission mode from ${from === undefined ? "unknown" : quoteReported(from)} to ${quoteReported(to)}, so Hercule stopped it.`,
+              `Antigravity changed its own permission mode from ${from === undefined ? "unknown" : escapeReportedText(from)} to ${escapeReportedText(to)}, so Hercule stopped it.`,
             ),
           },
         ]);
@@ -384,7 +448,7 @@ export const startAgySession = (
 
     // ---- What `agy` sends ----
 
-    const handleModeUpdate = (modeId: string): void => {
+    const recordReportedMode = (modeId: string): void => {
       const previous = currentMode;
       currentMode = modeId;
       if (modeChanged !== undefined) Deferred.doneUnsafe(modeChanged, Effect.void);
@@ -393,36 +457,20 @@ export const startAgySession = (
       }
     };
 
-    /** Reads the mode that `agy` reports as the `mode` config option, in an update or in the reply to a change of a setting. */
-    const readModeOption = (options: ConfigOptions): void => {
-      const modeId = readCurrentValue(options, "mode");
-      if (modeId !== undefined) handleModeUpdate(modeId);
-    };
-
-    /**
-     * Forgets what `agy` holds when an update says it holds something else, so
-     * the next input sets the model and level again. An update proves no change
-     * that was asked for: it can lag behind, and only the reply to the request
-     * confirms.
-     */
-    const forgetChangedSelection = (options: ConfigOptions): void => {
-      const model = readCurrentValue(options, "model");
-      const effort = readCurrentValue(options, "thought_level");
-      if (
-        applied !== undefined &&
-        ((applied.model !== undefined && model !== undefined && model !== applied.model) ||
-          (applied.effort !== undefined && effort !== undefined && effort !== applied.effort))
-      ) {
-        applied = undefined;
-      }
+    /** Records the mode that `agy` reports as the `mode` config option, in an update or in the reply to a change of a setting. */
+    const recordModeOfReply = (options: ConfigOptions): void => {
+      const modeId = findSelectOption(options, "mode")?.currentValue;
+      if (modeId !== undefined) recordReportedMode(modeId);
     };
 
     const handlers: AcpHandlers = {
       onSessionUpdate: (notification) => {
         if (isExited()) return;
-        // Before the reply that opens the conversation, an update is part of a resume's replay.
+        // Before the reply that opens the conversation, an update is part of a resume's replay and is dropped. A mode report is the exception: the mode must not be lost.
         if (normalizing === undefined) {
-          replayedUpdates += 1;
+          if (notification.update.sessionUpdate === "current_mode_update") {
+            recordReportedMode(notification.update.currentModeId);
+          }
           return;
         }
         if (notification.nativeSessionId !== nativeSessionId) {
@@ -434,7 +482,7 @@ export const startAgySession = (
           return;
         }
         if (notification.update.sessionUpdate === "current_mode_update") {
-          handleModeUpdate(notification.update.currentModeId);
+          recordReportedMode(notification.update.currentModeId);
           return;
         }
         if (notification.update.sessionUpdate === "config_option_update") {
@@ -442,7 +490,7 @@ export const startAgySession = (
           // `packages/acp/src/recordings/modes.jsonl` an update names `accept-edits` after
           // `set_mode default` was sent and before `current_mode_update default`, so reading
           // it would stop a healthy session. The reply to our own config call is reliable.
-          forgetChangedSelection(notification.update.configOptions);
+          config?.observe(notification.update.configOptions);
         }
         emitEvents(normalizeUpdate(normalizing, notification));
       },
@@ -481,10 +529,7 @@ export const startAgySession = (
         }),
       onUnhandledMessage: (message) => {
         if (isExited()) return;
-        if (normalizing === undefined) {
-          replayedUpdates += 1;
-          return;
-        }
+        if (normalizing === undefined) return;
         emitEvents(normalizeUnhandled(normalizing, message));
       },
     };
@@ -508,21 +553,11 @@ export const startAgySession = (
         guardedMode = modeId;
       });
 
-    /**
-     * Changes a setting of the conversation, and reads the mode that the reply
-     * reports along the way, because a mode change `agy` reports only there
-     * must still be seen by the drift guard.
-     */
-    const changeConfig = (connection: AcpConnection, nativeId: string, change: SettingChange) =>
-      changeSetting(connection, nativeId, change).pipe(
-        Effect.tap(({ options }) => Effect.sync(() => readModeOption(options))),
-      );
-
     const start = Effect.gen(function* () {
       const agy = yield* openSignedInAgy(seam.spawn, ctx, binary, {
         cwd,
         handlers,
-        purpose: { kind: "session", accessMode: spec.accessMode },
+        purpose: { kind: "session", accessMode },
       }).pipe(Scope.provide(processScope));
       const connection: AcpConnection = agy.connection;
 
@@ -542,7 +577,7 @@ export const startAgySession = (
           normalizing = buildNormalizingState({
             sessionId,
             nativeSessionId: id,
-            brainFolder: `${ctx.home}/${APP_DATA_DIR}/brain`,
+            planFilePaths: buildPlanFilePaths(ctx.home, id),
           });
           // Output that comes before the start is ready is held, so a failed start publishes nothing.
           holdTurn(normalizing);
@@ -563,11 +598,6 @@ export const startAgySession = (
       const state = normalizing;
       if (state === undefined)
         return yield* Effect.die(new Error("The conversation was not read."));
-      if (replayedUpdates > 0) {
-        yield* Effect.logInfo(
-          `Dropped ${replayedUpdates} updates that ${ANTIGRAVITY_NAME} replayed while it resumed the conversation.`,
-        ).pipe(Effect.annotateLogs({ sessionId }));
-      }
 
       const usable = checkAccountUsable(
         agy.planLabel,
@@ -577,50 +607,25 @@ export const startAgySession = (
       if (Result.isFailure(usable)) return yield* Effect.fail(usable.failure);
 
       // The model and level come first, and only when `agy` does not already have them.
-      const model = formatModelArgument(ctx.modelArgument, spec.modelSelection.model);
-      const effort = readEffort(spec.modelSelection);
-      let heldModel = readCurrentValue(settings.configOptions, "model");
-      let heldEffort = readCurrentValue(settings.configOptions, "thought_level");
-      /** Changes a setting, and fails the start unless the reply confirms it. Returns the options of the reply. */
-      const setAtStart = (change: SettingChange) =>
-        changeConfig(connection, conversation.id, change).pipe(
-          Effect.mapError((error) => buildStartConfigFailure(describeSetting(change), error)),
-          Effect.flatMap(({ outcome, options }) =>
-            outcome.kind === "confirmed"
-              ? Effect.succeed(options)
-              : Effect.fail(
-                  buildAdapterFailed(
-                    `${ANTIGRAVITY_NAME} did not confirm ${describeSetting(change)}${outcome.kind === "other" ? `: it reports ${quoteReported(outcome.named)}` : ""}, so the session was not started.`,
-                  ),
-                ),
-          ),
-        );
-      if (heldModel !== model) {
-        const options = yield* setAtStart({
-          configId: "model",
-          value: model,
-          kind: "model",
-          display: spec.modelSelection.model,
-        });
-        heldModel = model;
-        heldEffort = readCurrentValue(options, "thought_level");
+      const configChange = createConfigChange(
+        connection,
+        conversation.id,
+        ctx.modelArgument,
+        settings.configOptions,
+        recordModeOfReply,
+      );
+      config = configChange;
+      const applied = yield* configChange.apply(spec.modelSelection, () => false);
+      if (applied.kind === "cancelled") {
+        return yield* Effect.die(new Error("A start never cancels the change of its model."));
       }
-      if (effort !== undefined && heldEffort !== effort) {
-        yield* setAtStart({
-          configId: "thought_level",
-          value: effort,
-          kind: "level",
-          display: effort,
-        });
-        heldEffort = effort;
-      }
-      applied = { model: heldModel, effort: heldEffort };
+      if (applied.kind !== "applied") return yield* Effect.fail(buildStartConfigFailure(applied));
 
       // Then the mode. `full-access` has none: it is a flag of the process.
-      const modeId = readAgyModeId(spec.accessMode);
+      const modeId = chooseAgyMode(accessMode);
       if (modeId !== undefined) {
         const modeFailure = buildAdapterFailed(
-          `${ANTIGRAVITY_NAME} did not switch to ${ACCESS_MODE_NAMES[spec.accessMode]}. Pick another access mode.`,
+          `${ANTIGRAVITY_NAME} did not switch to ${ACCESS_MODE_NAMES[accessMode]}. Pick another access mode.`,
         );
         const modes = settings.modes;
         // A missing list is "not known", never "none", and neither lets a session start.
@@ -641,6 +646,8 @@ export const startAgySession = (
         } else {
           guardedMode = modeId;
         }
+        // An update that came while the start waited may have moved the mode again. Nothing waits between this check and `session.started`.
+        if (currentMode !== modeId) return yield* Effect.fail(modeFailure);
       }
 
       // From here to the monitor nothing waits, so no update slips in between.
@@ -665,10 +672,10 @@ export const startAgySession = (
         ),
         scope,
       );
-      return { connection, state, nativeId: conversation.id };
+      return { connection, state, nativeId: conversation.id, configChange };
     }).pipe(Effect.onError(() => Scope.close(processScope, Exit.void)));
 
-    const { connection, state, nativeId } = yield* start;
+    const { connection, state, nativeId, configChange } = yield* start;
 
     // ---- Inputs ----
 
@@ -686,92 +693,13 @@ export const startAgySession = (
         ),
       );
 
-    /**
-     * Changes one setting before an input, and returns the options of the reply.
-     * `whileChanging` is what `agy` holds while the request is in flight, which
-     * is unknown, and `recordOther` is what it holds when its reply names another
-     * value. A refusal puts back what was held before. The reply must name the
-     * requested value: another value is a refusal, no value is a change that is
-     * not confirmed.
-     */
-    const changeForInput = (
-      change: SettingChange,
-      whileChanging: AppliedSelection | undefined,
-      recordOther: (named: string, options: ConfigOptions) => AppliedSelection,
-    ): Effect.Effect<ConfigOptions, AdapterError> =>
-      Effect.gen(function* () {
-        const before = applied;
-        applied = whileChanging;
-        const what = `switch to ${describeSetting(change)}`;
-        const { outcome, options } = yield* changeConfig(connection, nativeId, change).pipe(
-          Effect.tapError((error) =>
-            Effect.sync(() => {
-              if (error.reason === "refused") applied = before;
-            }),
-          ),
-          Effect.mapError((error) => buildChangeFailure(what, error)),
-        );
-        if (outcome.kind === "other") {
-          applied = recordOther(outcome.named, options);
-          return yield* Effect.fail(
-            buildModelChangeRefused(
-              ANTIGRAVITY_NAME,
-              what,
-              `${ANTIGRAVITY_NAME} reports the ${change.kind} ${quoteReported(outcome.named)} instead.`,
-            ),
-          );
-        }
-        if (outcome.kind === "unconfirmed") return yield* Effect.fail(buildUnconfirmedChange(what));
-        return options;
-      });
-
-    /**
-     * Changes the model and level to the ones the input asks for, when `agy`
-     * does not hold them. What `agy` holds is `applied`: it is unknown while a
-     * request is in flight and after one that was not confirmed, so the next
-     * input sets it again. A model that was confirmed stays recorded when its
-     * level fails.
-     */
-    const selectModel = (
-      selection: ModelSelection,
-      inputGeneration: number,
-    ): Effect.Effect<void, AdapterError> =>
-      Effect.gen(function* () {
-        const model = formatModelArgument(ctx.modelArgument, selection.model);
-        const effort = readEffort(selection);
-        let held = applied;
-        if (held?.model !== model) {
-          const options = yield* changeForInput(
-            { configId: "model", value: model, kind: "model", display: selection.model },
-            undefined,
-            (named, reply) => ({
-              model: named,
-              effort: readCurrentValue(reply, "thought_level"),
-            }),
-          );
-          held = { model, effort: readCurrentValue(options, "thought_level") };
-          applied = held;
-          if (stopping || generation !== inputGeneration)
-            return yield* Effect.fail(buildInputStopped());
-        }
-        if (effort !== undefined && held.effort !== effort) {
-          const heldModel = held.model;
-          yield* changeForInput(
-            { configId: "thought_level", value: effort, kind: "level", display: effort },
-            { model: heldModel, effort: undefined },
-            (named) => ({ model: heldModel, effort: named }),
-          );
-          applied = { model: heldModel, effort };
-        }
-      });
-
     /** Whether an interrupt or a stop came after the input `inputGeneration` was admitted, which voids it. */
     const isVoided = (inputGeneration: number): boolean =>
       stopping || generation !== inputGeneration;
 
     /**
      * Reads the images and sets the model, and returns the prompt for `agy` with
-     * the part of `PREPARATION_BUDGET` that is left to hand it over. Fails with
+     * the part of `PREPARATION_BUDGET` that is left for the handoff of the prompt. Fails with
      * `InputNotDelivered` when an interrupt or a stop voids the input, with the
      * failures of the model change, and with `AdapterFailed` when an image cannot
      * be read or the budget runs out.
@@ -788,7 +716,11 @@ export const startAgySession = (
         // An interrupt that came while the images were read voids the input before anything is written to `agy`.
         if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
         if (input.modelSelection !== undefined) {
-          yield* selectModel(input.modelSelection, inputGeneration);
+          const changed = yield* configChange.apply(input.modelSelection, () =>
+            isVoided(inputGeneration),
+          );
+          if (changed.kind !== "applied")
+            return yield* Effect.fail(buildInputConfigFailure(changed));
         }
         // The last wait before the write is over, so an interrupt that came during it is checked here.
         if (isVoided(inputGeneration)) return yield* Effect.fail(buildInputStopped());
@@ -824,8 +756,10 @@ export const startAgySession = (
           );
         }
         // Admission is reserved here, before the first wait, so a second input is refused while this one is prepared.
+        // The output of `agy` is held from the same moment: until the handoff of the prompt is proven, new output may belong to this input, so no synthetic turn may open for it.
         const inputGeneration = generation;
         preparing = true;
+        holdTurn(state);
 
         // Uninterruptible except the two waits, so an interrupt can never leave the admission taken or a Turn unread.
         return yield* Effect.uninterruptibleMask((restore) =>
@@ -833,6 +767,8 @@ export const startAgySession = (
             const prepared = yield* Effect.exit(restore(prepareInput(input, inputGeneration)));
             if (Exit.isFailure(prepared)) {
               preparing = false;
+              // No Turn will take the held output, so it is shown as output with no input.
+              emitEvents(releaseTurn(state));
               if (Cause.hasInterrupts(prepared.cause) || !isVoided(inputGeneration)) {
                 return yield* Effect.failCause(prepared.cause);
               }
@@ -896,7 +832,7 @@ export const startAgySession = (
         );
       }
       return Effect.flatMap(turn.interrupt, (result) =>
-        result === "unresponsive" ? endUnresponsive(turn.id) : Effect.void,
+        result === "unresponsive" ? stopUnresponsiveProcess(turn.id) : Effect.void,
       );
     });
 
@@ -905,7 +841,7 @@ export const startAgySession = (
         const turn = readRunningTurn();
         if (turn === undefined) return Effect.void;
         return Effect.flatMap(turn.decide(requestId, decision), (result) =>
-          result === "unresponsive" ? endUnresponsive(turn.id) : Effect.void,
+          result === "unresponsive" ? stopUnresponsiveProcess(turn.id) : Effect.void,
         );
       });
 

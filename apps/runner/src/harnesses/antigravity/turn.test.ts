@@ -20,7 +20,8 @@ import {
   type PromptReply,
 } from "@hercule/acp";
 import type { HarnessEvent } from "@hercule/protocol";
-import { buildNormalizingState, normalizeUpdate } from "./normalize";
+import { buildPlanFilePaths } from "./harness-home";
+import { buildNormalizingState, holdTurn, normalizeUpdate } from "./normalize";
 import { startTurn } from "./turn";
 
 const FIRST_PROMPT: ReadonlyArray<PromptContent> = [{ type: "text", text: "go" }];
@@ -102,9 +103,11 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
     const normalizing = buildNormalizingState({
       sessionId: "session-1",
       nativeSessionId: "native",
-      brainFolder: "/tmp/brain",
+      planFilePaths: buildPlanFilePaths("/tmp", "native"),
     });
     let deliveryUnknown = 0;
+    // The session holds the output from the admission of the input on.
+    holdTurn(normalizing);
     const turn = yield* startTurn(
       {
         sessionId: "session-1",
@@ -422,7 +425,7 @@ describe("a Request about a call that is not a running item of the turn", () => 
       Effect.gen(function* () {
         const sent = buildQuestion();
 
-        expect(yield* h.turn.openQuestion(sent.request)).toEqual({ action: "cancel" });
+        expect(yield* h.turn.openQuestion(sent.request)).toEqual({ action: "decline" });
 
         expect(h.tags("request.opened")).toEqual([]);
         expect(h.tags("runtime.warning")).toHaveLength(1);
@@ -477,6 +480,28 @@ describe("the follow-up after a deny", () => {
         expect(h.prompts[1]?.content).toEqual([
           { type: "text", text: followUpText("edit_file, a tool") },
         ]);
+      }),
+    ));
+
+  it("cancels a Request that is still open when the prompt ends, and the follow-up is not an interrupt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* askAndDecide(h, buildTool("edit_file", "call-1"), "deny");
+        const second = buildTool("run_command", "call-2");
+        const asking = yield* Effect.forkChild(h.openApproval(second.request));
+        yield* Effect.yieldNow;
+
+        yield* h.reply(0, "end_turn");
+        expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
+        yield* Deferred.succeed(second.written, undefined);
+        yield* h.until(() => h.prompts.length === 2);
+        expect(h.tags("request.resolved")).toMatchObject([
+          { decision: "deny" },
+          { decision: "cancel" },
+        ]);
+        yield* h.reply(1, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
       }),
     ));
 
@@ -589,7 +614,7 @@ describe("interrupt", () => {
         });
         const question = buildQuestion();
         expect(yield* h.openQuestion(question.request)).toEqual({
-          action: "cancel",
+          action: "decline",
         });
         expect(h.tags("request.opened")).toHaveLength(0);
       }),
@@ -731,7 +756,7 @@ describe("questions", () => {
           requestedSchema: { properties: { other: { type: "string" } } },
         };
         expect(yield* h.openQuestion(unreadable)).toEqual({
-          action: "cancel",
+          action: "decline",
         });
         expect(h.tags("request.opened")).toHaveLength(0);
         expect(h.tags("runtime.warning")).toHaveLength(1);

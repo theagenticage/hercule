@@ -6,7 +6,15 @@
  * (`fake-agy.testing.ts`) answers over the pipes behind a spawn, and it writes
  * the worker logs the way `agy` does. The real `agy` is never started.
  */
-import { readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
@@ -836,5 +844,55 @@ describe("closing the scope", () => {
     expect(fake.spawns[0]!.signals).toEqual(["SIGTERM"]);
     expect(fake.spawns[0]!.hasExited).toBe(true);
     expect(listLogFolders(home)).toEqual([]);
+  });
+});
+
+describe("the hooks file of the Harness Home", () => {
+  const SESSION: AgyPurpose = { kind: "session", accessMode: "approval-required" };
+  const HOOKS = (home: string) => join(home, "config", "hooks.json");
+
+  it("is removed before agy starts for a session", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(HOOKS(home), "{}");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(fake.spawns).toHaveLength(1);
+  });
+
+  it("is removed as a link, and what it points to stays", async () => {
+    const { home, fake } = setUp();
+    const target = join(createScratchHome("agy-target"), "hooks.json");
+    writeFileSync(target, "{}");
+    mkdirSync(join(home, "config"));
+    symlinkSync(target, HOOKS(home));
+
+    await Effect.runPromise(Effect.scoped(open(fake, home, { purpose: SESSION })));
+
+    expect(existsSync(HOOKS(home))).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("{}");
+  });
+
+  it("is left alone when agy is opened for a probe", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(home, "config"));
+    writeFileSync(HOOKS(home), "{}");
+
+    await Effect.runPromise(Effect.scoped(open(fake, home)));
+
+    expect(existsSync(HOOKS(home))).toBe(true);
+  });
+
+  it("fails the start with AdapterFailed, and spawns nothing, when it cannot be removed", async () => {
+    const { home, fake } = setUp();
+    mkdirSync(join(HOOKS(home), "inner"), { recursive: true });
+
+    const failure = await runAndReadFailure(open(fake, home, { purpose: SESSION }));
+
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain("hooks file");
+    expect(fake.spawns).toHaveLength(0);
   });
 });

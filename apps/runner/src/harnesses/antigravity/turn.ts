@@ -49,7 +49,6 @@ import {
   closeTurn,
   describeRequestItem,
   findRequestOwner,
-  holdTurn,
   markDeclined,
   openTurn,
   releaseTurn,
@@ -288,8 +287,9 @@ export const cancelOrphanQuestion = (
 };
 
 /**
- * Starts a Turn for `input` and returns it reserved: its handoff is pending,
- * and the output of `agy` is held from now on. A fiber of the current scope
+ * Starts a Turn for `input` and returns it reserved: its handoff is pending.
+ * The session has held the output of `agy` since it admitted the input
+ * (`holdTurn`), and the Turn releases or replays it. A fiber of the current scope
  * writes the first prompt (`prompt`) to `agy`, which must take at most
  * `handoffBudget`, and then runs the Turn. Follow-up prompts are sent by the
  * Turn itself. The Turn ends by emitting `turn.completed`, and closing the
@@ -316,15 +316,12 @@ export const startTurn = (
     const turnId = crypto.randomUUID();
     const ended = yield* Deferred.make<void>();
     const handoff = yield* Deferred.make<Handoff>();
-    holdTurn(normalizing);
 
     /** The Requests that wait for a reply, by the id Hercule gave them. A Request leaves the map when it settles, so it settles once. */
     const open = new Map<string, ApprovalPark | QuestionPark>();
     let promptInFlight = false;
     /** Whether the Turn must end `interrupted`: the user or the session stopped it. */
     let interrupted = false;
-    /** Whether a Request was answered `cancel`. `agy` then replies `end_turn`, so the reply alone does not show it. */
-    let answeredCancel = false;
     /**
      * Where the Turn is in its life. `handoff` lasts until the first prompt is
      * proven delivered or refused. From `ending` on, no new Request opens and no
@@ -432,7 +429,6 @@ export const startTurn = (
         yield* trackResolution(announce);
         // `agy` reports a refused call as failed, so the item must be marked to show as declined.
         if (decision !== "allow") markDeclined(normalizing, request.toolCall.toolCallId);
-        if (decision === "cancel") answeredCancel = true;
         Deferred.doneUnsafe(
           park.outcome,
           Effect.succeed(buildApprovalOutcome(request.options, decision)),
@@ -575,7 +571,7 @@ export const startTurn = (
         if (written) return;
         return yield* Effect.fail(
           buildAnswerNotDelivered(
-            "It is not known whether Antigravity received the answer, so the question was cancelled. Ask again if the agent still needs it.",
+            "It is not known whether Antigravity received the answer, so the question was cancelled. The agent can ask again if it still needs the answer.",
           ),
         );
       });
@@ -678,7 +674,7 @@ export const startTurn = (
     };
 
     /** Writes the first prompt and returns the effect that waits for its reply, or refuses the handoff and returns undefined. */
-    const handOverFirstPrompt = Effect.gen(function* () {
+    const writeFirstPrompt = Effect.gen(function* () {
       const written = yield* Effect.result(
         connection.sendPrompt(nativeSessionId, input.prompt),
       ).pipe(Effect.timeoutOption(input.handoffBudget));
@@ -724,7 +720,7 @@ export const startTurn = (
     });
 
     const runTurn = Effect.gen(function* () {
-      let waiting = yield* handOverFirstPrompt;
+      let waiting = yield* writeFirstPrompt;
       if (waiting === undefined) return;
       for (;;) {
         deniedToolNames = [];
@@ -757,11 +753,14 @@ export const startTurn = (
 
         const { stopReason } = result.reply;
         if (stopReason === "end_turn") {
-          if (interrupted || answeredCancel) return yield* finish("interrupted");
+          if (interrupted) return yield* finish("interrupted");
           if (deniedToolNames.length === 0) return yield* finish("completed");
           const followUp: ReadonlyArray<PromptContent> = [
             { type: "text", text: buildFollowUpText(deniedToolNames) },
           ];
+          // A Request still open belongs to the prompt that is over, so it must not stay answerable.
+          yield* cancelOpenRequests;
+          yield* Effect.forEach(pendingResolutions, Fiber.await, { discard: true });
           waiting = Effect.flatten(connection.sendPrompt(nativeSessionId, followUp));
           continue;
         }

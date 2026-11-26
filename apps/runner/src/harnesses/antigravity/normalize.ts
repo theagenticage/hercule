@@ -1,20 +1,28 @@
 /**
  * Converts the ACP messages of an Antigravity session into normalized harness
  * events. The input is one message and a small mutable state per session; the
- * output is a list of events. Nothing here touches a process or a socket. Spec
- * 06 sections 6.2 (turns), 6.3 (items), 6.6 (usage) and 6.7 (the decision for
- * every message) own the rules.
+ * output is a list of events. This module does no I/O and knows no process or
+ * socket, but it is not pure: it mints ids and reads the clock through the
+ * shared `buildEnvelope`, as the pi and Codex normalizers do. Spec 06 sections
+ * 6.2 (turns), 6.3 (items), 6.6 (usage) and 6.7 (the decision for every message)
+ * own the rules.
  *
  * ACP has no turn, no item ids for text, and no todo list, so this module
- * supplies them:
+ * supplies them. The Turn (`turn.ts`) decides when a user's turn opens and
+ * ends, and calls `holdTurn`, `openTurn`, `releaseTurn` and `closeTurn` to say
+ * so. This module keeps what follows from that:
  *
- * - A turn is opened and closed by the adapter (`openTurn`, `closeTurn`). Output
- *   that arrives with no turn open gets a synthetic turn, which closes when
- *   its last item completes.
- * - A text item starts at its first chunk and completes at the next message of
- *   another kind, at `usage_update`, or when the turn closes.
- * - The `todo_list` and `plan` items are rebuilt from the files the model
- *   writes, because `agy` sends no ACP `plan` update.
+ * - the item records, and which turn each item belongs to (a late update of a
+ *   call completes the item in the turn the call started in);
+ * - the hold buffer: output that would draw something new while an input is
+ *   handed over waits, and is replayed into the input's turn;
+ * - synthetic turns: output that arrives with no turn open gets one, which
+ *   closes when its last item completes;
+ * - text items: one starts at its first chunk and completes at the next
+ *   message of another kind, at `usage_update`, or when the turn closes;
+ * - the `todo_list` and `plan` items, rebuilt from the files the model writes,
+ *   because `agy` sends no ACP `plan` update. It compares a written path with
+ *   the plan file paths it was given; it does not build paths.
  *
  * This module emits no `user_message`, `session.started`, `session.exited` or
  * `request.*` event: the session and the adapter own those.
@@ -48,6 +56,7 @@ import {
   type ApprovalDescription,
   type ToolCallFields,
 } from "./tool-items";
+import type { PlanFilePaths } from "./harness-home";
 
 /** The channel name every raw payload from this adapter is reported under. */
 const ANTIGRAVITY_MESSAGE = "antigravity.acp.message";
@@ -127,8 +136,8 @@ type BufferedMessage =
 export interface Normalizing {
   readonly sessionId: string;
   readonly nativeSessionId: string;
-  /** The folder `<Harness Home>/antigravity-acp/brain`, where the model keeps its plan files. */
-  readonly brainFolder: string;
+  /** Where this conversation's `task.md` and `implementation_plan.md` can be reported. */
+  readonly planFilePaths: PlanFilePaths;
   /** The turn in flight, if any. */
   turn: TurnRecord | undefined;
   /** Whether an input is being handed over: nothing new is drawn while it is. */
@@ -161,18 +170,17 @@ export interface RequestItem extends RequestOwner {
 }
 
 /**
- * Returns the state for a new session. `brainFolder` is
- * `<Harness Home>/antigravity-acp/brain`: this session's plan files are in
- * `<brainFolder>/<nativeSessionId>/`.
+ * Returns the state for a new session. `planFilePaths` are the paths of this
+ * conversation's plan files (`buildPlanFilePaths`).
  */
 export const buildNormalizingState = (input: {
   readonly sessionId: string;
   readonly nativeSessionId: string;
-  readonly brainFolder: string;
+  readonly planFilePaths: PlanFilePaths;
 }): Normalizing => ({
   sessionId: input.sessionId,
   nativeSessionId: input.nativeSessionId,
-  brainFolder: input.brainFolder,
+  planFilePaths: input.planFilePaths,
   turn: undefined,
   held: false,
   buffered: [],
@@ -607,7 +615,11 @@ const normalizeToolCall = (
   // A late update of an ended call changes nothing, so it must not close the
   // open message either: that would split one message in two.
   if (record?.ended === true) return [];
-  const events = closeTextItem(state);
+  // An update of a call that belongs to an earlier turn completes that call's
+  // item and says nothing about the current turn's message, so it must not
+  // split it.
+  const events =
+    record !== undefined && record.turnId !== state.turn?.id ? [] : closeTextItem(state);
   if (record === undefined) {
     if (!isStart && (call.rawInput == null || !call.name)) return events;
     const { turn, events: turnEvents } = ensureTurn(state);
@@ -633,8 +645,7 @@ const normalizeToolCall = (
   } else {
     record.call = mergeCall(record.call, call);
   }
-  if (record.ended || call.rawInput == null) return events;
-  const running = record;
+  if (call.rawInput == null) return events;
   if (call.status !== "completed" && call.status !== "failed") return events;
 
   const wasDeclined = state.declined.delete(call.toolCallId);
@@ -642,7 +653,7 @@ const normalizeToolCall = (
     call.status === "completed" ? "completed" : wasDeclined ? "declined" : "failed";
   state.tools.set(call.toolCallId, ENDED_TOOL);
   if (state.turn?.id === record.turnId) state.turn.running.delete(record.itemId);
-  const { kind, detail } = buildToolItem(running.call);
+  const { kind, detail } = buildToolItem(record.call);
   events.push(
     buildItemCompleted(
       state,
@@ -652,33 +663,16 @@ const normalizeToolCall = (
     ),
   );
   if (status === "completed" && kind === "file_change") {
-    events.push(...buildPlanFileEvents(state, running, call));
+    events.push(...buildPlanFileEvents(state, record, call));
   }
   return events;
 };
 
 // ---- todo_list and plan, rebuilt from the model's files ----
 
-const TASK_FILE = "task.md";
-const PLAN_FILE = "implementation_plan.md";
-
-/**
- * Returns the other spelling of `path`, but only on macOS, where `/tmp`, `/var` and
- * `/etc` are links to `/private/tmp`, `/private/var` and `/private/etc`. `agy`
- * reports the same file under either spelling.
- */
-const toOtherMacSpelling = (path: string): string => {
-  if (process.platform !== "darwin") return path;
-  if (/^\/private\/(tmp|var|etc)(\/|$)/.test(path)) return path.slice("/private".length);
-  return /^\/(tmp|var|etc)(\/|$)/.test(path) ? `/private${path}` : path;
-};
-
-/** Checks that `given` and `expected` name the same file: equal after `resolve`, or equal but for the `/private` spelling. */
-const isSameFile = (given: string, expected: string): boolean => {
-  const actual = resolve(given);
-  const wanted = resolve(expected);
-  return actual === wanted || actual === toOtherMacSpelling(wanted);
-};
+/** Checks that `given` names one of the `known` paths of a plan file, after `resolve`. */
+const isPlanFile = (given: string, known: ReadonlyArray<string>): boolean =>
+  known.includes(resolve(given));
 
 /** Returns the text a completed update says the file now holds: the `newText` of its first diff. */
 const readWrittenText = (call: ToolCallFields): string | undefined => {
@@ -695,11 +689,13 @@ const readWrittenText = (call: ToolCallFields): string | undefined => {
  */
 const parseTaskSteps = (text: string): TodoStep[] =>
   text.split(/\r?\n/).flatMap((line) => {
-    const match = /^\s*-\s+\[([ /xX])\]\s*(.*?)\s*$/.exec(line);
-    if (match === null || match[2] === "") return [];
+    // The text is trimmed after the match: a lazy `(.*?)\s*$` takes quadratic time on a long run of spaces.
+    const match = /^\s*-\s+\[([ /xX])\](.*)$/.exec(line);
+    const text = match?.[2]?.trim();
+    if (match === null || text === undefined || text === "") return [];
     const mark = match[1];
     const status = mark === " " ? "pending" : mark === "/" ? "in_progress" : "completed";
-    return [{ text: truncateFact(match[2]!), status }];
+    return [{ text: truncateFact(text), status }];
   });
 
 /**
@@ -728,9 +724,8 @@ const buildPlanFileEvents = (
       : undefined;
   const text = readWrittenText(completingCall);
   if (typeof path !== "string" || text === undefined) return [];
-  const folder = `${state.brainFolder}/${state.nativeSessionId}`;
 
-  if (isSameFile(path, `${folder}/${PLAN_FILE}`)) {
+  if (isPlanFile(path, state.planFilePaths.plan)) {
     const item: ItemFields = {
       turnId: turn.id,
       itemId: `${record.itemId}:plan`,
@@ -745,7 +740,7 @@ const buildPlanFileEvents = (
       ),
     ];
   }
-  if (!isSameFile(path, `${folder}/${TASK_FILE}`)) return [];
+  if (!isPlanFile(path, state.planFilePaths.task)) return [];
 
   const steps = parseTaskSteps(text);
   if (steps.length > MAX_TODO_STEPS) {

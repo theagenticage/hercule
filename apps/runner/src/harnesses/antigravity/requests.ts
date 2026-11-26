@@ -25,8 +25,12 @@ import { truncateFact, truncateMessage } from "../text";
 /** The reply to an approval Request that nobody can decide: `agy` does not run the call. */
 export const CANCELLED_APPROVAL: ApprovalOutcome = { outcome: "cancelled" };
 
-/** The reply to a question Request that nobody can answer. */
-export const CANCELLED_QUESTION: ElicitationReply = { action: "cancel" };
+/**
+ * The reply to a question Request that nobody can answer. It is `decline`, not
+ * `cancel`: `agy` was recorded taking `decline` (the model reads "User Skipped"
+ * and the turn goes on), while `cancel` was never recorded (spec 06 section 6.5).
+ */
+export const CANCELLED_QUESTION: ElicitationReply = { action: "decline" };
 
 /** Returns the failure of an answer to a question that is not open anymore. */
 export const buildQuestionNotOpen = () =>
@@ -86,8 +90,6 @@ interface FormQuestion {
   readonly field: string;
   /** The name of the field that carries a typed answer, when the form has one. */
   readonly otherField: string | undefined;
-  /** Whether the form lists the question in `required`, so it must be answered. */
-  readonly required: boolean;
   /** Whether the field takes a list of choices (`qN` is an array) rather than one. */
   readonly multiSelect: boolean;
   readonly choices: ReadonlyArray<FormChoice>;
@@ -165,7 +167,7 @@ const readChoices = (
 
 /**
  * Reads the form `agy` sent into questions. Returns `undefined` when the form
- * cannot be read, and the caller then answers `{ action: "cancel" }` with a
+ * cannot be read, and the caller then answers `{ action: "decline" }` with a
  * warning. A form is unreadable when:
  *
  * - a property is neither `qN` nor `qN_other`;
@@ -196,7 +198,6 @@ export const parseQuestionForm = (request: ElicitationRequest): QuestionForm | u
 
   if (questionFields.length > MAX_FORM_ITEMS) return undefined;
 
-  const required = new Set(request.requestedSchema.required ?? []);
   let characters = 0;
   const mapping: Array<FormQuestion> = [];
   const questions: Array<Question> = [];
@@ -209,7 +210,6 @@ export const parseQuestionForm = (request: ElicitationRequest): QuestionForm | u
       header,
       field: name,
       otherField: otherFields.has(name) ? `${name}_other` : undefined,
-      required: required.has(name),
       multiSelect,
       choices,
     });
@@ -267,10 +267,10 @@ const refuse = (message: string): ElicitationAnswerResult => ({ kind: "refused",
  * - a single-choice answer is a list of several values;
  * - a multi-select answer holds more than one typed text (`qN_other` is one
  *   text);
- * - an answer has a header the form does not have;
- * - a question the form lists in `requestedSchema.required` got no answer. A
- *   question that is not required may be left unanswered, and then it is
- *   absent from the reply.
+ * - an answer has a header the form does not have.
+ *
+ * A question left unanswered is absent from the reply. No recorded form has a
+ * `required` list, so none is read.
  */
 export const buildElicitationReply = (
   form: QuestionForm,
@@ -287,7 +287,6 @@ export const buildElicitationReply = (
     const given = answers[question.header];
     const list = given === undefined ? [] : typeof given === "string" ? [given] : given;
     if (list.length === 0) {
-      if (question.required) return refuse(`${question.header} needs an answer. Answer it.`);
       continue;
     }
     if (!question.multiSelect && list.length !== 1) {

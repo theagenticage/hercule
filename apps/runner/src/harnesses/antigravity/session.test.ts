@@ -186,14 +186,11 @@ const confirmMode =
   ({ id }) => [{ jsonrpc: "2.0", id, result: {} }, buildModeUpdate(modeId)];
 
 /**
- * The `cancel` recording ran in `auto` and its turn reports that mode again,
- * so a session over it starts in `auto` too. A session in any other mode
- * would see `agy` change its mode.
+ * The `cancel` recording ends its turn with a mode update to `auto`. A session
+ * in `full-access` has no mode to guard, so it takes that update without
+ * stopping.
  */
-const CANCEL_IN_AUTO: FakeAgyOptions = {
-  recording: "cancel",
-  scripts: { "session/set_mode": confirmMode("auto") },
-};
+const CANCEL_RECORDING: FakeAgyOptions = { recording: "cancel" };
 
 /** How many `session/set_config_option` calls the test that counts them has seen. */
 let configCalls = 0;
@@ -666,7 +663,7 @@ describe("the confirmation of a model or level", () => {
 });
 
 describe("the mode of a start", () => {
-  const AUTO: Partial<SessionSpec> = { accessMode: "auto" };
+  const ACCEPT_EDITS: Partial<SessionSpec> = { accessMode: "auto-accept-edits" };
   const inUpdateOrder = {
     "before the reply": true,
     "after the reply": false,
@@ -677,9 +674,11 @@ describe("the mode of a start", () => {
       run(
         (h) =>
           Effect.gen(function* () {
-            yield* h.start(AUTO);
+            yield* h.start(ACCEPT_EDITS);
 
-            expect(h.received("session/set_mode")[0]?.params).toMatchObject({ modeId: "auto" });
+            expect(h.received("session/set_mode")[0]?.params).toMatchObject({
+              modeId: "accept-edits",
+            });
             expect(h.tags("session.started")).toHaveLength(1);
           }),
         {
@@ -688,8 +687,8 @@ describe("the mode of a start", () => {
               "session/set_mode": ({ id }) => {
                 const reply: JsonRpcMessage = { jsonrpc: "2.0", id, result: {} };
                 return updateFirst
-                  ? [buildModeUpdate("auto"), reply]
-                  : [reply, buildModeUpdate("auto")];
+                  ? [buildModeUpdate("accept-edits"), reply]
+                  : [reply, buildModeUpdate("accept-edits")];
               },
             },
           },
@@ -697,27 +696,11 @@ describe("the mode of a start", () => {
       ));
   }
 
-  it.each([
-    ["auto-accept-edits", "accept-edits"],
-    ["auto", "auto"],
-  ] as const)("asks agy for the mode of the %s Access Mode: %s", (accessMode, modeId) =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start({ accessMode });
-
-          expect(h.received("session/set_mode")[0]?.params).toMatchObject({ modeId });
-          expect(h.tags("session.started")).toHaveLength(1);
-        }),
-      { fake: { scripts: { "session/set_mode": confirmMode(modeId) } } },
-    ),
-  );
-
   it("fails the start when a contrary mode update follows the confirming one before the reply", () =>
     run(
       (h) =>
         Effect.gen(function* () {
-          const starting = yield* startInFiber(h, AUTO);
+          const starting = yield* startInFiber(h, ACCEPT_EDITS);
           yield* h.untilReceived("session/set_mode");
           yield* TestClock.adjust(Duration.seconds(5));
 
@@ -728,7 +711,7 @@ describe("the mode of a start", () => {
         fake: {
           scripts: {
             "session/set_mode": ({ id }) => [
-              buildModeUpdate("auto"),
+              buildModeUpdate("accept-edits"),
               buildModeUpdate("plan"),
               { jsonrpc: "2.0", id, result: {} },
             ],
@@ -741,14 +724,35 @@ describe("the mode of a start", () => {
     run(
       (h) =>
         Effect.gen(function* () {
-          yield* h.start(AUTO);
+          yield* h.start(ACCEPT_EDITS);
 
           h.harness().sendLine(JSON.stringify(buildModeUpdate("plan")));
 
           yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
           expect(h.tags("session.exited")).toMatchObject([{ reason: "crash" }]);
         }),
-      { fake: { scripts: { "session/set_mode": confirmMode("auto") } } },
+      { fake: { scripts: { "session/set_mode": confirmMode("accept-edits") } } },
+    ));
+
+  it("takes a mode update that comes before the reply that opens the conversation", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start(ACCEPT_EDITS);
+
+          expect(h.received("session/set_mode")).toHaveLength(0);
+          expect(h.tags("session.started")).toHaveLength(1);
+        }),
+      {
+        fake: (home) => ({
+          scripts: {
+            "session/new": (call, harness) => [
+              buildModeUpdate("accept-edits"),
+              ...answerNewSession(home)(call, harness),
+            ],
+          },
+        }),
+      },
     ));
 
   it("sets nothing when agy is already in the mode", () =>
@@ -760,13 +764,13 @@ describe("the mode of a start", () => {
       }),
     ));
 
-  const NOT_SWITCHED = "Antigravity did not switch to Auto. Pick another access mode.";
+  const NOT_SWITCHED = "Antigravity did not switch to Auto-accept edits. Pick another access mode.";
 
   it("fails the start when agy does not offer the mode, and sets nothing", () =>
     run(
       (h) =>
         Effect.gen(function* () {
-          const failure = yield* Effect.flip(h.start(AUTO));
+          const failure = yield* Effect.flip(h.start(ACCEPT_EDITS));
 
           expect(failure).toMatchObject({ _tag: "AdapterFailed", message: NOT_SWITCHED });
           expect(h.received("session/set_mode")).toHaveLength(0);
@@ -777,7 +781,9 @@ describe("the mode of a start", () => {
           scripts: {
             "session/new": changeNewSession(home, (result) => {
               const modes = result["modes"] as { availableModes: Array<{ id: string }> };
-              modes.availableModes = modes.availableModes.filter((mode) => mode.id !== "auto");
+              modes.availableModes = modes.availableModes.filter(
+                (mode) => mode.id !== "accept-edits",
+              );
             }),
           },
         }),
@@ -788,7 +794,7 @@ describe("the mode of a start", () => {
     run(
       (h) =>
         Effect.gen(function* () {
-          const failure = yield* Effect.flip(h.start(AUTO));
+          const failure = yield* Effect.flip(h.start(ACCEPT_EDITS));
 
           expect(failure).toMatchObject({ _tag: "AdapterFailed", message: NOT_SWITCHED });
           expect(h.received("session/set_mode")).toHaveLength(0);
@@ -807,7 +813,7 @@ describe("the mode of a start", () => {
   it("fails the start, and prompts nothing, when agy does not confirm the mode in 5 seconds", () =>
     run((h) =>
       Effect.gen(function* () {
-        const starting = yield* startInFiber(h, AUTO);
+        const starting = yield* startInFiber(h, ACCEPT_EDITS);
         yield* h.untilReceived("session/set_mode");
         yield* TestClock.adjust(Duration.millis(4999));
         expect(starting.pollUnsafe()).toBeUndefined();
@@ -881,7 +887,7 @@ describe("a turn", () => {
           expect(h.received("session/prompt")).toHaveLength(1);
           expect(h.tags("turn.started")).toHaveLength(1);
         }),
-      { fake: CANCEL_IN_AUTO, spec: { accessMode: "auto" } },
+      { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
     ));
 
   it("is interrupted with session/cancel and ends interrupted, and the session goes on", () =>
@@ -902,7 +908,7 @@ describe("a turn", () => {
           expect(h.tags("session.exited")).toHaveLength(0);
           expect(yield* h.adapter.listSessions).toHaveLength(1);
         }),
-      { fake: CANCEL_IN_AUTO, spec: { accessMode: "auto" } },
+      { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
     ));
 
   it("sends no cancel for an interrupt when no turn runs", () =>
@@ -1238,7 +1244,7 @@ describe("the end of a session", () => {
           expect(h.tags("turn.completed")).toMatchObject([{ state: "interrupted" }]);
           expect(h.received("session/cancel")).toHaveLength(0);
         }),
-      { fake: CANCEL_IN_AUTO, spec: { accessMode: "auto" } },
+      { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
     ));
 
   it("is reported as a process exit when agy dies mid-turn, and the turn fails", () =>
@@ -1263,7 +1269,7 @@ describe("the end of a session", () => {
           const next = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput()));
           expect(next._tag).toBe("SessionNotRunning");
         }),
-      { fake: CANCEL_IN_AUTO, spec: { accessMode: "auto" } },
+      { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
     ));
 
   it("fails a start whose process dies before it is ready, with no event", () =>
@@ -1807,6 +1813,86 @@ describe("the output that comes while a prompt is handed over, with a synthetic 
       },
     );
   });
+});
+
+describe("the output that comes while an input is prepared", () => {
+  it("is held for the input's turn, so no synthetic turn opens before the prompt is handed off", () => {
+    let levelReply: ReturnType<HarnessScript>[number] | undefined;
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          const sending = yield* Effect.forkChild(
+            h.adapter.sendInput(
+              SESSION,
+              buildInput("Work.", {
+                modelSelection: { model: SPEC.modelSelection.model, options: { effort: "low" } },
+              }),
+            ),
+          );
+          yield* h.until("the level change was received", () => levelReply !== undefined);
+          h.harness().sendLine(
+            JSON.stringify(
+              buildUpdate({
+                sessionUpdate: "tool_call_update",
+                toolCallId: "call-new",
+                name: "run_command",
+                kind: "execute",
+                status: "in_progress",
+                rawInput: { CommandLine: "ls" },
+              }),
+            ),
+          );
+          yield* Effect.promise(settle);
+          expect(h.tags("turn.started"), "no turn opens during the preparation").toHaveLength(0);
+
+          h.harness().sendLine(JSON.stringify(levelReply));
+          const { turnId } = (yield* Fiber.join(sending)) as { turnId: string };
+
+          expect(h.tags("item.started").map((event) => [event.turnId, event.kind])).toEqual([
+            [turnId, "user_message"],
+            [turnId, "command_execution"],
+          ]);
+        }),
+      {
+        fake: {
+          recording: readRecordedSetup("cancel"),
+          scripts: {
+            "session/prompt": noAnswer,
+            "session/set_config_option": (call, harness) => {
+              levelReply = answerConfigChange("cancel")(call, harness)[0];
+              return [];
+            },
+          },
+        },
+      },
+    );
+  });
+});
+
+describe("a synthetic turn that agy leaves open", () => {
+  const CHUNK = buildUpdate({
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "Hello." },
+  });
+
+  it("completes after 10 seconds without an update, and each update starts the wait again", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.start();
+        h.harness().sendLine(JSON.stringify(CHUNK));
+        yield* h.until("a synthetic turn opened", () => h.tags("turn.started").length === 1);
+
+        yield* TestClock.adjust(Duration.seconds(9));
+        h.harness().sendLine(JSON.stringify(CHUNK));
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust(Duration.seconds(9));
+        expect(h.tags("turn.completed"), "the second chunk started the wait again").toHaveLength(0);
+
+        yield* TestClock.adjust(Duration.seconds(1));
+        expect(h.tags("turn.completed")).toMatchObject([{ state: "completed" }]);
+      }),
+    ));
 });
 
 describe("the output that comes before a start is ready", () => {

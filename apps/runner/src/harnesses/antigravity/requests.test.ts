@@ -59,13 +59,10 @@ describe("approvals", () => {
 });
 
 /** Returns a form request holding `properties`. */
-const buildRequest = (
-  properties: Record<string, ElicitationField>,
-  required?: ReadonlyArray<string>,
-): ElicitationRequest => ({
+const buildRequest = (properties: Record<string, ElicitationField>): ElicitationRequest => ({
   requestId: "req-1",
   message: "The agent has a question.",
-  requestedSchema: { properties, ...(required === undefined ? {} : { required }) },
+  requestedSchema: { properties },
   raw: {},
   replyWritten: Effect.void,
 });
@@ -87,11 +84,8 @@ const answerOk = (form: QuestionForm, answers: QuestionAnswers) => {
 };
 
 /** Reads a form that must be readable. */
-const readForm = (
-  properties: Record<string, ElicitationField>,
-  required?: ReadonlyArray<string>,
-) => {
-  const form = parseQuestionForm(buildRequest(properties, required));
+const readForm = (properties: Record<string, ElicitationField>) => {
+  const form = parseQuestionForm(buildRequest(properties));
   if (form === undefined) throw new Error("expected a readable form");
   return form;
 };
@@ -167,20 +161,10 @@ describe("several questions", () => {
     });
   });
 
-  it("leaves out an unanswered question that is not required", () => {
+  it("leaves out an unanswered question", () => {
     expect(answerOk(form, { "Question 2": "C" })).toEqual({
       action: "accept",
       content: { q2: "1" },
-    });
-  });
-
-  it("refuses an unanswered question the form requires", () => {
-    const required = readForm({ q1: buildSelect("First?", "A"), q2: buildSelect("Second?", "C") }, [
-      "q2",
-    ]);
-    expect(buildElicitationReply(required, { "Question 1": "A" })).toEqual({
-      kind: "refused",
-      message: "Question 2 needs an answer. Answer it.",
     });
   });
 

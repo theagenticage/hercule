@@ -132,7 +132,9 @@ const splitMcpToolName = (
  * - `edit_file` and `write_file`: `path`, whole, or the tool's name when the
  *   call has no usable path.
  * - `read_file`: `path`.
- * - `search_web`: `query`.
+ * - `search_web`: `query`, followed by ` site:<domain>` when the call has a
+ *   `domain`. The item's detail has no field for a domain, and the search
+ *   operator says what the call did.
  * - `invoke_subagent`: `description` (the call's `Role`) and an empty
  *   `subagentIds`, because Antigravity gives a subagent no id.
  * - `mcp_tools_<server>__<tool>`: `{ server, name, kind: "mcp" }`. The call's
@@ -173,7 +175,12 @@ export const buildToolItem = (call: ToolCallFields): ToolItem => {
     }
     case "web_search": {
       const query = readText(input, "query");
-      return { kind, detail: query === undefined ? {} : { query: truncateFact(query) } };
+      const domain = readText(input, "domain");
+      if (query === undefined) return { kind, detail: {} };
+      return {
+        kind,
+        detail: { query: truncateFact(domain === undefined ? query : `${query} site:${domain}`) },
+      };
     }
     case "subagent": {
       const role = readText(input, "Role");

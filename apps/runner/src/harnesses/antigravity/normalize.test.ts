@@ -10,7 +10,7 @@
 import type { SessionUpdate, SessionUpdateNotification, ToolCall } from "@hercule/acp";
 import { readRecording, type RecordingName } from "@hercule/acp/testing";
 import { MAX_TODO_STEPS, type HarnessEvent } from "@hercule/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   addPromptUsage,
   buildNormalizingState,
@@ -27,9 +27,10 @@ import {
   type Normalizing,
   type RequestItem,
 } from "./normalize";
+import { buildPlanFilePaths } from "./harness-home";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
-const BRAIN = "/tmp/agy-spike/acctC/antigravity-acp/brain";
+const HOME = "/tmp/agy-spike/acctC";
 
 const KNOWN_UPDATES = new Set([
   "agent_message_chunk",
@@ -69,7 +70,11 @@ const playRecording = (name: RecordingName): Played => {
   const nativeSessionId = messages
     .map((entry) => (entry.message.result as { sessionId?: string } | undefined)?.sessionId)
     .find((id) => id !== undefined)!;
-  const state = buildNormalizingState({ sessionId: SESSION, nativeSessionId, brainFolder: BRAIN });
+  const state = buildNormalizingState({
+    sessionId: SESSION,
+    nativeSessionId,
+    planFilePaths: buildPlanFilePaths(HOME, nativeSessionId),
+  });
   const events: HarnessEvent[] = [];
   const requests: Array<RequestItem | undefined> = [];
   const callOfRequest = new Map<string | number, string>();
@@ -153,7 +158,7 @@ const freshState = () =>
   buildNormalizingState({
     sessionId: SESSION,
     nativeSessionId: "native-1",
-    brainFolder: "/b/brain",
+    planFilePaths: buildPlanFilePaths("/b", "native-1"),
   });
 
 const runCall = (id: string, command = "ls") => ({
@@ -376,6 +381,22 @@ describe("the websearch recording", () => {
   });
 });
 
+describe("a web search with a domain", () => {
+  it("shows the domain beside the query", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    const events = normalizeUpdate(
+      state,
+      buildToolStart({
+        toolCallId: "s1",
+        name: "search_web",
+        rawInput: { query: "bun", domain: "bun.sh" },
+      }),
+    );
+    expect(events).toMatchObject([{ kind: "web_search", detail: { query: "bun site:bun.sh" } }]);
+  });
+});
+
 describe("the deny2 recording", () => {
   it("shows a call that the adapter denied as declined, not failed", () => {
     const { events } = playRecording("deny2");
@@ -424,6 +445,35 @@ describe("tool items", () => {
     ).toEqual([]);
     const events = normalizeUpdate(state, buildChunk("world"));
     expect(outline(events)).toEqual(["content.delta"]);
+  });
+
+  it("does not split the open message for a late update of a call of an earlier turn", () => {
+    const state = freshState();
+    openTurn(state, "t1");
+    normalizeUpdate(state, buildToolStart(runCall("old")));
+    closeTurn(state, { state: "completed" });
+    openTurn(state, "t2");
+    const events = [
+      ...normalizeUpdate(state, buildChunk("Hel")),
+      ...normalizeUpdate(state, buildToolUpdate({ ...runCall("old"), status: "completed" })),
+      ...normalizeUpdate(state, buildChunk("lo")),
+      ...closeTurn(state, { state: "completed" }),
+    ];
+    const messages = only(events, "item.completed").filter(
+      (event) => event.kind === "assistant_message",
+    );
+    expect(messages).toHaveLength(1);
+    expect(
+      only(events, "content.delta")
+        .map((event) => event.delta)
+        .join(""),
+    ).toBe("Hello");
+    expect(
+      only(events, "item.completed").find((event) => event.kind === "command_execution"),
+    ).toMatchObject({
+      turnId: "t1",
+      status: "completed",
+    });
   });
 
   it("records no decline for a call that is unknown or ended", () => {
@@ -787,7 +837,7 @@ describe("the files of the plan", () => {
       buildToolStart({ toolCallId: id, name: "write_file", rawInput: { Path: path } }),
     );
 
-  const TASK = "/b/brain/native-1/task.md";
+  const TASK = "/b/antigravity-acp/brain/native-1/task.md";
 
   const write = (
     state: Normalizing,
@@ -806,57 +856,35 @@ describe("the files of the plan", () => {
     return state;
   };
 
-  describe("the /private spelling of the same file", () => {
-    const platform = Object.getOwnPropertyDescriptor(process, "platform");
-    const setPlatform = (value: string) => {
-      Object.defineProperty(process, "platform", { value });
-    };
-    afterEach(() => {
-      if (platform !== undefined) Object.defineProperty(process, "platform", platform);
-    });
+  it("reads a task line of 80000 spaces in linear time", () => {
+    const state = open();
+    const line = `- [ ] x${" ".repeat(80_000)}x`;
+    const started = performance.now();
+    const events = write(state, TASK, `${line}\n`);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(outline(events)).toEqual(["item.completed file_change", "item.started todo_list"]);
+  });
 
-    const writeUnder = (brainFolder: string, path: string) => {
-      const state = buildNormalizingState({
-        sessionId: SESSION,
-        nativeSessionId: "native-1",
-        brainFolder,
-      });
-      openTurn(state, "t");
-      return outline(write(state, path, "- [ ] a\n"));
-    };
-
-    it("is accepted on macOS for /tmp, /var and /etc", () => {
-      setPlatform("darwin");
-      for (const root of ["tmp", "var", "etc"]) {
-        expect(writeUnder(`/${root}/b/brain`, `/private/${root}/b/brain/native-1/task.md`)).toEqual(
-          ["item.completed file_change", "item.started todo_list"],
-        );
-      }
+  it("accepts the /private spelling of the plan files it was given", () => {
+    const state = buildNormalizingState({
+      sessionId: SESSION,
+      nativeSessionId: "native-1",
+      planFilePaths: buildPlanFilePaths("/tmp/b", "native-1", "darwin"),
     });
-
-    it("is not accepted on another system", () => {
-      setPlatform("linux");
-      expect(writeUnder("/tmp/b/brain", "/private/tmp/b/brain/native-1/task.md")).toEqual([
-        "item.completed file_change",
-      ]);
-    });
-
-    it("is not accepted for any other folder, also on macOS", () => {
-      setPlatform("darwin");
-      expect(writeUnder("/private/data/brain", "/data/brain/native-1/task.md")).toEqual([
-        "item.completed file_change",
-      ]);
-    });
+    openTurn(state, "t");
+    expect(
+      outline(write(state, "/private/tmp/b/antigravity-acp/brain/native-1/task.md", "- [ ] a\n")),
+    ).toEqual(["item.completed file_change", "item.started todo_list"]);
   });
 
   it("ignores another session's folder, other file names, and a path that only looks alike", () => {
     const state = open();
     for (const path of [
-      "/b/brain/other/task.md",
-      "/b/brain/native-1/notes.md",
-      "/b/brain/native-1/sub/task.md",
-      "/b/brain/native-12/task.md",
-      "/b/brain/native-1/task.md.bak",
+      "/b/antigravity-acp/brain/other/task.md",
+      "/b/antigravity-acp/brain/native-1/notes.md",
+      "/b/antigravity-acp/brain/native-1/sub/task.md",
+      "/b/antigravity-acp/brain/native-12/task.md",
+      "/b/antigravity-acp/brain/native-1/task.md.bak",
     ]) {
       expect(outline(write(state, path, "- [ ] a\n", path))).toEqual([
         "item.completed file_change",
@@ -939,7 +967,11 @@ describe("the files of the plan", () => {
 
   it("shows implementation_plan.md as a plan item", () => {
     const state = open();
-    const events = write(state, "/b/brain/native-1/implementation_plan.md", "# Plan\nDo it");
+    const events = write(
+      state,
+      "/b/antigravity-acp/brain/native-1/implementation_plan.md",
+      "# Plan\nDo it",
+    );
     expect(events.slice(1)).toMatchObject([
       { _tag: "item.started", kind: "plan" },
       {

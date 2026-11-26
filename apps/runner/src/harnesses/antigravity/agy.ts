@@ -5,7 +5,7 @@
  * them can run as another account.
  */
 import { mkdtempSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
@@ -37,7 +37,7 @@ import type { HarnessRunnerContext } from "../index";
 import type { LoginCommand } from "../login";
 import { isExecutableNotFound, stopChild } from "../process";
 import type { CheckedFramedChild, FramedChild, Run } from "../process";
-import { describeFileFailure } from "../session-files";
+import { describeFileFailure, isMissingPath } from "../session-files";
 import { truncateFact } from "../text";
 import { APP_DATA_DIR, readLoginFile, readRegularFile } from "./harness-home";
 
@@ -50,23 +50,55 @@ export type AgyPurpose =
   | { readonly kind: "session"; readonly accessMode: AccessMode };
 
 /**
+ * Removes `<home>/config/hooks.json`, the hooks file of the Harness Home, and
+ * logs that it did. Does nothing when there is none. A link is removed, never
+ * what it points to. Fails with `AdapterFailed` when the file exists and cannot
+ * be removed, because then Hercule cannot tell what `agy` would load.
+ *
+ * `agy` reads this file at every tool call, and every session of an account
+ * shares the Harness Home. A hook left there (for example one that approves
+ * every command) would silently loosen every later session, in any workspace,
+ * so a session start removes it before `agy` runs. What stays possible: a
+ * session that writes the file while another session of the same account runs.
+ * That needs code execution as the runner's user, which already reaches
+ * everything this user can.
+ */
+const removeHooksFile = (home: string): Effect.Effect<void, AdapterFailed> => {
+  const path = join(home, "config", "hooks.json");
+  return Effect.tryPromise({
+    try: () => unlink(path).then(() => true),
+    catch: (error) =>
+      isMissingPath(error)
+        ? "missing"
+        : buildAdapterFailed(
+            `${ANTIGRAVITY_NAME} could not start, because Hercule could not remove the hooks file ${path}: ${describeFileFailure(error)}`,
+          ),
+  }).pipe(
+    Effect.catch((failure) =>
+      failure === "missing" ? Effect.succeed(false) : Effect.fail(failure),
+    ),
+    Effect.flatMap((wasRemoved) =>
+      wasRemoved
+        ? Effect.logWarning(
+            `Removed the hooks file ${path}: Hercule allows no hooks in the Harness Home, because ${ANTIGRAVITY_NAME} runs them for every session of the account.`,
+          )
+        : Effect.void,
+    ),
+  );
+};
+
+/**
  * Returns the id of the `agy` mode that matches a Hercule Access Mode, or
  * undefined for `full-access`, which `agy` has no mode for: a session in it
  * starts `agy` with `--dangerously-skip-permissions` instead (see
  * `openSignedInAgy`) and keeps the default mode.
- *
- * The `auto` case is not reachable today: the plugin declares the Access Mode
- * `auto` unsupported, so no session asks for it. The mapping stays so that
- * supporting it later needs no change here.
  */
-export const readAgyModeId = (accessMode: AccessMode): string | undefined => {
+export const chooseAgyMode = (accessMode: Exclude<AccessMode, "auto">): string | undefined => {
   switch (accessMode) {
     case "approval-required":
       return "default";
     case "auto-accept-edits":
       return "accept-edits";
-    case "auto":
-      return "auto";
     case "full-access":
       return undefined;
   }
@@ -623,6 +655,8 @@ export const openSignedInAgy = (
   Effect.gen(function* () {
     if ((yield* readLoginFile(ctx.home)) === undefined)
       return yield* Effect.fail(buildHarnessLoginMissing(ANTIGRAVITY_NAME));
+
+    if (options.purpose.kind === "session") yield* removeHooksFile(ctx.home);
 
     const folder = yield* makeSessionLogFolder(ctx.home);
     const command = [
