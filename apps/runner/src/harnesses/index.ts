@@ -32,6 +32,7 @@ import { ANTIGRAVITY, antigravity } from "./antigravity";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
+import type { LeaseResult } from "./harness-home-leases";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
@@ -365,6 +366,13 @@ export interface HarnessAdapter {
     binary: string,
     method: LoginMethod,
   ) => LoginCommand | undefined;
+  /**
+   * Set by a harness whose sign-in must not run beside its other processes on
+   * the same Harness Home (see `harness-home-leases.ts`). Takes the exclusive
+   * lease on the account's home, or returns why it is refused. The login
+   * releases it once its process has exited, on every path.
+   */
+  readonly acquireLoginLease?: (ctx: HarnessRunnerContext) => LeaseResult;
 
   /**
    * Makes one text generation: a single model call with the spec's

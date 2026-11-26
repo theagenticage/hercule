@@ -11,6 +11,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type { HarnessEvent } from "@hercule/protocol";
 import {
+  buildAdapterFailed,
   buildAnswerNotDelivered,
   buildSessionAlreadyRunning,
   buildSessionNotRunning,
@@ -19,6 +20,7 @@ import type { HarnessAdapter } from "../index";
 import { buildFailedProbe } from "../probe";
 import { runProcess, spawnAgy } from "../process";
 import { ANTIGRAVITY_NAME, buildLoginCommand, type AgySeam } from "./agy";
+import { makeHarnessHomeLeases } from "../harness-home-leases";
 import { deleteSessionFiles } from "./harness-home";
 import { makeAntigravityInstall } from "./install";
 import { makeProbe } from "./probe";
@@ -35,6 +37,9 @@ const ANTIGRAVITY_BINARY = "agy";
  */
 export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
   const probe = makeProbe(seam);
+  // Sessions and probes hold a read lease on their Harness Home, a sign-in the
+  // exclusive one, so a sign-in never rewrites the login under a running `agy`.
+  const leases = makeHarnessHomeLeases();
   // Creating an unbounded PubSub only allocates, so it is safe to run here and
   // keeps `findAdapter` a synchronous lookup.
   const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
@@ -71,19 +76,32 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
     usageReports: Stream.empty,
 
     // The probe ignores `options.readUsage`: `agy` has no usage read.
-    probe: (ctx) =>
-      ctx.binary === undefined
-        ? Effect.succeed(buildFailedProbe(null, `no ${ANTIGRAVITY_BINARY} on this machine`))
-        : probe(ctx, ctx.binary),
+    probe: (ctx) => {
+      const binary = ctx.binary;
+      if (binary === undefined) {
+        return Effect.succeed(buildFailedProbe(null, `no ${ANTIGRAVITY_BINARY} on this machine`));
+      }
+      return Effect.suspend(() => {
+        const lease = leases.acquireRead(ctx.home, "probe");
+        if (!lease.acquired) return Effect.succeed(buildFailedProbe(null, lease.message));
+        return probe(ctx, binary).pipe(Effect.ensuring(Effect.sync(lease.release)));
+      });
+    },
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
         // The id stays held until the session has exited, so a second `agy`
         // never serves the same conversation.
         if (hosted.has(sessionId)) return yield* Effect.fail(buildSessionAlreadyRunning());
+        // Taken before the session reads the account's login, so a sign-in that
+        // is in progress is never read half written.
+        const lease = leases.acquireRead(ctx.home, "session");
+        if (!lease.acquired) return yield* Effect.fail(buildAdapterFailed(lease.message));
         hosted.set(sessionId, "starting");
         // The session's own scope: closing it stops its process, which happens when it exits or fails to start.
         const scope = Scope.makeUnsafe();
+        // Added first, so it runs last: the lease ends after the process is gone.
+        yield* Scope.addFinalizer(scope, Effect.sync(lease.release));
         const session = yield* startAgySession(seam, sessionId, spec, ctx, emit).pipe(
           Scope.provide(scope),
           // Also on interruption: an interrupted start must not hold the id for good.
@@ -149,6 +167,7 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
 
     login: (ctx, binary, method) =>
       method === "sign-in" ? buildLoginCommand(ctx, binary) : undefined,
+    acquireLoginLease: (ctx) => leases.acquireExclusive(ctx.home),
 
     install: makeAntigravityInstall(seam.run),
   };
