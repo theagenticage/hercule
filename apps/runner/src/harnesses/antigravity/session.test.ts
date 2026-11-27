@@ -2881,15 +2881,6 @@ const CHILD_STEPS = readFileSync(
   .split("\n")
   .filter((step) => step !== "");
 
-/** A step the subagent writes after its turn ended: it opens a new turn that completes at once. */
-const LATE_STEP = JSON.stringify({
-  step_index: 7,
-  type: "PLANNER_RESPONSE",
-  status: "DONE",
-  model: "gemini-4-neon-high",
-  content: "Late words.",
-});
-
 /** The recorded steps of the session's own agent, one line each. */
 const ROOT_STEPS = readFileSync(
   join(FILES_BRAIN, ROOT, ".system_generated", "logs", "transcript.jsonl"),
