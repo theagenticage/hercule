@@ -1373,25 +1373,43 @@ describe.skipIf(skipReason !== undefined)(
       );
 
       it(
-        "refuses a subagent's command in Approval required with the reason, and neither hangs nor opens a Request (spec 06 section 13.6)",
+        "refuses a subagent's command in Approval required with the reason, and and opens no Request for the subagent (spec 06 section 13.6)",
         async () => {
           const session = await startLiveSession({ accessMode: "approval-required" });
           const sent = await run(
             adapter.sendInput(session.id, {
-              text: "Start exactly one subagent with your invoke_subagent tool. Its task: run the shell command `echo SUBMARK > sub.txt` and report the result. When the subagent has reported back, reply with the single word DONE. Do not run any command yourself.",
+              text: "Start exactly one subagent with your invoke_subagent tool. Its task: run the shell command `echo SUBMARK > sub.txt` and report the result. When the subagent has reported back, reply with the single word DONE. Never run any command yourself, not even to check the result: only the subagent runs commands.",
             }),
           );
+          // The model may still run a command in the session's own agent, which opens an ordinary
+          // Request nobody else answers. Deny each one as it opens so the root turn can end. Only
+          // a Request of the subagent is a fault.
+          const denied = new Set<string>();
           const rootEnd = await waitFor(
             session.id,
             "ended the root turn",
-            (events) => findTurnEnd(events, sent.turnId),
+            (events) => {
+              for (const event of events) {
+                if (event._tag !== "request.opened" || event.request.kind === "question") continue;
+                if (readSubagentId(event) !== undefined || denied.has(event.request.requestId)) {
+                  continue;
+                }
+                denied.add(event.request.requestId);
+                Effect.runFork(
+                  adapter.respondToApprovalRequest(session.id, event.request.requestId, "deny"),
+                );
+              }
+              return findTurnEnd(events, sent.turnId);
+            },
             90_000,
           );
           const events = eventsOf(session.id);
           const why = dumpEvents(session.id);
 
           expect(
-            events.filter((event) => event._tag === "request.opened"),
+            events.filter(
+              (event) => event._tag === "request.opened" && readSubagentId(event) !== undefined,
+            ),
             why,
           ).toEqual([]);
           const refused = completedItems(
