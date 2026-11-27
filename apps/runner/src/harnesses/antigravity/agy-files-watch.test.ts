@@ -13,7 +13,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import type * as Scope from "effect/Scope";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 import type { HarnessEvent } from "@hercule/protocol";
 import { cleanupHomes, createScratchHome, settle } from "../testing";
@@ -287,6 +288,25 @@ describe("when the watcher reads", () => {
     ));
 });
 
+describe("the end of the process", () => {
+  it("stops reading the files when the scope the watcher was started in closes", () =>
+    run(
+      Effect.gen(function* () {
+        const processScope = yield* Scope.make();
+        const w = yield* startWatching().pipe(Scope.provide(processScope));
+        yield* openWork(w);
+        yield* Effect.promise(settle);
+
+        yield* Scope.close(processScope, Exit.void);
+        registerSubagent(w.home);
+        appendChildSteps(w.home, 0, 7);
+        yield* runOutClock(Duration.seconds(3));
+
+        expect(w.published).toEqual([]);
+      }),
+    ));
+});
+
 describe("what the watcher shows of a subagent", () => {
   it("shows a subagent before its first turn, and adds the tokens of its model steps to the session's usage", () =>
     run(
@@ -482,6 +502,35 @@ describe("a Turn that replied", () => {
         expect(tags(w, "session.usage.updated").at(-1)).toMatchObject({
           usageReport: { status: "incomplete" },
         });
+      }),
+    ));
+
+  it("warns once, however often work opens and closes again after the reader closed", () =>
+    run(
+      Effect.gen(function* () {
+        const w = yield* startWatching();
+        yield* replyAndClose(w);
+        yield* readUntil("the warning", () => tags(w, "runtime.warning").length > 0);
+
+        yield* replyAndClose(w);
+        yield* runOutClock(Duration.seconds(5));
+
+        expect(tags(w, "runtime.warning")).toHaveLength(1);
+      }),
+    ));
+
+  it("does not read the session's own files again once it closed the reader, even when agy writes the transcript later", () =>
+    run(
+      Effect.gen(function* () {
+        const w = yield* startWatching();
+        yield* replyAndClose(w);
+        yield* readUntil("the warning", () => tags(w, "runtime.warning").length > 0);
+
+        registerSubagent(w.home);
+        yield* replyAndClose(w);
+        yield* runOutClock(Duration.seconds(5));
+
+        expect(tags(w, "subagent.started")).toEqual([]);
       }),
     ));
 
