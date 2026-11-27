@@ -52,6 +52,7 @@ import {
   createConversationFiles,
   createSignedInHome,
   GATEWAY_ENTRY,
+  TEST_SESSION_TOKEN,
   noAnswer,
   readRecordedSetup,
   refuse,
@@ -3113,6 +3114,46 @@ const childEnded = (h: Harness, state: string) => () =>
   summarizeChildTurns(h).includes(`ended ${state}`);
 
 describe("the subagents that agy's files show", () => {
+  it("never publishes the session token that a subagent's files hold, in its text, its tool input and output, or a warning that quotes the files", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          const echo = `echo ${TEST_SESSION_TOKEN} end`;
+          const step = (index: number, type: string, fields: Record<string, unknown>) =>
+            `${JSON.stringify({ step_index: index, type, status: "DONE", model: "gemini-4-neon-high", ...fields })}\n`;
+          appendToSubagentTranscript(
+            h.home,
+            step(1, "PLANNER_RESPONSE", {
+              content: echo,
+              tool_calls: [
+                {
+                  name: "run_command",
+                  args: { CommandLine: `curl -H "Authorization: Bearer ${TEST_SESSION_TOKEN}"` },
+                },
+              ],
+            }) +
+              step(2, "GENERIC", { content: `output ${echo}` }) +
+              step(3, "ERROR_MESSAGE", { error: `503 ${echo}` }) +
+              step(4, "PLANNER_RESPONSE", { content: "Done." }),
+          );
+          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "completed"));
+
+          const published = JSON.stringify(h.seen);
+          expect(published).not.toContain(TEST_SESSION_TOKEN);
+          const hidden = (text: string) => published.includes(`${text}[hidden]`);
+          expect(hidden("echo "), "the subagent's text and the tool's output").toBe(true);
+          expect(hidden("Bearer "), "the tool's input").toBe(true);
+          expect(
+            h.tags("runtime.warning").some((event) => event.message.includes("503 echo [hidden]")),
+            "the warning that quotes the files",
+          ).toBe(true);
+        }),
+      { fake: subagentFake },
+    ));
+
   it("warns once when the session's own files cannot be read, goes on with ACP alone, and counts the usage as incomplete", () =>
     run(
       (h) =>
