@@ -1165,6 +1165,59 @@ describe("a steer", () => {
       }),
     ));
 
+  it("is decided by its own reply when agy refuses the old prompt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* Deferred.fail(h.prompts[0]!.reply, agyRefusal);
+        yield* letTurnRead;
+        expect(steering.pollUnsafe(), "the old prompt's refusal decides nothing").toBeUndefined();
+
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(h.completed()).toMatchObject({ state: "completed" });
+      }),
+    ));
+
+  it("fails the turn as a failed prompt does when agy refuses the old prompt and then the steer's prompt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* Deferred.fail(h.prompts[0]!.reply, agyRefusal);
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+
+        expect(yield* Fiber.join(steering)).toMatchObject({ kind: "refused" });
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect(h.tags("runtime.error")).toMatchObject([
+          { message: expect.stringContaining("could not finish the turn") as unknown },
+        ]);
+      }),
+    ));
+
+  it("is not accepted by the cancelled reply that answers an interrupt, and the steer's own reply decides", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+
+        yield* h.reply(0, "cancelled");
+        yield* letTurnRead;
+        expect(steering.pollUnsafe(), "the cancel answers the old prompt only").toBeUndefined();
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        expect(yield* Fiber.join(steering)).toMatchObject({ kind: "refused" });
+        expect(steeredMessages(h)).toHaveLength(0);
+        yield* Fiber.join(interrupting);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+      }),
+    ));
+
   it("takes two steers in a row that agy both refuses, and ends by the reply of the first prompt", () =>
     run((h) =>
       Effect.gen(function* () {
@@ -1309,8 +1362,9 @@ describe("a steer", () => {
         expect(steering.pollUnsafe(), "not refused: agy may have the message").toBeUndefined();
 
         yield* Deferred.succeed(gate, undefined);
-        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        // The cancel answered the old prompt only: the steer's own reply accepts it.
         yield* h.reply(1, "cancelled");
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
         expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.completed()).toMatchObject({ state: "interrupted" });
         expect(steeredMessages(h)).toHaveLength(1);
@@ -1325,8 +1379,8 @@ describe("a steer", () => {
         const interrupting = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
         yield* h.reply(1, "cancelled");
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
 
         expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.completed()).toMatchObject({ state: "interrupted" });

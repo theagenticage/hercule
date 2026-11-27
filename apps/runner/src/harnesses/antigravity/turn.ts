@@ -1007,13 +1007,27 @@ export const startTurn = (
 
     /**
      * Returns what the reply or the failure of the prompt the steer supersedes
-     * means for the steer: `agy` answers that prompt at once when it takes the
-     * steer. A failure means the connection is gone, and the steer with it.
+     * means for the steer, or undefined when it decides nothing and the steer's
+     * own reply decides. `agy` answers that prompt at once when it takes the
+     * steer.
+     *
+     * - A reply accepts the steer, except the `cancelled` reply that answers an
+     *   interrupt: that cancel ends the old prompt whatever the steer comes to.
+     * - A refusal of the old prompt says nothing about the steer, which `agy`
+     *   still answers itself. If the steer is then refused, the old prompt's
+     *   failure ends the Turn as any failed prompt does.
+     * - The connection ending leaves the steer unknown.
      */
-    const decideSupersededResult = (result: PromptResult): SteerOutcome =>
-      result.kind === "replied"
-        ? { kind: "accepted" }
+    const decideSupersededResult = (result: PromptResult): SteerOutcome | undefined => {
+      if (result.kind === "replied") {
+        return interrupted && result.reply.stopReason === "cancelled"
+          ? undefined
+          : { kind: "accepted" };
+      }
+      return result.error.reason === "refused"
+        ? undefined
         : { kind: "unknown", message: `${CANNOT_TELL}, because its connection ended.` };
+    };
 
     const steer: Turn["steer"] = (prepared) =>
       Effect.suspend(() => {
@@ -1052,7 +1066,10 @@ export const startTurn = (
             Effect.map(Fiber.join(steerReply), decideSteerPromptResult),
             supersededReply === undefined
               ? Effect.never
-              : Effect.map(Fiber.join(supersededReply), decideSupersededResult),
+              : Effect.flatMap(Fiber.join(supersededReply), (result) => {
+                  const decided = decideSupersededResult(result);
+                  return decided === undefined ? Effect.never : Effect.succeed(decided);
+                }),
           );
           decideSteer(steerPrompt, outcome);
         });
