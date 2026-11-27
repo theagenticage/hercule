@@ -356,6 +356,7 @@ export const startAgySession = (
     let stopping = false;
     let exitReason: ExitReason | undefined;
     const exitedSignal = Deferred.makeUnsafe<void>();
+    let hasPublishedExit = false;
     /** The latest mode `agy` reported, in an update or in the reply that opened the conversation. A report is never replaced by an older one. */
     let currentMode: string | undefined;
     /** Wakes the start that waits for the mode, whenever `agy` reports one. */
@@ -419,9 +420,12 @@ export const startAgySession = (
      * is a subagent's work, which never changes the session's own state.
      */
     const publishEvents = (events: ReadonlyArray<HarnessEvent>): void => {
-      if (!isStarted) return;
+      // Nothing follows `session.exited`, whichever fiber is still running (a stop that waits on the files, for one).
+      if (!isStarted || hasPublishedExit) return;
       const hidden = hideEventSecret(events);
-      if (hidden.length > 0) emit(hidden);
+      if (hidden.length === 0) return;
+      emit(hidden);
+      if (hidden.some((event) => event._tag === "session.exited")) hasPublishedExit = true;
     };
 
     const isExited = (): boolean => Deferred.isDoneUnsafe(exitedSignal);

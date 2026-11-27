@@ -3300,6 +3300,35 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFakeWithRunningCall },
     ));
 
+  it("publishes nothing after session.exited when the session stops while an interrupt still waits for the files to catch up", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          // Written before the cancel and not read yet: the wait after the cancel would show it.
+          appendSubagentSteps(h.home, 2, 5);
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          yield* replyToLatestPrompt(h, "cancelled");
+          yield* Effect.promise(settle);
+          yield* h.adapter.stopSession(SESSION, "stopped");
+          const exitedAt = h.seen.findIndex((event) => event._tag === "session.exited");
+          expect(exitedAt).toBeGreaterThanOrEqual(0);
+
+          yield* joinAfterCancelLag(interrupting);
+
+          expect(h.seen.slice(exitedAt + 1)).toEqual([]);
+        }),
+      { fake: subagentFake },
+    ));
+
   it("cancels when only subagents run, shows what they wrote before the cancel, and ends their turns as interrupted", () =>
     run(
       (h) =>
