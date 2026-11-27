@@ -286,6 +286,13 @@ export interface Turn {
    * and a second one.
    */
   readonly recordRootConversationFact: (fact: RootConversationFact) => void;
+  /**
+   * Records that `agy` sent an update over ACP that is not an error notice,
+   * which shows it went on working. The provider error that the transcript
+   * showed before is forgotten, so a later inactivity timeout ends the Turn
+   * `interrupted` and not `failed` with words that are out of date.
+   */
+  readonly recordAgyProgress: () => void;
   /** Waits until the Turn has ended, which is after it emitted `turn.completed`, and returns the state it ended in. */
   readonly ended: Effect.Effect<TurnState>;
 }
@@ -1130,6 +1137,10 @@ export const startTurn = (
       ]);
     };
 
+    const recordAgyProgress: Turn["recordAgyProgress"] = () => {
+      newestProviderError = undefined;
+    };
+
     const runTurn = Effect.gen(function* () {
       const waiting = yield* writeFirstPrompt;
       if (waiting === undefined) return;
@@ -1260,6 +1271,7 @@ export const startTurn = (
       abandon,
       hasEnded: () => phase === "closed",
       recordRootConversationFact,
+      recordAgyProgress,
       ended: Deferred.await(ended),
     };
   });

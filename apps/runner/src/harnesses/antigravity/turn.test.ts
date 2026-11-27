@@ -1704,6 +1704,21 @@ describe("a provider error in the transcript", () => {
       }),
     ));
 
+  it("forgets the provider error when agy goes on working, so a later inactivity timeout ends it interrupted", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.turn.recordRootConversationFact(input);
+        h.turn.recordRootConversationFact(providerError(NO_CAPACITY));
+        h.turn.recordAgyProgress();
+        yield* h.turn.stop("inactivity_timeout");
+        yield* h.reply(0, "cancelled");
+        yield* h.turn.ended;
+
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(h.tags("runtime.error")).toEqual([]);
+      }),
+    ));
+
   it("ends failed as a usage limit when the provider error is a quota error", () =>
     run((h) =>
       Effect.gen(function* () {

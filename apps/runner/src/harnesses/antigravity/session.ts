@@ -573,6 +573,8 @@ export const startAgySession = (
           config?.observe(notification.update.configOptions);
         }
         emitEvents(normalizeUpdate(normalizing, notification));
+        // An error notice is held by the normalizer for one step, and is `agy` failing, not working.
+        if (normalizing.errorNotice === undefined) readRunningTurn()?.recordAgyProgress();
       },
       onApprovalRequest: (request) =>
         Effect.suspend(() => {

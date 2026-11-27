@@ -3329,6 +3329,50 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
+  it.each([
+    { worksAfterError: false, state: "failed" },
+    { worksAfterError: true, state: "interrupted" },
+  ])(
+    "ends the turn $state when the inactivity timeout stops a session that showed a provider error and agy worked after it: $worksAfterError",
+    ({ worksAfterError, state }) =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* sendUntilLaunched(h);
+            registerSubagent(h.home);
+            const error =
+              "API error (attempt 1): transport error (Unavailable, HTTP 503): No capacity";
+            appendFileSync(
+              transcriptPath(h.home, ROOT),
+              `${JSON.stringify({ step_index: 9, type: "ERROR_MESSAGE", status: "DONE", error })}\n`,
+            );
+            yield* readFilesUntil("the error", () => h.tags("runtime.warning").length > 0);
+            if (worksAfterError) {
+              h.harness().sendLine(
+                JSON.stringify(
+                  buildUpdate(
+                    {
+                      sessionUpdate: "agent_message_chunk",
+                      content: { type: "text", text: "Back at it." },
+                    },
+                    ROOT,
+                  ),
+                ),
+              );
+              yield* h.until("the text", () =>
+                h.tags("item.started").some((event) => event.kind === "assistant_message"),
+              );
+            }
+
+            yield* h.adapter.stopSession(SESSION, "inactivity_timeout");
+
+            expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state }]);
+          }),
+        { fake: subagentFake },
+      ),
+  );
+
   it("cancels when only subagents run, shows what they wrote before the cancel, and ends their turns as interrupted", () =>
     run(
       (h) =>
