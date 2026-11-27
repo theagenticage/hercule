@@ -3154,7 +3154,7 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
-  it("warns once when the session's own files cannot be read, goes on with ACP alone, and counts the usage as incomplete", () =>
+  it("goes on with ACP alone, and warns, when the session's own files cannot be read", () =>
     run(
       (h) =>
         Effect.gen(function* () {
@@ -3163,29 +3163,18 @@ describe("the subagents that agy's files show", () => {
           yield* h.start();
           yield* sendUntilLaunched(h);
           yield* readFilesUntil("the warning", () => h.tags("runtime.warning").length > 0);
-          yield* runOutClock(Duration.seconds(1));
 
-          const [warning, ...more] = h.tags("runtime.warning");
-          expect(more).toEqual([]);
-          expect(warning?.message).toMatch(
-            /^Hercule cannot read Antigravity's session files \(.+\), so subagents' work is not shown and their tokens are not counted\.$/,
-          );
+          expect(h.tags("runtime.warning")).toHaveLength(1);
           expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
             usageReport: { status: "incomplete" },
           });
-
-          // The reader is closed for the rest of the process, so a subagent that shows up now is not shown.
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 7);
-          yield* runOutClock(Duration.seconds(1));
-          expect(h.tags("subagent.started")).toEqual([]);
           yield* replyToLatestPrompt(h);
           yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
         }),
       { fake: subagentFake },
     ));
 
-  it("warns once, and stops reading the session's own files, when a turn replied and agy wrote no transcript for the conversation", () =>
+  it("tells the watcher that a turn replied, so it warns when agy wrote no transcript", () =>
     run(
       (h) =>
         Effect.gen(function* () {
@@ -3193,20 +3182,8 @@ describe("the subagents that agy's files show", () => {
           yield* sendUntilLaunched(h);
           yield* replyToLatestPrompt(h);
           yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
-          yield* runOutClock(Duration.seconds(1));
-          expect(h.tags("runtime.warning"), "not before the files had their 2 seconds").toEqual([]);
 
           yield* readFilesUntil("the warning", () => h.tags("runtime.warning").length > 0);
-          yield* runOutClock(Duration.seconds(10));
-
-          const [warning, ...more] = h.tags("runtime.warning");
-          expect(more).toEqual([]);
-          expect(warning?.message).toBe(
-            "Hercule cannot read Antigravity's session files (agy wrote no transcript for this conversation), so subagents' work is not shown and their tokens are not counted.",
-          );
-          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
-            usageReport: { status: "incomplete" },
-          });
         }),
       { fake: subagentFake },
     ));
@@ -3483,7 +3460,7 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
-  it("skips what the files held before a resume, and shows a known subagent again only when it writes a new step", () =>
+  it("hands the watcher a resume, so it shows nothing of what the files held before it", () =>
     run(
       (h) =>
         Effect.gen(function* () {
@@ -3499,22 +3476,9 @@ describe("the subagents that agy's files show", () => {
           });
           yield* sendUntilLaunched(h);
           yield* runOutClock(Duration.seconds(1));
+
           expect(h.tags("subagent.started")).toEqual([]);
           expect(h.seen.filter(isChild)).toEqual([]);
-
-          appendToSubagentTranscript(h.home, `${LATE_STEP}\n`);
-          yield* readFilesUntil("the late step", () =>
-            h
-              .tags("content.delta")
-              .some((event) => isChild(event) && event.delta === "Late words."),
-          );
-
-          expect(h.tags("subagent.started")).toMatchObject([{ subagentId: CHILD }]);
-          expect(
-            h
-              .tags("content.delta")
-              .filter((event) => isChild(event) && event.delta === "Late words."),
-          ).toHaveLength(1);
         }),
       { fake: subagentFake },
     ));
