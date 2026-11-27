@@ -75,6 +75,9 @@ const step = (index: number, type: string, extra: Partial<AgyStep> = {}): AgySte
 
 const command = () => ({ name: "run_command", args: { CommandLine: "ls", toolSummary: "List" } });
 
+/** The conversation id of the session's own agent, which is the sender of a message to a subagent. */
+const PARENT = FULL_ROOT;
+
 const message = (sender: string, content: string): AgyStep =>
   step(0, "SYSTEM_MESSAGE", {
     content: `The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-26T21:05:31Z sender=${sender} priority=MESSAGE_PRIORITY_HIGH content=${content}\n</SYSTEM_MESSAGE>`,
@@ -95,7 +98,6 @@ const buildStateWithChild = () => {
     state,
     {
       conversationId: "A",
-      parentConversationId: "root",
       launchToolCallId: "call_0",
       brief: "Do it",
     },
@@ -258,7 +260,7 @@ describe("model errors", () => {
 
 describe("messages to a subagent", () => {
   const finishTurn = (state: SubagentsState) => {
-    normalizeSubagentStep(state, "A", message("root", "Do it"));
+    normalizeSubagentStep(state, "A", message(PARENT, "Do it"));
     normalizeSubagentStep(state, "A", step(1, "PLANNER_RESPONSE", { content: "done" }));
   };
 
@@ -266,7 +268,7 @@ describe("messages to a subagent", () => {
     const state = buildStateWithChild();
     finishTurn(state);
     expect(hasOpenSubagentTurn(state)).toBe(false);
-    expect(normalizeSubagentStep(state, "A", message("root", "Now do more"))).toEqual([]);
+    expect(normalizeSubagentStep(state, "A", message(PARENT, "Now do more"))).toEqual([]);
     const events = normalizeSubagentStep(
       state,
       "A",
@@ -279,36 +281,16 @@ describe("messages to a subagent", () => {
   it("shows a message that arrives during a turn as a steered input", () => {
     const state = buildStateWithChild();
     normalizeSubagentStep(state, "A", step(1, "PLANNER_RESPONSE", { toolCalls: [command()] }));
-    const events = normalizeSubagentStep(state, "A", message("root", "also this"));
+    const events = normalizeSubagentStep(state, "A", message(PARENT, "also this"));
     expect(userMessages(events)).toEqual([{ text: "also this", steered: true }]);
   });
 
-  it("opens a turn at once, with no user_message, for a message from a task or from the system", () => {
+  it("ignores a message from a task or from the system: it opens no turn and adds no input", () => {
     const state = buildStateWithChild();
     finishTurn(state);
-    const fromTask = normalizeSubagentStep(state, "A", message("root/task-2", "finished"));
-    expect(tags(fromTask)).toEqual(["turn.started"]);
-    expect(hasOpenSubagentTurn(state)).toBe(true);
-    // The open turn is continued, not replaced.
+    expect(normalizeSubagentStep(state, "A", message(`${PARENT}/task-2`, "finished"))).toEqual([]);
     expect(normalizeSubagentStep(state, "A", message("system", "[Notice]"))).toEqual([]);
-    const events = normalizeSubagentStep(
-      state,
-      "A",
-      step(3, "PLANNER_RESPONSE", { content: "ok" }),
-    );
-    expect(tags(events)).not.toContain("turn.started");
-    expect(tags(events).at(-1)).toBe("turn.completed");
-    expect(userMessages([...fromTask, ...events])).toEqual([]);
-  });
-
-  it("introduces a subagent before the turn that a system message opens", () => {
-    const state = buildSubagentsState({
-      sessionId: SESSION,
-      nativeSessionId: "root",
-      known: [{ subagentId: "A" }],
-    });
-    const events = normalizeSubagentStep(state, "A", message("system", "[Notice]"));
-    expect(tags(events)).toEqual(["subagent.started", "turn.started"]);
+    expect(hasOpenSubagentTurn(state)).toBe(false);
   });
 
   it("ignores a hook's reminder: it opens no turn and adds no input", () => {
@@ -323,79 +305,30 @@ describe("messages to a subagent", () => {
 });
 
 describe("which subagent a step belongs to", () => {
-  it("gives a grandchild the child as its parent, and finds the item that launched it", () => {
-    const state = buildStateWithChild();
-    const calls = normalizeSubagentStep(
-      state,
-      "A",
-      step(1, "PLANNER_RESPONSE", {
-        toolCalls: [{ name: "invoke_subagent", args: { Role: "Helper" } }],
-      }),
-    );
-    normalizeSubagentStep(state, "A", step(2, "GENERIC"));
-    const itemId = find(calls, "item.started").find((e) => e.kind === "subagent")?.itemId;
-    expect(itemId).toBeDefined();
-
-    const started = introduceSubagent(
-      state,
-      {
-        conversationId: "B",
-        parentConversationId: "A",
-        launchToolCallId: "call_b",
-        role: "Helper",
-        launchStepIndex: 2,
-      },
-      findNothing,
-    );
-    expect(started[0]).toMatchObject({
-      _tag: "subagent.started",
-      subagentId: "B",
-      parentSubagentId: "A",
-      itemId,
-    });
-  });
-
-  it("points a grandchild at nothing when the step of its launch is unknown", () => {
-    const state = buildStateWithChild();
-    const started = introduceSubagent(
-      state,
-      {
-        conversationId: "B",
-        parentConversationId: "A",
-        launchToolCallId: "call_b",
-        launchStepIndex: 9,
-      },
-      findNothing,
-    );
-    expect(started[0]).not.toHaveProperty("itemId");
-  });
-
   it("asks the session's lookup for the launching item of a child of the session's own agent", () => {
     const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
     const started = introduceSubagent(
       state,
-      { conversationId: "A", parentConversationId: "root", launchToolCallId: "call_1" },
+      { conversationId: "A", launchToolCallId: "call_1" },
       (toolCallId) => (toolCallId === "call_1" ? "item-1" : undefined),
     );
     expect(started[0]).toMatchObject({ _tag: "subagent.started", itemId: "item-1" });
   });
 
-  it("introduces a resumed subagent once, keeps its parent, and shows no old brief", () => {
+  it("introduces a resumed subagent once, and shows no old brief", () => {
     const state = buildSubagentsState({
       sessionId: SESSION,
       nativeSessionId: "root",
-      known: [{ subagentId: "A", parentSubagentId: "P" }],
+      known: [{ subagentId: "A" }],
     });
     const link = {
       conversationId: "A",
-      parentConversationId: "root",
       launchToolCallId: "call_0",
       brief: "old brief",
     };
     expect(introduceSubagent(state, link, findNothing)[0]).toMatchObject({
       _tag: "subagent.started",
       subagentId: "A",
-      parentSubagentId: "P",
     });
     expect(introduceSubagent(state, link, findNothing)).toEqual([]);
     const events = normalizeSubagentStep(
@@ -464,6 +397,27 @@ describe("incomplete usage", () => {
   });
 });
 
+describe("a subagent that starts a subagent of its own", () => {
+  const launch = (index: number) =>
+    step(index, "PLANNER_RESPONSE", {
+      toolCalls: [{ name: "invoke_subagent", args: { Role: "Helper" } }],
+      usage: { inputTokens: 5, cacheReadTokens: 0, outputTokens: 1 },
+    });
+
+  it("warns the session once, however many such calls follow, and marks the usage incomplete", () => {
+    const state = buildStateWithChild();
+    const first = normalizeSubagentStep(state, "A", launch(1));
+    const warnings = find(first, "runtime.warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).not.toHaveProperty("subagentId");
+    expect(warnings[0]?.message).toContain("started a subagent of its own");
+    expect(find(first, "session.usage.updated")[0]).toHaveProperty("usageReport");
+    const second = normalizeSubagentStep(state, "A", launch(2));
+    expect(find(second, "runtime.warning")).toEqual([]);
+    expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
+  });
+});
+
 describe("an unreadable subagent", () => {
   it("fails its open turn and its pending items, and reports its usage incomplete", () => {
     const state = buildStateWithChild();
@@ -495,11 +449,7 @@ describe("every subagent when the session's own files are unreadable", () => {
   it("ends the open turn of each known subagent as failed and reports each one's usage incomplete", () => {
     const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
     for (const id of ["A", "B"]) {
-      introduceSubagent(
-        state,
-        { conversationId: id, parentConversationId: "root", launchToolCallId: id },
-        findNothing,
-      );
+      introduceSubagent(state, { conversationId: id, launchToolCallId: id }, findNothing);
       normalizeSubagentStep(state, id, step(1, "PLANNER_RESPONSE", { toolCalls: [command()] }));
     }
 
@@ -537,7 +487,7 @@ describe("a subagent that a cancel stopped", () => {
     const state = buildStateWithChild();
     interruptSubagentTurns(state);
 
-    normalizeSubagentStep(state, "A", message("root", "Go on"));
+    normalizeSubagentStep(state, "A", message(PARENT, "Go on"));
     const events = normalizeSubagentStep(
       state,
       "A",

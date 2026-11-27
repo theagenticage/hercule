@@ -80,10 +80,11 @@ const describeAll = (observations: ReadonlyArray<AgyFileObservation>): ReadonlyA
   observations.map((o) => {
     if (o.kind === "step") return `step ${o.conversationId.slice(0, 4)} ${String(o.step.index)}`;
     if (o.kind === "subagent") return `subagent ${o.link.conversationId.slice(0, 4)}`;
-    return `unreadable ${o.conversationId.slice(0, 4)}`;
+    if (o.kind === "unreadable") return `unreadable ${o.conversationId.slice(0, 4)}`;
+    return o.kind;
   });
 
-/** Registers a child below `parent`, the way `agy` does. */
+/** Registers a child in the `subagents/` folder of `parent`, the way `agy` does. */
 const registerChild = (home: string, parent: string, child: string): void => {
   write(
     join(buildConversationFolder(home, parent), "subagents", `${child}.json`),
@@ -95,21 +96,14 @@ const registerChild = (home: string, parent: string, child: string): void => {
   );
 };
 
-/** Writes the message in which `parent` started `child`, naming `stepIndex` as the parent's step that holds the call's result. */
-const writeLaunchMessage = (
-  home: string,
-  parent: string,
-  child: string,
-  callId: string,
-  stepIndex = 7,
-): void => {
+/** Writes the message in which `parent` started `child`. */
+const writeLaunchMessage = (home: string, parent: string, child: string, callId: string): void => {
   write(
     join(buildConversationFolder(home, child), "messages", `${randomUUID()}.json`),
     JSON.stringify({
       sender: parent,
       sourceMetadata: {
         tool: {
-          stepIndex,
           toolCall: {
             id: callId,
             name: "invoke_subagent",
@@ -136,9 +130,7 @@ describe("a recorded conversation with a subagent", () => {
       kind: "subagent",
       link: {
         conversationId: FULL_CHILD,
-        parentConversationId: FULL_ROOT,
         launchToolCallId: "call_11946467374736309831",
-        launchStepIndex: 2,
         role: "File Writer",
         typeName: "self",
         brief:
@@ -482,7 +474,7 @@ describe("subagents", () => {
       `step ${child.slice(0, 4)} 0`,
     ]);
     expect(observations[0]).toMatchObject({
-      link: { launchToolCallId: "call_late", launchStepIndex: 7 },
+      link: { launchToolCallId: "call_late" },
     });
   });
 
@@ -524,7 +516,7 @@ describe("subagents", () => {
     const toolMessage = (sender: string, name: string): string =>
       JSON.stringify({
         sender,
-        sourceMetadata: { tool: { stepIndex: 1, toolCall: { id: "call_x", name } } },
+        sourceMetadata: { tool: { toolCall: { id: "call_x", name } } },
       });
     write(
       join(buildConversationFolder(home, child), "messages", `${randomUUID()}.json`),
@@ -539,30 +531,6 @@ describe("subagents", () => {
     const { late } = await readOnTestClock(files, [0, 0, 2100, 0]);
 
     expect(describeAll(late)).toEqual([`unreadable ${child.slice(0, 4)}`]);
-  });
-
-  it("announces a grandchild only after its parent, and holds its steps until then", async () => {
-    const home = createScratchHome("session-files");
-    const root = randomUUID();
-    const child = randomUUID();
-    const grandchild = randomUUID();
-    write(transcriptOf(home, root), launchLine(0));
-    registerChild(home, root, child);
-    write(transcriptOf(home, child), launchLine(0));
-    registerChild(home, child, grandchild);
-    write(transcriptOf(home, grandchild), line(0));
-    writeLaunchMessage(home, child, grandchild, "call_2", 0);
-    const files = await open(home, root);
-
-    expect(describeAll(await read(files))).toEqual([`step ${root.slice(0, 4)} 0`]);
-
-    writeLaunchMessage(home, root, child, "call_1");
-    expect(describeAll(await read(files))).toEqual([
-      `subagent ${child.slice(0, 4)}`,
-      `step ${child.slice(0, 4)} 0`,
-      `subagent ${grandchild.slice(0, 4)}`,
-      `step ${grandchild.slice(0, 4)} 0`,
-    ]);
   });
 
   it("retries a child whose folder is not there yet, and announces it before its first step", async () => {
@@ -582,38 +550,11 @@ describe("subagents", () => {
     expect(describeAll(await read(files))).toEqual([`step ${child.slice(0, 4)} 0`]);
   });
 
-  it("finds a grandchild through its parent, and links it to its parent", async () => {
+  it("reports the subagents past the bound once in all, however many there are, and keeps reading the others", async () => {
     const home = createScratchHome("session-files");
     const root = randomUUID();
-    const child = randomUUID();
-    const grandchild = randomUUID();
-    write(transcriptOf(home, root), launchLine(0));
-    registerChild(home, root, child);
-    write(transcriptOf(home, child), launchLine(0));
-    writeLaunchMessage(home, root, child, "call_1");
-    registerChild(home, child, grandchild);
-    write(transcriptOf(home, grandchild), line(0));
-    writeLaunchMessage(home, child, grandchild, "call_2", 0);
-
-    const observations = await read(await open(home, root));
-
-    expect(describeAll(observations)).toEqual([
-      `step ${root.slice(0, 4)} 0`,
-      `subagent ${child.slice(0, 4)}`,
-      `step ${child.slice(0, 4)} 0`,
-      `subagent ${grandchild.slice(0, 4)}`,
-      `step ${grandchild.slice(0, 4)} 0`,
-    ]);
-    expect(observations[3]).toMatchObject({
-      link: { parentConversationId: child, launchToolCallId: "call_2" },
-    });
-  });
-
-  it("reports the subagents past the bound once each when they produce a step, and keeps reading the others", async () => {
-    const home = createScratchHome("session-files");
-    const root = randomUUID();
-    write(transcriptOf(home, root), launchLine(0, 66));
-    const children = Array.from({ length: 66 }, () => randomUUID()).sort();
+    write(transcriptOf(home, root), launchLine(0, 100));
+    const children = Array.from({ length: 100 }, () => randomUUID()).sort();
     for (const child of children) {
       registerChild(home, root, child);
       write(transcriptOf(home, child), line(0));
@@ -623,11 +564,24 @@ describe("subagents", () => {
 
     const first = await read(files);
 
-    expect(first.filter((o) => o.kind === "unreadable").map((o) => o.conversationId)).toEqual(
-      children.slice(64),
-    );
+    expect(first.filter((o) => o.kind === "too-many-subagents")).toHaveLength(1);
+    expect(first.filter((o) => o.kind === "unreadable")).toEqual([]);
     expect(first.filter((o) => o.kind === "subagent")).toHaveLength(64);
     expect(first.filter((o) => o.kind === "step")).toHaveLength(65);
+    expect(await read(files)).toEqual([]);
+  });
+
+  it("looks at no more registration files than the bound, and says so once", async () => {
+    const home = createScratchHome("session-files");
+    const root = randomUUID();
+    write(transcriptOf(home, root), line(0));
+    for (let i = 0; i < 300; i += 1) registerChild(home, root, randomUUID());
+    const files = await open(home, root);
+
+    expect(describeAll(await read(files))).toEqual([
+      `step ${root.slice(0, 4)} 0`,
+      "too-many-subagents",
+    ]);
     expect(await read(files)).toEqual([]);
   });
 
@@ -691,50 +645,6 @@ describe("listing the subagents folder", () => {
 
     expect(describeAll(late)).toEqual([`unreadable ${child.slice(0, 4)}`]);
   });
-
-  it("lists a child's folder only after a step of it called the launch tool, and until as many new subagents appeared as calls were seen", async () => {
-    const home = createScratchHome("session-files");
-    const root = randomUUID();
-    const child = randomUUID();
-    const [first, second, third] = [randomUUID(), randomUUID(), randomUUID()];
-    write(transcriptOf(home, root), line(0));
-    registerChild(home, root, child);
-    write(transcriptOf(home, child), line(0));
-    writeLaunchMessage(home, root, child, "call_0");
-    registerChild(home, child, first);
-    write(transcriptOf(home, first), line(0));
-    writeLaunchMessage(home, child, first, "call_1", 0);
-    const files = await open(home, root);
-
-    // A subagent registered below the child with no launch call seen is not looked for.
-    expect(describeAll(await read(files))).toEqual([
-      `step ${root.slice(0, 4)} 0`,
-      `subagent ${child.slice(0, 4)}`,
-      `step ${child.slice(0, 4)} 0`,
-    ]);
-
-    appendFileSync(transcriptOf(home, child), launchLine(1, 2));
-    expect(describeAll(await read(files))).toEqual([
-      `step ${child.slice(0, 4)} 1`,
-      `subagent ${first.slice(0, 4)}`,
-      `step ${first.slice(0, 4)} 0`,
-    ]);
-
-    // One of the two calls has its subagent; the folder is listed again until the second shows up.
-    registerChild(home, child, second);
-    write(transcriptOf(home, second), line(0));
-    writeLaunchMessage(home, child, second, "call_2", 0);
-    expect(describeAll(await read(files))).toEqual([
-      `subagent ${second.slice(0, 4)}`,
-      `step ${second.slice(0, 4)} 0`,
-    ]);
-
-    // Both calls are matched: a third registration is not looked for.
-    registerChild(home, child, third);
-    write(transcriptOf(home, third), line(0));
-    writeLaunchMessage(home, child, third, "call_3", 0);
-    expect(await read(files)).toEqual([]);
-  });
 });
 
 describe("waiting for a link", () => {
@@ -786,65 +696,64 @@ describe("waiting for a link", () => {
 
     expect((await Effect.runPromise((await open(home, root)).read)).isAwaitingLink).toBe(false);
   });
+});
 
-  it("holds a grandchild until its parent's transcript was read up to the launch step, then names that step", async () => {
+describe("an id of the session's conversation that is not a UUID", () => {
+  it("reports the conversation unreadable once and reads nothing, so that the id never becomes a path", async () => {
     const home = createScratchHome("session-files");
-    const root = randomUUID();
-    const child = randomUUID();
-    const grandchild = randomUUID();
-    write(transcriptOf(home, root), launchLine(0));
-    registerChild(home, root, child);
-    write(transcriptOf(home, child), launchLine(0));
-    writeLaunchMessage(home, root, child, "call_1");
-    registerChild(home, child, grandchild);
-    write(transcriptOf(home, grandchild), line(0));
-    // The launch call's result is the child's step 3, which is not written yet.
-    writeLaunchMessage(home, child, grandchild, "call_2", 3);
-    const files = await open(home, root);
+    write(
+      join(home, APP_DATA_DIR, "outside", ".system_generated", "logs", "transcript.jsonl"),
+      line(0),
+    );
+    const files = await open(home, "../outside");
 
-    const early = await Effect.runPromise(files.read);
-    expect(describeAll(early.observations)).toEqual([
-      `step ${root.slice(0, 4)} 0`,
-      `subagent ${child.slice(0, 4)}`,
-      `step ${child.slice(0, 4)} 0`,
+    expect(await read(files)).toEqual([
+      {
+        kind: "unreadable",
+        conversationId: "../outside",
+        reason: "the conversation id is not a UUID",
+      },
     ]);
-    expect(early.isAwaitingLink).toBe(true);
+    expect(await read(files)).toEqual([]);
+  });
+});
 
-    appendFileSync(transcriptOf(home, child), line(1) + line(3));
-    const late = await Effect.runPromise(files.read);
-    expect(describeAll(late.observations)).toEqual([
-      `step ${child.slice(0, 4)} 1`,
-      `step ${child.slice(0, 4)} 3`,
-      `subagent ${grandchild.slice(0, 4)}`,
-      `step ${grandchild.slice(0, 4)} 0`,
-    ]);
-    expect(late.observations[2]).toMatchObject({ link: { launchStepIndex: 3 } });
-    expect(late.isAwaitingLink).toBe(false);
+describe("a step with forged token counts", () => {
+  const readSteps = async (home: string, id: string) =>
+    (await read(await open(home, id))).flatMap((o) => (o.kind === "step" ? [o.step] : []));
+  const counts = (input: number) => ({
+    type: "PLANNER_RESPONSE",
+    input_tokens: input,
+    cache_read_tokens: 0,
+    output_tokens: 1,
   });
 
-  it("announces a grandchild without the launch step once the parent's transcript did not reach it within 2 seconds", async () => {
+  it("has no usage and is marked as having invalid usage, so two such steps cannot add up past the safe range", async () => {
     const home = createScratchHome("session-files");
-    const root = randomUUID();
-    const child = randomUUID();
-    const grandchild = randomUUID();
-    write(transcriptOf(home, root), launchLine(0));
-    registerChild(home, root, child);
-    write(transcriptOf(home, child), launchLine(0));
-    writeLaunchMessage(home, root, child, "call_1");
-    registerChild(home, child, grandchild);
-    write(transcriptOf(home, grandchild), line(0));
-    writeLaunchMessage(home, child, grandchild, "call_2", 3);
-    const files = await open(home, root);
+    const id = randomUUID();
+    write(
+      transcriptOf(home, id),
+      line(0, counts(Number.MAX_SAFE_INTEGER)) + line(1, counts(Number.MAX_SAFE_INTEGER)),
+    );
 
-    const { early, late } = await readOnTestClock(files, [0, 1900, 200, 0]);
+    const steps = await readSteps(home, id);
 
-    expect(describeAll(early)).toEqual([]);
-    expect(describeAll(late)).toEqual([
-      `subagent ${grandchild.slice(0, 4)}`,
-      `step ${grandchild.slice(0, 4)} 0`,
-    ]);
-    expect(late[0]).toMatchObject({ link: { launchToolCallId: "call_2" } });
-    expect(late[0]).not.toHaveProperty("link.launchStepIndex");
+    expect(steps).toHaveLength(2);
+    for (const step of steps) {
+      expect(step).not.toHaveProperty("usage");
+      expect(step.hasInvalidUsage).toBe(true);
+    }
+  });
+
+  it("keeps a count at the bound, and refuses one past it", async () => {
+    const home = createScratchHome("session-files");
+    const id = randomUUID();
+    write(transcriptOf(home, id), line(0, counts(1e9)) + line(1, counts(1e9 + 1)));
+
+    const steps = await readSteps(home, id);
+
+    expect(steps[0]?.usage).toEqual({ inputTokens: 1e9, cacheReadTokens: 0, outputTokens: 1 });
+    expect(steps[1]?.hasInvalidUsage).toBe(true);
   });
 });
 

@@ -927,6 +927,16 @@ export const startAgySession = (
           );
         case "unreadable":
           return buildUnreadableFilesEvents(observation.conversationId, observation.reason);
+        case "too-many-subagents":
+          filesWereUnreadable = true;
+          return [
+            {
+              _tag: "runtime.warning",
+              ...buildBase(),
+              message:
+                "This session has more subagents than Hercule reads, so the work of the others is not shown and their tokens are not counted.",
+            },
+          ];
       }
     };
 
