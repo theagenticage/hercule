@@ -12,7 +12,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { takeStartMarks } from "../../edit-marks";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks/mark-format";
 import { cleanupHomes, createScratchHome } from "../testing";
-import { HOOK_RULES_VARIABLE, answerPreToolCall, encodeHookRules } from "./pre-tool-hook";
+import { listGuardedHomePaths } from "./harness-home";
+import {
+  HOOK_RULES_VARIABLE,
+  answerPreToolCall,
+  buildSubagentReason,
+  encodeHookRules,
+} from "./pre-tool-hook";
 import type { HookRules } from "./pre-tool-hook";
 
 afterEach(cleanupHomes);
@@ -26,6 +32,7 @@ const rulesEnv = (
     accessMode,
     readOnlyFolders: [],
     harnessHomePaths: [],
+    conversationIdFile: "/nowhere/conversation-id",
     ...rules,
   }),
 });
@@ -303,6 +310,159 @@ describe("the policy inputs", () => {
   });
 });
 
+describe("a subagent's call", () => {
+  const OWN = "11111111-1111-1111-1111-111111111111";
+  const CHILD = "22222222-2222-2222-2222-222222222222";
+  const callIn = (conversationId: unknown, toolCall: Record<string, unknown>): string =>
+    JSON.stringify({ conversationId, cwd: "/work", toolCall });
+  const command = (conversationId: unknown) =>
+    callIn(conversationId, { args: { CommandLine: "ls" }, id: "call_1", name: "run_command" });
+  const edit = (conversationId: unknown) =>
+    callIn(conversationId, {
+      args: { Content: "x", Path: "/work/a.txt" },
+      id: "call_2",
+      name: "write_file",
+    });
+  const read = (conversationId: unknown) =>
+    callIn(conversationId, {
+      args: { AbsolutePath: "/work/a.txt" },
+      id: "call_3",
+      name: "view_file",
+    });
+
+  /** The environment of a session whose own conversation id is `ownId`, or whose file is missing for undefined. */
+  const sessionEnv = (mode: HookRules["accessMode"], ownId: string | undefined) => {
+    const file = join(createScratchHome("hook-conversation"), "conversation-id");
+    if (ownId !== undefined) writeFileSync(file, ownId);
+    return rulesEnv(mode, { conversationIdFile: file });
+  };
+
+  it.each([
+    ["Approval required", "approval-required", "command", command],
+    ["Approval required", "approval-required", "file change", edit],
+    ["Auto-accept edits", "auto-accept-edits", "command", command],
+    ["Auto-accept edits", "auto-accept-edits", "file change", edit],
+  ] as const)(
+    "is denied in %s for a %s, with a reason that says what to do",
+    (name, mode, what, build) => {
+      const reason = readReason(answerPreToolCall(build(CHILD), sessionEnv(mode, OWN)));
+
+      expect(reason).toBe(
+        `Hercule refused this subagent's ${what}: in ${name} a subagent cannot ask you for approval, because Antigravity does not pass its requests on. Do this step in the main agent, or switch the thread to Full access.`,
+      );
+    },
+  );
+
+  const mcp = (conversationId: unknown) =>
+    callIn(conversationId, { args: {}, id: "call_6", name: "mcp_tools_whoami" });
+
+  it.each([
+    ["Approval required", "approval-required"],
+    ["Auto-accept edits", "auto-accept-edits"],
+  ] as const)(
+    "is denied in %s for an MCP tool call, which would otherwise wait for an approval that cannot come",
+    (name, mode) => {
+      const reason = readReason(answerPreToolCall(mcp(CHILD), sessionEnv(mode, OWN)));
+
+      expect(reason).toBe(buildSubagentReason("mcp", mode));
+      expect(reason).toContain(`this subagent's MCP tool call: in ${name}`);
+    },
+  );
+
+  it.each(["approval-required", "auto-accept-edits"] as const)(
+    "lets the session's own MCP tool call run in %s, and denies nothing in Full access",
+    (mode) => {
+      expect(answerPreToolCall(mcp(OWN), sessionEnv(mode, OWN))).toBe("");
+      expect(answerPreToolCall(mcp(CHILD), sessionEnv("full-access", OWN))).toBe("");
+    },
+  );
+
+  it("takes no edit-watch mark for an MCP tool call", () => {
+    const marks = createScratchHome("hook-marks");
+    answerPreToolCall(mcp(CHILD), {
+      ...sessionEnv("approval-required", OWN),
+      [SESSION_MARKS_DIR_VARIABLE]: marks,
+    });
+
+    expect(readdirSync(marks)).toEqual([]);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["not a safe id", "../x"],
+    ["not a safe id, with a space", "a b"],
+  ])("does not apply when the call's conversation id is %s", (_name, id) => {
+    const env = sessionEnv("approval-required", OWN);
+
+    expect(answerPreToolCall(command(id), env)).toBe("");
+    expect(answerPreToolCall(edit(id), env)).toBe("");
+    expect(answerPreToolCall(mcp(id), env)).toBe("");
+  });
+
+  it.each(["approval-required", "auto-accept-edits"] as const)(
+    "lets the session's own command and file change run in %s",
+    (mode) => {
+      const env = sessionEnv(mode, OWN);
+
+      expect(answerPreToolCall(command(OWN), env)).toBe("");
+      expect(answerPreToolCall(edit(OWN), env)).toBe("");
+    },
+  );
+
+  it("lets a subagent's read run", () => {
+    expect(answerPreToolCall(read(CHILD), sessionEnv("approval-required", OWN))).toBe("");
+  });
+
+  it("denies nothing in Full access", () => {
+    const env = sessionEnv("full-access", OWN);
+
+    expect(answerPreToolCall(command(CHILD), env)).toBe("");
+    expect(answerPreToolCall(edit(CHILD), env)).toBe("");
+  });
+
+  it.each([
+    ["the file is missing", undefined],
+    ["the file is empty", ""],
+    ["the file holds more than an id", "not an id\n../x"],
+  ])("does not apply when %s", (_name, own) => {
+    const env = sessionEnv("approval-required", own);
+
+    expect(answerPreToolCall(command(CHILD), env)).toBe("");
+    expect(answerPreToolCall(edit(CHILD), env)).toBe("");
+  });
+
+  it("does not apply when the path cannot be read as a file", () => {
+    const folder = createScratchHome("hook-conversation");
+    const env = rulesEnv("approval-required", { conversationIdFile: folder });
+
+    expect(answerPreToolCall(command(CHILD), env)).toBe("");
+  });
+
+  it("does not apply to a call with no conversation id", () => {
+    const env = sessionEnv("approval-required", OWN);
+
+    expect(answerPreToolCall(command(undefined), env)).toBe("");
+    expect(answerPreToolCall(command(5), env)).toBe("");
+  });
+
+  it("gives a guarded path its own reason first", () => {
+    const { cwd } = setUpRepo();
+    const input = JSON.stringify({
+      conversationId: CHILD,
+      cwd,
+      toolCall: {
+        args: { Content: "x", Path: ".agents/hooks.json" },
+        id: "call_4",
+        name: "write_file",
+      },
+    });
+
+    expect(readReason(answerPreToolCall(input, sessionEnv("approval-required", OWN)))).toContain(
+      "decides what the agent may do without asking",
+    );
+  });
+});
+
 describe("the guard of the approval files", () => {
   const decide = (cwd: string, path: string, env: Record<string, string> = GUARDED) =>
     answerPreToolCall(editInput(cwd, path), env);
@@ -432,6 +592,30 @@ describe("the guard of the approval files", () => {
     expect(isDenied(decide(cwd, join(home, "config", "plugins", "p", "x.json"), env))).toBe(true);
     expect(decide(cwd, join(home, "config", "other.json"), env)).toBe("");
     expect(decide(cwd, hooks, FULL)).toBe("");
+  });
+
+  it("denies a change to the files Hercule reads in any conversation's brain folder, and lets the model's own files be written", () => {
+    const { cwd } = setUpRepo();
+    const home = createScratchHome("hook-home");
+    const env = rulesEnv("auto-accept-edits", {
+      harnessHomePaths: [...listGuardedHomePaths(home)],
+    });
+    const brain = join(home, "antigravity-acp", "brain");
+
+    expect(isDenied(decide(cwd, join(brain, "conv-1", ".system_generated"), env))).toBe(true);
+    expect(
+      isDenied(decide(cwd, join(brain, "conv-2", ".system_generated", "steps", "1.json"), env)),
+    ).toBe(true);
+    expect(
+      isDenied(decide(cwd, join(brain, "conv-2", ".SYSTEM_GENERATED", "steps", "1.json"), env)),
+    ).toBe(true);
+    expect(decide(cwd, join(brain, "conv-1", "task.md"), env)).toBe("");
+    expect(decide(cwd, join(brain, "conv-1", "implementation_plan.md"), env)).toBe("");
+    expect(decide(cwd, join(brain, "conv-1", "notes", ".system_generated"), env)).toBe("");
+    expect(decide(cwd, join(brain, ".system_generated"), env)).toBe("");
+    expect(decide(cwd, join(brain, "conv-1", ".system_generated", "steps", "1.json"), FULL)).toBe(
+      "",
+    );
   });
 
   it.each([

@@ -8,6 +8,12 @@ Third-party material that is copied into this repository. Each entry says what i
 - Licence: MIT. Copyright (c) 2026 T3 Tools Inc.
 - Text: `packages/acp/vendor/effect-acp/LICENSE`
 
+## T3 Code: the reading of agy's transcript lines
+
+- What: the reading of the transcript lines and tool arguments of `agy` (a line, and its JSON-encoded string arguments decoded with a fallback to the raw text) in `apps/runner/src/harnesses/antigravity/agy-files.ts`, after `TranscriptLine`, `decodeArgument` and `toolArguments` in `apps/server/src/provider/acp/AntigravityChildWork.ts` of [T3 Code](https://github.com/pingdotgg/t3code). Commit `9b4943f91cf8de7f376b73d4a7299fe74b54d044`.
+- Licence: MIT. Copyright (c) 2026 T3 Tools Inc.
+- Text: `packages/acp/vendor/effect-acp/LICENSE`
+
 ## Octicons: status icons of the GitHub plugin
 
 - What: the paths of six icons (pull request open, draft, merged and closed; issue open and closed) from [primer/octicons](https://github.com/primer/octicons), package `@primer/octicons` 19.15.0, copied unchanged into `plugins/github/src/status-icons.ts`.

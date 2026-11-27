@@ -17,6 +17,7 @@ import {
   buildSessionNotRunning,
 } from "../adapter-error-builders";
 import type { HarnessAdapter } from "../index";
+import { buildEnvelope } from "../normalize";
 import { buildFailedProbe } from "../probe";
 import { runProcess, spawnAgy } from "../process";
 import { ANTIGRAVITY_NAME, buildLoginCommand, type AgySeam } from "./agy";
@@ -145,13 +146,25 @@ export const makeAntigravityAdapter = (seam: AgySeam): HarnessAdapter => {
           ? Effect.fail(buildSessionNotRunning())
           : entry.session.send(input);
       }),
-    // `agy` reports no subagents, so an interrupt of one has nothing to stop.
+    // `session/cancel` is the only stop `agy` has: it names the session and stops every subagent. So one subagent cannot be stopped; the caller is told, and nothing is stopped.
     interrupt: (sessionId, subagentId) =>
       Effect.suspend(() => {
         const entry = readHosted(sessionId);
-        return entry === undefined || subagentId !== undefined
-          ? Effect.void
-          : entry.session.interrupt;
+        if (entry === undefined) return Effect.void;
+        if (subagentId === undefined) return entry.session.interrupt;
+        return Effect.sync(() =>
+          emit([
+            {
+              _tag: "runtime.warning",
+              ...buildEnvelope(sessionId, {
+                nativeSessionId: entry.session.binding.nativeSessionId,
+              }),
+              subagentId,
+              message:
+                "Antigravity cannot stop one subagent. Interrupt the session's turn to stop all of its work.",
+            },
+          ]),
+        );
       }),
     respondToApprovalRequest: (sessionId, requestId, decision) =>
       Effect.suspend(

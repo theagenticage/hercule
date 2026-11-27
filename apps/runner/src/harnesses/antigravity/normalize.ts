@@ -20,6 +20,14 @@
  *   closes when its last item completes;
  * - text items: one starts at its first chunk and completes at the next
  *   message of another kind, at `usage_update`, or when the turn closes;
+ * - the held error notice: a message chunk that is agy's own error (see
+ *   `parseAgyErrorNotice`) waits one step, because agy replies `end_turn` right
+ *   after it and only then is it known to be the end of the turn and not text
+ *   in the middle of one. The Turn takes it (`takeErrorNotice`) when the reply
+ *   comes; an update that draws something, the end of the turn and the end of
+ *   the process show it as the assistant text it would have been. With no
+ *   input's prompt in flight (an automatic wake) it is shown at once as
+ *   assistant text in the synthetic turn, because no reply would ever take it;
  * - the `todo_list` and `plan` items, rebuilt from the files the model writes,
  *   because `agy` sends no ACP `plan` update. It compares a written path with
  *   the plan file paths it was given; it does not build paths.
@@ -48,12 +56,14 @@ import {
 import type * as Schema from "effect/Schema";
 import { ensureId } from "../events";
 import { buildEnvelope, buildRaw, clampCount } from "../normalize";
+import { parseAgyErrorNotice } from "./agy";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { truncateFact, truncateMessage } from "../text";
 import {
   buildApprovalDescription,
   buildFailedToolItem,
   buildToolItem,
+  LAUNCH_TOOL_NAME,
   type ApprovalDescription,
   type ToolCallFields,
 } from "./tool-items";
@@ -66,7 +76,7 @@ const ANTIGRAVITY_MESSAGE = "antigravity.acp.message";
 const LABEL_PREFIX = "antigravity";
 
 /** The token counts of one scope (a turn, or the whole process), added up. */
-interface Totals {
+export interface Totals {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -113,15 +123,27 @@ interface RunningTool {
 }
 
 /**
- * What stays of a tool item after it ends: nothing but the fact that it ended,
- * so a long session does not hold every file it edited. It is enough to ignore
- * a late update.
+ * What stays of a tool item after it ends: the fact that it ended, so a long
+ * session does not hold every file it edited. It is enough to ignore a late
+ * update. A call that launches subagents also keeps its item's id, because a
+ * subagent's files link it to the call about a second after the call ended
+ * (`findLaunchItem`).
  */
 interface EndedTool {
   readonly ended: true;
+  readonly itemId?: string;
 }
 
 const ENDED_TOOL: EndedTool = { ended: true };
+
+/**
+ * Returns what stays of `record` once it ended. Only a call that launches
+ * subagents keeps its item's id. That bounds the memory: a session makes as
+ * many such calls as it starts subagents, and the files of at most 64 of them
+ * are read.
+ */
+const buildEndedTool = (record: RunningTool): EndedTool =>
+  record.call.name === LAUNCH_TOOL_NAME ? { ended: true, itemId: record.itemId } : ENDED_TOOL;
 
 type ToolRecord = RunningTool | EndedTool;
 
@@ -147,16 +169,22 @@ export interface NormalizerState {
   readonly buffered: Array<BufferedMessage>;
   /** The open assistant message or reasoning block, if any. */
   text: TextRecord | undefined;
+  /** The text of agy's own error notice that is held until the next update or the reply of the prompt, if any. */
+  errorNotice: string | undefined;
   /** Every tool call seen, by `toolCallId`. */
   readonly tools: Map<string, ToolRecord>;
   /** The calls whose Request the adapter answered with a deny or a cancel. */
   readonly declined: Set<string>;
   readonly processUsage: Totals;
+  /** The tokens the subagents used in this process. No prompt reply counts them, and the session's usage includes them. */
+  readonly subagentUsage: Totals;
   /**
-   * Whether the process used tokens that no prompt reply counts: a subagent
-   * ran, output came with no prompt open, or a reply had no usage.
+   * Whether the process used tokens that no prompt reply counts: output came
+   * with no prompt open, or a reply had no usage.
    */
   usageIsIncomplete: boolean;
+  /** Whether the files that hold the subagents' tokens could not be read, wholly or for one subagent. */
+  subagentUsageIsIncomplete: boolean;
 }
 
 /** The turn and item a Request belongs to. */
@@ -186,13 +214,17 @@ export const buildNormalizerState = (input: {
   held: false,
   buffered: [],
   text: undefined,
+  errorNotice: undefined,
   tools: new Map(),
   declined: new Set(),
   processUsage: buildZeroTotals(),
+  subagentUsage: buildZeroTotals(),
   usageIsIncomplete: false,
+  subagentUsageIsIncomplete: false,
 });
 
-const buildZeroTotals = (): Totals => ({
+/** Returns token totals that are all zero. */
+export const buildZeroTotals = (): Totals => ({
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
@@ -370,7 +402,8 @@ const buildRuntimeWarning = (
   message: truncateMessage(message),
 });
 
-const buildUsage = (totals: Totals): Usage => ({
+/** Returns the protocol `Usage` that holds `totals`. */
+export const buildUsage = (totals: Totals): Usage => ({
   inputTokens: totals.inputTokens,
   outputTokens: totals.outputTokens,
   cacheReadTokens: totals.cacheReadTokens,
@@ -425,7 +458,7 @@ export const closeTurn = (
 ): HarnessEvent[] => {
   const turn = state.turn;
   if (turn === undefined || (end.turnId !== undefined && end.turnId !== turn.id)) return [];
-  const events = closeTextItem(state);
+  const events = [...releaseErrorNotice(state), ...closeTextItem(state)];
   if (turn.todo !== undefined) {
     events.push(
       buildItemCompleted(
@@ -510,6 +543,31 @@ const replayBuffered = (state: NormalizerState): HarnessEvent[] =>
         ? normalizeUpdate(state, message.notification)
         : normalizeUnhandled(state, message.message),
     );
+
+// ---- The held error notice ----
+
+/**
+ * Removes and returns the text of the error notice that is held, or returns
+ * `undefined` when none is held. The Turn calls it when the newest prompt
+ * replies `end_turn`: the notice is then the provider's error, and is not
+ * shown as an assistant message.
+ */
+export const takeErrorNotice = (state: NormalizerState): string | undefined => {
+  const notice = state.errorNotice;
+  state.errorNotice = undefined;
+  return notice;
+};
+
+/** Returns the events that show the held error notice as assistant text, or nothing when none is held. */
+const releaseErrorNotice = (state: NormalizerState): HarnessEvent[] => {
+  const notice = takeErrorNotice(state);
+  return notice === undefined
+    ? []
+    : appendText(state, "assistant_message", buildNoticeText(notice));
+};
+
+/** Returns the assistant text that shows an error notice of `agy`. */
+const buildNoticeText = (notice: string): string => `\n⚠ ${notice}\n`;
 
 // ---- Text items ----
 
@@ -727,7 +785,6 @@ const normalizeToolCall = (
     state.tools.set(call.toolCallId, record);
     turn.running.add(record.itemId);
     const { kind, detail } = buildToolItem(record.call);
-    if (kind === "subagent") state.usageIsIncomplete = true;
     events.push(
       ...turnEvents,
       buildItemStarted(
@@ -745,7 +802,7 @@ const normalizeToolCall = (
   const wasDeclined = state.declined.delete(call.toolCallId);
   const status: ItemStatus =
     call.status === "completed" ? "completed" : wasDeclined ? "declined" : "failed";
-  state.tools.set(call.toolCallId, ENDED_TOOL);
+  state.tools.set(call.toolCallId, buildEndedTool(record));
   if (state.turn?.id === record.turnId) state.turn.running.delete(record.itemId);
   const { kind, detail } =
     status === "failed" ? buildFailedToolItem(record.call) : buildToolItem(record.call);
@@ -898,20 +955,70 @@ export const normalizeUpdate = (
     state.buffered.push({ type: "update", notification });
     return [];
   }
-  return [...routeUpdate(state, notification), ...closeIdleSyntheticTurn(state)];
+  const name = readUpdateName(notification.update);
+  const decision = decideUpdate(name);
+  // Only an update that starts new output releases the notice. `usage_update`
+  // follows the message chunks of every model call, and a late update of an
+  // item that already exists arrives after `agy` wrote its notice, so neither
+  // may release it before the reply. The updates the session drops draw
+  // nothing either (available commands, session info, mode, config option and
+  // the echo of the user's message).
+  return [
+    ...(startsNewOutput(state, decision, notification.update) ? releaseErrorNotice(state) : []),
+    ...routeUpdate(state, notification, name, decision),
+    ...closeIdleSyntheticTurn(state),
+  ];
+};
+
+/**
+ * Returns true when an update with this `decision` starts output that was not
+ * on screen before: a message or thought chunk, a tool call that begins, an
+ * update of a tool call this adapter has no item for, or an `unknown` item.
+ */
+const startsNewOutput = (
+  state: NormalizerState,
+  decision: UpdateDecision,
+  update: SessionUpdate,
+): boolean => {
+  switch (decision) {
+    case "message":
+    case "thought":
+    case "toolStart":
+    case "unknown":
+      return true;
+    case "toolUpdate": {
+      const call = readToolCall(update);
+      return call === undefined || !state.tools.has(call.toolCallId);
+    }
+    case "closeText":
+    case "drop":
+      return false;
+  }
 };
 
 const routeUpdate = (
   state: NormalizerState,
   notification: SessionUpdateNotification,
+  name: string,
+  decision: UpdateDecision,
 ): HarnessEvent[] => {
   const { update } = notification;
-  const name = readUpdateName(update);
-  const decision = decideUpdate(name);
   switch (decision) {
     case "message":
     case "thought": {
       const text = readChunkText(update);
+      const notice =
+        decision === "message" && state.text?.kind !== "assistant_message" && text !== undefined
+          ? parseAgyErrorNotice(text)
+          : undefined;
+      if (notice !== undefined) {
+        // Only the reply of an input's prompt can say that the notice ends the turn. With no such prompt in flight (an automatic wake), nothing would ever take the notice, so it is shown at once.
+        if (state.turn?.synthetic === false) {
+          state.errorNotice = notice;
+          return [];
+        }
+        return appendText(state, "assistant_message", buildNoticeText(notice));
+      }
       return text === undefined
         ? buildUnknownItem(state, name, notification)
         : appendText(state, decision === "message" ? "assistant_message" : "reasoning", text);
@@ -945,7 +1052,11 @@ export const normalizeUnhandled = (
     state.buffered.push({ type: "unhandled", message });
     return [];
   }
-  return [...buildUnknownItem(state, message.method, message), ...closeIdleSyntheticTurn(state)];
+  return [
+    ...releaseErrorNotice(state),
+    ...buildUnknownItem(state, message.method, message),
+    ...closeIdleSyntheticTurn(state),
+  ];
 };
 
 // ---- Public: declined calls and approvals ----
@@ -976,6 +1087,16 @@ export const findRequestOwner = (
 };
 
 /**
+ * Returns the id of the item of the call `toolCallId`, whether the call still
+ * runs or has ended, or `undefined` when the call is unknown or ended without
+ * launching subagents. A subagent's files link it to its launching call about
+ * a second after that call ended, so the session cannot use `findRequestOwner`,
+ * which refuses an ended call.
+ */
+export const findLaunchItem = (state: NormalizerState, toolCallId: string): string | undefined =>
+  state.tools.get(toolCallId)?.itemId;
+
+/**
  * Returns the owner of an approval Request, as `findRequestOwner` does, with
  * the Request's kind and detail built from the call. The approval's own
  * `snapshot` of the tool call is read over the fields the item last had.
@@ -995,15 +1116,19 @@ export const describeRequestItem = (
 // ---- Public: usage ----
 
 /**
- * Adds the usage of one prompt reply to the turn in flight and to the process,
- * and returns `session.usage.updated` with the process's sum. The event has
- * the incomplete form once the process used tokens that no reply counts: a
- * subagent ran, output came with no prompt open, or a reply had no usage.
+ * Adds the usage of one prompt reply to the process, and to the turn in flight
+ * only when that turn is `ownerTurnId`, the turn that sent the prompt. A reply
+ * that arrives after a newer turn opened still counts toward the process, but
+ * not toward the newer turn. Returns `session.usage.updated` with the process's
+ * sum. The event has
+ * the incomplete form once the process used tokens that no reply counts:
+ * output came with no prompt open, or a reply had no usage.
  * `thoughtTokens` is never added, because `outputTokens` already includes it.
  */
 export const addPromptUsage = (
   state: NormalizerState,
   usage: PromptUsage | null | undefined,
+  ownerTurnId: string,
 ): HarnessEvent[] => {
   if (usage == null) {
     state.usageIsIncomplete = true;
@@ -1015,7 +1140,7 @@ export const addPromptUsage = (
       cacheWriteTokens: clampCount(usage.cachedWriteTokens),
     };
     addTotals(state.processUsage, parts);
-    if (state.turn !== undefined) {
+    if (state.turn?.id === ownerTurnId) {
       addTotals(state.turn.usage, parts);
       state.turn.hasUsage = true;
     }
@@ -1023,23 +1148,59 @@ export const addPromptUsage = (
   return [buildUsageUpdated(state)];
 };
 
+/**
+ * Adds the tokens of one model step of a subagent to the session's usage, and
+ * returns `session.usage.updated` with the new snapshot: the session's own
+ * prompts plus every subagent's. No prompt reply counts a subagent's tokens, so
+ * this is the one place that adds them to the session.
+ */
+export const addSubagentUsage = (
+  state: NormalizerState,
+  tokens: Pick<Totals, "inputTokens" | "outputTokens" | "cacheReadTokens">,
+): HarnessEvent[] => {
+  addTotals(state.subagentUsage, { ...tokens, cacheWriteTokens: 0 });
+  return [buildUsageUpdated(state)];
+};
+
+/**
+ * Marks the session's usage as incomplete because some tokens of the
+ * subagents were not counted: their files could not be read, or a subagent
+ * started a subagent that is not read. Returns `session.usage.updated` in the
+ * incomplete form, or nothing when it was already marked.
+ */
+export const markSubagentUsageIncomplete = (state: NormalizerState): HarnessEvent[] => {
+  if (state.subagentUsageIsIncomplete) return [];
+  state.subagentUsageIsIncomplete = true;
+  return [buildUsageUpdated(state)];
+};
+
 /** Returns `session.usage.updated` with the process's sum, in the incomplete form once that applies. */
 const buildUsageUpdated = (state: NormalizerState): HarnessEvent => {
-  const counts = buildUsage(state.processUsage);
+  const sum = buildZeroTotals();
+  addTotals(sum, state.processUsage);
+  addTotals(sum, state.subagentUsage);
+  const counts = buildUsage(sum);
   return {
     _tag: "session.usage.updated",
     ...buildBase(state),
-    ...(state.usageIsIncomplete
+    ...(state.usageIsIncomplete || state.subagentUsageIsIncomplete
       ? { usageReport: { status: "incomplete" as const, counts } }
       : { usage: counts }),
   };
 };
 
-const addTotals = (total: Totals, parts: Totals): void => {
-  total.inputTokens += parts.inputTokens;
-  total.outputTokens += parts.outputTokens;
-  total.cacheReadTokens += parts.cacheReadTokens;
-  total.cacheWriteTokens += parts.cacheWriteTokens;
+/**
+ * Adds `parts` to `total`. A count stops at the largest safe integer, because
+ * the protocol rejects a larger one and the runner then drops every later usage
+ * frame of the process.
+ */
+export const addTotals = (total: Totals, parts: Totals): void => {
+  const add = (count: number, extra: number): number =>
+    Math.min(count + extra, Number.MAX_SAFE_INTEGER);
+  total.inputTokens = add(total.inputTokens, parts.inputTokens);
+  total.outputTokens = add(total.outputTokens, parts.outputTokens);
+  total.cacheReadTokens = add(total.cacheReadTokens, parts.cacheReadTokens);
+  total.cacheWriteTokens = add(total.cacheWriteTokens, parts.cacheWriteTokens);
 };
 
 // ---- Public: the end of the process ----
@@ -1051,10 +1212,10 @@ const addTotals = (total: Totals, parts: Totals): void => {
  * user's is left to `closeTurn`.
  */
 export const buildProcessEndEvents = (state: NormalizerState): HarnessEvent[] => {
-  const events = closeTextItem(state);
+  const events = [...releaseErrorNotice(state), ...closeTextItem(state)];
   for (const [toolCallId, record] of state.tools) {
     if (record.ended) continue;
-    state.tools.set(toolCallId, ENDED_TOOL);
+    state.tools.set(toolCallId, buildEndedTool(record));
     const { kind, detail } = buildToolItem(record.call);
     events.push(
       buildItemCompleted(

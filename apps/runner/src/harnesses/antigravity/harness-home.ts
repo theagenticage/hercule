@@ -287,14 +287,23 @@ const buildFilesToWrite = (hooksFile: string): ReadonlyArray<FileToWrite> => [
 ];
 
 /**
- * Returns the absolute path of every file and folder Hercule owns in the
- * Harness Home `home`, so that the pre-tool hook can deny the agent every
- * change to them.
+ * Returns the absolute path of every file and folder in the Harness Home
+ * `home` that the agent may not change: the ones Hercule owns, and the ones
+ * Hercule reads from. The pre-tool hook denies every change to them. A
+ * segment `*` stands for any one folder name.
+ *
+ * The last entry is the `.system_generated` folder of every conversation in
+ * `brain`: Hercule reads the subagents' transcripts and steps from it, so the
+ * agent must not be able to write what Hercule then shows. The files the
+ * model writes itself, `brain/<id>/task.md` and `implementation_plan.md`, are
+ * outside it and stay writable.
  */
-export const listOwnedPaths = (home: string): ReadonlyArray<string> =>
-  [...PATHS_TO_REMOVE, ...buildFilesToWrite("").map((file) => file.path)].map((path) =>
-    join(home, path),
-  );
+export const listGuardedHomePaths = (home: string): ReadonlyArray<string> =>
+  [
+    ...PATHS_TO_REMOVE,
+    ...buildFilesToWrite("").map((file) => file.path),
+    join(APP_DATA_DIR, "brain", "*", ".system_generated"),
+  ].map((path) => join(home, path));
 
 /**
  * Returns the folders that hold the owned paths, from the Harness Home `home`

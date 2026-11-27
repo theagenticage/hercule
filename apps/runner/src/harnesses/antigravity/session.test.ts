@@ -6,7 +6,16 @@
  * recording's handshake only and writes the messages itself. Time runs on a
  * `TestClock`.
  */
-import { lstatSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,6 +39,7 @@ import {
   writeTestImage,
 } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { APP_DATA_DIR } from "./harness-home";
 import { answerPreToolCall, decodeHookRules } from "./pre-tool-hook";
 import {
   answerConfigChange,
@@ -42,6 +52,7 @@ import {
   createConversationFiles,
   createSignedInHome,
   GATEWAY_ENTRY,
+  TEST_SESSION_TOKEN,
   noAnswer,
   readRecordedSetup,
   refuse,
@@ -530,6 +541,22 @@ describe("the skills folder of a session", () => {
       ),
     );
   });
+
+  it.each(["new", "resume"] as const)(
+    "records the conversation id for the hook before the first prompt, on a %s session",
+    (kind) =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            const binding = yield* h.start(kind === "resume" ? RESUME : undefined);
+
+            const rules = decodeHookRules(h.fake.spawns[0]!.env["HERCULE_AGY_HOOK_RULES"] ?? "");
+            expect(h.received("session/prompt")).toHaveLength(0);
+            expect(readFileSync(rules!.conversationIdFile, "utf8")).toBe(binding.nativeSessionId);
+          }),
+        kind === "resume" ? { fake: withConversation } : {},
+      ),
+  );
 
   it("is passed resolved when it is reached through a link, as the pointer lines name resolved paths", () => {
     const skills = createSessionSkills({ library: ["review"] });
@@ -1494,22 +1521,159 @@ describe("a turn", () => {
       { fake: { recording: "bad-model" } },
     ));
 
-  it("refuses an input while a turn runs with SteerRefused, and prompts nothing for it", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* h.adapter.sendInput(SESSION, buildInput());
-          yield* h.untilReceived("session/prompt");
+  describe("an input that arrives while a turn runs", () => {
+    const STEER_TOKEN = "sess-tok-7f3a91c2e8";
 
-          const refused = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("More.")));
+    /** The reply of `agy` to a prompt, as the `steer-visible` recording shows it. */
+    const buildPromptReply = (id: unknown, inputTokens: number): JsonRpcMessage => ({
+      jsonrpc: "2.0",
+      id: id as number,
+      result: {
+        stopReason: "end_turn",
+        usage: {
+          inputTokens,
+          outputTokens: 0,
+          cachedReadTokens: 0,
+          cachedWriteTokens: 0,
+          totalTokens: inputTokens,
+        },
+      },
+    });
 
-          expect(refused._tag).toBe("SteerRefused");
-          expect(h.received("session/prompt")).toHaveLength(1);
-          expect(h.tags("turn.started")).toHaveLength(1);
-        }),
-      { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
-    ));
+    /** The second prompt reaches the fake as a prompt the recording does not hold, so a script decides what happens to it. */
+    const steerFake = (second: HarnessScript): FakeAgyOptions => ({
+      recording: "cancel",
+      scripts: { "session/prompt": second },
+    });
+
+    it("refuses it with SteerRefused when agy refuses the prompt, and the turn goes on without it", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+            const firstId = h.received("session/prompt")[0]?.id;
+
+            const refused = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("More.")));
+
+            expect(refused._tag).toBe("SteerRefused");
+            expect(refused.message).toContain("Can't add this prompt");
+            expect(
+              h.tags("item.completed").filter((event) => event.kind === "user_message"),
+            ).toHaveLength(1);
+
+            h.harness().sendLine(JSON.stringify(buildPromptReply(firstId, 5)));
+            yield* h.until("the turn completed", () => h.tags("turn.completed").length === 1);
+            expect(h.tags("turn.completed")).toMatchObject([{ state: "completed" }]);
+          }),
+        {
+          fake: steerFake(
+            refuse(-32603, "Can't add this prompt to session abc: a permission is open."),
+          ),
+          spec: { accessMode: "full-access" },
+        },
+      ));
+
+    it("hides the session token in the error of an input, here an image whose path holds it and cannot be read", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+            const missing = {
+              ...writeTestImage(),
+              path: join(tmpdir(), `no-such-folder-${STEER_TOKEN}`, "image.png"),
+            };
+
+            const failed = yield* Effect.flip(
+              h.adapter.sendInput(SESSION, buildInput("More.", { attachments: [missing] })),
+            );
+
+            expect(failed._tag).toBe("AdapterFailed");
+            expect(failed.message).not.toContain(STEER_TOKEN);
+            expect(failed.message).toContain("[hidden]");
+          }),
+        {
+          env: { PATH: "/usr/bin", HERCULE_TOKEN: STEER_TOKEN },
+          fake: steerFake(() => []),
+          spec: { accessMode: "full-access" },
+        },
+      ));
+
+    it("refuses it before any write when it asks for another model, because the model changes only when a turn starts", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+
+            const refused = yield* Effect.flip(
+              h.adapter.sendInput(
+                SESSION,
+                buildInput("More.", {
+                  modelSelection: { model: "gemini-4-carbon", options: { effort: "low" } },
+                }),
+              ),
+            );
+
+            expect(refused._tag).toBe("SteerRefused");
+            expect(refused.message).toContain("model");
+            expect(h.received("session/prompt")).toHaveLength(1);
+            expect(h.received("session/set_config_option")).toHaveLength(0);
+          }),
+        { fake: CANCEL_RECORDING, spec: { accessMode: "full-access" } },
+      ));
+
+    it("takes the model of the session in a steer without changing anything", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+
+            const sending = yield* Effect.forkChild(
+              h.adapter.sendInput(
+                SESSION,
+                buildInput("More.", { modelSelection: SPEC.modelSelection }),
+              ),
+            );
+            yield* h.untilReceived("session/prompt", 2);
+            h.harness().sendLine(
+              JSON.stringify(buildPromptReply(h.received("session/prompt")[1]?.id, 1)),
+            );
+
+            expect(yield* Fiber.join(sending)).toMatchObject({ delivery: "steered" });
+            expect(h.received("session/set_config_option")).toHaveLength(0);
+          }),
+        { fake: steerFake(() => []), spec: { accessMode: "full-access" } },
+      ));
+
+    it("fails with HarnessProtocolError and ends the process when agy does not confirm within the budget", () =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
+            yield* h.untilReceived("session/prompt");
+
+            const sending = yield* Effect.forkChild(
+              Effect.flip(h.adapter.sendInput(SESSION, buildInput("More."))),
+            );
+            yield* h.untilReceived("session/prompt", 2);
+            yield* TestClock.adjust(Duration.seconds(8));
+
+            expect((yield* Fiber.join(sending))._tag).toBe("HarnessProtocolError");
+            yield* h.until("the session exited", () => h.tags("session.exited").length === 1);
+            expect(h.tags("runtime.error")).toMatchObject([{ class: "delivery_unknown" }]);
+            expect(h.tags("session.exited")).toMatchObject([{ reason: "crash" }]);
+          }),
+        { fake: steerFake(noAnswer), spec: { accessMode: "full-access" } },
+      ));
+  });
 
   it("is interrupted with session/cancel and ends interrupted, and the session goes on", () =>
     run(
@@ -2043,6 +2207,10 @@ describe("a Request and the end of its turn", () => {
               const refused = yield* Effect.flip(h.adapter.sendInput(SESSION, buildInput("More.")));
               expect(refused._tag).toBe("SteerRefused");
               expect(h.tags("turn.started")).toHaveLength(1);
+              expect(
+                h.received("session/prompt"),
+                "nothing was written for the refused input",
+              ).toHaveLength(1);
 
               gate.resolve();
               yield* Fiber.join(answering);
@@ -2514,6 +2682,23 @@ describe("a synthetic turn that agy leaves open", () => {
         expect(h.tags("turn.completed")).toMatchObject([{ state: "completed" }]);
       }),
     ));
+
+  it("completes after 10 seconds although the reader of the files reads every half second meanwhile", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.start();
+        h.harness().sendLine(JSON.stringify(CHUNK));
+        yield* h.until("a synthetic turn opened", () => h.tags("turn.started").length === 1);
+
+        // The reader polls while the synthetic turn is open. What it reads must not start the wait again.
+        for (let half = 0; half < 20; half += 1) {
+          yield* TestClock.adjust(Duration.millis(500));
+          yield* Effect.promise(settle);
+        }
+
+        expect(h.tags("turn.completed")).toMatchObject([{ state: "completed" }]);
+      }),
+    ));
 });
 
 describe("the output that comes before a start is ready", () => {
@@ -2665,5 +2850,627 @@ describe("a stop with a Request open", () => {
             ? new Promise(() => {})
             : undefined,
       },
+    ));
+});
+
+// ---- The files of agy that show a subagent ----
+
+/** The recorded files of `subagent-full`: the session's own conversation, and the subagent it started. */
+const FILES_BRAIN = join(
+  import.meta.dirname,
+  "fixtures",
+  "session-files",
+  "subagent-full",
+  "brain",
+);
+const ROOT = "86a5c11a-cc0d-4231-b6a7-4df5e51875e0";
+const CHILD = "e4553827-0073-42e6-bc63-8e9619a7d435";
+/** The ACP id of the `invoke_subagent` call that the launch message of the child names. */
+const LAUNCH_CALL = "call_11946467374736309831";
+
+const conversationFolder = (home: string, id: string): string =>
+  join(home, APP_DATA_DIR, "brain", id, ".system_generated");
+const transcriptPath = (home: string, id: string): string =>
+  join(conversationFolder(home, id), "logs", "transcript.jsonl");
+
+/** The recorded steps of the subagent, one line each. Its last step ends its turn. */
+const CHILD_STEPS = readFileSync(
+  join(FILES_BRAIN, CHILD, ".system_generated", "logs", "transcript.jsonl"),
+  "utf8",
+)
+  .split("\n")
+  .filter((step) => step !== "");
+
+/** The recorded steps of the session's own agent, one line each. */
+const ROOT_STEPS = readFileSync(
+  join(FILES_BRAIN, ROOT, ".system_generated", "logs", "transcript.jsonl"),
+  "utf8",
+)
+  .split("\n")
+  .filter((step) => step !== "");
+
+/**
+ * Writes what `agy` writes about a second after the session's own agent calls `invoke_subagent`: the
+ * session's own transcript up to the call's result, the registration of the subagent, and the launch
+ * message that names the call which started it.
+ */
+const registerSubagent = (home: string): void => {
+  const rootTranscript = transcriptPath(home, ROOT);
+  mkdirSync(dirname(rootTranscript), { recursive: true });
+  writeFileSync(
+    rootTranscript,
+    ROOT_STEPS.slice(0, 3)
+      .map((step) => `${step}\n`)
+      .join(""),
+  );
+  cpSync(
+    join(FILES_BRAIN, ROOT, ".system_generated", "subagents"),
+    join(conversationFolder(home, ROOT), "subagents"),
+    { recursive: true },
+  );
+  cpSync(
+    join(FILES_BRAIN, CHILD, ".system_generated", "messages"),
+    join(conversationFolder(home, CHILD), "messages"),
+    { recursive: true },
+  );
+};
+
+/** Appends the text to the subagent's transcript, as `agy` appends a finished step. */
+const appendToSubagentTranscript = (home: string, text: string): void => {
+  const path = transcriptPath(home, CHILD);
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, text);
+};
+
+/** Appends the recorded steps from `from` up to, but not including, `to` to the subagent's transcript. */
+const appendSubagentSteps = (home: string, from: number, to: number): void => {
+  appendToSubagentTranscript(
+    home,
+    CHILD_STEPS.slice(from, to)
+      .map((step) => `${step}\n`)
+      .join(""),
+  );
+};
+
+/**
+ * Returns the script for `session/prompt` of a session over the conversation
+ * `ROOT`. The first prompt gets a call that launches a subagent, which
+ * completes at once and leaves the prompt open. A later prompt gets a short
+ * text, which only proves that `agy` has taken it.
+ */
+const buildLaunchScript = (): HarnessScript => {
+  let prompts = 0;
+  return () => {
+    prompts += 1;
+    if (prompts > 1) {
+      return [
+        buildUpdate(
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Again." } },
+          ROOT,
+        ),
+      ];
+    }
+    const args = { Prompt: "Run it.", Role: "File Writer", TypeName: "self" };
+    const call = {
+      toolCallId: LAUNCH_CALL,
+      name: "invoke_subagent",
+      args,
+      kind: "other",
+      title: "Run invoke_subagent",
+      rawInput: args,
+    };
+    return [
+      buildUpdate({ sessionUpdate: "tool_call", ...call, status: "in_progress" }, ROOT),
+      buildUpdate({ sessionUpdate: "tool_call_update", ...call, status: "completed" }, ROOT),
+    ];
+  };
+};
+
+const subagentFake = (home: string): FakeAgyOptions => ({
+  recording: readRecordedSetup("cancel"),
+  scripts: {
+    "session/new": answerNewSession(home, ROOT),
+    "session/prompt": buildLaunchScript(),
+  },
+});
+
+/** Like `subagentFake`, and the first prompt also leaves a shell call running, which the test can then ask an approval for. */
+const subagentFakeWithRunningCall = (home: string): FakeAgyOptions => {
+  const launch = buildLaunchScript();
+  let prompts = 0;
+  return {
+    ...subagentFake(home),
+    scripts: {
+      "session/new": answerNewSession(home, ROOT),
+      "session/prompt": (call, harness) => {
+        prompts += 1;
+        return [
+          ...launch(call, harness),
+          ...(prompts > 1
+            ? []
+            : [
+                buildUpdate(
+                  {
+                    sessionUpdate: "tool_call",
+                    toolCallId: "call-run",
+                    name: "run_command",
+                    kind: "execute",
+                    title: "Run ls",
+                    status: "in_progress",
+                    rawInput: { CommandLine: "ls" },
+                  },
+                  ROOT,
+                ),
+              ]),
+        ];
+      },
+    },
+  };
+};
+
+/** Waits in real time, up to `limitMs`, until `ready` returns true, and returns whether it did. */
+const pollFor = async (ready: () => boolean, limitMs: number): Promise<boolean> => {
+  const deadline = Date.now() + limitMs;
+  while (!ready() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1));
+  return ready();
+};
+
+/**
+ * Lets the reader of the files read until `ready` returns true. Each round runs the 500 ms between
+ * two reads out and then waits in real time, bounded, for the read to show its result, because
+ * the read is real file input and output. Fails the test when 10 rounds did not get there.
+ */
+const readFilesUntil = (what: string, ready: () => boolean) =>
+  Effect.gen(function* () {
+    for (let rounds = 0; rounds < 10 && !ready(); rounds += 1) {
+      yield* TestClock.adjust(Duration.millis(500));
+      yield* Effect.promise(() => pollFor(ready, 250));
+    }
+    expect(ready(), `the files never showed ${what}`).toBe(true);
+  });
+
+/**
+ * Waits for an interrupt, or an answer that cancels, which waits for the files to catch up with
+ * the cancel while a subagent's turn is open. The test clock runs that wait out only when asked,
+ * so this runs it in steps until the fiber is done.
+ */
+const joinAfterCancelLag = (fiber: Fiber.Fiber<unknown, unknown>) =>
+  Effect.gen(function* () {
+    for (let rounds = 0; rounds < 20 && fiber.pollUnsafe() === undefined; rounds += 1) {
+      yield* TestClock.adjust(Duration.millis(250));
+      yield* Effect.promise(settle);
+    }
+    yield* Fiber.join(fiber);
+  });
+
+/**
+ * Runs the clock out by `duration` in steps of half a second, and lets every read in between finish
+ * as far as it goes. It checks nothing itself: a test that then sees nothing new can trust that
+ * the reader had every chance to show it, because a late read only makes such a test pass.
+ */
+const runOutClock = (duration: Duration.Duration) =>
+  Effect.gen(function* () {
+    for (let elapsed = 0; elapsed < Duration.toMillis(duration); elapsed += 500) {
+      yield* TestClock.adjust(Duration.millis(500));
+      yield* Effect.promise(settle);
+    }
+  });
+
+/** Makes `agy` reply to its latest prompt: the usage of the session's own agent, and the end of the turn. */
+const replyToLatestPrompt = (h: Harness, stopReason: "end_turn" | "cancelled" = "end_turn") =>
+  Effect.sync(() => {
+    h.harness().sendLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: h.received("session/prompt").at(-1)!.id,
+        result: {
+          stopReason,
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 50,
+            cachedReadTokens: 0,
+            cachedWriteTokens: 0,
+            totalTokens: 1050,
+          },
+        },
+      }),
+    );
+  });
+
+/** Sends the first input and waits until the call that launches the subagent has completed. Returns that call's item. */
+const sendUntilLaunched = (h: Harness) =>
+  Effect.gen(function* () {
+    yield* h.adapter.sendInput(SESSION, buildInput("Start it."));
+    yield* h.until("the launch call completed", () =>
+      h.tags("item.completed").some((event) => event.kind === "subagent"),
+    );
+    return h.tags("item.completed").find((event) => event.kind === "subagent")!;
+  });
+
+const isRoot = (event: HarnessEvent): boolean =>
+  !("subagentId" in event) || event.subagentId === undefined;
+const isChild = (event: HarnessEvent): boolean =>
+  "subagentId" in event && event.subagentId === CHILD;
+
+/** Describes the events in order as `tag` or `tag (state)` for a turn end, to compare a whole sequence. */
+const summarizeChildTurns = (h: Harness) =>
+  h.seen
+    .filter(
+      (event) =>
+        isChild(event) && (event._tag === "turn.started" || event._tag === "turn.completed"),
+    )
+    .map((event) => (event._tag === "turn.completed" ? `ended ${event.state}` : "started"));
+
+const childEnded = (h: Harness, state: string) => () =>
+  summarizeChildTurns(h).includes(`ended ${state}`);
+
+describe("the subagents that agy's files show", () => {
+  it("never publishes the session token that a subagent's files hold, in its text, its tool input and output, or a warning that quotes the files", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          const echo = `echo ${TEST_SESSION_TOKEN} end`;
+          const step = (index: number, type: string, fields: Record<string, unknown>) =>
+            `${JSON.stringify({ step_index: index, type, status: "DONE", model: "gemini-4-neon-high", ...fields })}\n`;
+          appendToSubagentTranscript(
+            h.home,
+            step(1, "PLANNER_RESPONSE", {
+              content: echo,
+              tool_calls: [
+                {
+                  name: "run_command",
+                  args: { CommandLine: `curl -H "Authorization: Bearer ${TEST_SESSION_TOKEN}"` },
+                },
+              ],
+            }) +
+              step(2, "GENERIC", { content: `output ${echo}` }) +
+              step(3, "ERROR_MESSAGE", { error: `503 ${echo}` }) +
+              step(4, "PLANNER_RESPONSE", { content: "Done." }),
+          );
+          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "completed"));
+
+          const published = JSON.stringify(h.seen);
+          expect(published).not.toContain(TEST_SESSION_TOKEN);
+          const hidden = (text: string) => published.includes(`${text}[hidden]`);
+          expect(hidden("echo "), "the subagent's text and the tool's output").toBe(true);
+          expect(hidden("Bearer "), "the tool's input").toBe(true);
+          expect(
+            h.tags("runtime.warning").some((event) => event.message.includes("503 echo [hidden]")),
+            "the warning that quotes the files",
+          ).toBe(true);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("goes on with ACP alone, and warns, when the session's own files cannot be read", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          mkdirSync(dirname(transcriptPath(h.home, ROOT)), { recursive: true });
+          writeFileSync(transcriptPath(h.home, ROOT), "this is not json\n");
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          yield* readFilesUntil("the warning", () => h.tags("runtime.warning").length > 0);
+
+          expect(h.tags("runtime.warning")).toHaveLength(1);
+          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+            usageReport: { status: "incomplete" },
+          });
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("tells the watcher that a turn replied, so it warns when agy wrote no transcript", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          yield* readFilesUntil("the warning", () => h.tags("runtime.warning").length > 0);
+        }),
+      { fake: subagentFake },
+    ));
+
+  /** Checks whether the subagent's shell call completed, which is in step 2 of its transcript. */
+  const hasChildCommandCompleted = (h: Harness): boolean =>
+    h
+      .tags("item.completed")
+      .some(
+        (event) =>
+          isChild(event) && event.kind === "command_execution" && event.status === "completed",
+      );
+
+  it("shows the steps a subagent wrote before the cancel, and then ends its open turn as interrupted, when an interrupt stops the session's turn", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          // Written before the cancel and not read yet.
+          appendSubagentSteps(h.home, 2, 5);
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          yield* replyToLatestPrompt(h, "cancelled");
+          yield* joinAfterCancelLag(interrupting);
+
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+          expect(hasChildCommandCompleted(h)).toBe(true);
+          expect(h.seen.filter(isChild).at(-1)).toMatchObject({
+            _tag: "turn.completed",
+            state: "interrupted",
+          });
+          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state: "interrupted" }]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("shows the steps a subagent wrote before the cancel, and then ends its open turn as interrupted, when the user answers an approval with cancel", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* h.adapter.sendInput(SESSION, buildInput("Start it."));
+          yield* h.until("the shell call started", () =>
+            h.tags("item.started").some((event) => event.kind === "command_execution"),
+          );
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          appendSubagentSteps(h.home, 2, 5);
+          h.harness().sendLine(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: "jetski-acp-front:9",
+              method: "session/request_permission",
+              params: {
+                sessionId: ROOT,
+                toolCall: { toolCallId: "call-run", name: "run_command", status: "pending" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "deny", name: "Deny", kind: "reject_once" },
+                ],
+              },
+            }),
+          );
+          yield* h.until("the approval opened", () => h.tags("request.opened").length === 1);
+
+          const cancelling = yield* Effect.forkChild(
+            h.adapter.respondToApprovalRequest(
+              SESSION,
+              h.tags("request.opened")[0]!.request.requestId,
+              "cancel",
+            ),
+          );
+          yield* h.untilReceived("session/cancel");
+          yield* replyToLatestPrompt(h, "cancelled");
+          yield* joinAfterCancelLag(cancelling);
+
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+          expect(hasChildCommandCompleted(h)).toBe(true);
+          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state: "interrupted" }]);
+        }),
+      { fake: subagentFakeWithRunningCall },
+    ));
+
+  it("publishes nothing after session.exited when the session stops while an interrupt still waits for the files to catch up", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          // Written before the cancel and not read yet: the wait after the cancel would show it.
+          appendSubagentSteps(h.home, 2, 5);
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          yield* replyToLatestPrompt(h, "cancelled");
+          yield* Effect.promise(settle);
+          yield* h.adapter.stopSession(SESSION, "stopped");
+          const exitedAt = h.seen.findIndex((event) => event._tag === "session.exited");
+          expect(exitedAt).toBeGreaterThanOrEqual(0);
+
+          yield* joinAfterCancelLag(interrupting);
+
+          expect(h.seen.slice(exitedAt + 1)).toEqual([]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it.each([
+    { worksAfterError: false, state: "failed" },
+    { worksAfterError: true, state: "interrupted" },
+  ])(
+    "ends the turn $state when the inactivity timeout stops a session that showed a provider error and agy worked after it: $worksAfterError",
+    ({ worksAfterError, state }) =>
+      run(
+        (h) =>
+          Effect.gen(function* () {
+            yield* h.start();
+            yield* sendUntilLaunched(h);
+            registerSubagent(h.home);
+            const error =
+              "API error (attempt 1): transport error (Unavailable, HTTP 503): No capacity";
+            appendFileSync(
+              transcriptPath(h.home, ROOT),
+              `${JSON.stringify({ step_index: 9, type: "ERROR_MESSAGE", status: "DONE", error })}\n`,
+            );
+            yield* readFilesUntil("the error", () => h.tags("runtime.warning").length > 0);
+            if (worksAfterError) {
+              h.harness().sendLine(
+                JSON.stringify(
+                  buildUpdate(
+                    {
+                      sessionUpdate: "agent_message_chunk",
+                      content: { type: "text", text: "Back at it." },
+                    },
+                    ROOT,
+                  ),
+                ),
+              );
+              yield* h.until("the text", () =>
+                h.tags("item.started").some((event) => event.kind === "assistant_message"),
+              );
+            }
+
+            yield* h.adapter.stopSession(SESSION, "inactivity_timeout");
+
+            expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state }]);
+          }),
+        { fake: subagentFake },
+      ),
+  );
+
+  it("cancels when only subagents run, shows what they wrote before the cancel, and ends their turns as interrupted", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+          appendSubagentSteps(h.home, 2, 5);
+
+          yield* joinAfterCancelLag(yield* Effect.forkChild(h.adapter.interrupt(SESSION)));
+
+          expect(h.received("session/cancel")).toHaveLength(1);
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+          expect(hasChildCommandCompleted(h)).toBe(true);
+          // The session's own agent is idle, so its status is untouched and the next input opens a Turn.
+          const sent = yield* h.adapter.sendInput(SESSION, buildInput("Now."));
+          expect(sent.delivery).toBe("opened");
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("does not start the wait of a synthetic turn again when it ends a subagent's turn after the cancel", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
+          yield* h.untilReceived("session/cancel");
+          // agy still speaks after the cancel: a synthetic turn opens while the subagent's turn is open.
+          h.harness().sendLine(
+            JSON.stringify(
+              buildUpdate(
+                { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hi." } },
+                ROOT,
+              ),
+            ),
+          );
+          yield* h.until("a synthetic turn opened", () => h.tags("turn.started").length === 2);
+          yield* TestClock.adjust(Duration.seconds(9));
+          yield* joinAfterCancelLag(interrupting);
+          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
+
+          // The end of the subagent's turn is not output of agy, so the wait is still the one that began with the chunk.
+          yield* TestClock.adjust(Duration.seconds(1));
+          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([
+            { state: "completed" },
+            { state: "completed" },
+          ]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("leaves a subagent's turn open when the cancel could not be written", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 2);
+          yield* readFilesUntil("the start of the subagent's turn", () =>
+            summarizeChildTurns(h).includes("started"),
+          );
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          // The connection ends just before the interrupt, so the cancel cannot be written and nothing stopped the subagents.
+          h.harness().end();
+          yield* Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
+          yield* h.adapter.interrupt(SESSION);
+
+          expect(summarizeChildTurns(h)).toEqual(["started"]);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("sends no cancel for an interrupt when nothing runs, not even a subagent that already ended", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.start();
+          yield* sendUntilLaunched(h);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 7);
+          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "completed"));
+          yield* replyToLatestPrompt(h);
+          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
+
+          yield* h.adapter.interrupt(SESSION);
+
+          expect(h.received("session/cancel")).toHaveLength(0);
+        }),
+      { fake: subagentFake },
+    ));
+
+  it("hands the watcher a resume, so it shows nothing of what the files held before it", () =>
+    run(
+      (h) =>
+        Effect.gen(function* () {
+          createConversationFiles(h.home, ROOT);
+          registerSubagent(h.home);
+          appendSubagentSteps(h.home, 0, 7);
+          yield* h.start({
+            continue: {
+              nativeSessionId: ROOT,
+              mode: "resume",
+              subagents: [{ subagentId: CHILD, itemId: "item-of-an-earlier-process" }],
+            },
+          });
+          yield* sendUntilLaunched(h);
+          yield* runOutClock(Duration.seconds(1));
+
+          expect(h.tags("subagent.started")).toEqual([]);
+          expect(h.seen.filter(isChild)).toEqual([]);
+        }),
+      { fake: subagentFake },
     ));
 });

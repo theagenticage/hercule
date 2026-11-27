@@ -29,7 +29,7 @@ import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 import { AcpError } from "@hercule/acp";
 import type { NewSessionRequest } from "@hercule/acp";
-import { answerWith } from "@hercule/acp/testing";
+import { answerWith, readRecording } from "@hercule/acp/testing";
 import { buildAdapterFailed } from "../adapter-error-builders";
 import {
   AdapterFailed,
@@ -44,7 +44,9 @@ import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
 import {
   buildLoginCommand,
   checkAccountUsable,
+  isQuotaError,
   openSignedInAgy,
+  parseAgyErrorNotice,
   readAgyVersion,
   type AgyPurpose,
   type SignedInAgy,
@@ -1171,7 +1173,7 @@ describe("the pre-tool hook of a session", () => {
     expect(readFileSync(target, "utf8")).toBe("{}");
     expect(readdirSync(join(home, "config")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     expect((JSON.parse(hooks) as HooksFile).hercule.PreToolUse[0]!.matcher).toBe(
-      "run_command|edit_file|write_file|search_web|invoke_subagent|mcp_chrome_devtools_.*",
+      "run_command|edit_file|write_file|search_web|invoke_subagent|mcp_.*",
     );
     expect(hooks).not.toContain("agy-marks");
   });
@@ -1275,8 +1277,47 @@ describe("the pre-tool hook of a session", () => {
           join(home, "antigravity-acp", "settings.json"),
           join(home, "skills"),
           join(home, "AGENTS.md"),
+          join(home, "antigravity-acp", "brain", "*", ".system_generated"),
         ]),
       );
     }
+  });
+});
+
+describe("the error notices of agy", () => {
+  const NETWORK_NOTICE =
+    'agent executor error: generating and executing: request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": Service Unavailable';
+  const QUOTA_NOTICE =
+    "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h22m55s.";
+
+  it("reads the text of the recorded network error", () => {
+    const chunk = readRecording("failed-turn-network")
+      .map((entry) => entry.message.params as { update?: { content?: { text?: string } } })
+      .map((params) => params?.update?.content?.text)
+      .find((text) => text?.includes("\u26a0"));
+    expect(chunk).toBeDefined();
+    expect(parseAgyErrorNotice(chunk!)).toBe(NETWORK_NOTICE);
+    expect(isQuotaError(NETWORK_NOTICE)).toBe(false);
+  });
+
+  it("reads the quota error, and tells it from other errors", () => {
+    expect(parseAgyErrorNotice(`\n\u26a0 ${QUOTA_NOTICE}\n`)).toBe(QUOTA_NOTICE);
+    expect(isQuotaError(QUOTA_NOTICE)).toBe(true);
+    expect(
+      isQuotaError("RESOURCE_EXHAUSTED (code 429): You have exhausted your capacity on this model"),
+    ).toBe(true);
+    expect(isQuotaError("quota service unavailable")).toBe(false);
+  });
+
+  it.each([
+    ["no leading line break", `\u26a0 ${QUOTA_NOTICE}\n`],
+    ["no final line break", `\n\u26a0 ${QUOTA_NOTICE}`],
+    ["the sign in the middle of a text", `Note: \n\u26a0 ${QUOTA_NOTICE}\n`],
+    ["the first half of a notice split over two chunks", "\n\u26a0 Individual quota"],
+    ["the second half of a split notice", " reached.\n"],
+    ["more text after it", `\n\u26a0 ${QUOTA_NOTICE}\nAnd here is more.\n`],
+    ["no words", "\n\u26a0 \n"],
+  ])("is not a notice: %s", (_name, text) => {
+    expect(parseAgyErrorNotice(text)).toBeUndefined();
   });
 });

@@ -281,6 +281,14 @@ export interface FakeAgyOptions {
    * scripts it by hand.
    */
   readonly recording?: RecordingName | ReadonlyArray<RecordedMessage>;
+  /**
+   * Changes the messages of a recording given by name before the process plays
+   * them, for a test that needs a turn the recording did not have. The
+   * conversation, models and options still come from the recording.
+   */
+  readonly editRecording?: (
+    recording: ReadonlyArray<RecordedMessage>,
+  ) => ReadonlyArray<RecordedMessage>;
   /** Leaves `antigravity.systemPrompt.append` out of the reply to `initialize`. */
   readonly withoutSystemPromptCapability?: boolean;
   /** Leaves `sessionCapabilities.additionalDirectories` out of the reply to `initialize`. */
@@ -384,7 +392,7 @@ export const buildFakeAgy = (home: string, options: FakeAgyOptions = {}): FakeAg
     if (options.holdStderrOpen !== true) stderr.end();
     const recording =
       options.recording === undefined || typeof options.recording === "string"
-        ? readRecording(recordingName)
+        ? (options.editRecording ?? ((messages) => messages))(readRecording(recordingName))
         : options.recording;
     const harness = startFakeHarness({
       recording: removeCapabilities(recording, options),

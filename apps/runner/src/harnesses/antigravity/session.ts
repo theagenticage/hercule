@@ -6,10 +6,13 @@
  *
  * The session owns what must never overlap:
  *
- * - at most one input is prepared or running at a time, because `agy` takes one
- *   prompt at a time and cannot steer (the controller queues what arrives
- *   meanwhile);
- * - the exit happens exactly once, with the first reason that asks for it.
+ * - at most one input is prepared at a time, and an input that arrives while a
+ *   Turn runs steers it through the Turn, which is the one writer of prompts
+ *   (spec 06 section 5);
+ * - the exit happens exactly once, with the first reason that asks for it;
+ * - `agy-files-watch.ts` reads `agy`'s own session files, which show the
+ *   subagents' work and tokens that ACP does not carry (spec 06 section 13.6).
+ *   The session only tells it when work opens and when a Turn replied.
  *
  * Time is measured on Effect's clock, so tests run the deadlines on a `TestClock`.
  */
@@ -84,8 +87,10 @@ import {
 } from "./normalize";
 import type { NormalizerState } from "./normalize";
 import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
+import { watchAgyFiles } from "./agy-files-watch";
+import type { AgyFilesWatch } from "./agy-files-watch";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
-import type { Turn } from "./turn";
+import type { InterruptResult, Turn } from "./turn";
 
 /** How long `session/cancel` may take to be acknowledged when the session asks `agy` to stop output that has no input. */
 const CANCEL_DEADLINE = Duration.seconds(3);
@@ -123,22 +128,26 @@ const ACCESS_MODE_NAMES: Readonly<Record<AccessMode, string>> = {
 export interface AgySession {
   readonly binding: SessionBinding;
   /**
-   * Runs the input as a new Turn and returns once the handoff of its prompt is proven, not when `agy`
-   * replied. Fails with:
+   * Runs the input as a new Turn, or steers the running one, and returns once
+   * `agy` is known to have the prompt, not when it replied. The result says
+   * which happened (`opened` or `steered`). Fails with:
    *
    * - `SessionNotRunning` when the session is stopping or has exited;
-   * - `SteerRefused` while a Turn runs or another input is being prepared,
-   *   because `agy` cannot steer: the controller queues the input. Nothing
-   *   changes before this failure;
+   * - `SteerRefused` when another input is being prepared, or when the input
+   *   arrives while a Turn runs and `agy` certainly did not take it into that
+   *   Turn: the Turn is starting or ending, a Request is open (the user answers
+   *   it first), the input asks for another model or level (that waits for the
+   *   end of the turn), or `agy` refused it. The controller keeps the input
+   *   queued. Nothing changes before this failure;
    * - `ModelChangeRefused` when `agy` refuses the model or level of the input,
    *   and `HarnessProtocolError` when it is not known whether it took them;
    * - `InputNotDelivered` when an interrupt or a stop came during the
    *   preparation, or when writing the prompt to `agy` failed. No Turn is
    *   opened then;
-   * - `HarnessProtocolError` when it is not known whether `agy` got the prompt:
-   *   the budget ran out while it was written, the connection ended meanwhile,
-   *   or the caller was interrupted meanwhile. Only one prompt may be on the
-   *   wire, so the session then ends its process (`runtime.error`, exit
+   * - `HarnessProtocolError` when it is not known whether `agy` got the prompt
+   *   (a first prompt or a steer): the budget ran out while it was written or
+   *   confirmed, the connection ended meanwhile, or the caller was interrupted
+   *   meanwhile. The session then ends its process (`runtime.error`, exit
    *   `crash`) and the next input resumes it;
    * - `AdapterFailed` when an image cannot be read or the preparation takes
    *   longer than its budget.
@@ -230,7 +239,7 @@ const buildInputConfigFailure = (
       }
       if (error.reason === "closed") return buildModelChangeLost(ANTIGRAVITY_NAME, error.message);
       return buildHarnessProtocolError(
-        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${error.message}`,
+        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and your message was not sent: ${error.message}`,
       );
     }
     case "other":
@@ -241,7 +250,7 @@ const buildInputConfigFailure = (
       );
     case "unconfirmed":
       return buildHarnessProtocolError(
-        `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and the input was not sent.`,
+        `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and your message was not sent.`,
       );
   }
 };
@@ -347,6 +356,7 @@ export const startAgySession = (
     let stopping = false;
     let exitReason: ExitReason | undefined;
     const exitedSignal = Deferred.makeUnsafe<void>();
+    let hasPublishedExit = false;
     /** The latest mode `agy` reported, in an update or in the reply that opened the conversation. A report is never replaced by an older one. */
     let currentMode: string | undefined;
     /** Wakes the start that waits for the mode, whenever `agy` reports one. */
@@ -358,7 +368,8 @@ export const startAgySession = (
     let config: ConfigChange | undefined;
     /** The wait that closes an open synthetic turn when `agy` goes quiet. */
     let syntheticTurnBound: Fiber.Fiber<void> | undefined;
-
+    /** Watches `agy`'s session files. Undefined until the conversation is open. */
+    let filesWatch: AgyFilesWatch | undefined;
     const buildBase = (toolCallId?: string) =>
       buildEnvelope(sessionId, {
         ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
@@ -397,9 +408,24 @@ export const startAgySession = (
     /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
       if (!isStarted) return;
-      const hidden = hideEventSecret(events);
-      if (hidden.length > 0) emit(hidden);
+      publishEvents(events);
       boundSyntheticTurn();
+      filesWatch?.wake();
+    };
+
+    /**
+     * Publishes events with the session token hidden, and nothing when there
+     * are none. It does not touch the quiet wait of a synthetic turn: only
+     * output from `agy` over ACP keeps that turn open, and what the files show
+     * is a subagent's work, which never changes the session's own state.
+     */
+    const publishEvents = (events: ReadonlyArray<HarnessEvent>): void => {
+      // Nothing follows `session.exited`, whichever fiber is still running (a stop that waits on the files, for one).
+      if (!isStarted || hasPublishedExit) return;
+      const hidden = hideEventSecret(events);
+      if (hidden.length === 0) return;
+      emit(hidden);
+      if (hidden.some((event) => event._tag === "session.exited")) hasPublishedExit = true;
     };
 
     const isExited = (): boolean => Deferred.isDoneUnsafe(exitedSignal);
@@ -426,7 +452,7 @@ export const startAgySession = (
         exitReason = reason;
         const procedure = Effect.gen(function* () {
           const runningTurn = readRunningTurn();
-          if (runningTurn !== undefined && options.stopTurn) yield* runningTurn.stop;
+          if (runningTurn !== undefined && options.stopTurn) yield* runningTurn.stop(reason);
           yield* Scope.close(processScope, Exit.void);
           if (runningTurn !== undefined) {
             // A Turn that does not end by itself is ended here, so no event of it follows `session.exited`.
@@ -547,6 +573,8 @@ export const startAgySession = (
           config?.observe(notification.update.configOptions);
         }
         emitEvents(normalizeUpdate(normalizing, notification));
+        // An error notice is held by the normalizer for one step, and is `agy` failing, not working.
+        if (normalizing.errorNotice === undefined) readRunningTurn()?.recordAgyProgress();
       },
       onApprovalRequest: (request) =>
         Effect.suspend(() => {
@@ -660,6 +688,19 @@ export const startAgySession = (
       if (state === undefined)
         return yield* Effect.die(new Error("The conversation was not read."));
 
+      // Started before any prompt, because a resume marks what the files hold now as already shown, and the files of this process's first turn must not count as old. It lives in the process's scope.
+      const watch = yield* watchAgyFiles({
+        home: ctx.home,
+        resumes: spec.continue !== undefined,
+        known: spec.continue?.subagents ?? [],
+        normalizer: state,
+        isSessionWorkOpen: () =>
+          readRunningTurn() !== undefined || readSyntheticTurnId(state) !== undefined,
+        publish: publishEvents,
+        recordRootConversationFact: (fact) => readRunningTurn()?.recordRootConversationFact(fact),
+      }).pipe(Scope.provide(processScope));
+      filesWatch = watch;
+
       const usable = checkAccountUsable(
         agy.planLabel,
         buildModelCatalog(settings),
@@ -749,10 +790,10 @@ export const startAgySession = (
         ),
         scope,
       );
-      return { connection, state, nativeId: conversation.id, configChange };
+      return { connection, state, nativeId: conversation.id, configChange, watch };
     }).pipe(Effect.onError(() => Scope.close(processScope, Exit.void)));
 
-    const { connection, state, nativeId, configChange } = yield* start;
+    const { connection, state, nativeId, configChange, watch } = yield* start;
 
     // ---- Inputs ----
 
@@ -823,7 +864,7 @@ export const startAgySession = (
             ? Effect.succeed(prepared.value)
             : Effect.fail(
                 buildAdapterFailed(
-                  `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
+                  `Preparing your message for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
                 ),
               ),
         ),
@@ -834,18 +875,61 @@ export const startAgySession = (
         })),
       );
 
+    /**
+     * Steers the running Turn with `input` and returns `steered` when `agy`
+     * took it. Fails with `SteerRefused` when it certainly did not (the
+     * controller keeps the input queued), with `HarnessProtocolError` when it is
+     * not known and the process was ended, and with the failures of preparing
+     * the input. The model and level of the input are not applied: `agy` keeps
+     * the turn's model until the turn ends, so an input that asks for another
+     * one waits.
+     */
+    const steerTurn = (
+      turn: Turn,
+      input: AdapterTurnInput,
+    ): Effect.Effect<SendResult, AdapterError> =>
+      Effect.gen(function* () {
+        if (input.modelSelection !== undefined && configChange.wouldChange(input.modelSelection)) {
+          return yield* Effect.fail(
+            new SteerRefused({
+              message: `${ANTIGRAVITY_NAME} cannot change its model or thinking level in the middle of a turn. Your message stays queued and is sent when the turn ends.`,
+            }),
+          );
+        }
+        // Reserved before the first wait, so a second input is refused while this one is prepared.
+        const inputGeneration = generation;
+        preparing = true;
+        const prepared = yield* prepareInput(input, inputGeneration).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              preparing = false;
+            }),
+          ),
+        );
+        const outcome = yield* turn.steer({ input, ...prepared });
+        if (outcome.kind === "accepted")
+          return { turnId: turn.id, delivery: "steered" } satisfies SendResult;
+        if (outcome.kind === "unknown") {
+          endForUnknownDelivery();
+          return yield* Effect.fail(buildHarnessProtocolError(outcome.message));
+        }
+        return yield* Effect.fail(new SteerRefused({ message: outcome.message }));
+      });
+
     const send: AgySession["send"] = (input) =>
       Effect.gen(function* () {
         if (stopping) {
           return yield* Effect.fail(isExited() ? buildSessionNotRunning() : buildSessionStopping());
         }
-        if (readRunningTurn() !== undefined || preparing) {
+        if (preparing) {
           return yield* Effect.fail(
             new SteerRefused({
-              message: `${ANTIGRAVITY_NAME} cannot take input in the middle of a turn. The input stays queued and runs when this turn ends.`,
+              message: `${ANTIGRAVITY_NAME} is still preparing another message. Your message stays queued and is sent when the turn ends.`,
             }),
           );
         }
+        const runningTurn = readRunningTurn();
+        if (runningTurn !== undefined) return yield* steerTurn(runningTurn, input);
         // Admission is reserved here, before the first wait, so a second input is refused while this one is prepared.
         // The output of `agy` is held from the same moment: until the handoff of the prompt is proven, new output may belong to this input, so no synthetic turn may open for it.
         const inputGeneration = generation;
@@ -881,6 +965,16 @@ export const startAgySession = (
             ).pipe(Scope.provide(scope));
             current = turn;
             preparing = false;
+            watch.wake();
+            // The watcher learns from here that the session's own agent replied, so it can tell a missing transcript.
+            yield* Effect.forkIn(
+              Effect.flatMap(turn.ended, (endState) =>
+                Effect.sync(() => {
+                  if (endState === "completed") watch.recordSessionReply();
+                }),
+              ),
+              scope,
+            );
             const handoff = yield* Effect.exit(restore(Deferred.await(turn.handoff)));
             if (Exit.isFailure(handoff)) {
               // The caller is gone while `agy` may be reading the prompt, so no other prompt may follow on this process.
@@ -900,31 +994,65 @@ export const startAgySession = (
             );
           }),
         );
-      });
+      }).pipe(Effect.mapError(hideTokenInError));
+
+    /**
+     * Writes `session/cancel` for the session's own conversation, and returns
+     * whether `agy` got it. A cancel that could not be written is logged and
+     * is no failure, because the caller then leaves what runs alone. It is
+     * written before the prompt of any later input, on the same ordered pipe,
+     * so it cannot stop an input that comes after it.
+     */
+    const writeCancel: Effect.Effect<boolean> = withDeadline(
+      connection.cancel(nativeId),
+      CANCEL_DEADLINE,
+      "cancel",
+    ).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        Effect.as(
+          Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
+          false,
+        ),
+      ),
+    );
+
+    /**
+     * The one place every way of stopping the session's work ends in. `result`
+     * is what the Turn's interrupt or the answer `cancel` of an approval did.
+     *
+     * - `unresponsive`: the process is stopped.
+     * - `cancelled`: `agy` took a cancel, so the subagent turns end.
+     * - `not-cancelled`: no cancel reached `agy`. When subagents have open
+     *   turns, the cancel is written here, and their turns end only if `agy`
+     *   took it. A subagent that keeps running keeps its turn open.
+     */
+    const finishStop = (turn: Turn, result: InterruptResult): Effect.Effect<void> => {
+      if (result === "unresponsive") return stopUnresponsiveProcess(turn.id);
+      if (result === "cancelled") return watch.settleAfterCancel;
+      if (!watch.hasOpenSubagentTurn()) return Effect.void;
+      return Effect.flatMap(writeCancel, (wasWritten) =>
+        wasWritten ? watch.settleAfterCancel : Effect.void,
+      );
+    };
 
     const interrupt: AgySession["interrupt"] = Effect.suspend(() => {
       // An input still being prepared is void from now on.
       generation += 1;
       const turn = readRunningTurn();
-      if (turn === undefined) {
-        // Output with no prompt open has a synthetic turn. Stopping it asks `agy` to stop, and waits for nothing.
-        const syntheticTurnId = readSyntheticTurnId(state);
-        if (syntheticTurnId === undefined) return Effect.void;
-        // The wait lets an input open its own Turn, which this interrupt must not close.
-        return withDeadline(connection.cancel(nativeId), CANCEL_DEADLINE, "cancel").pipe(
-          Effect.catch((error) =>
-            Effect.logWarning(`session/cancel was not sent: ${hideSecret(error.message, token)}`),
-          ),
-          Effect.andThen(
-            Effect.sync(() =>
-              emitEvents(closeTurn(state, { state: "interrupted", turnId: syntheticTurnId })),
-            ),
-          ),
-        );
+      if (turn !== undefined)
+        return Effect.flatMap(turn.interrupt, (result) => finishStop(turn, result));
+      // Output with no prompt open has a synthetic turn, and subagents can run while the session's own agent is idle. Stopping either asks `agy` to stop, and waits for nothing else.
+      const syntheticTurnId = readSyntheticTurnId(state);
+      if (syntheticTurnId === undefined && !watch.hasOpenSubagentTurn()) {
+        return Effect.void;
       }
-      return Effect.flatMap(turn.interrupt, (result) =>
-        result === "unresponsive" ? stopUnresponsiveProcess(turn.id) : Effect.void,
-      );
+      return Effect.flatMap(writeCancel, (wasWritten) => {
+        if (syntheticTurnId !== undefined) {
+          emitEvents(closeTurn(state, { state: "interrupted", turnId: syntheticTurnId }));
+        }
+        return wasWritten ? watch.settleAfterCancel : Effect.void;
+      });
     });
 
     const decide: AgySession["decide"] = (requestId, decision) =>
@@ -932,7 +1060,7 @@ export const startAgySession = (
         const turn = readRunningTurn();
         if (turn === undefined) return Effect.void;
         return Effect.flatMap(turn.decide(requestId, decision), (result) =>
-          result === "unresponsive" ? stopUnresponsiveProcess(turn.id) : Effect.void,
+          result === "decided" ? Effect.void : finishStop(turn, result),
         );
       });
 

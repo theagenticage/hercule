@@ -2,7 +2,7 @@
  * `hercule antigravity-pre-tool-hook`: the pre-tool hook of an `agy` session
  * (spec 06 section 8.1). The hooks file in the Harness Home runs it before
  * every `run_command`, `edit_file`, `write_file`, `search_web`,
- * `invoke_subagent` and chrome-devtools call, and the tool waits for it. `agy`
+ * `invoke_subagent` and MCP tool (`mcp_`) call, and the tool waits for it. `agy`
  * writes the call as one JSON document on stdin; the hook prints a denial as
  * JSON, or nothing to let the call run. It always exits 0.
  *
@@ -11,26 +11,37 @@
  * reads the rules from `HOOK_RULES_VARIABLE` and decides what each Access
  * Mode denies:
  * - Full access: nothing.
- * - Approval required: web search, the browser agent, and every change to a
- *   guarded place.
- * - Auto-accept edits: the browser agent, and every change to a guarded place.
+ * - Approval required: web search, the browser agent, every change to a
+ *   guarded place, and every command, file change and MCP tool call of a
+ *   subagent.
+ * - Auto-accept edits: the browser agent, every change to a guarded place, and
+ *   every command, file change and MCP tool call of a subagent.
+ * A subagent's command, file change or MCP tool call is denied in these two
+ * modes because `agy` never passes a subagent's approval request on, so the
+ * call would wait for an answer that cannot come. The reads of a subagent run.
  * A rules value that is missing or does not decode is Hercule's own setup
  * being wrong, so the hook denies every edit, every web search and every
  * browser call, and says so.
  *
  * One call goes through one straight line: read the rules, decode the call,
  * take the edit-watch mark (spec 19 section 4.1), then decide. The mark is
- * best effort and its errors never reach the decision.
+ * best effort and its errors never reach the decision. The decision reads one
+ * more file, the session's conversation id (`conversationIdFile`), but only for
+ * a shell, edit or MCP call and only to tell a subagent's call from the
+ * session's own.
  *
  * This runs at every tool call, so startup time counts. The compiled binary
  * starts this file without the dispatcher, so keep its imports to Node
  * built-ins and the mark format, and not `effect`. `pnpm dep-lint` checks this.
  *
- * The input is decoded from its top-level fields only (`cwd`, `toolCall.id`,
- * `toolCall.name`, `toolCall.args`). The text of a command or a file is never
+ * The input is decoded from its top-level fields only (`cwd`,
+ * `conversationId`, `toolCall.id`, `toolCall.name`, `toolCall.args`). The text of a command or a file is never
  * searched, so a model cannot plant a field in it.
  *
  * Known limits, recorded in spec 06 section 8.1:
+ * - A subagent's `read_file` outside the workspace also waits for an approval
+ *   that cannot come. The hook does not run for reads, and `agy` ends the wait
+ *   by itself after 60 s with its own error, which the subagent reports.
  * - The check and `agy`'s write are two steps. A path swapped between them
  *   (a link put in place by a concurrent process of the same user) is not
  *   prevented.
@@ -45,6 +56,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  readFileSync,
   readlinkSync,
   readSync,
   realpathSync,
@@ -75,8 +87,18 @@ export interface HookRules {
   readonly accessMode: (typeof ACCESS_MODES)[number];
   /** Absolute paths of the folders Hercule gives the agent to read and never to change. */
   readonly readOnlyFolders: ReadonlyArray<string>;
-  /** Absolute paths of the files and folders Hercule owns in the Harness Home. */
+  /**
+   * Absolute paths of the files and folders in the Harness Home that the agent
+   * may not change: the ones Hercule owns and the ones it reads from.
+   * A segment `*` stands for any one folder name.
+   */
   readonly harnessHomePaths: ReadonlyArray<string>;
+  /**
+   * Absolute path of the file that holds the session's own conversation id,
+   * which the adapter writes when `agy` returns the id. A call from any other
+   * conversation is a subagent's. The file does not exist before then.
+   */
+  readonly conversationIdFile: string;
 }
 
 /** Returns whether `value` is an object that is not an array, so its fields can be read. */
@@ -106,7 +128,8 @@ export const decodeHookRules = (text: string): HookRules | undefined => {
     !isRecord(json) ||
     !ACCESS_MODES.some((mode) => mode === json["accessMode"]) ||
     !isStringArray(json["readOnlyFolders"]) ||
-    !isStringArray(json["harnessHomePaths"])
+    !isStringArray(json["harnessHomePaths"]) ||
+    typeof json["conversationIdFile"] !== "string"
   ) {
     return undefined;
   }
@@ -116,15 +139,17 @@ export const decodeHookRules = (text: string): HookRules | undefined => {
 /**
  * What the hook does with each tool it runs for. The one table the hooks
  * file's matcher, the marks and the decision all read.
- * - `shell`: runs a command. Marked, and never denied: `agy` asks about it.
- * - `edit`: changes the file at `Path`. Marked, and denied in a guarded place.
+ * - `shell`: runs a command. Marked, and denied only for a subagent: `agy` asks about the session's own.
+ * - `edit`: changes the file at `Path`. Marked, and denied in a guarded place and for a subagent.
  * - `search`: searches the web. Not marked.
  * - `subagent`: starts a subagent. Not marked. Denied only for the browser
  *   agent (`TypeName` "browser"); every other subagent runs.
  * - `browser`: a chrome-devtools call, matched by `BROWSER_TOOL_PREFIX`. Not
  *   marked, and denied outside Full access.
+ * - `mcp`: a call of any other MCP server's tool, matched by `MCP_TOOL_PREFIX`.
+ *   Not marked, and denied only for a subagent: `agy` asks about the session's own.
  */
-type ToolKind = "shell" | "edit" | "search" | "subagent" | "browser";
+type ToolKind = "shell" | "edit" | "search" | "subagent" | "browser" | "mcp";
 
 const TOOLS: ReadonlyMap<string, ToolKind> = new Map([
   ["run_command", "shell"],
@@ -140,12 +165,27 @@ const TOOLS: ReadonlyMap<string, ToolKind> = new Map([
  */
 const BROWSER_TOOL_PREFIX = "mcp_chrome_devtools_";
 
+/** The start of the name of every MCP tool `agy` offers, as measured on `agy` 1.5.15: `mcp_tools_whoami`. */
+const MCP_TOOL_PREFIX = "mcp_";
+
 /** Returns the kind of the tool `name`, or undefined for a tool the hook does not know. */
 const classifyTool = (name: string): ToolKind | undefined =>
-  name.startsWith(BROWSER_TOOL_PREFIX) ? "browser" : TOOLS.get(name);
+  name.startsWith(BROWSER_TOOL_PREFIX)
+    ? "browser"
+    : name.startsWith(MCP_TOOL_PREFIX)
+      ? "mcp"
+      : TOOLS.get(name);
 
-/** The tools the hooks file runs the hook for, as the regular expression `agy` matches tool names against. */
-const HOOK_MATCHER = [...TOOLS.keys(), `${BROWSER_TOOL_PREFIX}.*`].join("|");
+/**
+ * The tools the hooks file runs the hook for, as the regular expression `agy`
+ * matches tool names against. It holds every MCP tool (`mcp_`), and not just
+ * the browser's, because a subagent's MCP call waits for an approval that
+ * cannot come (measured: it waited 90 s and never reached the server), and
+ * only the hook can refuse it. The cost: the hook also runs before the
+ * session's own MCP calls, which it allows. That adds 63 to 77 ms to each such
+ * call, as measured on Linux (spec 06 section 8.1).
+ */
+const HOOK_MATCHER = [...TOOLS.keys(), `${MCP_TOOL_PREFIX}.*`].join("|");
 
 /**
  * Returns the hooks file of the Harness Home: one `PreToolUse` hook, for the
@@ -203,6 +243,9 @@ const MAX_LINKS = 40;
 /** The largest `plugins.json` the hook reads. A larger file makes it deny edits. */
 const MAX_PLUGINS_FILE_BYTES = 64 * 1024;
 
+/** The text between two folder names of a guarded path where any one folder name matches. */
+const WILDCARD_SEGMENT = "/*/";
+
 /** An id that is safe to use as a file name. Any other id gets no mark. */
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
@@ -229,6 +272,8 @@ interface DecodedCall {
   readonly id: string;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
+  /** The conversation the call belongs to, or undefined when `agy` gave none. */
+  readonly conversationId: string | undefined;
 }
 
 /** Stands for an input of more than `MAX_INPUT_BYTES`. */
@@ -252,6 +297,22 @@ const CHECK_FAILED_REASON =
 /** Returns the reason for a browser call denied in `mode`, spelled as the app spells it. */
 const buildBrowserReason = (mode: "approval-required" | "auto-accept-edits"): string =>
   `The browser agent is off in ${mode === "approval-required" ? "Approval required" : "Auto-accept edits"}: it acts in your own Chrome, with your logins, and Hercule cannot ask you first. Switch the thread to Full access to use it.`;
+
+const SUBAGENT_CALL_NAMES = {
+  shell: "command",
+  edit: "file change",
+  mcp: "MCP tool call",
+} as const;
+
+/**
+ * Returns the reason for a subagent's command, file change or MCP tool call
+ * denied in `mode`, spelled as the app spells it.
+ */
+export const buildSubagentReason = (
+  kind: keyof typeof SUBAGENT_CALL_NAMES,
+  mode: "approval-required" | "auto-accept-edits",
+): string =>
+  `Hercule refused this subagent's ${SUBAGENT_CALL_NAMES[kind]}: in ${mode === "approval-required" ? "Approval required" : "Auto-accept edits"} a subagent cannot ask you for approval, because Antigravity does not pass its requests on. Do this step in the main agent, or switch the thread to Full access.`;
 
 const WEB_SEARCH_REASON =
   "Web search is off in Approval required, because a search runs without a card. Ask the user, or switch the thread to another access mode.";
@@ -288,7 +349,14 @@ const decodeCall = (input: RawInput): DecodedCall | undefined => {
   const { id, name, args } = json["toolCall"];
   if (typeof id !== "string" || typeof name !== "string") return undefined;
   if (args !== undefined && !isRecord(args)) return undefined;
-  return { cwd: json["cwd"], id, name, args: args ?? {} };
+  const conversationId = json["conversationId"];
+  return {
+    cwd: json["cwd"],
+    id,
+    name,
+    args: args ?? {},
+    conversationId: typeof conversationId === "string" ? conversationId : undefined,
+  };
 };
 
 /**
@@ -305,10 +373,13 @@ const decodeCall = (input: RawInput): DecodedCall | undefined => {
  * bounds that window. Without a mark the observer would not know where the
  * window starts.
  */
-const takeMark = (call: DecodedCall, env: Readonly<Record<string, string | undefined>>): void => {
+const takeMark = (
+  call: DecodedCall,
+  kind: ToolKind | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+): void => {
   try {
     const marksDir = env[SESSION_MARKS_DIR_VARIABLE];
-    const kind = classifyTool(call.name);
     if (!marksDir || (kind !== "shell" && kind !== "edit") || !SAFE_ID.test(call.id)) {
       return;
     }
@@ -414,8 +485,12 @@ interface EditTarget {
  * `listedIn` is the `plugins.json` that lists the folder, for a folder that
  * is guarded only because a `plugins.json` lists it; it has its own reason
  * too, because the folder may be the session's own (an entry `.`).
+ * `wildcard` is set for a folder whose path has a `*` segment: the folder is
+ * `before`, then any one folder name, then `after`. `paths` then holds the
+ * readings of `before`, and `identity` is undefined.
  */
 interface GuardedPlace {
+  readonly wildcard?: { readonly after: string };
   readonly isFolder: boolean;
   readonly isReadOnlyFolder: boolean;
   readonly listedIn: string | undefined;
@@ -477,6 +552,16 @@ const buildEditTarget = (cwd: string, path: string, home: string): EditTarget =>
     }
   }
   return { paths, identities };
+};
+
+/**
+ * Builds the guarded folder for `path`, an absolute path with a `*` segment:
+ * the folder named `after` (a relative path) in any folder directly below the
+ * part before the `*`.
+ */
+const buildWildcardPlace = (before: string, after: string): GuardedPlace => {
+  const place = buildPlace(before, true);
+  return { ...place, wildcard: { after }, identity: undefined };
 };
 
 /** Builds the guarded place at `path`, an absolute path. */
@@ -570,7 +655,14 @@ const buildGuardedPlaces = (cwd: string, rules: HookRules): ReadonlyArray<Guarde
       for (const plugins of listed) places.push(buildPlace(plugins, true, { listedIn: manifest }));
     }
   }
-  for (const path of rules.harnessHomePaths) places.push(buildPlace(path, true));
+  for (const path of rules.harnessHomePaths) {
+    const at = path.indexOf(WILDCARD_SEGMENT);
+    places.push(
+      at === -1
+        ? buildPlace(path, true)
+        : buildWildcardPlace(path.slice(0, at), path.slice(at + WILDCARD_SEGMENT.length)),
+    );
+  }
   for (const folder of rules.readOnlyFolders)
     places.push(buildPlace(folder, true, { isReadOnlyFolder: true }));
   return places;
@@ -612,6 +704,20 @@ const isInsideFolder = (path: string, folder: string): boolean => {
 };
 
 /**
+ * Returns whether `path` is inside the folder `after` of a folder directly
+ * below `before`, as folded text.
+ */
+const isInsideWildcardFolder = (path: string, before: string, after: string): boolean => {
+  const base = foldSpelling(before);
+  const target = foldSpelling(path);
+  const start = base.endsWith("/") ? base : `${base}/`;
+  if (!target.startsWith(start)) return false;
+  const inner = target.slice(start.length);
+  const slash = inner.indexOf("/");
+  return slash > 0 && isInsideFolder(inner.slice(slash + 1), foldSpelling(after));
+};
+
+/**
  * Returns whether the edit target is the guarded place or inside it. Any
  * reading of the target against any reading of the place counts, and so does
  * a shared file identity.
@@ -619,7 +725,9 @@ const isInsideFolder = (path: string, folder: string): boolean => {
 const isTargetInPlace = (target: EditTarget, place: GuardedPlace): boolean => {
   for (const targetPath of target.paths) {
     for (const placePath of place.paths) {
-      if (
+      if (place.wildcard !== undefined) {
+        if (isInsideWildcardFolder(targetPath, placePath, place.wildcard.after)) return true;
+      } else if (
         place.isFolder
           ? isInsideFolder(targetPath, placePath)
           : foldSpelling(targetPath) === foldSpelling(placePath)
@@ -639,8 +747,7 @@ const isTargetInPlace = (target: EditTarget, place: GuardedPlace): boolean => {
  * because `agy` may do any of these (not measured). `Role` is free text the
  * model writes, so it is never read.
  */
-const isBrowserCall = (call: DecodedCall): boolean => {
-  const kind = classifyTool(call.name);
+const isBrowserCall = (call: DecodedCall, kind: ToolKind | undefined): boolean => {
   if (kind === "browser") return true;
   const typeName = call.args["TypeName"];
   return (
@@ -648,6 +755,25 @@ const isBrowserCall = (call: DecodedCall): boolean => {
     typeof typeName === "string" &&
     foldSpelling(typeName.replace(GO_SPACE_AT_ENDS, "")) === "browser"
   );
+};
+
+/**
+ * Returns whether the call belongs to a subagent: its conversation id is not
+ * the session's own, which the adapter wrote to `rules.conversationIdFile`.
+ * Reads the file once. Returns false whenever that cannot be told (the call's
+ * conversation id is missing, empty or not a safe id, or the file is missing,
+ * unreadable or empty), so a call of the session itself is never taken for a
+ * subagent's.
+ */
+const isSubagentCall = (call: DecodedCall, rules: HookRules): boolean => {
+  if (call.conversationId === undefined || !SAFE_ID.test(call.conversationId)) return false;
+  let sessionConversationId: string;
+  try {
+    sessionConversationId = readFileSync(rules.conversationIdFile, "utf8").trim();
+  } catch {
+    return false;
+  }
+  return SAFE_ID.test(sessionConversationId) && sessionConversationId !== call.conversationId;
 };
 
 /**
@@ -684,30 +810,35 @@ const decideEdit = (
  * decode (`rules` undefined) deny every edit tool call (guarded place or not),
  * every web search, every browser agent call and every call that could not be
  * decoded, with a reason that says the setup is wrong. A shell command runs,
- * because `agy` asks about it. In Approval required and Auto-accept edits the
- * browser agent is denied.
+ * because `agy` asks about it, unless a subagent runs it. In Approval required
+ * and Auto-accept edits the browser agent is denied, and so are a subagent's
+ * shell commands, edits and MCP tool calls.
  */
 const decide = (
   call: DecodedCall | undefined,
+  kind: ToolKind | undefined,
   input: RawInput,
   rules: HookRules | undefined,
   env: Readonly<Record<string, string | undefined>>,
 ): HookDenial | undefined => {
   if (rules?.accessMode === "full-access") return undefined;
-  const kind = call === undefined ? undefined : classifyTool(call.name);
   if (rules === undefined) {
-    return call === undefined || kind === "edit" || kind === "search" || isBrowserCall(call)
+    return call === undefined || kind === "edit" || kind === "search" || isBrowserCall(call, kind)
       ? deny(BAD_RULES_REASON)
       : undefined;
   }
   if (call === undefined) {
     return deny(input === INPUT_TOO_LARGE ? TOO_LARGE_REASON : UNREADABLE_REASON);
   }
-  if (isBrowserCall(call)) return deny(buildBrowserReason(rules.accessMode));
+  if (isBrowserCall(call, kind)) return deny(buildBrowserReason(rules.accessMode));
   if (kind === "search") {
     return rules.accessMode === "approval-required" ? deny(WEB_SEARCH_REASON) : undefined;
   }
-  return kind === "edit" ? decideEdit(call, rules, env) : undefined;
+  const guardDenial = kind === "edit" ? decideEdit(call, rules, env) : undefined;
+  if (guardDenial !== undefined) return guardDenial;
+  return (kind === "shell" || kind === "edit" || kind === "mcp") && isSubagentCall(call, rules)
+    ? deny(buildSubagentReason(kind, rules.accessMode))
+    : undefined;
 };
 
 /**
@@ -729,8 +860,9 @@ export const answerPreToolCall = (
     const encoded = env[HOOK_RULES_VARIABLE];
     rules = encoded ? decodeHookRules(encoded) : undefined;
     const call = decodeCall(input);
-    if (call !== undefined) takeMark(call, env);
-    return formatAnswer(decide(call, input, rules, env));
+    const kind = call === undefined ? undefined : classifyTool(call.name);
+    if (call !== undefined) takeMark(call, kind, env);
+    return formatAnswer(decide(call, kind, input, rules, env));
   } catch {
     return formatAnswer(
       rules?.accessMode === "full-access" ? undefined : deny(CHECK_FAILED_REASON),

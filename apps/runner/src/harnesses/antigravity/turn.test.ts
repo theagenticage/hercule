@@ -21,8 +21,9 @@ import {
 } from "@hercule/acp";
 import type { HarnessEvent } from "@hercule/protocol";
 import { buildPlanFilePaths } from "./harness-home";
-import { buildNormalizerState, holdTurn, normalizeUpdate } from "./normalize";
-import { startTurn } from "./turn";
+import { buildNormalizerState, closeTurn, holdTurn, normalizeUpdate, openTurn } from "./normalize";
+import { startTurn, type PreparedInput } from "./turn";
+import type { RootConversationFact } from "./agy-files";
 
 const FIRST_PROMPT: ReadonlyArray<PromptContent> = [{ type: "text", text: "go" }];
 
@@ -106,6 +107,12 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
       planFilePaths: buildPlanFilePaths("/tmp", "native"),
     });
     let deliveryUnknown = 0;
+    /** Makes the write of the next prompt fail, as the test says. */
+    let nextWriteFailure: AcpError | undefined;
+    /** Holds the write of the next prompt until the test completes it. */
+    let nextWriteGate: Deferred.Deferred<void> | undefined;
+    /** Makes the next `session/cancel` fail to be written. */
+    let isCancelFailing = false;
     // The session holds the output from the admission of the input on.
     holdTurn(normalizing);
     const turn = yield* startTurn(
@@ -122,14 +129,28 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
             Effect.gen(function* () {
               if (prompts.length === 0 && firstWrite !== undefined)
                 yield* Deferred.await(firstWrite);
+              if (nextWriteGate !== undefined) {
+                const gate = nextWriteGate;
+                nextWriteGate = undefined;
+                yield* Deferred.await(gate);
+              }
+              if (nextWriteFailure !== undefined) {
+                const failure = nextWriteFailure;
+                nextWriteFailure = undefined;
+                return yield* Effect.fail(failure);
+              }
               const reply = yield* Deferred.make<PromptReply, AcpError>();
               prompts.push({ content, reply });
               return Deferred.await(reply);
             }),
           cancel: (id) =>
-            Effect.sync(() => {
-              cancels.push(id);
-            }),
+            isCancelFailing
+              ? Effect.fail(
+                  new AcpError({ reason: "closed", message: "The connection is closed." }),
+                )
+              : Effect.sync(() => {
+                  cancels.push(id);
+                }),
         },
       },
       {
@@ -208,6 +229,16 @@ const startHarness = (firstWrite?: Deferred.Deferred<void, AcpError>) =>
       openQuestion,
       announceCall,
       deliveryUnknown: () => deliveryUnknown,
+      failCancels: (): void => {
+        isCancelFailing = true;
+      },
+      holdNextWrite: (): Deferred.Deferred<void> => {
+        nextWriteGate = Deferred.makeUnsafe<void>();
+        return nextWriteGate;
+      },
+      failNextWrite: (error: AcpError): void => {
+        nextWriteFailure = error;
+      },
     };
   });
 
@@ -288,7 +319,7 @@ describe("the handoff of the first prompt", () => {
           yield* h.until(() => h.cancels.length === 1);
           yield* h.reply(0, "cancelled");
 
-          expect(yield* Fiber.join(interrupting)).toBe("stopped");
+          expect(yield* Fiber.join(interrupting)).toBe("cancelled");
           expect(h.completed()).toMatchObject({ state: "interrupted" });
         }),
       written,
@@ -572,7 +603,7 @@ describe("the follow-up after a deny", () => {
         // `agy` answers end_turn to a prompt whose Request was cancelled.
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(0, "end_turn");
-        expect(yield* Fiber.join(result)).toBe("stopped");
+        expect(yield* Fiber.join(result)).toBe("cancelled");
         expect(h.prompts).toHaveLength(1);
         expect(h.completed()).toMatchObject({ state: "interrupted" });
       }),
@@ -592,7 +623,7 @@ describe("interrupt", () => {
         yield* h.until(() => h.cancels.length === 1);
         yield* h.turn.decide(h.findRequestId("request-call-1"), "allow");
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(interrupting)).toBe("stopped");
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
         expect(h.tags("request.resolved")).toMatchObject([{ decision: "cancel" }]);
         expect(h.completed()).toMatchObject({ state: "interrupted" });
         expect(h.cancels).toHaveLength(1);
@@ -604,10 +635,37 @@ describe("interrupt", () => {
       Effect.gen(function* () {
         yield* h.reply(0, "end_turn");
         yield* h.turn.ended;
-        expect(yield* h.turn.interrupt).toBe("stopped");
+        expect(yield* h.turn.interrupt).toBe("not-cancelled");
         expect(h.cancels).toHaveLength(0);
       }),
     ));
+
+  it("returns not-cancelled at once when session/cancel could not be written", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.failCancels();
+        expect(yield* h.turn.interrupt).toBe("not-cancelled");
+        expect(h.completed(), "the prompt is still running").toBeUndefined();
+      }),
+    ));
+
+  it("returns not-cancelled when the first prompt is refused while the interrupt waits for the handoff", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+          yield* Effect.yieldNow;
+          yield* Deferred.fail(
+            written,
+            new AcpError({ reason: "not-sent", message: "stdin is closed" }),
+          );
+          expect(yield* Fiber.join(interrupting)).toBe("not-cancelled");
+          expect(h.cancels).toEqual([]);
+        }),
+      written,
+    );
+  });
 
   it("is unresponsive after 5 seconds, and the turn ends only when the prompt fails", () =>
     run((h) =>
@@ -653,7 +711,7 @@ describe("interrupt", () => {
         const second = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 2);
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(second)).toBe("stopped");
+        expect(yield* Fiber.join(second)).toBe("cancelled");
       }),
     ));
 
@@ -664,8 +722,8 @@ describe("interrupt", () => {
         const second = yield* Effect.forkChild(h.turn.interrupt);
         yield* h.until(() => h.cancels.length === 1);
         yield* h.reply(0, "cancelled");
-        expect(yield* Fiber.join(first)).toBe("stopped");
-        expect(yield* Fiber.join(second)).toBe("stopped");
+        expect(yield* Fiber.join(first)).toBe("cancelled");
+        expect(yield* Fiber.join(second)).toBe("cancelled");
         expect(h.cancels).toHaveLength(1);
       }),
     ));
@@ -676,7 +734,7 @@ describe("interrupt", () => {
         const sent = buildTool("run_command");
         const asking = yield* Effect.forkChild(h.openApproval(sent.request));
         yield* h.until(() => h.tags("request.opened").length === 1);
-        yield* h.turn.stop;
+        yield* h.turn.stop("stopped");
         expect(yield* Fiber.join(asking)).toEqual({ outcome: "cancelled" });
         yield* Deferred.succeed(sent.written, undefined);
         yield* Deferred.fail(h.prompts[0]?.reply as PromptCall["reply"], closedError);
@@ -823,7 +881,7 @@ describe("how a turn fails", () => {
   it.each([
     ["max_tokens", "output limit"],
     ["max_turn_requests", "limit of model requests"],
-    ["refusal", "refused to go on"],
+    ["refusal", "without giving a reason"],
   ])("fails with a message for the user and the class %s", (stopReason, words) =>
     run((h) =>
       Effect.gen(function* () {
@@ -836,6 +894,15 @@ describe("how a turn fails", () => {
       }),
     ),
   );
+
+  it("claims no cause for a refusal", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.reply(0, "refusal");
+        yield* h.turn.ended;
+        expect(h.tags("runtime.error")[0]?.message).not.toMatch(/refused to go on|policy|safety/);
+      }),
+    ));
 
   it("fails with the stop reason named when ACP does not define it", () =>
     run((h) =>
@@ -981,6 +1048,717 @@ describe("the end of a turn and its Requests", () => {
         expect(h.turn.hasEnded()).toBe(true);
         expect(h.tags("turn.completed")).toMatchObject([{ state: "interrupted" }]);
         expect(h.events.at(-1)?._tag).toBe("turn.completed");
+      }),
+    ));
+});
+
+describe("a steer", () => {
+  const STEER: PreparedInput = {
+    input: { text: "more" },
+    prompt: [{ type: "text", text: "more" }],
+    skillReferences: [],
+    skippedSkills: [],
+    handoffBudget: Duration.seconds(8),
+  };
+
+  /** What `agy` answers a prompt it cannot add to the running one, as recorded in `steer-during-request.jsonl`. */
+  const agyRefusal = new AcpError({
+    reason: "refused",
+    message: "The harness refused session/prompt: the running prompt is waiting (code -32603).",
+    code: -32603,
+    harnessMessage:
+      "Can't add this prompt to session abc: the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again",
+  });
+
+  /** Starts a steer and waits until its prompt was written. */
+  const startSteer = (h: Harness, count = 2) =>
+    Effect.gen(function* () {
+      const steering = yield* Effect.forkChild(h.turn.steer(STEER));
+      yield* h.until(() => h.prompts.length === count);
+      return steering;
+    });
+
+  /** Lets the Turn read what it was sent. */
+  const letTurnRead = Effect.gen(function* () {
+    for (let tries = 0; tries < 20; tries++) yield* Effect.yieldNow;
+  });
+
+  const steeredMessages = (h: Harness) =>
+    h
+      .tags("item.completed")
+      .filter((event) => event.kind === "user_message")
+      .filter((event) => (event.detail as { steered?: boolean }).steered === true);
+
+  it("is accepted when the prompt it supersedes replies, and the newest prompt's reply ends the turn", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        expect(steeredMessages(h), "nothing is shown before agy took it").toHaveLength(0);
+
+        yield* h.reply(0, "end_turn", 5);
+        yield* letTurnRead;
+
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(steeredMessages(h)).toHaveLength(1);
+        expect(h.completed(), "the reply of the old prompt ends nothing").toBeUndefined();
+
+        yield* h.reply(1, "end_turn", 7);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 12 } });
+        expect(h.tags("turn.completed")).toHaveLength(1);
+      }),
+    ));
+
+  it("is accepted when its own prompt replies first, and that reply ends the turn", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 3 } });
+        expect(steeredMessages(h)).toHaveLength(1);
+        const tagsInOrder = h.events.map((event) => event._tag);
+        expect(tagsInOrder.lastIndexOf("item.completed")).toBeLessThan(
+          tagsInOrder.indexOf("turn.completed"),
+        );
+      }),
+    ));
+
+  it("is refused with the words of agy when agy refuses it, and the first prompt goes on", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+
+        const outcome = yield* Fiber.join(steering);
+        expect(outcome).toMatchObject({ kind: "refused" });
+        expect(outcome).toHaveProperty("message", expect.stringContaining("Can't add this prompt"));
+        expect(outcome).toHaveProperty("message", expect.stringContaining("stays queued"));
+        expect(steeredMessages(h)).toHaveLength(0);
+        expect(h.completed()).toBeUndefined();
+
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 5 } });
+      }),
+    ));
+
+  it("is accepted when the old prompt replied, and fails the turn when agy then refuses the steer's prompt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* h.reply(0, "end_turn", 5);
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(h.completed(), "the old reply ends nothing").toBeUndefined();
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect(h.tags("runtime.error")).toMatchObject([
+          { message: expect.stringContaining("could not finish the turn") as unknown },
+        ]);
+      }),
+    ));
+
+  it("is decided by its own reply when agy refuses the old prompt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* Deferred.fail(h.prompts[0]!.reply, agyRefusal);
+        yield* letTurnRead;
+        expect(steering.pollUnsafe(), "the old prompt's refusal decides nothing").toBeUndefined();
+
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(h.completed()).toMatchObject({ state: "completed" });
+      }),
+    ));
+
+  it("fails the turn as a failed prompt does when agy refuses the old prompt and then the steer's prompt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* Deferred.fail(h.prompts[0]!.reply, agyRefusal);
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+
+        expect(yield* Fiber.join(steering)).toMatchObject({ kind: "refused" });
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect(h.tags("runtime.error")).toMatchObject([
+          { message: expect.stringContaining("could not finish the turn") as unknown },
+        ]);
+      }),
+    ));
+
+  it("is not accepted by the cancelled reply that answers an interrupt, and the steer's own reply decides", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+
+        yield* h.reply(0, "cancelled");
+        yield* letTurnRead;
+        expect(steering.pollUnsafe(), "the cancel answers the old prompt only").toBeUndefined();
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        expect(yield* Fiber.join(steering)).toMatchObject({ kind: "refused" });
+        expect(steeredMessages(h)).toHaveLength(0);
+        yield* Fiber.join(interrupting);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+      }),
+    ));
+
+  it("takes two steers in a row that agy both refuses, and ends by the reply of the first prompt", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const first = yield* startSteer(h);
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        expect(yield* Fiber.join(first)).toMatchObject({ kind: "refused" });
+
+        const second = yield* startSteer(h, 3);
+        yield* Deferred.fail(h.prompts[2]!.reply, agyRefusal);
+        expect(yield* Fiber.join(second)).toMatchObject({ kind: "refused" });
+        expect(steeredMessages(h)).toHaveLength(0);
+        expect(h.completed()).toBeUndefined();
+
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 5 } });
+        expect(h.tags("turn.completed")).toHaveLength(1);
+      }),
+    ));
+
+  it("is refused without a write when the write fails with not-sent", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.failNextWrite(new AcpError({ reason: "not-sent", message: "stdin is closed" }));
+
+        const outcome = yield* h.turn.steer(STEER);
+
+        expect(outcome).toMatchObject({ kind: "refused" });
+        expect(outcome).toHaveProperty("message", expect.stringContaining("stdin is closed"));
+        expect(h.prompts).toHaveLength(1);
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
+      }),
+    ));
+
+  it("is unknown when the write ends with a closed connection", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.failNextWrite(closedError);
+
+        expect(yield* h.turn.steer(STEER)).toMatchObject({ kind: "unknown" });
+      }),
+    ));
+
+  it("is unknown when agy neither takes nor refuses it within the budget", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* TestClock.adjust(Duration.seconds(8));
+
+        expect(yield* Fiber.join(steering)).toMatchObject({ kind: "unknown" });
+        expect(steeredMessages(h)).toHaveLength(0);
+      }),
+    ));
+
+  it("is unknown, and the session is told, when its caller is interrupted while it waits", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* Fiber.interrupt(steering);
+
+        expect(h.deliveryUnknown()).toBe(1);
+      }),
+    ));
+
+  it("is refused locally, writing nothing, while a Request is open", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const sent = buildTool("run_command");
+        yield* Effect.forkChild(h.openApproval(sent.request));
+        yield* h.until(() => h.tags("request.opened").length === 1);
+
+        const outcome = yield* h.turn.steer(STEER);
+
+        expect(outcome).toMatchObject({ kind: "refused" });
+        expect(outcome).toHaveProperty(
+          "message",
+          expect.stringContaining("Answer the request first"),
+        );
+        expect(h.prompts).toHaveLength(1);
+      }),
+    ));
+
+  it("is refused locally, writing nothing, while the first prompt is being handed over", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          const outcome = yield* h.turn.steer(STEER);
+
+          expect(outcome).toMatchObject({ kind: "refused" });
+          expect(h.prompts).toHaveLength(0);
+          yield* Deferred.succeed(written, undefined);
+        }),
+      written,
+    );
+  });
+
+  it("is refused locally while another steer is being taken", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* startSteer(h);
+
+        const second = yield* h.turn.steer(STEER);
+
+        expect(second).toMatchObject({ kind: "refused" });
+        expect(second).toHaveProperty("message", expect.stringContaining("previous message"));
+        expect(h.prompts).toHaveLength(2);
+      }),
+    ));
+
+  it("is refused, writing nothing, when an interrupt came before it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* Effect.forkChild(h.turn.interrupt);
+        yield* Effect.yieldNow;
+
+        const outcome = yield* h.turn.steer(STEER);
+
+        expect(outcome).toMatchObject({ kind: "refused" });
+        expect(outcome).toHaveProperty("message", expect.stringContaining("stopped"));
+        expect(h.prompts).toHaveLength(1);
+        yield* h.reply(0, "cancelled");
+        yield* h.turn.ended;
+      }),
+    ));
+
+  it("is not refused by an interrupt that comes while its write is open, and is decided by the write's outcome", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const gate = h.holdNextWrite();
+        const steering = yield* Effect.forkChild(h.turn.steer(STEER));
+        yield* letTurnRead;
+
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+        yield* h.reply(0, "cancelled");
+        yield* letTurnRead;
+        expect(steering.pollUnsafe(), "not refused: agy may have the message").toBeUndefined();
+
+        yield* Deferred.succeed(gate, undefined);
+        // The cancel answered the old prompt only: the steer's own reply accepts it.
+        yield* h.reply(1, "cancelled");
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(steeredMessages(h)).toHaveLength(1);
+      }),
+    ));
+
+  it("is accepted and shown inside the turn when an interrupt comes after its prompt was written", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+        yield* h.reply(0, "cancelled");
+        yield* h.reply(1, "cancelled");
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(steeredMessages(h)).toHaveLength(1);
+        const tagsInOrder = h.events.map((event) => event._tag);
+        expect(tagsInOrder.lastIndexOf("item.completed")).toBeLessThan(
+          tagsInOrder.indexOf("turn.completed"),
+        );
+      }),
+    ));
+
+  it("ends the turn when agy fails an accepted steer's prompt and then the steer open behind it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const first = yield* startSteer(h);
+        yield* h.reply(0, "end_turn", 1);
+        expect(yield* Fiber.join(first)).toEqual({ kind: "accepted" });
+        const second = yield* startSteer(h, 3);
+
+        yield* Deferred.fail(h.prompts[1]!.reply, agyRefusal);
+        yield* Deferred.fail(h.prompts[2]!.reply, agyRefusal);
+
+        // The failure of the accepted steer's prompt ends the turn through the failed path, and the second steer is not accepted.
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect((yield* Fiber.join(second)).kind).not.toBe("accepted");
+        expect(steeredMessages(h)).toHaveLength(1);
+      }),
+    ));
+
+  it("lets an interrupt after it was accepted end the turn as interrupted", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        yield* h.reply(0, "end_turn");
+        yield* letTurnRead;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        const interrupting = yield* Effect.forkChild(h.turn.interrupt);
+        yield* h.until(() => h.cancels.length === 1);
+        yield* h.reply(1, "cancelled");
+
+        expect(yield* Fiber.join(interrupting)).toBe("cancelled");
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+      }),
+    ));
+
+  it("counts the late reply of the old prompt after the steer's own reply ended the turn", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.until(() => h.tags("session.usage.updated").length === 2);
+
+        expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+          usage: { inputTokens: 8 },
+        });
+      }),
+    ));
+
+  it("ends nothing when the superseded prompt replies with another stop reason, and still counts its usage", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+
+        yield* h.reply(0, "max_tokens", 4);
+        yield* letTurnRead;
+
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(h.completed()).toBeUndefined();
+        expect(h.tags("runtime.error")).toHaveLength(0);
+
+        yield* h.reply(1, "end_turn", 6);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 10 } });
+      }),
+    ));
+
+  it("carries a deny over to the follow-up after the newest prompt's reply, and sends none after the old reply", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const sent = buildTool("run_command");
+        yield* askAndDecide(h, sent, "deny");
+
+        const steering = yield* startSteer(h);
+        yield* h.reply(0, "end_turn");
+        yield* letTurnRead;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+        expect(h.prompts, "no follow-up after the old prompt's reply").toHaveLength(2);
+
+        yield* h.reply(1, "end_turn");
+        yield* h.until(() => h.prompts.length === 3);
+        expect(h.prompts[2]?.content).toEqual([
+          { type: "text", text: followUpText("run_command") },
+        ]);
+        yield* h.reply(2, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
+      }),
+    ));
+
+  it("adds the usage of an older prompt's late reply and ends nothing with it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const sent = buildTool("run_command");
+        yield* askAndDecide(h, sent, "deny");
+        const steering = yield* startSteer(h);
+        yield* h.reply(1, "end_turn", 2);
+        yield* h.until(() => h.prompts.length === 3);
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        yield* h.reply(0, "end_turn", 5);
+        yield* letTurnRead;
+        expect(h.completed()).toBeUndefined();
+
+        yield* h.reply(2, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 10 } });
+      }),
+    ));
+
+  it("counts the late reply of this turn toward the session but not toward a turn opened after it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const steering = yield* startSteer(h);
+        yield* h.reply(1, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(yield* Fiber.join(steering)).toEqual({ kind: "accepted" });
+
+        h.events.push(...openTurn(h.normalizing, "later-turn"));
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.until(() => h.tags("session.usage.updated").length === 2);
+
+        expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
+          usage: { inputTokens: 8 },
+        });
+        expect(closeTurn(h.normalizing, { state: "completed" }).at(-1)).not.toHaveProperty("usage");
+      }),
+    ));
+
+  it("takes two steers in a row, and only the last prompt's reply ends the turn", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        const first = yield* startSteer(h);
+        yield* h.reply(0, "end_turn", 1);
+        yield* letTurnRead;
+        expect(yield* Fiber.join(first)).toEqual({ kind: "accepted" });
+
+        const second = yield* startSteer(h, 3);
+        yield* h.reply(1, "end_turn", 2);
+        yield* letTurnRead;
+        expect(yield* Fiber.join(second)).toEqual({ kind: "accepted" });
+        expect(steeredMessages(h)).toHaveLength(2);
+        expect(h.completed()).toBeUndefined();
+
+        yield* h.reply(2, "end_turn", 3);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed", usage: { inputTokens: 6 } });
+        expect(h.tags("turn.completed")).toHaveLength(1);
+      }),
+    ));
+});
+
+describe("an error that agy wrote into the chat", () => {
+  const NETWORK = 'agent executor error: request failed: Post "https://x": Service Unavailable';
+  const QUOTA = "Individual quota reached. Resets in 1h22m55s.";
+
+  /** Plays the chunk that agy sends before it replies, as the session passes it on. */
+  const sendChunk = (h: Harness, text: string) => {
+    h.events.push(
+      ...normalizeUpdate(h.normalizing, {
+        nativeSessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        raw: {},
+      }),
+    );
+  };
+  const shownText = (h: Harness) =>
+    h
+      .tags("content.delta")
+      .map((event) => event.delta)
+      .join("");
+
+  it.each([
+    [NETWORK, "provider_error"],
+    [QUOTA, "usage_limit"],
+  ])("ends failed with agy's words and the class of %s", (words, errorClass) =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${words}\n`);
+        yield* h.reply(0, "end_turn", 5);
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed", usage: { inputTokens: 5 } });
+        expect(h.tags("runtime.error")).toMatchObject([{ class: errorClass, message: words }]);
+        expect(shownText(h), "no assistant message of the error").toBe("");
+      }),
+    ),
+  );
+
+  it("ends failed when a usage_update comes between the notice and the reply", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${QUOTA}\n`);
+        h.events.push(
+          ...normalizeUpdate(h.normalizing, {
+            nativeSessionId: "native",
+            update: { sessionUpdate: "other", name: "usage_update" },
+            raw: {},
+          }),
+        );
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect(h.tags("runtime.error")).toMatchObject([{ class: "usage_limit" }]);
+        expect(shownText(h)).toBe("");
+      }),
+    ));
+
+  it("ends completed, with the text shown, when more output follows the notice", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${NETWORK}\n`);
+        sendChunk(h, "and then the answer");
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
+        expect(h.tags("runtime.error")).toEqual([]);
+        expect(shownText(h)).toContain("Service Unavailable");
+        expect(shownText(h)).toContain("and then the answer");
+      }),
+    ));
+
+  it("ends interrupted when an interrupt came, whatever the notice", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        sendChunk(h, `\n\u26a0 ${NETWORK}\n`);
+        yield* h.turn.stop("stopped");
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(h.tags("runtime.error")).toEqual([]);
+      }),
+    ));
+});
+
+describe("a provider error in the transcript", () => {
+  const providerError = (words: string): RootConversationFact => ({
+    kind: "provider-error",
+    words,
+  });
+
+  const input: RootConversationFact = { kind: "input" };
+
+  it("ignores every fact until the Turn is published, and an error until it saw an input", () => {
+    const written = Deferred.makeUnsafe<void, AcpError>();
+    return run(
+      (h) =>
+        Effect.gen(function* () {
+          h.turn.recordRootConversationFact(input);
+          h.turn.recordRootConversationFact(providerError("error of the Turn before"));
+          yield* Deferred.succeed(written, undefined);
+          yield* h.until(() => h.tags("turn.started").length === 1);
+
+          h.turn.recordRootConversationFact(providerError("error before the input"));
+          expect(h.tags("runtime.warning"), "no USER_INPUT since the Turn was published").toEqual(
+            [],
+          );
+
+          h.turn.recordRootConversationFact(input);
+          h.turn.recordRootConversationFact(providerError("503 no capacity"));
+          expect(h.tags("runtime.warning")).toMatchObject([
+            { message: expect.stringContaining("may try again: 503 no capacity") as unknown },
+          ]);
+        }),
+      written,
+    );
+  });
+
+  it("warns once with the provider's words, and ends nothing", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.turn.recordRootConversationFact(input);
+        h.turn.recordRootConversationFact(providerError("503 no capacity"));
+        h.turn.recordRootConversationFact(providerError("503 again"));
+        expect(h.tags("runtime.warning")).toMatchObject([
+          { message: expect.stringContaining("may try again: 503 no capacity") as unknown },
+        ]);
+        expect(h.completed()).toBeUndefined();
+        yield* h.reply(0, "end_turn");
+        yield* h.turn.ended;
+        expect(h.completed()).toMatchObject({ state: "completed" });
+        h.turn.recordRootConversationFact(providerError("too late"));
+        expect(h.tags("runtime.warning")).toHaveLength(1);
+      }),
+    ));
+
+  // The words are quoted from a transcript seen on a Mac (docs/research/antigravity-harness.md
+  // section 6.5 on the branch research/antigravity-harness): no recording of an ERROR_MESSAGE step
+  // exists in this repository.
+  const NO_CAPACITY =
+    "API error (attempt 1): transport error (Unavailable, HTTP 503): No capacity available for model on the server";
+
+  it("ends failed with the newest provider error when the inactivity timeout stops it", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.turn.recordRootConversationFact(input);
+        h.turn.recordRootConversationFact(providerError("first error"));
+        h.turn.recordRootConversationFact(providerError(NO_CAPACITY));
+        yield* h.turn.stop("inactivity_timeout");
+        yield* h.reply(0, "cancelled");
+        yield* h.turn.ended;
+
+        expect(h.completed()).toMatchObject({ state: "failed" });
+        expect(h.tags("runtime.error")).toMatchObject([
+          { class: "provider_error", message: NO_CAPACITY },
+        ]);
+      }),
+    ));
+
+  it("forgets the provider error when agy goes on working, so a later inactivity timeout ends it interrupted", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.turn.recordRootConversationFact(input);
+        h.turn.recordRootConversationFact(providerError(NO_CAPACITY));
+        h.turn.recordAgyProgress();
+        yield* h.turn.stop("inactivity_timeout");
+        yield* h.reply(0, "cancelled");
+        yield* h.turn.ended;
+
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
+        expect(h.tags("runtime.error")).toEqual([]);
+      }),
+    ));
+
+  it("ends failed as a usage limit when the provider error is a quota error", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        h.turn.recordRootConversationFact(input);
+        h.turn.recordRootConversationFact(
+          providerError("Individual quota reached. Resets in 1h22m55s."),
+        );
+        yield* h.turn.stop("inactivity_timeout");
+        yield* h.reply(0, "cancelled");
+        yield* h.turn.ended;
+
+        expect(h.tags("runtime.error")).toMatchObject([{ class: "usage_limit" }]);
+      }),
+    ));
+
+  it.each(["stopped", "absolute_timeout"] as const)(
+    "ends interrupted when %s stops it, whatever the transcript showed",
+    (reason) =>
+      run((h) =>
+        Effect.gen(function* () {
+          h.turn.recordRootConversationFact(input);
+          h.turn.recordRootConversationFact(providerError(NO_CAPACITY));
+          yield* h.turn.stop(reason);
+          yield* h.reply(0, "cancelled");
+          yield* h.turn.ended;
+
+          expect(h.completed()).toMatchObject({ state: "interrupted" });
+          expect(h.tags("runtime.error")).toEqual([]);
+        }),
+      ),
+  );
+
+  it("ends interrupted when the inactivity timeout stops a Turn that showed no provider error", () =>
+    run((h) =>
+      Effect.gen(function* () {
+        yield* h.turn.stop("inactivity_timeout");
+        yield* h.reply(0, "cancelled");
+        yield* h.turn.ended;
+
+        expect(h.completed()).toMatchObject({ state: "interrupted" });
       }),
     ));
 });

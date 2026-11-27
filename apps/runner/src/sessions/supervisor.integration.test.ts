@@ -21,7 +21,18 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Queue, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Logger,
+  PubSub,
+  Queue,
+  Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
@@ -5460,5 +5471,74 @@ describe("the Git boundary at a workspace root", () => {
     expect(readRefusalMessage(listInputResults(sent)[0])).not.toContain(root);
     expect(fake.contexts).toEqual([]);
     expect(existsSync(join(root, ".git"))).toBe(false);
+  });
+});
+
+describe("a frame that fails its protocol schema", () => {
+  it("is dropped with a warning that names its tags and holds none of its content", async () => {
+    const fake = createFake();
+    const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
+    const SECRET = "text only the user may see";
+    const sent: Array<RunnerToController> = [];
+    const supervisor = runner.forConnection({
+      scope,
+      runnerId: RUNNER_ID,
+      machine,
+      githubTokenCopies,
+      workspaceSteps: steps,
+      // The real connection throws from its schema encoder, which is a defect, not a failed write.
+      send: (frame) =>
+        Effect.suspend(() => {
+          if (frame._tag === "sessionEvent" && frame.event._tag === "runtime.warning") {
+            throw new TypeError(`Expected a safe integer, got ${SECRET}`);
+          }
+          return Effect.sync(() => void sent.push(frame));
+        }),
+    });
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>((options) => {
+      if (options.logLevel === "Warn") warnings.push(String(options.message));
+    });
+
+    // Not `runConnected`: the logger must be in place when the watch is forked.
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startWatching(fake);
+          yield* awaitMarker(fake);
+          yield* supervisor.attach({ controllerReadsFilesEdited: true });
+          yield* supervisor.start(START);
+          yield* Effect.sync(() =>
+            fake.emit({
+              _tag: "runtime.warning",
+              eventId: "e-bad",
+              sessionId: SESSION,
+              at,
+              message: SECRET,
+            }),
+          );
+          yield* Effect.sync(() =>
+            fake.emit({
+              _tag: "content.delta",
+              eventId: "e-after",
+              sessionId: SESSION,
+              at,
+              turnId: "t-1",
+              itemId: "i-1",
+              streamKind: "assistant_text",
+              delta: "hello",
+            }),
+          );
+          // The event after the dropped one still arrives: the watch survived.
+          yield* waitUntil("sent the event after the dropped one", () =>
+            listSessionEvents(sent).some((frame) => frame.event._tag === "content.delta"),
+          );
+        }),
+      ).pipe(Effect.provide(Logger.layer([logger]))),
+    );
+
+    expect(warnings).toEqual([
+      "Dropped a sessionEvent frame (runtime.warning) that failed its protocol schema: TypeError",
+    ]);
   });
 });

@@ -4,7 +4,7 @@
  * is built here, so that all of them get the same environment and none of
  * them can run as another account.
  */
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -44,7 +44,7 @@ import { truncateFact } from "../text";
 import {
   ANTIGRAVITY_NAME,
   APP_DATA_DIR,
-  listOwnedPaths,
+  listGuardedHomePaths,
   readLoginFile,
   readRegularFile,
   resetOwnedHomePaths,
@@ -211,6 +211,45 @@ const readLogMessage = (line: string): string | undefined => {
  */
 const HELD_BY_GOOGLE_PHRASE = /"reason":\s*"VALIDATION_REQUIRED"/;
 
+/**
+ * Returns the text of an error that `agy` wrote into the chat itself, or
+ * `undefined` when `text` is not such a notice. Takes the text of one
+ * `agent_message_chunk`.
+ *
+ * Dependency on the wording of `agy` 1.5.15: it writes its own errors as one
+ * chunk whose whole text is `"\n⚠ " + <text> + "\n"` (the format string
+ * `"\n⚠ %s\n"` is in the binary), and then replies `end_turn`. Seen with a
+ * cut network (recording `failed-turn-network.jsonl`: "agent executor error:
+ * generating and executing: request failed: ...: Service Unavailable") and
+ * with a used-up quota ("Individual quota reached. ..."; measured by hand,
+ * with no recording, because the quota cannot be used up on purpose).
+ *
+ * A chunk counts only when it is exactly that format, with no other line
+ * break in the text: a text that merely starts with or contains `⚠` is the
+ * model's own text. A later `agy` that words its errors differently gives an
+ * ordinary message and a turn that ends `completed`.
+ */
+export const parseAgyErrorNotice = (text: string): string | undefined => {
+  if (!text.startsWith("\n⚠ ") || !text.endsWith("\n")) return undefined;
+  const notice = text.slice("\n⚠ ".length, -1);
+  return notice === "" || notice.includes("\n") ? undefined : notice;
+};
+
+/**
+ * Matches the two texts recorded for a quota error of the model service:
+ * - "Individual quota reached. Please upgrade your subscription to increase
+ *   your limits. Resets in 1h22m55s." (a live run on 2026-11-26).
+ * - "RESOURCE_EXHAUSTED (code 429): You have exhausted your capacity on this
+ *   model" (research of 2026-11-25, `docs/research/antigravity-harness.md`
+ *   section 6.5).
+ * A quota error worded another way is not matched, and the turn then fails
+ * as an ordinary provider error with the same words.
+ */
+const QUOTA_ERROR_PATTERN = /quota reached|RESOURCE_EXHAUSTED/i;
+
+/** Returns true when the text of an error of `agy` is one of the recorded quota errors. */
+export const isQuotaError = (text: string): boolean => QUOTA_ERROR_PATTERN.test(text);
+
 /** The most bytes of one worker log that are read. A line that comes later is not found. */
 const LOG_LIMIT = 1024 * 1024;
 
@@ -219,6 +258,9 @@ const LOG_NAME = "agy.log";
 
 /** The start of the name of a log folder, directly in the Harness Home. */
 const LOG_FOLDER_PREFIX = "hercule-log-";
+
+/** The file in a session process's log folder that holds the session's own conversation id, for the pre-tool hook. */
+const CONVERSATION_ID_FILE = "conversation-id";
 
 /**
  * How long a failed start waits for the last words of the process on stderr.
@@ -699,6 +741,10 @@ export const openSignedInAgy = (
         : []),
       ...buildAccountFlags(ctx.home, folder),
     ];
+    // The log folder is private to this process and ends with it. The agent's
+    // own TMPDIR is writable by the agent, and the marks folder is read by the
+    // edit watch, which takes every file in it for a mark.
+    const conversationIdFile = join(folder, CONVERSATION_ID_FILE);
     const tempFolder = yield* makeAgyTempFolder();
     const env = buildAgyEnv(
       ctx,
@@ -710,7 +756,9 @@ export const openSignedInAgy = (
           options.purpose.kind === "session" ? options.purpose.accessMode : "approval-required",
         // Every additional directory is a folder Hercule gives the agent to read, never to change.
         readOnlyFolders: (request.additionalDirectories ?? []).map((folder) => resolve(folder)),
-        harnessHomePaths: listOwnedPaths(ctx.home),
+        // The file of the conversation id sits in the process's own log folder, and the agent may not change it.
+        harnessHomePaths: [...listGuardedHomePaths(ctx.home), conversationIdFile],
+        conversationIdFile,
       },
     );
     const child = yield* Effect.acquireRelease(
@@ -841,13 +889,37 @@ export const openSignedInAgy = (
         }),
       );
 
+    /**
+     * Writes the session's own conversation id where the pre-tool hook reads
+     * it, so the hook can tell a subagent's call from the session's. Runs
+     * when the call has answered, before the first prompt. The write is
+     * synchronous so that no update of the conversation is read between the
+     * reply and the caller's `onReply`. Fails with an
+     * `AdapterFailed` when the file cannot be written, because without it a
+     * subagent's call would wait for an approval that never comes. A probe
+     * runs no tools and writes nothing.
+     */
+    const recordConversationId = (id: string): Effect.Effect<void, AdapterFailed> =>
+      options.purpose.kind !== "session"
+        ? Effect.void
+        : Effect.try({
+            try: () => writeFileSync(conversationIdFile, id),
+            catch: (error) =>
+              buildAdapterFailed(
+                `Hercule could not record the conversation id of this session: ${describeError(error)}`,
+              ),
+          });
+
     return {
       connection,
       planLabel: readPlanLabel(reply.meta),
       newConversation: (onReply) =>
         Effect.map(
           openConversation(connection.newSession(request), (opened) =>
-            onReply === undefined ? Effect.void : onReply(opened.nativeSessionId),
+            Effect.andThen(
+              recordConversationId(opened.nativeSessionId),
+              onReply === undefined ? Effect.void : onReply(opened.nativeSessionId),
+            ),
           ),
           ([opened, isHeldByGoogle]) => ({
             id: opened.nativeSessionId,
@@ -858,7 +930,10 @@ export const openSignedInAgy = (
       resumeConversation: (nativeSessionId, onReply) =>
         Effect.map(
           openConversation(connection.resumeSession({ ...request, nativeSessionId }), () =>
-            onReply === undefined ? Effect.void : onReply(nativeSessionId),
+            Effect.andThen(
+              recordConversationId(nativeSessionId),
+              onReply === undefined ? Effect.void : onReply(nativeSessionId),
+            ),
           ).pipe(
             Effect.catch((error) =>
               error._tag === "AcpError" && isConversationMissing(error)

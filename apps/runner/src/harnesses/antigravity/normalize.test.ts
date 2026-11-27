@@ -13,10 +13,13 @@ import { MAX_TODO_STEPS, type HarnessEvent } from "@hercule/protocol";
 import { describe, expect, it } from "vitest";
 import {
   addPromptUsage,
+  addSubagentUsage,
+  markSubagentUsageIncomplete,
   buildNormalizerState,
   buildProcessEndEvents,
   closeTurn,
   describeRequestItem,
+  findLaunchItem,
   findRequestOwner,
   holdTurn,
   makeEventSecretHider,
@@ -25,6 +28,7 @@ import {
   normalizeUpdate,
   openTurn,
   releaseTurn,
+  takeErrorNotice,
   type NormalizerState,
   type RequestItem,
 } from "./normalize";
@@ -106,7 +110,7 @@ const playRecording = (name: RecordingName): Played => {
     ) {
       const reply = message.result as { stopReason: string; usage?: never };
       events.push(
-        ...addPromptUsage(state, reply.usage),
+        ...addPromptUsage(state, reply.usage, "turn-1"),
         ...closeTurn(state, {
           state: reply.stopReason === "cancelled" ? "interrupted" : "completed",
         }),
@@ -309,10 +313,19 @@ describe("the subagent recording", () => {
     expect(itemsOf(events, "assistant_message")).toHaveLength(2);
   });
 
-  it("reports usage in the incomplete form because a subagent ran", () => {
-    expect(only(events, "session.usage.updated")).toMatchObject([
-      { usageReport: { status: "incomplete", counts: { inputTokens: 15385, outputTokens: 783 } } },
-    ]);
+  it("reports the usage of the replies as complete, because the subagent's tokens are added from its files", () => {
+    const [update] = only(events, "session.usage.updated");
+    expect(update).toMatchObject({ usage: { inputTokens: 15385, outputTokens: 783 } });
+    expect(update).not.toHaveProperty("usageReport");
+  });
+
+  it("finds the item of the call that launched a subagent after the call ended", () => {
+    const { state, events: played } = playRecording("subagent");
+    const [launched] = itemsOf(played, "subagent");
+    const toolCallId = launched!.harnessRefs!.toolCallId!;
+
+    expect(findLaunchItem(state, toolCallId)).toBe(launched!.itemId);
+    expect(findLaunchItem(state, "unknown-call")).toBeUndefined();
   });
 });
 
@@ -764,7 +777,7 @@ describe("synthetic turns", () => {
     const state = freshState();
     normalizeUpdate(state, buildChunk("x"));
     expect(
-      addPromptUsage(state, { totalTokens: 3, inputTokens: 1, outputTokens: 2 }),
+      addPromptUsage(state, { totalTokens: 3, inputTokens: 1, outputTokens: 2 }, "t1"),
     ).toMatchObject([
       { usageReport: { status: "incomplete", counts: { inputTokens: 1, outputTokens: 2 } } },
     ]);
@@ -1079,27 +1092,37 @@ describe("usage", () => {
   it("adds the replies of the process, and gives the turn the sum of its own prompts", () => {
     const state = freshState();
     openTurn(state, "t1");
-    addPromptUsage(state, reply);
-    addPromptUsage(state, reply);
+    addPromptUsage(state, reply, "t1");
+    addPromptUsage(state, reply, "t1");
     expect(closeTurn(state, { state: "completed" }).at(-1)).toMatchObject({
       usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 14, cacheWriteTokens: 2 },
     });
     openTurn(state, "t2");
-    addPromptUsage(state, reply);
+    addPromptUsage(state, reply, "t2");
     expect(closeTurn(state, { state: "completed" }).at(-1)).toMatchObject({
       usage: { inputTokens: 10 },
     });
     expect(
-      addPromptUsage(state, { totalTokens: 0, inputTokens: 1, outputTokens: 0 }),
+      addPromptUsage(state, { totalTokens: 0, inputTokens: 1, outputTokens: 0 }, "t2"),
     ).toMatchObject([{ usage: { inputTokens: 31, outputTokens: 15 } }]);
+  });
+
+  it("counts the reply of an earlier turn toward the process, never toward the turn open now", () => {
+    const state = freshState();
+    openTurn(state, "t1");
+    closeTurn(state, { state: "completed" });
+    openTurn(state, "t2");
+
+    expect(addPromptUsage(state, reply, "t1")).toMatchObject([{ usage: { inputTokens: 10 } }]);
+    expect(closeTurn(state, { state: "completed" }).at(-1)).not.toHaveProperty("usage");
   });
 
   it("reports the incomplete form once a reply had no usage, and keeps it so", () => {
     const state = freshState();
-    expect(addPromptUsage(state, undefined)[0]).toMatchObject({
+    expect(addPromptUsage(state, undefined, "t1")[0]).toMatchObject({
       usageReport: { status: "incomplete" },
     });
-    expect(addPromptUsage(state, reply)[0]).toMatchObject({
+    expect(addPromptUsage(state, reply, "t1")[0]).toMatchObject({
       usageReport: { status: "incomplete", counts: { inputTokens: 10 } },
     });
   });
@@ -1110,6 +1133,51 @@ describe("usage", () => {
     expect(first.map((event) => event._tag)).toContain("session.usage.updated");
     const again = normalizeUpdate(state, buildToolStart(runCall("c1")));
     expect(again.map((event) => event._tag)).not.toContain("session.usage.updated");
+  });
+
+  it("adds the tokens of each subagent step to the session's usage", () => {
+    const state = freshState();
+    addPromptUsage(state, reply, "t1");
+
+    expect(
+      addSubagentUsage(state, { inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 }),
+    ).toMatchObject([
+      { usage: { inputTokens: 110, outputTokens: 25, cacheReadTokens: 37, cacheWriteTokens: 1 } },
+    ]);
+    expect(
+      addSubagentUsage(state, { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1 }),
+    ).toMatchObject([{ usage: { inputTokens: 111, outputTokens: 26, cacheReadTokens: 38 } }]);
+  });
+
+  it("stops every count at the largest safe integer, so two forged counts never make a frame the protocol rejects", () => {
+    const state = freshState();
+    const forged = {
+      inputTokens: Number.MAX_SAFE_INTEGER,
+      outputTokens: Number.MAX_SAFE_INTEGER,
+      cacheReadTokens: Number.MAX_SAFE_INTEGER,
+    };
+    addPromptUsage(state, reply, "t1");
+    addSubagentUsage(state, forged);
+
+    const [event] = addSubagentUsage(state, forged);
+
+    expect(event).toMatchObject({
+      usage: {
+        inputTokens: Number.MAX_SAFE_INTEGER,
+        outputTokens: Number.MAX_SAFE_INTEGER,
+        cacheReadTokens: Number.MAX_SAFE_INTEGER,
+      },
+    });
+  });
+
+  it("reports the incomplete form, with the counts so far, once the tokens of a subagent were not counted, and only once", () => {
+    const state = freshState();
+    addPromptUsage(state, reply, "t1");
+
+    expect(markSubagentUsageIncomplete(state)).toMatchObject([
+      { usageReport: { status: "incomplete", counts: { inputTokens: 10 } } },
+    ]);
+    expect(markSubagentUsageIncomplete(state)).toEqual([]);
   });
 
   it("leaves usage out of a turn whose prompts reported none", () => {
@@ -1260,5 +1328,76 @@ describe("makeEventSecretHider", () => {
     const hide = makeEventSecretHider(SECRET);
     const event = closing("turn.completed");
     expect(hide([event])).toEqual([event]);
+  });
+});
+
+describe("the held error notice", () => {
+  const NOTICE = "\n\u26a0 agent executor error: Service Unavailable\n";
+
+  it("is held, and shown as assistant text by the next update, as it was no end", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    expect(normalizeUpdate(state, buildChunk(NOTICE))).toEqual([]);
+    const events = normalizeUpdate(state, buildChunk("more"));
+    expect(
+      only(events, "content.delta").map((event) => event.delta),
+      "the notice, then the text that followed",
+    ).toEqual([NOTICE, "more"]);
+  });
+
+  it("is taken once by the Turn, and then shown nowhere", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildChunk(NOTICE));
+    expect(takeErrorNotice(state)).toBe("agent executor error: Service Unavailable");
+    expect(takeErrorNotice(state)).toBeUndefined();
+    expect(only(closeTurn(state, { state: "failed" }), "content.delta")).toEqual([]);
+  });
+
+  it("is shown as text when the turn closes or the process ends without taking it", () => {
+    for (const end of [
+      (state: NormalizerState) => closeTurn(state, { state: "completed" }),
+      (state: NormalizerState) => buildProcessEndEvents(state),
+    ]) {
+      const state = freshState();
+      openTurn(state, "t");
+      normalizeUpdate(state, buildChunk(NOTICE));
+      expect(only(end(state), "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+    }
+  });
+
+  it("is held by a late update of a tool call that already has an item, and released by a new call", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildToolStart({ toolCallId: "c1", name: "search_web" }));
+    normalizeUpdate(state, buildChunk(NOTICE));
+
+    const late = normalizeUpdate(
+      state,
+      buildToolUpdate({ toolCallId: "c1", name: "search_web", status: "completed" }),
+    );
+    expect(only(late, "content.delta"), "the late update shows no notice").toEqual([]);
+    expect(takeErrorNotice(state)).toBe("agent executor error: Service Unavailable");
+
+    normalizeUpdate(state, buildChunk(NOTICE));
+    const next = normalizeUpdate(state, buildToolStart({ toolCallId: "c2", name: "search_web" }));
+    expect(only(next, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+  });
+
+  it("is shown at once as text in a synthetic turn when no input's prompt is in flight, and is not held for the next turn", () => {
+    const state = freshState();
+    const events = normalizeUpdate(state, buildChunk(NOTICE));
+    expect(only(events, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+    expect(only(events, "turn.started")).toHaveLength(1);
+    expect(takeErrorNotice(state)).toBeUndefined();
+  });
+
+  it("is ordinary text inside an open assistant text item", () => {
+    const state = freshState();
+    openTurn(state, "t");
+    normalizeUpdate(state, buildChunk("Hello"));
+    const events = normalizeUpdate(state, buildChunk(NOTICE));
+    expect(only(events, "content.delta").map((event) => event.delta)).toEqual([NOTICE]);
+    expect(takeErrorNotice(state)).toBeUndefined();
   });
 });

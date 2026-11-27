@@ -20,8 +20,11 @@
  * `normalize.recordings.test.ts` plays every other recording through the
  * normalizer alone.
  */
+import { cpSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { readRecording, type JsonRpcMessage, type RecordingName } from "@hercule/acp/testing";
@@ -29,8 +32,14 @@ import type { HarnessEvent, QuestionAnswers, SessionSpec } from "@hercule/protoc
 import type { ApprovalDecision } from "@hercule/protocol";
 import { cleanupHomes, CWD, settle, waitUntil } from "../testing";
 import { makeAntigravityAdapter } from "./adapter";
+import { APP_DATA_DIR } from "./harness-home";
 import { expectEventStreamToHoldTogether } from "./event-stream.testing";
-import { buildFakeAgy, buildStartContext, createSignedInHome } from "./fake-agy.testing";
+import {
+  buildFakeAgy,
+  buildStartContext,
+  createSignedInHome,
+  type FakeAgyOptions,
+} from "./fake-agy.testing";
 
 afterEach(cleanupHomes);
 
@@ -57,7 +66,7 @@ interface Input {
   readonly prompts: ReadonlyArray<number>;
   readonly actions: ReadonlyArray<Action>;
   readonly modelSelection?: SessionSpec["modelSelection"];
-  readonly end: "completed" | "interrupted";
+  readonly end: "completed" | "interrupted" | "failed";
 }
 
 interface Scenario {
@@ -124,6 +133,14 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
         end: "completed",
       },
     ],
+  },
+  {
+    // agy writes its own error into the chat and replies end_turn: the turn fails.
+    recording: "failed-turn-network-watch",
+    // The recorder cancelled after the reply to look for more; the session has nothing to cancel.
+    unplayedReplies: [0],
+    accessMode: "full-access",
+    inputs: [{ prompts: [0], actions: [], end: "failed" }],
   },
   {
     recording: "nonzero-exit",
@@ -199,11 +216,18 @@ const readRecordedClientReplies = (name: RecordingName): ReadonlyArray<JsonRpcMe
     .map(({ message }) => message);
 };
 
-/** Plays one scenario and returns what the session emitted and what it wrote to `agy`. */
-const play = (scenario: Scenario) =>
+/**
+ * Starts a session over a fake `agy` that plays `recording`, and returns it
+ * with what a test needs to drive it and read what it emitted.
+ */
+const openSession = (
+  recording: RecordingName,
+  accessMode: SessionSpec["accessMode"] = SPEC.accessMode,
+  fakeOptions: Omit<FakeAgyOptions, "recording"> = {},
+) =>
   Effect.gen(function* () {
     const home = createSignedInHome();
-    const fake = buildFakeAgy(home, { recording: scenario.recording });
+    const fake = buildFakeAgy(home, { ...fakeOptions, recording });
     const adapter = makeAntigravityAdapter(fake);
     const events: HarnessEvent[] = [];
     yield* Effect.forkScoped(
@@ -216,17 +240,23 @@ const play = (scenario: Scenario) =>
     yield* Effect.promise(settle);
     yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
     const context = buildStartContext(home, CWD);
-    yield* adapter.startSession(
-      SESSION,
-      { ...SPEC, accessMode: scenario.accessMode ?? SPEC.accessMode },
-      context,
-    );
-
-    const prompts = readRecordedPrompts(scenario.recording);
+    yield* adapter.startSession(SESSION, { ...SPEC, accessMode }, context);
     const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
       events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
     const until = (what: string, ready: () => boolean) =>
       Effect.promise(() => waitUntil(what, ready));
+    return { home, adapter, events, tags, until, received: () => fake.spawns[0]!.harness.received };
+  });
+
+/** Plays one scenario and returns what the session emitted and what it wrote to `agy`. */
+const play = (scenario: Scenario) =>
+  Effect.gen(function* () {
+    const { adapter, events, tags, until, received } = yield* openSession(
+      scenario.recording,
+      scenario.accessMode,
+    );
+
+    const prompts = readRecordedPrompts(scenario.recording);
     let opened = 0;
     let finished = 0;
     for (const input of scenario.inputs) {
@@ -250,7 +280,7 @@ const play = (scenario: Scenario) =>
       finished += 1;
       yield* until("completed the turn", () => tags("turn.completed").length === finished);
     }
-    return { events, tags, received: fake.spawns[0]!.harness.received };
+    return { events, tags, received: received() };
   });
 
 describe("recordings of agy through an Antigravity session", () => {
@@ -328,4 +358,171 @@ describe("recordings of agy through an Antigravity session", () => {
         ),
       ));
   }
+});
+
+describe("a provider error, as recorded", () => {
+  it("failed-turn-network-watch: the turn fails with agy's own words and shows no assistant message of them", () =>
+    Effect.runPromise(
+      play(SCENARIOS.find((scenario) => scenario.recording === "failed-turn-network-watch")!).pipe(
+        Effect.map(({ events, tags }) => {
+          expect(tags("runtime.error")).toMatchObject([
+            {
+              class: "provider_error",
+              message: expect.stringContaining("Service Unavailable") as unknown,
+            },
+          ]);
+          const shown = events
+            .filter((event) => event._tag === "content.delta")
+            .map((event) => event.delta)
+            .join("");
+          expect(shown).not.toContain("agent executor error");
+        }),
+        Effect.scoped,
+        Effect.provide(TestClock.layer()),
+      ),
+    ));
+});
+
+describe("steering, as recorded", () => {
+  it("steer-visible: the second prompt is accepted by the reply to the first, and its own reply ends the turn", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { adapter, events, tags, until, received } = yield* openSession(
+          "steer-visible",
+          "full-access",
+        );
+        const [first, second] = readRecordedPrompts("steer-visible");
+        yield* adapter.sendInput(SESSION, { text: first! });
+        yield* until("a call started", () => toolStarted(events));
+
+        const sending = yield* Effect.forkChild(adapter.sendInput(SESSION, { text: second! }));
+        // The reply to the first prompt comes 3 ms after the second is written. The wait for a refusal then runs out.
+        yield* until("the first reply was counted", () => tags("session.usage.updated").length > 0);
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust("500 millis");
+        const result = yield* Fiber.join(sending);
+        expect(result.delivery).toBe("steered");
+
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+        expectEventStreamToHoldTogether(events);
+        expect(
+          received()
+            .filter(isPrompt)
+            .map(
+              (message) => (message.params as { prompt: Array<{ text: string }> }).prompt[0]!.text,
+            ),
+        ).toEqual([first, second]);
+        expect(tags("turn.started"), "the steer joins the turn").toHaveLength(1);
+        expect(
+          tags("item.completed")
+            .filter((event) => event.kind === "user_message")
+            .map((event) => event.detail),
+        ).toMatchObject([{ text: first }, { text: second, steered: true }]);
+        expect(tags("turn.completed")[0]?.usage, "both replies count").toEqual(
+          sumUsage([readRecordedUsage("steer-visible", 0), readRecordedUsage("steer-visible", 1)]),
+        );
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+
+  it("steer-during-request: the session refuses the steer itself while the request is open, and the first prompt goes on", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        // The recorded second prompt and its refusal are left out, because the session never writes it: the fake would wait for it for ever.
+        const { adapter, events, tags, until, received } = yield* openSession(
+          "steer-during-request",
+          "approval-required",
+          {
+            editRecording: (recording) => {
+              const second = recording.findIndex(
+                ({ direction, message }) => direction === "out" && message.id === 5,
+              );
+              return recording.filter((_entry, index) => index !== second && index !== second + 1);
+            },
+          },
+        );
+        const [first, second] = readRecordedPrompts("steer-during-request");
+        yield* adapter.sendInput(SESSION, { text: first! });
+        yield* until("a request opened", () => tags("request.opened").length === 1);
+
+        const refused = yield* Effect.flip(adapter.sendInput(SESSION, { text: second! }));
+        expect(refused._tag).toBe("SteerRefused");
+        expect(refused.message).toContain("Answer the request first");
+        expect(received().filter(isPrompt)).toHaveLength(1);
+
+        yield* adapter.respondToApprovalRequest(
+          SESSION,
+          tags("request.opened")[0]!.request.requestId,
+          "allow",
+        );
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+        expectEventStreamToHoldTogether(events);
+        expect(tags("turn.completed")).toMatchObject([
+          { state: "completed", usage: readRecordedUsage("steer-during-request", 0) },
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+});
+
+describe("a subagent, as recorded", () => {
+  const isChild = (event: HarnessEvent) =>
+    "subagentId" in event && event.subagentId === "e4553827-0073-42e6-bc63-8e9619a7d435";
+
+  it("subagent-full: the files of agy show the subagent's work, linked to the call that started it, and its tokens join the usage", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { home, adapter, events, tags, until } = yield* openSession(
+          "subagent-full",
+          "full-access",
+        );
+        const [prompt] = readRecordedPrompts("subagent-full");
+        yield* adapter.sendInput(SESSION, { text: prompt! });
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+
+        // The files show up after the reply of the parent, as they did in the recording.
+        cpSync(
+          join(import.meta.dirname, "fixtures", "session-files", "subagent-full", "brain"),
+          join(home, APP_DATA_DIR, "brain"),
+          { recursive: true },
+        );
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust("500 millis");
+        yield* until("the subagent's turn completed", () => tags("turn.completed").some(isChild));
+
+        const launched = tags("item.completed").find((event) => event.kind === "subagent")!;
+        expect(tags("subagent.started")).toMatchObject([
+          {
+            subagentId: "e4553827-0073-42e6-bc63-8e9619a7d435",
+            itemId: launched.itemId,
+            description: "File Writer",
+            agentType: "self",
+          },
+        ]);
+        expect(tags("turn.completed").filter(isChild)).toMatchObject([{ state: "completed" }]);
+        expect(
+          tags("item.completed")
+            .filter(isChild)
+            .filter((event) => event.kind === "command_execution"),
+          "the subagent's command",
+        ).toMatchObject([
+          {
+            status: "completed",
+            detail: { command: expect.stringContaining("SUBMARK") as unknown },
+          },
+        ]);
+        expectEventStreamToHoldTogether(events.filter((event) => !isChild(event)));
+        expectEventStreamToHoldTogether(events.filter(isChild));
+
+        // The recorded reply counts the session's own agent, and the subagent's three model steps are added.
+        const snapshot = tags("session.usage.updated")
+          .filter((event) => !isChild(event))
+          .at(-1);
+        expect(snapshot).toMatchObject({
+          usage: sumUsage([
+            readRecordedUsage("subagent-full", 0),
+            { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169, cacheWriteTokens: 0 },
+          ]),
+        });
+        expect(snapshot).not.toHaveProperty("usageReport");
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
 });
