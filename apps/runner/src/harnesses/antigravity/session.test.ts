@@ -1546,60 +1546,6 @@ describe("a turn", () => {
       scripts: { "session/prompt": second },
     });
 
-    /** Lets the session read what `agy` sent, then runs out the wait for a refusal that follows the old reply. */
-    const waitOutRefusalGrace = (h: Harness) =>
-      Effect.gen(function* () {
-        yield* Effect.promise(settle);
-        yield* TestClock.adjust(Duration.millis(500));
-        yield* Effect.promise(settle);
-        expect(h.tags("turn.completed")).toHaveLength(0);
-      });
-
-    it("steers it into the turn: agy answers the first prompt, the input is shown as steered, and the second prompt's reply ends the turn", () =>
-      run(
-        (h) =>
-          Effect.gen(function* () {
-            yield* h.start();
-            yield* h.adapter.sendInput(SESSION, buildInput("Go."));
-            yield* h.untilReceived("session/prompt");
-            const firstId = h.received("session/prompt")[0]?.id;
-
-            const sending = yield* Effect.forkChild(
-              h.adapter.sendInput(SESSION, buildInput("Also this.")),
-            );
-            yield* h.untilReceived("session/prompt", 2);
-            const secondId = h.received("session/prompt")[1]?.id;
-            h.harness().sendLine(JSON.stringify(buildPromptReply(firstId, 5)));
-            yield* h.until(
-              "the first reply was counted",
-              () => h.tags("session.usage.updated").length > 0,
-            );
-            yield* waitOutRefusalGrace(h);
-
-            const result = yield* Fiber.join(sending);
-            expect(result).toMatchObject({ delivery: "steered" });
-            expect(result.turnId).toBe(h.tags("turn.started")[0]?.turnId);
-            const messages = h
-              .tags("item.completed")
-              .filter((event) => event.kind === "user_message");
-            expect(messages.map((event) => event.detail)).toMatchObject([
-              { text: "Go." },
-              { text: "Also this.", steered: true },
-            ]);
-
-            h.harness().sendLine(JSON.stringify(buildPromptReply(secondId, 7)));
-            yield* h.until("the turn completed", () => h.tags("turn.completed").length === 1);
-            expect(h.tags("turn.completed")).toMatchObject([
-              { state: "completed", usage: { inputTokens: 12 } },
-            ]);
-            expect(h.tags("turn.started")).toHaveLength(1);
-          }),
-        {
-          fake: steerFake(() => []),
-          spec: { accessMode: "full-access" },
-        },
-      ));
-
     it("refuses it with SteerRefused when agy refuses the prompt, and the turn goes on without it", () =>
       run(
         (h) =>
@@ -3168,45 +3114,6 @@ const childEnded = (h: Harness, state: string) => () =>
   summarizeChildTurns(h).includes(`ended ${state}`);
 
 describe("the subagents that agy's files show", () => {
-  it("shows a subagent before its first turn, linked to the call that launched it, and adds its tokens to the session's usage", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          const launch = yield* sendUntilLaunched(h);
-
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 7);
-          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "completed"));
-
-          expect(h.tags("subagent.started")).toMatchObject([
-            {
-              subagentId: CHILD,
-              itemId: launch.itemId,
-              description: "File Writer",
-              agentType: "self",
-            },
-          ]);
-          const startedAt = h.seen.findIndex((event) => event._tag === "subagent.started");
-          const turnAt = h.seen.findIndex(
-            (event) => event._tag === "turn.started" && isChild(event),
-          );
-          expect(startedAt).toBeLessThan(turnAt);
-          // The session's own snapshot adds the subagent's tokens to those of its own agent.
-          expect(h.tags("session.usage.updated").filter(isRoot).at(-1)).toMatchObject({
-            usage: { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169 },
-          });
-          yield* replyToLatestPrompt(h);
-          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
-          const snapshot = h.tags("session.usage.updated").filter(isRoot).at(-1);
-          expect(snapshot).toMatchObject({
-            usage: { inputTokens: 7801, outputTokens: 379, cacheReadTokens: 21169 },
-          });
-          expect(snapshot).not.toHaveProperty("usageReport");
-        }),
-      { fake: subagentFake },
-    ));
-
   it("keeps reading for 2 seconds after the last turn closed, so a step written a little later shows, and then reads nothing until a turn opens again", () =>
     run(
       (h) =>

@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect";
 import { TestClock } from "effect/testing";
 import { cleanupHomes, createScratchHome } from "../testing";
 import { APP_DATA_DIR } from "./harness-home";
-import { openAgyFiles, readRootConversationFact, readStepErrorText } from "./agy-files";
+import { openAgyFiles, readRootConversationFact } from "./agy-files";
 import type { AgyStep } from "./agy-files";
 import type { AgyFileObservation, AgyFiles } from "./agy-files";
 
@@ -218,25 +218,6 @@ describe("a recorded conversation with a subagent", () => {
   });
 });
 
-describe("readStepErrorText", () => {
-  const build = (fields: Partial<AgyStep>): AgyStep => ({
-    index: 0,
-    type: "ERROR_MESSAGE",
-    toolCalls: [],
-    ...fields,
-  });
-
-  it.each([
-    ["the error when both are set", { error: "boom", content: "text" }, "boom"],
-    ["the content when the error is empty", { error: "", content: "text" }, "text"],
-    ["the content when there is no error", { content: "text" }, "text"],
-    ["nothing when both are empty", { error: "", content: "" }, undefined],
-    ["nothing when both are missing", {}, undefined],
-  ])("returns %s", (_name, fields, expected) => {
-    expect(readStepErrorText(build(fields))).toBe(expected);
-  });
-});
-
 describe("readRootConversationFact", () => {
   const build = (fields: Partial<AgyStep>): AgyStep => ({
     index: 0,
@@ -251,6 +232,16 @@ describe("readRootConversationFact", () => {
       "a provider error with the error text for an ERROR_MESSAGE step",
       { type: "ERROR_MESSAGE", error: "503 no capacity" },
       { kind: "provider-error", words: "503 no capacity" },
+    ],
+    [
+      "a provider error with the content when the error is empty",
+      { type: "ERROR_MESSAGE", error: "", content: "503 in the content" },
+      { kind: "provider-error", words: "503 in the content" },
+    ],
+    [
+      "nothing for an ERROR_MESSAGE step with empty text",
+      { type: "ERROR_MESSAGE", error: "", content: "" },
+      undefined,
     ],
     ["nothing for an ERROR_MESSAGE step without text", { type: "ERROR_MESSAGE" }, undefined],
     ["nothing for any other step", { type: "GENERIC", content: "x" }, undefined],
