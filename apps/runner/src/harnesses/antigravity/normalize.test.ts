@@ -13,6 +13,8 @@ import { MAX_TODO_STEPS, type HarnessEvent } from "@hercule/protocol";
 import { describe, expect, it } from "vitest";
 import {
   addPromptUsage,
+  addSubagentUsage,
+  markSubagentUsageIncomplete,
   buildNormalizerState,
   buildProcessEndEvents,
   closeTurn,
@@ -26,7 +28,6 @@ import {
   normalizeUpdate,
   openTurn,
   releaseTurn,
-  setSubagentUsage,
   takeErrorNotice,
   type NormalizerState,
   type RequestItem,
@@ -1134,30 +1135,49 @@ describe("usage", () => {
     expect(again.map((event) => event._tag)).not.toContain("session.usage.updated");
   });
 
-  it("adds the subagents' tokens to the session's usage, and sends nothing when they did not change", () => {
+  it("adds the tokens of each subagent step to the session's usage", () => {
     const state = freshState();
     addPromptUsage(state, reply, "t1");
-    const subagents = {
-      inputTokens: 100,
-      outputTokens: 20,
-      cacheReadTokens: 30,
-      cacheWriteTokens: 0,
-    };
 
-    expect(setSubagentUsage(state, subagents, false)).toMatchObject([
+    expect(
+      addSubagentUsage(state, { inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 }),
+    ).toMatchObject([
       { usage: { inputTokens: 110, outputTokens: 25, cacheReadTokens: 37, cacheWriteTokens: 1 } },
     ]);
-    expect(setSubagentUsage(state, subagents, false)).toEqual([]);
+    expect(
+      addSubagentUsage(state, { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1 }),
+    ).toMatchObject([{ usage: { inputTokens: 111, outputTokens: 26, cacheReadTokens: 38 } }]);
   });
 
-  it("reports the incomplete form when the files of a subagent could not be read, with the counts so far", () => {
+  it("stops every count at the largest safe integer, so two forged counts never make a frame the protocol rejects", () => {
+    const state = freshState();
+    const forged = {
+      inputTokens: Number.MAX_SAFE_INTEGER,
+      outputTokens: Number.MAX_SAFE_INTEGER,
+      cacheReadTokens: Number.MAX_SAFE_INTEGER,
+    };
+    addPromptUsage(state, reply, "t1");
+    addSubagentUsage(state, forged);
+
+    const [event] = addSubagentUsage(state, forged);
+
+    expect(event).toMatchObject({
+      usage: {
+        inputTokens: Number.MAX_SAFE_INTEGER,
+        outputTokens: Number.MAX_SAFE_INTEGER,
+        cacheReadTokens: Number.MAX_SAFE_INTEGER,
+      },
+    });
+  });
+
+  it("reports the incomplete form, with the counts so far, once the tokens of a subagent were not counted, and only once", () => {
     const state = freshState();
     addPromptUsage(state, reply, "t1");
-    const none = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
-    expect(setSubagentUsage(state, none, true)).toMatchObject([
+    expect(markSubagentUsageIncomplete(state)).toMatchObject([
       { usageReport: { status: "incomplete", counts: { inputTokens: 10 } } },
     ]);
+    expect(markSubagentUsageIncomplete(state)).toEqual([]);
   });
 
   it("leaves usage out of a turn whose prompts reported none", () => {

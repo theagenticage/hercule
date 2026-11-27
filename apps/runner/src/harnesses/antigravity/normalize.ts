@@ -1149,41 +1149,37 @@ export const addPromptUsage = (
 };
 
 /**
- * Records the tokens the subagents used so far (`usage`) and whether their
- * files could not be read, and returns `session.usage.updated` with the new
- * sum. Returns nothing when neither changed, so a read of the files that finds
- * no new token sends nothing. The sum is the session's own prompts plus every
- * subagent's.
+ * Adds the tokens of one model step of a subagent to the session's usage, and
+ * returns `session.usage.updated` with the new snapshot: the session's own
+ * prompts plus every subagent's. No prompt reply counts a subagent's tokens, so
+ * this is the one place that adds them to the session.
  */
-export const setSubagentUsage = (
+export const addSubagentUsage = (
   state: NormalizerState,
-  usage: Usage,
-  isIncomplete: boolean,
+  tokens: Pick<Totals, "inputTokens" | "outputTokens" | "cacheReadTokens">,
 ): HarnessEvent[] => {
-  const known = state.subagentUsage;
-  if (
-    known.inputTokens === usage.inputTokens &&
-    known.outputTokens === usage.outputTokens &&
-    known.cacheReadTokens === (usage.cacheReadTokens ?? 0) &&
-    state.subagentUsageIsIncomplete === isIncomplete
-  ) {
-    return [];
-  }
-  known.inputTokens = usage.inputTokens;
-  known.outputTokens = usage.outputTokens;
-  known.cacheReadTokens = usage.cacheReadTokens ?? 0;
-  state.subagentUsageIsIncomplete = isIncomplete;
+  addTotals(state.subagentUsage, { ...tokens, cacheWriteTokens: 0 });
+  return [buildUsageUpdated(state)];
+};
+
+/**
+ * Marks the session's usage as incomplete because some tokens of the
+ * subagents were not counted: their files could not be read, or a subagent
+ * started a subagent that is not read. Returns `session.usage.updated` in the
+ * incomplete form, or nothing when it was already marked.
+ */
+export const markSubagentUsageIncomplete = (state: NormalizerState): HarnessEvent[] => {
+  if (state.subagentUsageIsIncomplete) return [];
+  state.subagentUsageIsIncomplete = true;
   return [buildUsageUpdated(state)];
 };
 
 /** Returns `session.usage.updated` with the process's sum, in the incomplete form once that applies. */
 const buildUsageUpdated = (state: NormalizerState): HarnessEvent => {
-  const counts = buildUsage({
-    inputTokens: state.processUsage.inputTokens + state.subagentUsage.inputTokens,
-    outputTokens: state.processUsage.outputTokens + state.subagentUsage.outputTokens,
-    cacheReadTokens: state.processUsage.cacheReadTokens + state.subagentUsage.cacheReadTokens,
-    cacheWriteTokens: state.processUsage.cacheWriteTokens + state.subagentUsage.cacheWriteTokens,
-  });
+  const sum = buildZeroTotals();
+  addTotals(sum, state.processUsage);
+  addTotals(sum, state.subagentUsage);
+  const counts = buildUsage(sum);
   return {
     _tag: "session.usage.updated",
     ...buildBase(state),
@@ -1193,11 +1189,18 @@ const buildUsageUpdated = (state: NormalizerState): HarnessEvent => {
   };
 };
 
-const addTotals = (total: Totals, parts: Totals): void => {
-  total.inputTokens += parts.inputTokens;
-  total.outputTokens += parts.outputTokens;
-  total.cacheReadTokens += parts.cacheReadTokens;
-  total.cacheWriteTokens += parts.cacheWriteTokens;
+/**
+ * Adds `parts` to `total`. A count stops at the largest safe integer, because
+ * the protocol rejects a larger one and the runner then drops every later usage
+ * frame of the process.
+ */
+export const addTotals = (total: Totals, parts: Totals): void => {
+  const add = (count: number, extra: number): number =>
+    Math.min(count + extra, Number.MAX_SAFE_INTEGER);
+  total.inputTokens = add(total.inputTokens, parts.inputTokens);
+  total.outputTokens = add(total.outputTokens, parts.outputTokens);
+  total.cacheReadTokens = add(total.cacheReadTokens, parts.cacheReadTokens);
+  total.cacheWriteTokens = add(total.cacheWriteTokens, parts.cacheWriteTokens);
 };
 
 // ---- Public: the end of the process ----

@@ -4,7 +4,8 @@
  * normalizer of the adapter, beside `normalize.ts`, which handles the
  * session's own agent from ACP. The two never share a turn or an item: an
  * event of a subagent never changes the session's own state (spec 06 section
- * 13.1).
+ * 13.1). The one exception is the session's usage snapshot, which includes the
+ * subagents' tokens (spec 06 section 6.6).
  *
  * The input is one step and one small mutable state per session; the output is
  * a list of events. This module does no I/O, but like `normalize.ts` it is not
@@ -21,9 +22,17 @@
  *   completes in the same step, except a tool item, which completes at the
  *   later step that holds the call's result.
  */
-import type { HarnessEvent, ItemStatus, SubagentId, Usage } from "@hercule/protocol";
+import type { HarnessEvent, ItemStatus, SubagentId } from "@hercule/protocol";
 import { buildEnvelope } from "../normalize";
-import { buildUsage, buildZeroTotals, type Totals } from "./normalize";
+import {
+  addSubagentUsage,
+  addTotals,
+  buildUsage,
+  buildZeroTotals,
+  markSubagentUsageIncomplete,
+  type NormalizerState,
+  type Totals,
+} from "./normalize";
 import { buildUserMessage } from "../events";
 import { truncateFact, truncateMessage } from "../text";
 import { readStepErrorText, type AgyStep, type AgySubagentLink } from "./agy-files";
@@ -85,8 +94,12 @@ interface Subagent {
  * Nothing outside this module reads its fields.
  */
 export interface SubagentsState {
-  readonly sessionId: string;
-  readonly nativeSessionId: string;
+  /**
+   * The session's own normalizer state. Its ids go on every event, and its
+   * usage snapshot is the one place that holds the sum of the subagents'
+   * tokens, so that a subagent's step can add to it.
+   */
+  readonly normalizer: NormalizerState;
   /** The subagents this process may get steps of, by conversation id. */
   readonly agents: Map<string, Subagent>;
   /** Whether the session was told once that a subagent started a subagent of its own. */
@@ -113,12 +126,10 @@ const buildSubagent = (input: {
  * again lands on its own record.
  */
 export const buildSubagentsState = (input: {
-  readonly sessionId: string;
-  readonly nativeSessionId: string;
+  readonly normalizer: NormalizerState;
   readonly known: ReadonlyArray<{ readonly subagentId: string }>;
 }): SubagentsState => ({
-  sessionId: input.sessionId,
-  nativeSessionId: input.nativeSessionId,
+  normalizer: input.normalizer,
   hasWarnedAboutGrandchild: false,
   agents: new Map(
     input.known.map((known) => [
@@ -135,7 +146,9 @@ export const buildSubagentsState = (input: {
 
 /** Returns the fields every event of `agent` has. */
 const buildBase = (state: SubagentsState, agent: Subagent) => ({
-  ...buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId }),
+  ...buildEnvelope(state.normalizer.sessionId, {
+    nativeSessionId: state.normalizer.nativeSessionId,
+  }),
   subagentId: agent.subagentId,
 });
 
@@ -151,7 +164,9 @@ const buildSubagentStarted = (
   const { role, typeName } = details.link ?? {};
   return {
     _tag: "subagent.started",
-    ...buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId }),
+    ...buildEnvelope(state.normalizer.sessionId, {
+      nativeSessionId: state.normalizer.nativeSessionId,
+    }),
     subagentId: agent.subagentId,
     ...(details.itemId === undefined ? {} : { itemId: truncateFact(details.itemId) }),
     ...(role === undefined || role === "" ? {} : { description: truncateMessage(role) }),
@@ -180,6 +195,19 @@ const buildTextItem = (
     },
     { _tag: "item.completed", ...buildBase(state, agent), ...itemFields, status: "completed" },
   ];
+};
+
+/**
+ * Marks `agent` (when it is known) and the session's usage as incomplete, the
+ * one place that decides what an incomplete count touches. Returns the session's
+ * `session.usage.updated` when it changed; the caller reports the agent's own.
+ */
+const markUsageIncomplete = (
+  state: SubagentsState,
+  agent: Subagent | undefined,
+): HarnessEvent[] => {
+  if (agent !== undefined) agent.hasIncompleteUsage = true;
+  return markSubagentUsageIncomplete(state.normalizer);
 };
 
 const buildUsageUpdated = (state: SubagentsState, agent: Subagent): HarnessEvent => ({
@@ -216,7 +244,7 @@ const openSubagentTurn = (state: SubagentsState, agent: Subagent, model: string 
   if (agent.inputForNextTurn !== undefined) {
     events.push(
       ...buildUserMessage({
-        sessionId: state.sessionId,
+        sessionId: state.normalizer.sessionId,
         subagentId: agent.subagentId,
         turnId: turn.id,
         text: truncateMessage(agent.inputForNextTurn),
@@ -323,7 +351,7 @@ const normalizeSystemMessage = (
   }
   return [
     ...buildUserMessage({
-      sessionId: state.sessionId,
+      sessionId: state.normalizer.sessionId,
       subagentId: agent.subagentId,
       turnId: agent.turn.id,
       text: truncateMessage(message.text),
@@ -368,26 +396,30 @@ const normalizeModelStep = (state: SubagentsState, agent: Subagent, step: AgySte
       detail,
     });
   }
-  if (step.usage !== undefined) {
-    for (const totals of [turn.usage, agent.processUsage]) {
-      totals.inputTokens += step.usage.inputTokens;
-      totals.outputTokens += step.usage.outputTokens;
-      totals.cacheReadTokens += step.usage.cacheReadTokens;
-    }
-    turn.hasUsage = true;
-  }
   // No recording shows a subagent that starts a subagent, so the reader does not follow one.
   // Its work and tokens are missing, and the session is told once.
   const startsSubagent = step.toolCalls.some((call) => call.name === LAUNCH_TOOL_NAME);
-  if (step.hasInvalidUsage === true || startsSubagent) agent.hasIncompleteUsage = true;
+  const sessionEvents: HarnessEvent[] = [];
+  if (step.usage !== undefined) {
+    const tokens = { ...step.usage, cacheWriteTokens: 0 };
+    addTotals(turn.usage, tokens);
+    addTotals(agent.processUsage, tokens);
+    turn.hasUsage = true;
+    sessionEvents.push(...addSubagentUsage(state.normalizer, step.usage));
+  }
+  if (step.hasInvalidUsage === true || startsSubagent) {
+    sessionEvents.push(...markUsageIncomplete(state, agent));
+  }
   if (step.usage !== undefined || step.hasInvalidUsage === true || startsSubagent) {
-    events.push(buildUsageUpdated(state, agent));
+    events.push(buildUsageUpdated(state, agent), ...sessionEvents);
   }
   if (startsSubagent && !state.hasWarnedAboutGrandchild) {
     state.hasWarnedAboutGrandchild = true;
     events.push({
       _tag: "runtime.warning",
-      ...buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId }),
+      ...buildEnvelope(state.normalizer.sessionId, {
+        nativeSessionId: state.normalizer.nativeSessionId,
+      }),
       message:
         "This subagent started a subagent of its own, which Hercule does not read, so its work is not shown and its tokens are not counted.",
     });
@@ -538,21 +570,24 @@ export const normalizeSubagentStep = (
  * Returns the events that end the subagent `conversationId` after its files
  * could not be read: its open turn ends `failed` with its tool items awaiting a result
  * failed, and its usage is reported in the incomplete form, because the steps
- * that were never read hold tokens. Returns nothing for a conversation that is
- * no known subagent, and for a subagent that was already ended this way.
+ * that were never read hold tokens. The session's usage is reported incomplete
+ * too, also for a conversation that is no known subagent (one that was never
+ * announced). Returns nothing more when the subagent was already ended this way.
  */
 export const endUnreadableSubagent = (
   state: SubagentsState,
   conversationId: string,
 ): HarnessEvent[] => {
   const agent = state.agents.get(conversationId);
-  if (agent === undefined) return [];
-  const events: HarnessEvent[] = [];
-  if (!agent.hasIncompleteUsage) {
-    agent.hasIncompleteUsage = true;
-    events.push(buildUsageUpdated(state, agent));
-  }
-  events.push(...closeSubagentTurn(state, agent, "failed"));
+  // The steps that were never read hold tokens, whether or not the subagent is known.
+  const wasIncomplete = agent?.hasIncompleteUsage ?? true;
+  const sessionEvents = markUsageIncomplete(state, agent);
+  if (agent === undefined) return sessionEvents;
+  const events: HarnessEvent[] = [
+    ...(wasIncomplete ? [] : [buildUsageUpdated(state, agent)]),
+    ...sessionEvents,
+    ...closeSubagentTurn(state, agent, "failed"),
+  ];
   return introduceBefore(state, agent, events);
 };
 
@@ -560,8 +595,10 @@ export const endUnreadableSubagent = (
  * Returns the events that end every known subagent after the session's own
  * files could not be read, as `endUnreadableSubagent` does for one.
  */
-export const endUnreadableSubagents = (state: SubagentsState): HarnessEvent[] =>
-  [...state.agents.keys()].flatMap((id) => endUnreadableSubagent(state, id));
+export const endUnreadableSubagents = (state: SubagentsState): HarnessEvent[] => [
+  ...markUsageIncomplete(state, undefined),
+  ...[...state.agents.keys()].flatMap((id) => endUnreadableSubagent(state, id)),
+];
 
 /**
  * Returns `turn.completed` with state `interrupted` for every subagent turn
@@ -580,20 +617,18 @@ export const hasOpenSubagentTurn = (state: SubagentsState): boolean =>
   [...state.agents.values()].some((agent) => agent.turn !== undefined);
 
 /**
- * Returns the token counts of every subagent since the process started, added
- * up, and whether the count of any subagent is incomplete (see
- * `Subagent.hasIncompleteUsage`).
+ * Returns the events for a session that has more subagents than the reader
+ * follows: a warning, and the session's usage reported incomplete, because the
+ * tokens of the subagents left out are not counted.
  */
-export const sumSubagentUsage = (
-  state: SubagentsState,
-): { readonly usage: Usage; readonly hasIncompleteCount: boolean } => {
-  const sum = buildZeroTotals();
-  let hasIncompleteCount = false;
-  for (const { processUsage, hasIncompleteUsage } of state.agents.values()) {
-    sum.inputTokens += processUsage.inputTokens;
-    sum.outputTokens += processUsage.outputTokens;
-    sum.cacheReadTokens += processUsage.cacheReadTokens;
-    if (hasIncompleteUsage) hasIncompleteCount = true;
-  }
-  return { usage: buildUsage(sum), hasIncompleteCount };
-};
+export const buildTooManySubagentsEvents = (state: SubagentsState): HarnessEvent[] => [
+  {
+    _tag: "runtime.warning",
+    ...buildEnvelope(state.normalizer.sessionId, {
+      nativeSessionId: state.normalizer.nativeSessionId,
+    }),
+    message:
+      "This session has more subagents than Hercule reads, so the work of the others is not shown and their tokens are not counted.",
+  },
+  ...markUsageIncomplete(state, undefined),
+];

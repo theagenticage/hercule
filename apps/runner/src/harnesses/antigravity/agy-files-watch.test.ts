@@ -121,7 +121,6 @@ const startWatching = (
     let isSessionWorkOpen = false;
     const watch = yield* watchAgyFiles({
       home,
-      conversationId: ROOT,
       resumes: options.resumes ?? false,
       known: options.known ?? [],
       normalizer: buildNormalizerState({
@@ -313,6 +312,41 @@ describe("what the watcher shows of a subagent", () => {
         ).toMatchObject({
           usage: { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169 },
         });
+      }),
+    ));
+
+  it("never publishes a count past the safe integer range for two forged steps, and reports the usage incomplete", () =>
+    run(
+      Effect.gen(function* () {
+        const w = yield* startWatching();
+        yield* openWork(w);
+        registerSubagent(w.home);
+        const forged = JSON.stringify({
+          step_index: 0,
+          type: "PLANNER_RESPONSE",
+          status: "DONE",
+          model: "gemini-4-neon-high",
+          content: "Forged.",
+          input_tokens: Number.MAX_SAFE_INTEGER,
+          cache_read_tokens: 0,
+          output_tokens: 1,
+        });
+        mkdirSync(dirname(transcriptOf(w.home, CHILD)), { recursive: true });
+        writeFileSync(
+          transcriptOf(w.home, CHILD),
+          `${forged}\n${forged.replace('"step_index":0', '"step_index":1')}\n`,
+        );
+        yield* readUntil("the end of the subagent's turn", childEnded(w, "completed"));
+
+        const counts = tags(w, "session.usage.updated").flatMap((event) => [
+          event.usage ?? event.usageReport?.counts,
+        ]);
+        expect(counts.length).toBeGreaterThan(0);
+        for (const usage of counts) {
+          expect(Number.isSafeInteger(usage?.inputTokens)).toBe(true);
+          expect(usage?.inputTokens).toBe(0);
+        }
+        expect(tags(w, "session.usage.updated").at(-1)).toHaveProperty("usageReport");
       }),
     ));
 

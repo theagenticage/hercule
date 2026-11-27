@@ -11,7 +11,8 @@ import type { HarnessEvent } from "@hercule/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import { cleanupHomes, createScratchHome } from "../testing";
-import { APP_DATA_DIR } from "./harness-home";
+import { APP_DATA_DIR, buildPlanFilePaths } from "./harness-home";
+import { buildNormalizerState } from "./normalize";
 import { openAgyFiles, type AgyStep } from "./agy-files";
 import {
   buildSubagentsState,
@@ -21,7 +22,6 @@ import {
   interruptSubagentTurns,
   introduceSubagent,
   normalizeSubagentStep,
-  sumSubagentUsage,
   type SubagentsState,
 } from "./subagents";
 
@@ -49,7 +49,7 @@ const playFixture = async (
     openAgyFiles({ home, conversationId: root, skipExisting: false }),
   );
   const { observations } = await Effect.runPromise(files.read);
-  const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: root, known: [] });
+  const state = buildSubagents(root);
   const events: HarnessEvent[] = [];
   for (const observation of observations) {
     if (observation.kind === "subagent") {
@@ -61,6 +61,20 @@ const playFixture = async (
   }
   return { state, events };
 };
+
+/** Returns the state of a session's subagents, over the normalizer of a session whose own conversation is `root`. */
+const buildSubagents = (
+  root: string,
+  known: ReadonlyArray<{ readonly subagentId: string }> = [],
+): SubagentsState =>
+  buildSubagentsState({
+    normalizer: buildNormalizerState({
+      sessionId: SESSION,
+      nativeSessionId: root,
+      planFilePaths: buildPlanFilePaths("/tmp/agy-home", root),
+    }),
+    known,
+  });
 
 /** Stands in for the session's lookup of a launch item when the test has none. */
 const findNothing = () => undefined;
@@ -83,6 +97,12 @@ const message = (sender: string, content: string): AgyStep =>
     content: `The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-26T21:05:31Z sender=${sender} priority=MESSAGE_PRIORITY_HIGH content=${content}\n</SYSTEM_MESSAGE>`,
   });
 
+/** Checks whether the event is the snapshot of the session's own usage, which a subagent's step also moves, and not an event of a subagent. */
+const isSessionSnapshot = (event: HarnessEvent): boolean =>
+  event._tag === "session.usage.updated" && event.subagentId === undefined;
+const sessionSnapshots = (events: ReadonlyArray<HarnessEvent>) =>
+  find(events, "session.usage.updated").filter(isSessionSnapshot);
+
 const tags = (events: ReadonlyArray<HarnessEvent>) => events.map((event) => event._tag);
 const find = <T extends HarnessEvent["_tag"]>(events: ReadonlyArray<HarnessEvent>, tag: T) =>
   events.filter((event): event is Extract<HarnessEvent, { _tag: T }> => event._tag === tag);
@@ -93,7 +113,7 @@ const userMessages = (events: ReadonlyArray<HarnessEvent>) =>
 
 /** A state with one subagent `A` of the session's own agent, introduced. */
 const buildStateWithChild = () => {
-  const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
+  const state = buildSubagents("root");
   introduceSubagent(
     state,
     {
@@ -125,19 +145,26 @@ describe("a recorded child that finishes", () => {
       "item.started", // user_message
       "item.completed",
       "item.started", // run_command
+      "session.usage.updated", // the subagent's, then the session's snapshot
       "session.usage.updated",
       "item.completed",
       "item.started", // send_message
+      "session.usage.updated",
       "session.usage.updated",
       "item.completed",
       "item.started", // reply
       "content.delta",
       "item.completed",
       "session.usage.updated",
+      "session.usage.updated",
       "turn.completed",
     ]);
+    // Every event but the session's own snapshots belongs to the subagent.
     expect(
-      events.slice(1).every((event) => "subagentId" in event && event.subagentId === FULL_CHILD),
+      events
+        .slice(1)
+        .filter((event) => !isSessionSnapshot(event))
+        .every((event) => "subagentId" in event && event.subagentId === FULL_CHILD),
     ).toBe(true);
     expect(find(events, "turn.started")[0]).toMatchObject({ model: "gemini-4-neon-high" });
     expect(userMessages(events)).toEqual([
@@ -167,7 +194,9 @@ describe("a recorded child that finishes", () => {
       usage: expected,
     });
     expect(find(events, "session.usage.updated").at(-1)).toMatchObject({ usage: expected });
-    expect(sumSubagentUsage(state)).toEqual({ usage: expected, hasIncompleteCount: false });
+    // The session's own snapshot, which has no prompt of its own here, holds the subagent's tokens and is complete.
+    expect(sessionSnapshots(events).at(-1)).toMatchObject({ usage: expected });
+    expect(sessionSnapshots(events).at(-1)).not.toHaveProperty("usageReport");
     expect(hasOpenSubagentTurn(state)).toBe(false);
   });
 });
@@ -306,7 +335,7 @@ describe("messages to a subagent", () => {
 
 describe("which subagent a step belongs to", () => {
   it("asks the session's lookup for the launching item of a child of the session's own agent", () => {
-    const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
+    const state = buildSubagents("root");
     const started = introduceSubagent(
       state,
       { conversationId: "A", launchToolCallId: "call_1" },
@@ -316,11 +345,7 @@ describe("which subagent a step belongs to", () => {
   });
 
   it("introduces a resumed subagent once, and shows no old brief", () => {
-    const state = buildSubagentsState({
-      sessionId: SESSION,
-      nativeSessionId: "root",
-      known: [{ subagentId: "A" }],
-    });
+    const state = buildSubagents("root", [{ subagentId: "A" }]);
     const link = {
       conversationId: "A",
       launchToolCallId: "call_0",
@@ -340,11 +365,7 @@ describe("which subagent a step belongs to", () => {
   });
 
   it("introduces a resumed subagent before its first event when it works unannounced", () => {
-    const state = buildSubagentsState({
-      sessionId: SESSION,
-      nativeSessionId: "root",
-      known: [{ subagentId: "A" }],
-    });
+    const state = buildSubagents("root", [{ subagentId: "A" }]);
     const events = normalizeSubagentStep(
       state,
       "A",
@@ -361,7 +382,6 @@ describe("which subagent a step belongs to", () => {
     });
     expect(normalizeSubagentStep(state, "unknown", stray)).toEqual([]);
     expect(hasOpenSubagentTurn(state)).toBe(false);
-    expect(sumSubagentUsage(state).usage).toMatchObject({ inputTokens: 0 });
   });
 });
 
@@ -381,7 +401,7 @@ describe("incomplete usage", () => {
       "A",
       step(3, "PLANNER_RESPONSE", { content: "done", hasInvalidUsage: true }),
     );
-    const updated = find(invalid, "session.usage.updated");
+    const updated = find(invalid, "session.usage.updated").filter((event) => event.subagentId);
     expect(updated).toHaveLength(1);
     expect(updated[0]).toMatchObject({
       usageReport: { status: "incomplete", counts: { inputTokens: 5, outputTokens: 1 } },
@@ -390,9 +410,9 @@ describe("incomplete usage", () => {
     const completed = find(invalid, "turn.completed")[0];
     expect(completed).toMatchObject({ state: "completed" });
     expect(completed).not.toHaveProperty("usage");
-    expect(sumSubagentUsage(state)).toMatchObject({
-      usage: { inputTokens: 5 },
-      hasIncompleteCount: true,
+    // The session's own snapshot is incomplete too, with the tokens counted so far.
+    expect(sessionSnapshots([...first, ...invalid]).at(-1)).toMatchObject({
+      usageReport: { status: "incomplete", counts: { inputTokens: 5 } },
     });
   });
 });
@@ -412,9 +432,9 @@ describe("a subagent that starts a subagent of its own", () => {
     expect(warnings[0]).not.toHaveProperty("subagentId");
     expect(warnings[0]?.message).toContain("started a subagent of its own");
     expect(find(first, "session.usage.updated")[0]).toHaveProperty("usageReport");
+    expect(sessionSnapshots(first).at(-1)).toHaveProperty("usageReport");
     const second = normalizeSubagentStep(state, "A", launch(2));
     expect(find(second, "runtime.warning")).toEqual([]);
-    expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
   });
 });
 
@@ -430,24 +450,42 @@ describe("an unreadable subagent", () => {
       }),
     );
     const events = endUnreadableSubagent(state, "A");
-    expect(tags(events)).toEqual(["session.usage.updated", "item.completed", "turn.completed"]);
+    expect(tags(events)).toEqual([
+      "session.usage.updated",
+      "session.usage.updated",
+      "item.completed",
+      "turn.completed",
+    ]);
     expect(events[0]).toMatchObject({
+      subagentId: "A",
       usageReport: { status: "incomplete", counts: { inputTokens: 5 } },
     });
-    expect(events[1]).toMatchObject({ status: "failed", kind: "command_execution" });
+    expect(sessionSnapshots(events)).toMatchObject([
+      { usageReport: { status: "incomplete", counts: { inputTokens: 5 } } },
+    ]);
+    expect(events[2]).toMatchObject({ status: "failed", kind: "command_execution" });
     const ended = find(events, "turn.completed")[0];
     expect(ended).toMatchObject({ state: "failed", subagentId: "A" });
     expect(ended).not.toHaveProperty("usage");
     expect(hasOpenSubagentTurn(state)).toBe(false);
-    expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
     expect(endUnreadableSubagent(state, "A")).toEqual([]);
-    expect(endUnreadableSubagent(state, "unknown")).toEqual([]);
+  });
+
+  it("reports the session's usage incomplete once for a conversation that is no known subagent, since its steps were never read", () => {
+    const state = buildStateWithChild();
+
+    const events = endUnreadableSubagent(state, "never-announced");
+
+    expect(tags(events)).toEqual(["session.usage.updated"]);
+    expect(events[0]).not.toHaveProperty("subagentId");
+    expect(events[0]).toHaveProperty("usageReport");
+    expect(endUnreadableSubagent(state, "another-never-announced")).toEqual([]);
   });
 });
 
 describe("every subagent when the session's own files are unreadable", () => {
   it("ends the open turn of each known subagent as failed and reports each one's usage incomplete", () => {
-    const state = buildSubagentsState({ sessionId: SESSION, nativeSessionId: "root", known: [] });
+    const state = buildSubagents("root");
     for (const id of ["A", "B"]) {
       introduceSubagent(state, { conversationId: id, launchToolCallId: id }, findNothing);
       normalizeSubagentStep(state, id, step(1, "PLANNER_RESPONSE", { toolCalls: [command()] }));
@@ -459,9 +497,11 @@ describe("every subagent when the session's own files are unreadable", () => {
       { subagentId: "A", state: "failed" },
       { subagentId: "B", state: "failed" },
     ]);
-    expect(find(events, "session.usage.updated")).toHaveLength(2);
+    expect(find(events, "session.usage.updated").filter((event) => event.subagentId)).toHaveLength(
+      2,
+    );
+    expect(sessionSnapshots(events)).toHaveLength(1);
     expect(hasOpenSubagentTurn(state)).toBe(false);
-    expect(sumSubagentUsage(state).hasIncompleteCount).toBe(true);
   });
 });
 

@@ -685,7 +685,6 @@ export const startAgySession = (
       // Started before any prompt, because a resume marks what the files hold now as already shown, and the files of this process's first turn must not count as old. It lives in the process's scope.
       const watch = yield* watchAgyFiles({
         home: ctx.home,
-        conversationId: conversation.id,
         resumes: spec.continue !== undefined,
         known: spec.continue?.subagents ?? [],
         normalizer: state,

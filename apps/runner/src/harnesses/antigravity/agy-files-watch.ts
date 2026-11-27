@@ -39,17 +39,17 @@ import { buildEnvelope } from "../normalize";
 import { truncateFact, truncateMessage } from "../text";
 import { openAgyFiles, readRootConversationFact } from "./agy-files";
 import type { AgyFileObservation, AgyFiles, RootConversationFact } from "./agy-files";
-import { findLaunchItem, setSubagentUsage } from "./normalize";
+import { findLaunchItem } from "./normalize";
 import type { NormalizerState } from "./normalize";
 import {
   buildSubagentsState,
+  buildTooManySubagentsEvents,
   endUnreadableSubagent,
   endUnreadableSubagents,
   hasOpenSubagentTurn,
   interruptSubagentTurns,
   introduceSubagent,
   normalizeSubagentStep,
-  sumSubagentUsage,
 } from "./subagents";
 
 /**
@@ -100,6 +100,8 @@ export interface AgyFilesWatch {
  * fiber lives in the scope that is provided, so closing that scope (the end of
  * the process) ends it.
  *
+ * The conversation is the one the `normalizer` belongs to.
+ *
  * - `resumes` is true for a resumed session: what the files hold now is then
  *   not shown again. The files are scanned when this effect runs, so the caller
  *   must run it before it sends its first prompt.
@@ -118,7 +120,6 @@ export interface AgyFilesWatch {
  */
 export const watchAgyFiles = (input: {
   readonly home: string;
-  readonly conversationId: string;
   readonly resumes: boolean;
   readonly known: ReadonlyArray<{ readonly subagentId: string }>;
   readonly normalizer: NormalizerState;
@@ -128,19 +129,14 @@ export const watchAgyFiles = (input: {
 }): Effect.Effect<AgyFilesWatch, never, Scope.Scope> =>
   Effect.gen(function* () {
     const { normalizer, publish } = input;
-    const subagents = buildSubagentsState({
-      sessionId: normalizer.sessionId,
-      nativeSessionId: input.conversationId,
-      known: input.known,
-    });
+    const conversationId = normalizer.nativeSessionId;
+    const subagents = buildSubagentsState({ normalizer, known: input.known });
     /** Undefined once the session's own files proved unreadable. */
     let reader: AgyFiles | undefined = yield* openAgyFiles({
       home: input.home,
-      conversationId: input.conversationId,
+      conversationId,
       skipExisting: input.resumes,
     });
-    /** Whether a subagent's files, or the session's own, could not be read. The session's usage is then incomplete. */
-    let filesWereUnreadable = false;
     /** Whether the reader showed a step of the session's own conversation. `agy` writes the first prompt there within seconds, so a Turn that replied with none shown means it wrote no transcript. */
     let hasSeenOwnStep = false;
     let hasSessionReplied = false;
@@ -152,7 +148,7 @@ export const watchAgyFiles = (input: {
     let wakeSignal: Deferred.Deferred<void> | undefined;
 
     const buildSessionEnvelope = () =>
-      buildEnvelope(normalizer.sessionId, { nativeSessionId: input.conversationId });
+      buildEnvelope(normalizer.sessionId, { nativeSessionId: conversationId });
 
     const escapeReportedText = (text: string): string =>
       truncateFact(escapeControlCharacters(text));
@@ -163,12 +159,11 @@ export const watchAgyFiles = (input: {
      * Returns the events for files that could not be read: a warning, and the
      * end of every subagent that can no longer be read. When the files are the
      * session's own, the reader closes for the rest of the process and every
-     * known subagent ends. Else only the subagent of those files ends. The
-     * session's usage is then incomplete.
+     * known subagent ends. Else only the subagent of those files ends. Either
+     * way the session's usage is then incomplete.
      */
-    const closeUnreadableFiles = (conversationId: string, reason: string): HarnessEvent[] => {
-      filesWereUnreadable = true;
-      if (conversationId === input.conversationId) {
+    const closeUnreadableFiles = (unreadableId: string, reason: string): HarnessEvent[] => {
+      if (unreadableId === conversationId) {
         reader = undefined;
         return [
           {
@@ -186,10 +181,10 @@ export const watchAgyFiles = (input: {
           _tag: "runtime.warning",
           ...buildSessionEnvelope(),
           message: truncateMessage(
-            `Hercule cannot read the session files of the Antigravity subagent ${conversationId} (${escapeReportedText(reason)}), so its work is not shown and its tokens are not counted.`,
+            `Hercule cannot read the session files of the Antigravity subagent ${unreadableId} (${escapeReportedText(reason)}), so its work is not shown and its tokens are not counted.`,
           ),
         },
-        ...endUnreadableSubagent(subagents, conversationId),
+        ...endUnreadableSubagent(subagents, unreadableId),
       ];
     };
 
@@ -201,7 +196,7 @@ export const watchAgyFiles = (input: {
     const routeObservation = (observation: AgyFileObservation): HarnessEvent[] => {
       switch (observation.kind) {
         case "step": {
-          if (observation.conversationId !== input.conversationId) {
+          if (observation.conversationId !== conversationId) {
             return normalizeSubagentStep(subagents, observation.conversationId, observation.step);
           }
           hasSeenOwnStep = true;
@@ -217,25 +212,11 @@ export const watchAgyFiles = (input: {
         case "unreadable":
           return closeUnreadableFiles(observation.conversationId, observation.reason);
         case "too-many-subagents":
-          filesWereUnreadable = true;
-          return [
-            {
-              _tag: "runtime.warning",
-              ...buildSessionEnvelope(),
-              message:
-                "This session has more subagents than Hercule reads, so the work of the others is not shown and their tokens are not counted.",
-            },
-          ];
+          return buildTooManySubagentsEvents(subagents);
       }
     };
 
-    /** Publishes the session's usage when what the subagents used, or whether that count is complete, changed. */
-    const publishSubagentUsage = (): void => {
-      const { usage, hasIncompleteCount } = sumSubagentUsage(subagents);
-      publish(setSubagentUsage(normalizer, usage, filesWereUnreadable || hasIncompleteCount));
-    };
-
-    /** Reads what is new in the files once and publishes what follows, then the session's usage when it changed. Only one read runs at a time. */
+    /** Reads what is new in the files once and publishes what follows. Only one read runs at a time. */
     const readOnce: Effect.Effect<void> = readLock.withPermits(1)(
       Effect.suspend(() => {
         const current = reader;
@@ -243,7 +224,6 @@ export const watchAgyFiles = (input: {
         return Effect.map(current.read, (result) => {
           isAwaitingLink = result.isAwaitingLink;
           for (const observation of result.observations) publish(routeObservation(observation));
-          publishSubagentUsage();
         });
       }),
     );
@@ -256,9 +236,8 @@ export const watchAgyFiles = (input: {
     const endWithoutTranscript = Effect.sync(() => {
       if (reader === undefined || !hasSessionReplied || hasSeenOwnStep) return;
       publish(
-        closeUnreadableFiles(input.conversationId, "agy wrote no transcript for this conversation"),
+        closeUnreadableFiles(conversationId, "agy wrote no transcript for this conversation"),
       );
-      publishSubagentUsage();
     });
 
     /**
