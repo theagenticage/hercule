@@ -21,13 +21,14 @@ import {
   discoverAuthorization,
   parseBearerChallenge,
   registerClient,
-  type AuthorizationServer,
+  type DiscoveredAuthorization,
 } from "./authorization";
 
 const SERVER = "https://mcp.example.com/mcp";
 const ISSUER = "https://auth.example.com";
 const PRM_URL = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp";
 const AS_URL = `${ISSUER}/.well-known/oauth-authorization-server`;
+const REDIRECT_URI = "http://127.0.0.1:50123/callback";
 
 /** A protected resource metadata document for `SERVER` that names `ISSUER`. */
 const PRM = { resource: SERVER, authorization_servers: [ISSUER] };
@@ -44,24 +45,51 @@ const AS = {
 };
 
 /**
- * What the stub web answers, by `"<METHOD> <address>"`: a `Response`, or a
- * value that is answered as a JSON body with status 200. Any other request
- * gets 404.
+ * What the stub web answers, by `"<METHOD> <address>"`: a `Response`, a
+ * JSON value, or a function receiving each POST JSON body and returning one.
+ * Any other request gets 404.
  */
-type Answers = Record<string, unknown>;
+type StubAnswer =
+  | ((body: Record<string, unknown> | undefined) => unknown)
+  | Response
+  | Record<string, unknown>
+  | string
+  | number
+  | undefined;
 
-/** Builds a stub HTTP client over `answers`, and the list of `"<METHOD> <address>"` it received. */
+type Answers = Record<string, StubAnswer>;
+
+type RegistrationAnswerInput = StubAnswer;
+
+/** Builds a stub HTTP client over `answers`, and the list of `"<METHOD> <address>"` and JSON POST bodies it received. */
 const stubWeb = (answers: Answers) => {
   const requests: Array<string> = [];
+  const postedBodies: Array<Record<string, unknown>> = [];
   const client = HttpClient.make((request) => {
     // The client keeps the query apart from the address.
     const query = UrlParams.toString(request.urlParams);
     const key = `${request.method} ${request.url}${query === "" ? "" : `?${query}`}`;
     requests.push(key);
-    const answer = answers[key];
+    let parsedBody: Record<string, unknown> | undefined;
+    if (request.method === "POST") {
+      if (request.body._tag !== "Uint8Array") {
+        throw new Error(`expected Uint8Array POST body, got ${request.body._tag}`);
+      }
+      parsedBody = JSON.parse(new TextDecoder().decode(request.body.body)) as Record<
+        string,
+        unknown
+      >;
+      postedBodies.push(parsedBody);
+    }
+    const rawAnswer = answers[key];
+    const answer = typeof rawAnswer === "function" ? rawAnswer(parsedBody) : rawAnswer;
     const response =
       answer instanceof Response
-        ? answer
+        ? new Response(answer.clone().body, {
+            status: answer.status,
+            statusText: answer.statusText,
+            headers: answer.headers,
+          })
         : answer === undefined
           ? new Response("not found", { status: 404 })
           : Response.json(answer);
@@ -69,6 +97,7 @@ const stubWeb = (answers: Answers) => {
   });
   return {
     requests,
+    postedBodies,
     /** The metadata requests only, which are the GETs. */
     get metadataRequests() {
       return requests.filter((key) => key.startsWith("GET ")).map((key) => key.slice(4));
@@ -95,7 +124,11 @@ const failureMessage = (outcome: { readonly _tag: string }): string => {
 };
 
 /** Discovers against a web that serves `prm` and `as`, and returns the failure's tag, which the test expects. */
-const discoveryFailure = async (prm: unknown, as: unknown, server = SERVER): Promise<string> => {
+const discoveryFailure = async (
+  prm: StubAnswer,
+  as: StubAnswer,
+  server = SERVER,
+): Promise<string> => {
   const { outcome } = await discover({ [`GET ${PRM_URL}`]: prm, [`GET ${AS_URL}`]: as }, server);
   if (outcome._tag !== "Failure") throw new Error("discovery did not fail");
   return (outcome.failure as { _tag: string })._tag;
@@ -186,6 +219,7 @@ describe("discoverAuthorization", () => {
         resource: SERVER,
         scope: "read write",
         sendsIssuer: true,
+        grantTypesSupported: undefined,
         tokenEndpointAuthMethods: ["none", "client_secret_post"],
       },
     });
@@ -416,8 +450,48 @@ describe("discoverAuthorization", () => {
   it.each([
     ["no PKCE methods", leaveOut(AS, "code_challenge_methods_supported")],
     ["only the plain PKCE method", { ...AS, code_challenge_methods_supported: ["plain"] }],
+    ["no code response type", { ...AS, response_types_supported: ["token"] }],
+    ["no authorization_code grant type", { ...AS, grant_types_supported: ["client_credentials"] }],
+    ["explicitly empty client auth methods", { ...AS, token_endpoint_auth_methods_supported: [] }],
+    [
+      "only unsupported client auth methods",
+      { ...AS, token_endpoint_auth_methods_supported: ["private_key_jwt"] },
+    ],
   ])("is unsupported when the authorization server has %s", async (_name, as) => {
     expect(await discoveryFailure(PRM, as)).toBe("AuthorizationUnsupported");
+  });
+
+  it("preserves omitted vs explicit grant_types_supported and token_endpoint_auth_methods_supported", async () => {
+    const omitted = await discover({
+      [`GET ${PRM_URL}`]: PRM,
+      [`GET ${AS_URL}`]: leaveOut(
+        leaveOut(AS, "grant_types_supported"),
+        "token_endpoint_auth_methods_supported",
+      ),
+    });
+    const listed = await discover({
+      [`GET ${PRM_URL}`]: PRM,
+      [`GET ${AS_URL}`]: {
+        ...AS,
+        grant_types_supported: ["authorization_code", 1],
+        token_endpoint_auth_methods_supported: ["client_secret_basic", 4],
+      },
+    });
+
+    expect(omitted.outcome).toMatchObject({
+      _tag: "Success",
+      success: {
+        grantTypesSupported: undefined,
+        tokenEndpointAuthMethods: undefined,
+      },
+    });
+    expect(listed.outcome).toMatchObject({
+      _tag: "Success",
+      success: {
+        grantTypesSupported: ["authorization_code"],
+        tokenEndpointAuthMethods: ["client_secret_basic"],
+      },
+    });
   });
 
   it("refuses a metadata answer that is a 200 but not JSON, and one over the size limit", async () => {
@@ -456,7 +530,7 @@ describe("discoverAuthorization", () => {
         registration_endpoint: `${HTTP_ISSUER}/register`,
         [key]: value,
       }) as Record<string, unknown>;
-    const answers = (as: unknown, issuer = HTTP_ISSUER) => ({
+    const answers = (as: StubAnswer, issuer = HTTP_ISSUER): Answers => ({
       "GET http://127.0.0.1:9/.well-known/oauth-protected-resource/mcp": {
         resource: HTTP_SERVER,
         authorization_servers: [issuer],
@@ -511,16 +585,189 @@ describe("discoverAuthorization", () => {
 });
 
 describe("registerClient", () => {
-  const AUTHORIZATION: AuthorizationServer = {
+  const AUTHORIZATION: DiscoveredAuthorization = {
     issuer: ISSUER,
     authorizationEndpoint: `${ISSUER}/authorize`,
     tokenEndpoint: `${ISSUER}/token`,
     registrationEndpoint: `${ISSUER}/register`,
     sendsIssuer: false,
-    tokenEndpointAuthMethods: [],
+    grantTypesSupported: ["authorization_code", "refresh_token"],
+    tokenEndpointAuthMethods: ["none", "client_secret_post"],
+    resource: SERVER,
+    scope: undefined,
   };
-  const register = (answer: unknown, authorization = AUTHORIZATION) =>
-    stubWeb({ [`POST ${ISSUER}/register`]: answer }).run(registerClient(authorization));
+  const registerWithWeb = async (
+    answer: RegistrationAnswerInput,
+    authorization = AUTHORIZATION,
+    redirectUri = REDIRECT_URI,
+  ) => {
+    const web = stubWeb({ [`POST ${ISSUER}/register`]: answer });
+    const outcome = await web.run(registerClient(authorization, redirectUri));
+    return { outcome, web };
+  };
+  const register = (
+    answer: RegistrationAnswerInput,
+    authorization = AUTHORIZATION,
+    redirectUri = REDIRECT_URI,
+  ) => registerWithWeb(answer, authorization, redirectUri).then(({ outcome }) => outcome);
+
+  it("sends the attempt's exact redirectUri and native application_type, omitting discovered scope", async () => {
+    const { outcome, web } = await registerWithWeb(
+      { client_id: "c1" },
+      { ...AUTHORIZATION, scope: "read write" },
+      REDIRECT_URI,
+    );
+    expect(outcome).toMatchObject({ _tag: "Success" });
+    expect(web.postedBodies).toEqual([
+      {
+        client_name: "Hercule",
+        redirect_uris: [REDIRECT_URI],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+        application_type: "native",
+      },
+    ]);
+  });
+
+  it("tries public PKCE first even when none is omitted from metadata (Keycloak/Auth0)", async () => {
+    const { outcome, web } = await registerWithWeb(
+      { client_id: "c1", token_endpoint_auth_method: "none" },
+      {
+        ...AUTHORIZATION,
+        tokenEndpointAuthMethods: ["client_secret_basic", "client_secret_post"],
+      },
+    );
+
+    expect(outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c1", authMethod: "none" },
+    });
+    expect(web.postedBodies).toHaveLength(1);
+    expect(web.postedBodies[0]).toMatchObject({ token_endpoint_auth_method: "none" });
+  });
+
+  it("falls back on HTTP 400 invalid_client_metadata to confidential auth and authorization_code-only grants", async () => {
+    const basicOnly = await registerWithWeb(
+      (body) =>
+        body?.token_endpoint_auth_method === "client_secret_basic"
+          ? {
+              client_id: "c1",
+              client_secret: "s",
+              token_endpoint_auth_method: "client_secret_basic",
+            }
+          : new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 }),
+      { ...AUTHORIZATION, tokenEndpointAuthMethods: ["client_secret_basic"] },
+    );
+    expect(basicOnly.outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c1", clientSecret: "s", authMethod: "client_secret_basic" },
+    });
+    expect(
+      basicOnly.web.postedBodies.map((body) => ({
+        authMethod: body.token_endpoint_auth_method,
+        grantTypes: body.grant_types,
+      })),
+    ).toEqual([
+      { authMethod: "none", grantTypes: ["authorization_code", "refresh_token"] },
+      { authMethod: "client_secret_basic", grantTypes: ["authorization_code", "refresh_token"] },
+    ]);
+
+    const prefersPost = await registerWithWeb(
+      (body) =>
+        body?.token_endpoint_auth_method === "none"
+          ? new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 })
+          : {
+              client_id: "c2",
+              client_secret: "s",
+              token_endpoint_auth_method: body?.token_endpoint_auth_method,
+            },
+      {
+        ...AUTHORIZATION,
+        tokenEndpointAuthMethods: ["client_secret_basic", "client_secret_post"],
+      },
+    );
+    expect(prefersPost.outcome).toMatchObject({
+      _tag: "Success",
+      success: { authMethod: "client_secret_post" },
+    });
+
+    const authCodeOnly = await registerWithWeb(
+      (body) =>
+        Array.isArray(body?.grant_types) && body.grant_types.includes("refresh_token")
+          ? new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 })
+          : { client_id: "c3" },
+      { ...AUTHORIZATION, grantTypesSupported: ["authorization_code"] },
+    );
+    expect(authCodeOnly.outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c3", authMethod: "none" },
+    });
+    expect(authCodeOnly.web.postedBodies.map((body) => body.grant_types)).toEqual([
+      ["authorization_code", "refresh_token"],
+      ["authorization_code"],
+    ]);
+
+    const omittedMetadataDefaults = await registerWithWeb(
+      (body) =>
+        body?.token_endpoint_auth_method === "client_secret_basic" &&
+        Array.isArray(body?.grant_types) &&
+        body.grant_types.length === 1
+          ? { client_id: "c4", client_secret: "s" }
+          : new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 }),
+      {
+        ...AUTHORIZATION,
+        grantTypesSupported: undefined,
+        tokenEndpointAuthMethods: undefined,
+      },
+    );
+    expect(omittedMetadataDefaults.outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c4", clientSecret: "s", authMethod: "client_secret_basic" },
+    });
+    expect(
+      omittedMetadataDefaults.web.postedBodies.map((body) => ({
+        authMethod: body.token_endpoint_auth_method,
+        grantTypes: body.grant_types,
+      })),
+    ).toEqual([
+      { authMethod: "none", grantTypes: ["authorization_code", "refresh_token"] },
+      { authMethod: "client_secret_basic", grantTypes: ["authorization_code", "refresh_token"] },
+      { authMethod: "none", grantTypes: ["authorization_code"] },
+      { authMethod: "client_secret_basic", grantTypes: ["authorization_code"] },
+    ]);
+  });
+
+  it.each([
+    [
+      "400 invalid_redirect_uri",
+      new Response(JSON.stringify({ error: "invalid_redirect_uri" }), { status: 400 }),
+    ],
+    ["401 Unauthorized", new Response("denied", { status: 401 })],
+    ["403 Forbidden", new Response("denied", { status: 403 })],
+  ])("does not retry client registration on %s", async (_name, response) => {
+    const { outcome, web } = await registerWithWeb(response, {
+      ...AUTHORIZATION,
+      grantTypesSupported: ["authorization_code"],
+      tokenEndpointAuthMethods: ["client_secret_basic"],
+    });
+
+    expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnsupported" } });
+    expect(web.postedBodies).toHaveLength(1);
+  });
+
+  it.each([["private_key_jwt"], []] as const)(
+    "is unsupported before registering when tokenEndpointAuthMethods is %j",
+    async (...methods) => {
+      const { outcome, web } = await registerWithWeb(
+        { client_id: "c1" },
+        { ...AUTHORIZATION, tokenEndpointAuthMethods: methods },
+      );
+
+      expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnsupported" } });
+      expect(web.requests).toEqual([]);
+    },
+  );
 
   it("returns a public client when no secret and no method come back", async () => {
     expect(await register({ client_id: "c1" })).toMatchObject({
@@ -538,63 +785,42 @@ describe("registerClient", () => {
     expect((outcome as { success: object }).success).not.toHaveProperty("clientSecret");
   });
 
-  it.each(["client_secret_post", "client_secret_basic"] as const)(
-    "keeps the secret and the method %s",
-    async (method) => {
-      expect(
-        await register({ client_id: "c1", client_secret: "s", token_endpoint_auth_method: method }),
-      ).toMatchObject({ success: { clientSecret: "s", authMethod: method } });
-    },
-  );
-
-  it("picks client_secret_post for a secret with no method when the token endpoint lists it, else basic", async () => {
-    const answer = { client_id: "c1", client_secret: "s" };
+  it("keeps the secret and a supported auth method, including fallback when method is omitted", async () => {
     expect(
-      await register(answer, {
-        ...AUTHORIZATION,
-        tokenEndpointAuthMethods: ["client_secret_post"],
-      }),
-    ).toMatchObject({ success: { authMethod: "client_secret_post" } });
-    expect(
-      await register(answer, { ...AUTHORIZATION, tokenEndpointAuthMethods: ["private_key_jwt"] }),
-    ).toMatchObject({ success: { authMethod: "client_secret_basic" } });
-  });
+      await register(
+        { client_id: "c1", client_secret: "s", token_endpoint_auth_method: "client_secret_post" },
+        { ...AUTHORIZATION, tokenEndpointAuthMethods: ["none", "client_secret_post"] },
+      ),
+    ).toMatchObject({ success: { clientSecret: "s", authMethod: "client_secret_post" } });
 
-  it("keeps when the secret expires, in milliseconds, and treats 0 as never", async () => {
-    const answer = {
-      client_id: "c1",
-      client_secret: "s",
-      token_endpoint_auth_method: "client_secret_post",
-    };
-    expect(await register({ ...answer, client_secret_expires_at: 1_900_000_000 })).toMatchObject({
-      success: { secretExpiresAtMillis: 1_900_000_000_000 },
+    const fallbackBasic = await registerWithWeb(
+      (body) =>
+        body?.token_endpoint_auth_method === "client_secret_basic"
+          ? { client_id: "c2", client_secret: "s" }
+          : new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 }),
+      { ...AUTHORIZATION, tokenEndpointAuthMethods: ["client_secret_basic"] },
+    );
+    expect(fallbackBasic.outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c2", clientSecret: "s", authMethod: "client_secret_basic" },
     });
+
     expect(
-      ((await register({ ...answer, client_secret_expires_at: 0 })) as { success: object }).success,
-    ).not.toHaveProperty("secretExpiresAtMillis");
+      await register(
+        { client_id: "c3", client_secret: "s" },
+        { ...AUTHORIZATION, tokenEndpointAuthMethods: undefined },
+      ),
+    ).toMatchObject({ success: { clientSecret: "s", authMethod: "client_secret_basic" } });
   });
 
-  it("reads a secret expiry more than ten years away, or too large to convert, as no expiry", async () => {
-    const answer = {
-      client_id: "c1",
-      client_secret: "s",
-      token_endpoint_auth_method: "client_secret_post",
-    };
-    for (const farAway of [4_000_000_000, 1e306]) {
-      const outcome = (await register({ ...answer, client_secret_expires_at: farAway })) as {
-        success: object;
-      };
-      expect(outcome.success).not.toHaveProperty("secretExpiresAtMillis");
-    }
-  });
-
-  it("accepts redirect addresses that include the registered one", async () => {
-    expect(
-      await register({
-        client_id: "c1",
-        redirect_uris: ["http://x.example/cb", "http://127.0.0.1/callback"],
-      }),
-    ).toMatchObject({ _tag: "Success" });
+  it.each([
+    ["exact match", [REDIRECT_URI]],
+    ["RFC 8252 portless loopback normalization", ["http://127.0.0.1/callback"]],
+    ["exact match alongside other URIs", ["http://x.example/cb", REDIRECT_URI]],
+  ])("accepts echoed redirect_uris with %s", async (_name, redirectUris) => {
+    expect(await register({ client_id: "c1", redirect_uris: redirectUris })).toMatchObject({
+      _tag: "Success",
+    });
   });
 
   it.each([
@@ -605,8 +831,33 @@ describe("registerClient", () => {
       { client_id: "c1", redirect_uris: ["http://other.example/cb"] },
     ],
     [
+      "a loopback redirect address with a different port",
+      { client_id: "c1", redirect_uris: ["http://127.0.0.1:9999/callback"] },
+    ],
+    [
+      "a loopback redirect address with a different path",
+      { client_id: "c1", redirect_uris: ["http://127.0.0.1/other"] },
+    ],
+    [
+      "a loopback redirect address with explicit port 80",
+      { client_id: "c1", redirect_uris: ["http://127.0.0.1:80/callback"] },
+    ],
+    [
+      "a loopback redirect address with user info and dot segments",
+      { client_id: "c1", redirect_uris: ["http://user@127.0.0.1/extra/../callback"] },
+    ],
+    [
+      "grant_types missing authorization_code",
+      { client_id: "c1", grant_types: ["client_credentials"] },
+    ],
+    ["response_types missing code", { client_id: "c1", response_types: [] }],
+    [
       "a method Hercule does not speak",
       { client_id: "c1", client_secret: "s", token_endpoint_auth_method: "private_key_jwt" },
+    ],
+    [
+      "a method excluded by discovery",
+      { client_id: "c1", client_secret: "s", token_endpoint_auth_method: "client_secret_basic" },
     ],
     [
       "a method that needs a secret, and no secret",
@@ -619,9 +870,89 @@ describe("registerClient", () => {
     });
   });
 
+  it("retries independent auth-method and code-only fallbacks when metadata lists both none and confidential methods with refresh_token", async () => {
+    const basicFallback = await registerWithWeb(
+      (body) =>
+        body?.token_endpoint_auth_method === "client_secret_basic"
+          ? {
+              client_id: "c1",
+              client_secret: "s",
+              token_endpoint_auth_method: "client_secret_basic",
+            }
+          : new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 }),
+      {
+        ...AUTHORIZATION,
+        grantTypesSupported: ["authorization_code", "refresh_token"],
+        tokenEndpointAuthMethods: ["none", "client_secret_basic"],
+      },
+    );
+    expect(basicFallback.outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c1", clientSecret: "s", authMethod: "client_secret_basic" },
+    });
+    expect(
+      basicFallback.web.postedBodies.map((body) => ({
+        authMethod: body.token_endpoint_auth_method,
+        grantTypes: body.grant_types,
+      })),
+    ).toEqual([
+      { authMethod: "none", grantTypes: ["authorization_code", "refresh_token"] },
+      { authMethod: "client_secret_basic", grantTypes: ["authorization_code", "refresh_token"] },
+    ]);
+
+    const codeOnlyFallback = await registerWithWeb(
+      (body) =>
+        Array.isArray(body?.grant_types) && body.grant_types.length === 1
+          ? { client_id: "c2", token_endpoint_auth_method: "none" }
+          : new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 }),
+      {
+        ...AUTHORIZATION,
+        grantTypesSupported: ["authorization_code", "refresh_token"],
+        tokenEndpointAuthMethods: ["none", "client_secret_basic"],
+      },
+    );
+    expect(codeOnlyFallback.outcome).toMatchObject({
+      _tag: "Success",
+      success: { clientId: "c2", authMethod: "none" },
+    });
+    expect(
+      codeOnlyFallback.web.postedBodies.map((body) => ({
+        authMethod: body.token_endpoint_auth_method,
+        grantTypes: body.grant_types,
+      })),
+    ).toEqual([
+      { authMethod: "none", grantTypes: ["authorization_code", "refresh_token"] },
+      { authMethod: "client_secret_basic", grantTypes: ["authorization_code", "refresh_token"] },
+      { authMethod: "none", grantTypes: ["authorization_code"] },
+    ]);
+  });
+
+  it("refuses an inferred auth method excluded by discovery when the response gives a secret without naming a method", async () => {
+    const outcome = await register(
+      { client_id: "c1", client_secret: "s" },
+      { ...AUTHORIZATION, tokenEndpointAuthMethods: ["none"] },
+    );
+
+    expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
+  });
+
+  it("refuses a registration response that omits both auth method and secret after requesting confidential auth", async () => {
+    const { outcome } = await registerWithWeb(
+      (body) =>
+        body?.token_endpoint_auth_method === "client_secret_basic"
+          ? { client_id: "c1" }
+          : new Response(JSON.stringify({ error: "invalid_client_metadata" }), { status: 400 }),
+      { ...AUTHORIZATION, tokenEndpointAuthMethods: ["client_secret_basic"] },
+    );
+
+    expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
+  });
+
   it("is unsupported when the authorization server has no registration endpoint or refuses Hercule, and unreadable for a server error", async () => {
     expect(
-      await stubWeb({}).run(registerClient({ ...AUTHORIZATION, registrationEndpoint: undefined })),
+      await stubWeb({}).run(
+        registerClient({ ...AUTHORIZATION, registrationEndpoint: undefined }, REDIRECT_URI),
+      ),
     ).toMatchObject({ failure: { _tag: "AuthorizationUnsupported" } });
     expect(await register(new Response("no", { status: 400 }))).toMatchObject({
       failure: { _tag: "AuthorizationUnsupported" },

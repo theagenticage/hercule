@@ -26,7 +26,6 @@
  * not be reached or answered what OAuth does not allow, so the user tries
  * again later.
  */
-import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -44,19 +43,15 @@ const MAX_METADATA_BYTES = 1024 * 1024;
 /** How long one request has to be answered, body included. */
 const REQUEST_TIMEOUT_SECONDS = 30;
 
-/** The furthest expiry of a client secret that is kept: ten years. A later one is read as no expiry. */
-const MAX_SECRET_LIFETIME_MILLIS = 10 * 365 * 24 * 60 * 60 * 1000;
-
 /** The MCP revision the unauthenticated probe says it speaks. */
 const PROBE_PROTOCOL_VERSION = "2025-11-25";
 
-/**
- * The redirect address Hercule registers: the loopback address with no port.
- * RFC 8252 section 7.3 says an authorization server accepts any port on a
- * loopback redirect, so one registration covers every port a sign-in listens
- * on. Notion and Linear were proven to do so.
- */
-const REGISTERED_REDIRECT_URI = "http://127.0.0.1/callback";
+/** The client authentication methods Hercule supports, in order of preference. */
+const SUPPORTED_CLIENT_AUTH_METHODS: ReadonlyArray<ClientAuthMethod> = [
+  "none",
+  "client_secret_post",
+  "client_secret_basic",
+];
 
 /** What the longest scope Hercule sends may be. A longer one is not a scope. */
 const MAX_SCOPE_LENGTH = 1024;
@@ -67,8 +62,9 @@ const SCOPE_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]+( [\x21\x23-\x5B\x5D-\x7E]+)*$/
 /**
  * The server offers no sign-in through the browser that Hercule can use: it
  * publishes no OAuth metadata, or its authorization server cannot sign
- * Hercule in (no registration endpoint, or no PKCE with S256). The message is
- * fixed and safe to show.
+ * Hercule in (no registration endpoint, no PKCE with S256, or incompatible
+ * grant, response or client authentication types). The message is fixed and
+ * safe to show.
  */
 export class AuthorizationUnsupported extends Schema.TaggedError<AuthorizationUnsupported>()(
   "AuthorizationUnsupported",
@@ -102,8 +98,10 @@ export interface AuthorizationServer {
   readonly registrationEndpoint: string | undefined;
   /** Whether the server promises to send `iss` on every authorization response (RFC 9207). */
   readonly sendsIssuer: boolean;
-  /** The client authentication methods the token endpoint accepts, when it says. */
-  readonly tokenEndpointAuthMethods: ReadonlyArray<string>;
+  /** The grant types the authorization server lists, or `undefined` when it omits `grant_types_supported`. */
+  readonly grantTypesSupported: ReadonlyArray<string> | undefined;
+  /** The client authentication methods the token endpoint lists, or `undefined` when omitted. */
+  readonly tokenEndpointAuthMethods: ReadonlyArray<string> | undefined;
 }
 
 /** What discovery found for one MCP server: its authorization server, its resource and the scope to ask for. */
@@ -117,8 +115,6 @@ export interface DiscoveredAuthorization extends AuthorizationServer {
 /** A client registered with an authorization server. `authMethod` is how it signs its token requests. */
 export interface RegisteredClient extends OAuthClient {
   readonly authMethod: ClientAuthMethod;
-  /** When the client's secret stops working, as the registration answer states (RFC 7591), or `undefined` when it never does. */
-  readonly secretExpiresAtMillis?: number;
 }
 
 /** What a `WWW-Authenticate` header's `Bearer` challenge says about OAuth. */
@@ -379,6 +375,8 @@ const AuthorizationServerMetadata = Schema.Struct({
   token_endpoint: Schema.String,
   registration_endpoint: Schema.optional(Schema.NullOr(Schema.String)),
   code_challenge_methods_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  response_types_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  grant_types_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
   token_endpoint_auth_methods_supported: Schema.optional(
     Schema.NullOr(Schema.Array(Schema.Unknown)),
   ),
@@ -397,7 +395,10 @@ const decodeAuthorizationServerMetadata = Schema.decodeUnknownOption(Authorizati
  *   fragment, when an address in it breaks the outbound rules, or when an
  *   endpoint is http while the issuer is https;
  * - `AuthorizationUnsupported` when it does not list `S256` among its PKCE
- *   methods, because Hercule never signs in without PKCE.
+ *   methods, when `response_types_supported` is listed without `code`, when
+ *   `grant_types_supported` is listed without `authorization_code`, or when
+ *   `token_endpoint_auth_methods_supported` is listed with no method Hercule
+ *   speaks (`none`, `client_secret_post`, `client_secret_basic`).
  */
 const readAuthorizationServerMetadata = (
   body: unknown,
@@ -439,17 +440,131 @@ const readAuthorizationServerMetadata = (
         "its authorization server does not offer PKCE with S256, which Hercule requires",
       );
     }
+    if (
+      metadata.response_types_supported != null &&
+      !metadata.response_types_supported.includes("code")
+    ) {
+      return yield* failUnsupported(
+        "its authorization server does not offer the authorization code flow",
+      );
+    }
+    const grantTypesSupported =
+      metadata.grant_types_supported == null
+        ? undefined
+        : metadata.grant_types_supported.filter(
+            (grant): grant is string => typeof grant === "string",
+          );
+    if (grantTypesSupported !== undefined && !grantTypesSupported.includes("authorization_code")) {
+      return yield* failUnsupported(
+        "its authorization server does not offer the authorization code grant",
+      );
+    }
+    const tokenEndpointAuthMethods =
+      metadata.token_endpoint_auth_methods_supported == null
+        ? undefined
+        : metadata.token_endpoint_auth_methods_supported.filter(
+            (method): method is string => typeof method === "string",
+          );
+    if (
+      tokenEndpointAuthMethods !== undefined &&
+      !SUPPORTED_CLIENT_AUTH_METHODS.some((method) => tokenEndpointAuthMethods.includes(method))
+    ) {
+      return yield* failUnsupported(
+        "its authorization server requires a client authentication method Hercule does not support",
+      );
+    }
     return {
       issuer: metadata.issuer,
       authorizationEndpoint: authorizationEndpoint.href,
       tokenEndpoint: tokenEndpoint.href,
       registrationEndpoint: registrationEndpoint?.href,
       sendsIssuer: metadata.authorization_response_iss_parameter_supported === true,
-      tokenEndpointAuthMethods: (metadata.token_endpoint_auth_methods_supported ?? []).filter(
-        (method): method is string => typeof method === "string",
-      ),
+      grantTypesSupported,
+      tokenEndpointAuthMethods,
     };
   });
+
+/** One client registration payload variant to try in order. */
+interface RegistrationAttempt {
+  readonly authMethod: ClientAuthMethod;
+  readonly grantTypes: ReadonlyArray<string>;
+}
+
+/**
+ * Lists the registration payloads to try for one authorization server.
+ * Starts with a public PKCE client requesting `refresh_token`, because
+ * servers such as Keycloak and Auth0 omit `none` from
+ * `token_endpoint_auth_methods_supported` or omit `refresh_token` from
+ * `grant_types_supported` while still accepting them. On HTTP 400 fallback,
+ * tries a bounded sequence across supported confidential methods
+ * (`client_secret_post`, `client_secret_basic`, or RFC 8414 default
+ * `client_secret_basic` when metadata omits the list) and `authorization_code`-only
+ * grants.
+ */
+const buildRegistrationAttempts = (
+  authorization: Pick<AuthorizationServer, "grantTypesSupported" | "tokenEndpointAuthMethods">,
+): ReadonlyArray<RegistrationAttempt> => {
+  const withRefresh = ["authorization_code", "refresh_token"] as const;
+  const withoutRefresh = ["authorization_code"] as const;
+  const { tokenEndpointAuthMethods, grantTypesSupported } = authorization;
+  const confidentialMethods: ReadonlyArray<ClientAuthMethod> =
+    tokenEndpointAuthMethods === undefined
+      ? ["client_secret_basic"]
+      : (["client_secret_post", "client_secret_basic"] as const).filter((method) =>
+          tokenEndpointAuthMethods.includes(method),
+        );
+  const advertisesNone = tokenEndpointAuthMethods?.includes("none") === true;
+  const advertisesRefresh = grantTypesSupported?.includes("refresh_token") === true;
+
+  const attempts: Array<RegistrationAttempt> = [{ authMethod: "none", grantTypes: withRefresh }];
+  if (advertisesNone && !advertisesRefresh) {
+    // The server lists `none` but not `refresh_token`: drop refresh first so we stay public.
+    attempts.push({ authMethod: "none", grantTypes: withoutRefresh });
+    for (const authMethod of confidentialMethods) {
+      attempts.push({ authMethod, grantTypes: withRefresh });
+    }
+    for (const authMethod of confidentialMethods) {
+      attempts.push({ authMethod, grantTypes: withoutRefresh });
+    }
+    return attempts;
+  }
+  for (const authMethod of confidentialMethods) {
+    attempts.push({ authMethod, grantTypes: withRefresh });
+  }
+  attempts.push({ authMethod: "none", grantTypes: withoutRefresh });
+  for (const authMethod of confidentialMethods) {
+    attempts.push({ authMethod, grantTypes: withoutRefresh });
+  }
+  return attempts;
+};
+
+/** Loopback callback shape that may normalize to portless `http://127.0.0.1/callback`. */
+const LOOPBACK_CALLBACK_PATTERN = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/callback$/;
+const PORTLESS_LOOPBACK_CALLBACK = "http://127.0.0.1/callback";
+
+/**
+ * Checks whether an echoed `redirect_uris` entry matches `requested`. Accepts
+ * exact equality, or the literal `http://127.0.0.1/callback` when `requested`
+ * is `http://127.0.0.1:<port>/callback` (RFC 8252 section 7.3).
+ */
+const matchesRegisteredRedirectUri = (registered: unknown, requested: string): boolean => {
+  if (typeof registered !== "string") return false;
+  if (registered === requested) return true;
+  return LOOPBACK_CALLBACK_PATTERN.test(requested) && registered === PORTLESS_LOOPBACK_CALLBACK;
+};
+
+/**
+ * Checks whether an HTTP registration refusal warrants trying a fallback
+ * registration payload. Retries only HTTP 400 when the body is not JSON, omits
+ * an `error` field, or reports `invalid_client_metadata`.
+ */
+const isRetryableRegistrationRefusal = (answer: Answer): boolean => {
+  if (answer.status !== 400) return false;
+  const body = parseJsonObject(answer.body);
+  return (
+    body === undefined || typeof body.error !== "string" || body.error === "invalid_client_metadata"
+  );
+};
 
 /** The answer to a client registration (RFC 7591 section 3.2.1): the fields registration reads. */
 const RegistrationAnswer = Schema.Struct({
@@ -457,7 +572,8 @@ const RegistrationAnswer = Schema.Struct({
   client_secret: Schema.optional(Schema.NullOr(Schema.String)),
   token_endpoint_auth_method: Schema.optional(Schema.NullOr(Schema.String)),
   redirect_uris: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
-  client_secret_expires_at: Schema.optional(Schema.NullOr(Schema.Number)),
+  grant_types: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  response_types: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
 });
 
 const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
@@ -465,22 +581,25 @@ const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
 /**
  * Validates the answer to a client registration and returns the client.
  * Fails with `AuthorizationUnreadable` when the answer is not a registration,
- * when it lists redirect addresses that do not include the registered one
- * (a sign-in would then be refused at the browser), when it gives a client
- * authentication method Hercule does not speak, or when it gives a method that
- * needs a secret and no secret. A secret's `client_secret_expires_at` is kept
- * as `secretExpiresAtMillis`, unless it is 0 or more than ten years away,
- * which both mean the secret never expires.
+ * when it lists redirect addresses that do not cover `redirectUri` (exact or
+ * literal `http://127.0.0.1/callback`), when it lists grant or response types
+ * without `authorization_code` or `code`, when the effective client
+ * authentication method is excluded by discovery metadata (except `none` when
+ * `none` was requested), when it gives a client authentication method Hercule
+ * does not speak, or when the effective method requires a secret and none is
+ * given.
  *
- * A client that got a secret signs its token requests with the method the
- * answer names. When the answer names none, the method is
- * `client_secret_post` if the token endpoint lists it and `client_secret_basic`
- * otherwise (RFC 7591 section 2 makes basic the default). A client with no
- * secret, or with the method `none`, is public.
+ * A client signs its token requests with the method the answer names. When the
+ * answer names none, it uses the non-public method Hercule requested, or when
+ * Hercule requested `none` and got a secret, `client_secret_post` if listed
+ * and `client_secret_basic` otherwise (RFC 7591 section 2 default). A client
+ * with no secret, or with method `none`, is public.
  */
 const readRegisteredClient = (
   body: unknown,
-  tokenEndpointAuthMethods: ReadonlyArray<string>,
+  redirectUri: string,
+  requestedAuthMethod: ClientAuthMethod,
+  tokenEndpointAuthMethods: ReadonlyArray<string> | undefined,
 ): Effect.Effect<RegisteredClient, AuthorizationUnreadable> =>
   Effect.gen(function* () {
     const decoded = decodeRegistrationAnswer(body);
@@ -490,43 +609,66 @@ const readRegisteredClient = (
     const answer = decoded.value;
     // A field that is null counts as absent.
     const redirectUris = answer.redirect_uris ?? undefined;
-    if (redirectUris !== undefined && !redirectUris.includes(REGISTERED_REDIRECT_URI)) {
+    if (
+      redirectUris !== undefined &&
+      !redirectUris.some((uri) => matchesRegisteredRedirectUri(uri, redirectUri))
+    ) {
       return yield* failUnreadable(
         "the client registration answer does not keep the redirect address that was registered",
+      );
+    }
+    const grantTypes = answer.grant_types ?? undefined;
+    if (grantTypes !== undefined && !grantTypes.includes("authorization_code")) {
+      return yield* failUnreadable(
+        "the client registration answer does not allow the authorization code grant",
+      );
+    }
+    const responseTypes = answer.response_types ?? undefined;
+    if (responseTypes !== undefined && !responseTypes.includes("code")) {
+      return yield* failUnreadable(
+        "the client registration answer does not allow the authorization code flow",
       );
     }
     const clientId = answer.client_id;
     const clientSecret = answer.client_secret ?? undefined;
     const answered = answer.token_endpoint_auth_method ?? undefined;
-    if (answered === "none" || (answered === undefined && clientSecret === undefined)) {
-      return { clientId, authMethod: "none" };
-    }
     const authMethod =
       answered ??
-      (tokenEndpointAuthMethods.includes("client_secret_post")
-        ? "client_secret_post"
-        : "client_secret_basic");
-    if (authMethod !== "client_secret_post" && authMethod !== "client_secret_basic") {
+      (requestedAuthMethod !== "none"
+        ? requestedAuthMethod
+        : clientSecret === undefined
+          ? "none"
+          : (tokenEndpointAuthMethods ?? []).includes("client_secret_post")
+            ? "client_secret_post"
+            : "client_secret_basic");
+    if (
+      authMethod !== "none" &&
+      authMethod !== "client_secret_post" &&
+      authMethod !== "client_secret_basic"
+    ) {
       return yield* failUnreadable(
         "the client registration answer uses an unsupported client authentication method",
       );
     }
+    if (
+      tokenEndpointAuthMethods !== undefined &&
+      !tokenEndpointAuthMethods.includes(authMethod) &&
+      !(authMethod === "none" && requestedAuthMethod === "none")
+    ) {
+      return yield* failUnreadable(
+        "the client registration answer uses a client authentication method the token endpoint does not list",
+      );
+    }
+    if (authMethod === "none") {
+      return { clientId, authMethod: "none" };
+    }
     if (clientSecret === undefined || clientSecret === "") {
       return yield* failUnreadable("the client registration answer has no client secret");
     }
-    // The time is in seconds since the epoch, and 0 means it never expires.
-    // A time more than ten years away is read as never expiring too: a huge
-    // one would become infinite in milliseconds, which JSON stores as `null`
-    // and the stored sign-in then fails to read.
-    const expiresAtMillis = (answer.client_secret_expires_at ?? 0) * 1000;
-    const nowMillis = yield* Clock.currentTimeMillis;
     return {
       clientId,
       clientSecret,
       authMethod,
-      ...(expiresAtMillis > 0 && expiresAtMillis <= nowMillis + MAX_SECRET_LIFETIME_MILLIS
-        ? { secretExpiresAtMillis: expiresAtMillis }
-        : {}),
     };
   });
 
@@ -797,17 +939,22 @@ export const discoverAuthorization = (
 
 /**
  * Registers Hercule as a client of the authorization server with Dynamic
- * Client Registration (RFC 7591) and returns the client. Hercule is a native
- * application and a public client: it registers the loopback redirect address
- * without a port, asks for the authorization code and refresh token grants, and
- * asks for no client secret. The answer is checked by `readRegisteredClient`.
+ * Client Registration (RFC 7591) for one sign-in attempt and returns the
+ * client. It registers the attempt's exact `redirectUri` and
+ * `application_type: "native"`. It tries a public PKCE client (`none`) with
+ * `refresh_token` first, and falls back on an HTTP 400 registration error
+ * (`invalid_client_metadata` or unspecified error) using the authorization
+ * server's metadata (or RFC 8414 defaults when omitted). The answer is checked
+ * by `readRegisteredClient`.
  *
  * Fails with `AuthorizationUnsupported` when the authorization server offers
- * no registration endpoint, or refuses to register Hercule (an HTTP 4xx), and
- * with `AuthorizationUnreadable` for everything else that goes wrong.
+ * no registration endpoint, advertises no client authentication method Hercule
+ * supports, or refuses to register Hercule, and with `AuthorizationUnreadable`
+ * for everything else that goes wrong.
  */
 export const registerClient = (
-  authorization: AuthorizationServer,
+  authorization: DiscoveredAuthorization,
+  redirectUri: string,
 ): Effect.Effect<
   RegisteredClient,
   AuthorizationUnsupported | AuthorizationUnreadable,
@@ -819,33 +966,48 @@ export const registerClient = (
         "its authorization server offers no client registration, which Hercule needs",
       );
     }
-    // The endpoint was checked against the outbound rules when the metadata
-    // that names it was read.
-    const answer = yield* send(
-      HttpClientRequest.post(authorization.registrationEndpoint, {
-        acceptJson: true,
-        body: HttpBody.jsonUnsafe({
-          client_name: "Hercule",
-          redirect_uris: [REGISTERED_REDIRECT_URI],
-          grant_types: ["authorization_code", "refresh_token"],
-          response_types: ["code"],
-          token_endpoint_auth_method: "none",
-          application_type: "native",
-        }),
-      }),
-      "client registration",
-      true,
-    );
-    if (answer.status >= 500 || answer.status === 429) {
-      return yield* failUnreadable(
-        `the client registration answered HTTP ${String(answer.status)}`,
+    if (
+      authorization.tokenEndpointAuthMethods !== undefined &&
+      !SUPPORTED_CLIENT_AUTH_METHODS.some((method) =>
+        authorization.tokenEndpointAuthMethods!.includes(method),
+      )
+    ) {
+      return yield* failUnsupported(
+        "its authorization server requires a client authentication method Hercule does not support",
       );
     }
-    if (answer.status !== 200 && answer.status !== 201) {
-      return yield* failUnsupported("its authorization server refused to register Hercule");
+    for (const attempt of buildRegistrationAttempts(authorization)) {
+      // The endpoint was checked against the outbound rules when the metadata
+      // that names it was read.
+      const answer = yield* send(
+        HttpClientRequest.post(authorization.registrationEndpoint, {
+          acceptJson: true,
+          body: HttpBody.jsonUnsafe({
+            client_name: "Hercule",
+            redirect_uris: [redirectUri],
+            grant_types: attempt.grantTypes,
+            response_types: ["code"],
+            token_endpoint_auth_method: attempt.authMethod,
+            application_type: "native",
+          }),
+        }),
+        "client registration",
+        true,
+      );
+      if (answer.status >= 500 || answer.status === 429) {
+        return yield* failUnreadable(
+          `the client registration answered HTTP ${String(answer.status)}`,
+        );
+      }
+      if (answer.status === 200 || answer.status === 201) {
+        return yield* readRegisteredClient(
+          parseJsonObject(answer.body),
+          redirectUri,
+          attempt.authMethod,
+          authorization.tokenEndpointAuthMethods,
+        );
+      }
+      if (!isRetryableRegistrationRefusal(answer)) break;
     }
-    return yield* readRegisteredClient(
-      parseJsonObject(answer.body),
-      authorization.tokenEndpointAuthMethods,
-    );
+    return yield* failUnsupported("its authorization server refused to register Hercule");
   });
