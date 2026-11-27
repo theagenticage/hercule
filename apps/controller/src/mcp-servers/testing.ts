@@ -945,14 +945,19 @@ export interface FakeAuthorizationServer {
   authorizePath: string;
   /** Whether the metadata promises `iss` on authorization responses, and the redirects carry it. */
   sendsIssuer: boolean;
+  /** The `token_endpoint_auth_methods_supported` served in metadata and accepted by registration, or `undefined` when omitted. */
+  tokenEndpointAuthMethodsSupported: ReadonlyArray<string> | undefined;
+  /** The `grant_types_supported` served in metadata and accepted by registration when set. */
+  grantTypesSupported: ReadonlyArray<string> | undefined;
   /** The `expires_in`, in seconds, of every access token it issues. */
   expiresIn: number;
   /** The `token_type` of every access token it issues. */
   tokenType: string;
   /**
    * When set, registration gives the client a secret and the method
-   * `client_secret_post`, and the token endpoint refuses a request without that
-   * secret. By default clients are public.
+   * `client_secret_post` when the client asked for `none`, and the token
+   * endpoint refuses a request without that secret. By default clients are
+   * public unless they ask for a confidential method.
    */
   issuesClientSecrets: boolean;
   /** The client secrets registration gave out, by client id. */
@@ -963,15 +968,12 @@ export interface FakeAuthorizationServer {
    * at once, while the refreshed tokens last.
    */
   firstExpiresIn: number | undefined;
-  /** When set, a refresh is refused with `invalid_grant`. */
+  /** When set, a refresh is refused with `refreshErrorCode`. */
   refuseRefresh: boolean;
+  /** The OAuth error code returned when `refuseRefresh` is true. */
+  refreshErrorCode: string;
   /** When set, every metadata request gets a 302 to this address. */
   redirectMetadataTo: string | undefined;
-  /**
-   * The `client_secret_expires_at` (seconds since the epoch) that registration
-   * gives a client with a secret. By default the secret never expires.
-   */
-  secretExpiresAt: number | undefined;
   /** Makes the fake forget every client it registered, as an authorization server that purged them. */
   forgetClients: () => void;
   /**
@@ -982,6 +984,8 @@ export interface FakeAuthorizationServer {
   holdCodeExchange: () => () => void;
   /** The forms the token endpoint received. */
   readonly tokenRequests: ReadonlyArray<Record<string, string>>;
+  /** The OAuth error codes the token endpoint returned, in order. */
+  readonly tokenErrorCodes: ReadonlyArray<string>;
   /** The JSON bodies the registration endpoint received. */
   readonly registrations: ReadonlyArray<Record<string, unknown>>;
   /** The address the browser was sent to for each authorization request. */
@@ -1004,12 +1008,36 @@ export interface FakeAuthorizationServer {
   stop: () => void;
 }
 
+interface FakeRegisteredClient {
+  readonly redirectUris: ReadonlyArray<string>;
+  readonly grantTypes: ReadonlyArray<string>;
+  readonly authMethod: string;
+}
+
+/** Parses `Authorization: Basic ...` credentials as RFC 6749 section 2.3.1 specifies. */
+const parseBasicClientAuth = (
+  header: string | null,
+): { readonly clientId: string; readonly clientSecret: string } | undefined => {
+  if (header === null || !header.startsWith("Basic ")) return undefined;
+  const decoded = Buffer.from(header.slice("Basic ".length), "base64").toString("utf8");
+  const colon = decoded.indexOf(":");
+  if (colon === -1) return undefined;
+  try {
+    return {
+      clientId: decodeURIComponent(decoded.slice(0, colon).replaceAll("+", " ")),
+      clientSecret: decodeURIComponent(decoded.slice(colon + 1).replaceAll("+", " ")),
+    };
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * Starts a fake OAuth authorization server on the origin of the fake MCP server. It serves
  * the metadata, Dynamic Client Registration, an authorization endpoint that
- * redirects with a code, and a token endpoint that checks what a real one
- * checks (PKCE, the redirect address, the client, the `resource`) and rotates
- * its refresh tokens. It never calls a real vendor.
+ * enforces exact registered `redirect_uri` values, and a token
+ * endpoint that checks what a real one checks (PKCE, the redirect address, the
+ * client, the `resource`) and rotates its refresh tokens. It never calls a real vendor.
  *
  * `upstream` is the fake MCP server it protects: the fake publishes the
  * server's protected resource metadata there, makes the server's 401 point at
@@ -1021,7 +1049,7 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
     string,
     { readonly challenge: string; readonly redirectUri: string; readonly clientId: string }
   >();
-  const clients = new Set<string>();
+  const clients = new Map<string, FakeRegisteredClient>();
   const clientSecrets = new Map<string, string>();
   const refreshTokens = new Set<string>();
   let accessTokens = new Set<string>();
@@ -1029,24 +1057,29 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
   let lastAccessToken = "";
   let heldExchange: Promise<void> | undefined;
   const tokenRequests: Array<Record<string, string>> = [];
+  const tokenErrorCodes: Array<string> = [];
   const registrations: Array<Record<string, unknown>> = [];
   const authorizationRequests: Array<URL> = [];
   const resourceMetadataPath = "/.well-known/oauth-protected-resource/mcp";
 
-  const issueTokens = (): Response => {
+  const issueTokens = (includeRefreshToken = true): Response => {
     issued += 1;
     lastAccessToken = `access-token-${String(issued)}`;
-    const refreshToken = `refresh-token-${String(issued)}`;
     accessTokens.add(lastAccessToken);
-    refreshTokens.add(refreshToken);
+    const refreshToken = `refresh-token-${String(issued)}`;
+    if (includeRefreshToken) refreshTokens.add(refreshToken);
     return Response.json({
       access_token: lastAccessToken,
-      refresh_token: refreshToken,
+      ...(includeRefreshToken ? { refresh_token: refreshToken } : {}),
       token_type: fake.tokenType,
       expires_in: issued === 1 ? (fake.firstExpiresIn ?? fake.expiresIn) : fake.expiresIn,
     });
   };
   const refuse = (error: string) => Response.json({ error }, { status: 400 });
+  const refuseToken = (error: string) => {
+    tokenErrorCodes.push(error);
+    return refuse(error);
+  };
 
   /**
    * Answers a request of the authorization server, or returns `undefined` for
@@ -1076,16 +1109,56 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
         token_endpoint: `${issuer}${fake.tokenPath}`,
         registration_endpoint: `${issuer}/register`,
         code_challenge_methods_supported: ["S256"],
-        token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
+        ...(fake.tokenEndpointAuthMethodsSupported === undefined
+          ? {}
+          : { token_endpoint_auth_methods_supported: fake.tokenEndpointAuthMethodsSupported }),
+        ...(fake.grantTypesSupported === undefined
+          ? {}
+          : { grant_types_supported: fake.grantTypesSupported }),
         ...(fake.sendsIssuer ? { authorization_response_iss_parameter_supported: true } : {}),
       });
     }
     if (url.pathname === "/register" && request.method === "POST") {
       const body = (await request.json()) as Record<string, unknown>;
       registrations.push(body);
+      const authMethod =
+        typeof body.token_endpoint_auth_method === "string"
+          ? body.token_endpoint_auth_method
+          : "none";
+      const grantTypes = Array.isArray(body.grant_types)
+        ? body.grant_types.filter((grant): grant is string => typeof grant === "string")
+        : ["authorization_code"];
+      const redirectUris = Array.isArray(body.redirect_uris)
+        ? body.redirect_uris.filter((uri): uri is string => typeof uri === "string")
+        : [];
+      const allowedAuthMethod =
+        fake.tokenEndpointAuthMethodsSupported !== undefined
+          ? fake.tokenEndpointAuthMethodsSupported.includes(authMethod)
+          : authMethod === "none" || authMethod === "client_secret_basic";
+      if (
+        redirectUris.length === 0 ||
+        !allowedAuthMethod ||
+        (fake.grantTypesSupported !== undefined &&
+          grantTypes.some((grant) => !fake.grantTypesSupported!.includes(grant)))
+      ) {
+        return refuse("invalid_client_metadata");
+      }
       const clientId = `client-${String(registrations.length)}`;
-      clients.add(clientId);
-      if (fake.issuesClientSecrets) {
+      const needsSecret =
+        fake.issuesClientSecrets ||
+        authMethod === "client_secret_post" ||
+        authMethod === "client_secret_basic";
+      const effectiveAuthMethod = needsSecret
+        ? authMethod === "none"
+          ? "client_secret_post"
+          : authMethod
+        : "none";
+      clients.set(clientId, {
+        redirectUris,
+        grantTypes,
+        authMethod: effectiveAuthMethod,
+      });
+      if (needsSecret) {
         const secret = `dcr-secret-${Math.random().toString(36).slice(2)}`;
         clientSecrets.set(clientId, secret);
         return Response.json(
@@ -1093,34 +1166,36 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
             ...body,
             client_id: clientId,
             client_secret: secret,
-            ...(fake.secretExpiresAt === undefined
-              ? {}
-              : { client_secret_expires_at: fake.secretExpiresAt }),
-            token_endpoint_auth_method: "client_secret_post",
+            token_endpoint_auth_method: effectiveAuthMethod,
           },
           { status: 201 },
         );
       }
       return Response.json(
-        { ...body, client_id: clientId, token_endpoint_auth_method: "none" },
+        {
+          ...body,
+          client_id: clientId,
+          token_endpoint_auth_method: effectiveAuthMethod,
+        },
         { status: 201 },
       );
     }
     if (url.pathname === fake.authorizePath) {
       authorizationRequests.push(url);
       const params = url.searchParams;
-      const redirect = URL.parse(params.get("redirect_uri") ?? "");
+      const client = clients.get(params.get("client_id") ?? "");
+      const redirectUri = params.get("redirect_uri") ?? "";
       const problems = [
         params.get("response_type") === "code" ? "" : "response_type",
-        clients.has(params.get("client_id") ?? "") ? "" : "client_id",
-        redirect?.hostname === "127.0.0.1" && redirect.pathname === "/callback"
+        client !== undefined ? "" : "client_id",
+        client !== undefined && client.redirectUris.includes(redirectUri) ? "" : "redirect_uri",
+        client !== undefined && client.grantTypes.includes("authorization_code")
           ? ""
-          : "redirect_uri",
+          : "grant_types",
         params.get("code_challenge_method") === "S256" ? "" : "code_challenge_method",
         params.get("code_challenge") ? "" : "code_challenge",
         params.get("state") ? "" : "state",
         params.get("resource") === upstream.url ? "" : "resource",
-        params.get("scope") === OAUTH_TEST_SCOPE ? "" : "scope",
       ].filter((problem) => problem !== "");
       if (problems.length > 0)
         return new Response(`bad request: ${problems.join(",")}`, { status: 400 });
@@ -1129,14 +1204,26 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
     if (url.pathname === fake.tokenPath && request.method === "POST") {
       const form = Object.fromEntries(new URLSearchParams(await request.text()));
       tokenRequests.push(form);
-      if (!clients.has(form.client_id ?? "")) return refuse("invalid_client");
-      const secret = clientSecrets.get(form.client_id ?? "");
-      if (secret !== undefined && form.client_secret !== secret) return refuse("invalid_client");
-      if (form.resource !== upstream.url) return refuse("invalid_target");
+      if (form.grant_type === "refresh_token" && fake.refuseRefresh) {
+        return refuseToken(fake.refreshErrorCode);
+      }
+      const basic = parseBasicClientAuth(request.headers.get("authorization"));
+      const clientId = basic?.clientId ?? form.client_id ?? "";
+      const client = clients.get(clientId);
+      if (client === undefined) return refuseToken("invalid_client");
+      const secret = clientSecrets.get(clientId);
+      if (client.authMethod === "client_secret_basic") {
+        if (basic === undefined || secret === undefined || basic.clientSecret !== secret) {
+          return refuseToken("invalid_client");
+        }
+      } else if (secret !== undefined && (basic !== undefined || form.client_secret !== secret)) {
+        return refuseToken("invalid_client");
+      }
+      if (form.resource !== upstream.url) return refuseToken("invalid_target");
       if (form.grant_type === "refresh_token") {
-        if (fake.refuseRefresh) return refuse("invalid_grant");
+        if (!client.grantTypes.includes("refresh_token")) return refuseToken("unauthorized_client");
         const token = form.refresh_token ?? "";
-        if (!refreshTokens.has(token)) return refuse("invalid_grant");
+        if (!refreshTokens.has(token)) return refuseToken("invalid_grant");
         // A rotating provider: the old refresh token dies the moment it is used.
         refreshTokens.delete(token);
         return issueTokens();
@@ -1144,16 +1231,16 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
       await heldExchange;
       const code = codes.get(form.code ?? "");
       if (form.grant_type !== "authorization_code" || code === undefined)
-        return refuse("invalid_grant");
+        return refuseToken("invalid_grant");
       codes.delete(form.code ?? "");
       if (
         code.redirectUri !== form.redirect_uri ||
-        code.clientId !== form.client_id ||
+        code.clientId !== clientId ||
         computeChallenge(form.code_verifier ?? "") !== code.challenge
       ) {
-        return refuse("invalid_grant");
+        return refuseToken("invalid_grant");
       }
-      return issueTokens();
+      return issueTokens(client.grantTypes.includes("refresh_token"));
     }
     return undefined;
   };
@@ -1163,12 +1250,13 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
     tokenPath: "/token",
     authorizePath: "/authorize",
     sendsIssuer: true,
+    tokenEndpointAuthMethodsSupported: ["none", "client_secret_post"],
+    grantTypesSupported: undefined,
     expiresIn: 3600,
     tokenType: "Bearer",
     issuesClientSecrets: false,
     clientSecrets,
     firstExpiresIn: undefined,
-    secretExpiresAt: undefined,
     forgetClients: () => clients.clear(),
     holdCodeExchange: () => {
       let release = () => {};
@@ -1181,8 +1269,10 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
       };
     },
     refuseRefresh: false,
+    refreshErrorCode: "invalid_grant",
     redirectMetadataTo: undefined,
     tokenRequests,
+    tokenErrorCodes,
     registrations,
     authorizationRequests,
     approve: async (authorizationUrl, approval = {}) => {
