@@ -1452,8 +1452,12 @@ describe.skipIf(skipReason !== undefined)(
         TEST_MS,
       );
 
+      // The Turn knows a Request is open, so it refuses the second input itself and never sends
+      // `agy` the second prompt. `agy`'s own refusal (JSON-RPC -32603, "the running prompt is
+      // waiting for a permission or question answer") is not exercised here: the recording
+      // `steer-during-request.jsonl` in `packages/acp/src/recordings/` is its evidence.
       it(
-        "refuses a steer while a Request is open, and the turn goes on to complete once the Request is allowed (spec 06 section 6.2)",
+        "refuses a second input locally while a Request is open, and the turn goes on to complete once the Request is allowed (spec 06 section 6.2)",
         async () => {
           const session = await startLiveSession({ accessMode: "approval-required" });
           const first = await run(
