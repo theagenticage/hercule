@@ -417,9 +417,7 @@ const normalizeModelStep = (state: SubagentsState, agent: Subagent, step: AgySte
     state.hasWarnedAboutGrandchild = true;
     events.push({
       _tag: "runtime.warning",
-      ...buildEnvelope(state.normalizer.sessionId, {
-        nativeSessionId: state.normalizer.nativeSessionId,
-      }),
+      ...buildBase(state, agent),
       message:
         "This subagent started a subagent of its own, which Hercule does not read, so its work is not shown and its tokens are not counted.",
     });

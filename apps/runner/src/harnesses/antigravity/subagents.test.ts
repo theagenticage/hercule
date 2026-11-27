@@ -424,12 +424,12 @@ describe("a subagent that starts a subagent of its own", () => {
       usage: { inputTokens: 5, cacheReadTokens: 0, outputTokens: 1 },
     });
 
-  it("warns the session once, however many such calls follow, and marks the usage incomplete", () => {
+  it("warns once, naming the subagent, however many such calls follow, and marks the usage incomplete", () => {
     const state = buildStateWithChild();
     const first = normalizeSubagentStep(state, "A", launch(1));
     const warnings = find(first, "runtime.warning");
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).not.toHaveProperty("subagentId");
+    expect(warnings[0]).toMatchObject({ subagentId: "A" });
     expect(warnings[0]?.message).toContain("started a subagent of its own");
     expect(find(first, "session.usage.updated")[0]).toHaveProperty("usageReport");
     expect(sessionSnapshots(first).at(-1)).toHaveProperty("usageReport");
