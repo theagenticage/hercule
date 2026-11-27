@@ -239,7 +239,7 @@ const buildInputConfigFailure = (
       }
       if (error.reason === "closed") return buildModelChangeLost(ANTIGRAVITY_NAME, error.message);
       return buildHarnessProtocolError(
-        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and the input was not sent: ${error.message}`,
+        `${ANTIGRAVITY_NAME} did not acknowledge the request to ${change} in time, so it may or may not have happened and your message was not sent: ${error.message}`,
       );
     }
     case "other":
@@ -250,7 +250,7 @@ const buildInputConfigFailure = (
       );
     case "unconfirmed":
       return buildHarnessProtocolError(
-        `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and the input was not sent.`,
+        `${ANTIGRAVITY_NAME} did not confirm the request to ${change}, so it may or may not have happened and your message was not sent.`,
       );
   }
 };
@@ -864,7 +864,7 @@ export const startAgySession = (
             ? Effect.succeed(prepared.value)
             : Effect.fail(
                 buildAdapterFailed(
-                  `Preparing the input for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
+                  `Preparing your message for ${ANTIGRAVITY_NAME} took too long, so it was not sent.`,
                 ),
               ),
         ),
@@ -892,7 +892,7 @@ export const startAgySession = (
         if (input.modelSelection !== undefined && configChange.wouldChange(input.modelSelection)) {
           return yield* Effect.fail(
             new SteerRefused({
-              message: `${ANTIGRAVITY_NAME} cannot change its model or thinking level in the middle of a turn. The input stays queued and is sent when the turn ends.`,
+              message: `${ANTIGRAVITY_NAME} cannot change its model or thinking level in the middle of a turn. Your message stays queued and is sent when the turn ends.`,
             }),
           );
         }
@@ -924,7 +924,7 @@ export const startAgySession = (
         if (preparing) {
           return yield* Effect.fail(
             new SteerRefused({
-              message: `${ANTIGRAVITY_NAME} is still preparing another input. This input stays queued and is sent when the turn ends.`,
+              message: `${ANTIGRAVITY_NAME} is still preparing another message. Your message stays queued and is sent when the turn ends.`,
             }),
           );
         }

@@ -767,13 +767,13 @@ const isBrowserCall = (call: DecodedCall, kind: ToolKind | undefined): boolean =
  */
 const isSubagentCall = (call: DecodedCall, rules: HookRules): boolean => {
   if (call.conversationId === undefined || !SAFE_ID.test(call.conversationId)) return false;
-  let own: string;
+  let sessionConversationId: string;
   try {
-    own = readFileSync(rules.conversationIdFile, "utf8").trim();
+    sessionConversationId = readFileSync(rules.conversationIdFile, "utf8").trim();
   } catch {
     return false;
   }
-  return SAFE_ID.test(own) && own !== call.conversationId;
+  return SAFE_ID.test(sessionConversationId) && sessionConversationId !== call.conversationId;
 };
 
 /**
