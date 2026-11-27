@@ -286,8 +286,8 @@ export interface Turn {
    * and a second one.
    */
   readonly recordRootConversationFact: (fact: RootConversationFact) => void;
-  /** Waits until the Turn has ended, which is after it emitted `turn.completed`. */
-  readonly ended: Effect.Effect<void>;
+  /** Waits until the Turn has ended, which is after it emitted `turn.completed`, and returns the state it ended in. */
+  readonly ended: Effect.Effect<TurnState>;
 }
 
 /** An approval Request that is open: `agy` waits for the reply held here. */
@@ -428,7 +428,9 @@ export const startTurn = (
       context;
     const scope = yield* Effect.scope;
     const turnId = crypto.randomUUID();
-    const ended = yield* Deferred.make<void>();
+    const ended = yield* Deferred.make<TurnState>();
+    /** How the Turn ended. `interrupted` until `finish` says otherwise, which is also what a Turn that is abandoned or whose handoff failed reports. */
+    let endState: TurnState = "interrupted";
     const handoff = yield* Deferred.make<Handoff>();
 
     /** The Requests that wait for a reply, by the id Hercule gave them. A Request leaves the map when it settles, so it settles once. */
@@ -812,6 +814,7 @@ export const startTurn = (
             ...(error === undefined ? {} : { error: error.message }),
           }),
         );
+        endState = state;
         phase = "closed";
       });
 
@@ -1201,7 +1204,7 @@ export const startTurn = (
               message: `${CANNOT_TELL}, because the turn ended first.`,
             });
           }
-          Deferred.doneUnsafe(ended, Effect.void);
+          Deferred.doneUnsafe(ended, Effect.succeed(endState));
         }),
       ),
     );
@@ -1221,7 +1224,7 @@ export const startTurn = (
               emit(closeTurn(normalizing, { state: "interrupted", turnId }));
               phase = "closed";
             }
-            Deferred.doneUnsafe(ended, Effect.void);
+            Deferred.doneUnsafe(ended, Effect.succeed(endState));
           }),
         ),
       );

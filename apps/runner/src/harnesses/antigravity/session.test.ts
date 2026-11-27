@@ -13,7 +13,6 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -3114,65 +3113,6 @@ const childEnded = (h: Harness, state: string) => () =>
   summarizeChildTurns(h).includes(`ended ${state}`);
 
 describe("the subagents that agy's files show", () => {
-  it("keeps reading for 2 seconds after the last turn closed, so a step written a little later shows, and then reads nothing until a turn opens again", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* sendUntilLaunched(h);
-          yield* replyToLatestPrompt(h);
-          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
-
-          // The files of the subagent show up after the reply of its parent.
-          yield* TestClock.adjust(Duration.millis(550));
-          yield* Effect.promise(settle);
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 7);
-          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "completed"));
-          expect(summarizeChildTurns(h)).toEqual(["started", "ended completed"]);
-
-          // Nothing is open once the 2 seconds are over, so a new step waits however long the clock runs.
-          yield* runOutClock(Duration.seconds(3));
-          const shown = h.seen.length;
-          appendToSubagentTranscript(h.home, `${LATE_STEP}\n`);
-          yield* runOutClock(Duration.seconds(30));
-          expect(h.seen).toHaveLength(shown);
-
-          // A turn that opens makes the session read again.
-          yield* h.adapter.sendInput(SESSION, buildInput("Again."));
-          yield* h.until("the late step showed", () =>
-            h
-              .tags("content.delta")
-              .some((event) => isChild(event) && event.delta === "Late words."),
-          );
-        }),
-      { fake: subagentFake },
-    ));
-
-  it("keeps reading while only a subagent's turn is open, however long that lasts", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* sendUntilLaunched(h);
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 2);
-          yield* readFilesUntil("the start of the subagent's turn", () =>
-            summarizeChildTurns(h).includes("started"),
-          );
-          yield* replyToLatestPrompt(h);
-          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
-
-          // The 2 seconds after the parent's turn are over, but the subagent's turn is still open.
-          yield* runOutClock(Duration.seconds(5));
-          appendSubagentSteps(h.home, 2, 7);
-          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "completed"));
-
-          expect(summarizeChildTurns(h)).toEqual(["started", "ended completed"]);
-        }),
-      { fake: subagentFake },
-    ));
-
   it("warns once when the session's own files cannot be read, goes on with ACP alone, and counts the usage as incomplete", () =>
     run(
       (h) =>
@@ -3204,55 +3144,6 @@ describe("the subagents that agy's files show", () => {
       { fake: subagentFake },
     ));
 
-  it("ends the open turn of a known subagent as failed, and reports the usage incomplete, when the session's own files become unreadable", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* sendUntilLaunched(h);
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 2);
-          yield* readFilesUntil("the start of the subagent's turn", () =>
-            summarizeChildTurns(h).includes("started"),
-          );
-
-          appendFileSync(transcriptPath(h.home, ROOT), "this is not json\n");
-          yield* readFilesUntil("the end of the subagent's turn", childEnded(h, "failed"));
-
-          expect(summarizeChildTurns(h)).toEqual(["started", "ended failed"]);
-          expect(h.tags("runtime.warning")).toHaveLength(1);
-          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
-            usageReport: { status: "incomplete" },
-          });
-        }),
-      { fake: subagentFake },
-    ));
-
-  it("keeps reading after the tail while a subagent that has steps waits for its launch message, and reports it once its wait ran out", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* sendUntilLaunched(h);
-          yield* replyToLatestPrompt(h);
-          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
-
-          // The child is seen late in the 2 second tail, so the tail ends before its own 2 second wait.
-          yield* TestClock.adjust(Duration.millis(1900));
-          yield* Effect.promise(settle);
-          registerSubagent(h.home);
-          rmSync(join(conversationFolder(h.home, CHILD), "messages"), {
-            recursive: true,
-            force: true,
-          });
-          appendSubagentSteps(h.home, 0, 2);
-          yield* readFilesUntil("the warning about the subagent", () =>
-            h.tags("runtime.warning").some((event) => event.message.includes(CHILD)),
-          );
-        }),
-      { fake: subagentFake },
-    ));
-
   it("warns once, and stops reading the session's own files, when a turn replied and agy wrote no transcript for the conversation", () =>
     run(
       (h) =>
@@ -3275,36 +3166,6 @@ describe("the subagents that agy's files show", () => {
           expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
             usageReport: { status: "incomplete" },
           });
-        }),
-      { fake: subagentFake },
-    ));
-
-  it("ends the turn of a subagent whose files cannot be read as failed, warns once naming it, and keeps the session's own work going", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* sendUntilLaunched(h);
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 2);
-          yield* readFilesUntil("the start of the subagent's turn", () =>
-            summarizeChildTurns(h).includes("started"),
-          );
-
-          appendToSubagentTranscript(h.home, "this is not json\n");
-          yield* readFilesUntil("the warning", () => h.tags("runtime.warning").length > 0);
-          yield* runOutClock(Duration.seconds(1));
-
-          const [warning, ...more] = h.tags("runtime.warning");
-          expect(more).toEqual([]);
-          expect(warning?.message).toContain(CHILD);
-          expect(summarizeChildTurns(h)).toEqual(["started", "ended failed"]);
-          expect(h.tags("session.usage.updated").at(-1)).toMatchObject({
-            usageReport: { status: "incomplete" },
-          });
-          yield* replyToLatestPrompt(h);
-          yield* h.until("the turn completed", () => h.tags("turn.completed").some(isRoot));
-          expect(h.tags("turn.completed").filter(isRoot)).toMatchObject([{ state: "completed" }]);
         }),
       { fake: subagentFake },
     ));
@@ -3461,45 +3322,6 @@ describe("the subagents that agy's files show", () => {
             { state: "completed" },
             { state: "completed" },
           ]);
-        }),
-      { fake: subagentFake },
-    ));
-
-  it("waits for the files to catch up with the cancel, so a step written just after agy answered it is shown before the subagent's turn ends", () =>
-    run(
-      (h) =>
-        Effect.gen(function* () {
-          yield* h.start();
-          yield* sendUntilLaunched(h);
-          registerSubagent(h.home);
-          appendSubagentSteps(h.home, 0, 2);
-          yield* readFilesUntil("the start of the subagent's turn", () =>
-            summarizeChildTurns(h).includes("started"),
-          );
-
-          const interrupting = yield* Effect.forkChild(h.adapter.interrupt(SESSION));
-          yield* h.untilReceived("session/cancel");
-          yield* replyToLatestPrompt(h, "cancelled");
-          yield* h.until("the Turn ended", () => h.tags("turn.completed").some(isRoot));
-          // Real time, enough for a read of the files that does not wait to finish.
-          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)));
-          // `agy` wrote this step before the cancel, but it reaches the file only now.
-          appendSubagentSteps(h.home, 2, 5);
-          yield* joinAfterCancelLag(interrupting);
-
-          const commandAt = h.seen.findIndex(
-            (event) =>
-              isChild(event) &&
-              event._tag === "item.completed" &&
-              event.kind === "command_execution" &&
-              event.status === "completed",
-          );
-          const endAt = h.seen.findIndex(
-            (event) => isChild(event) && event._tag === "turn.completed",
-          );
-          expect(commandAt, "the step was shown").toBeGreaterThan(-1);
-          expect(commandAt).toBeLessThan(endAt);
-          expect(summarizeChildTurns(h)).toEqual(["started", "ended interrupted"]);
         }),
       { fake: subagentFake },
     ));

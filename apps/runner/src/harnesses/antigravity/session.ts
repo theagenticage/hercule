@@ -10,14 +10,13 @@
  *   Turn runs steers it through the Turn, which is the one writer of prompts
  *   (spec 06 section 5);
  * - the exit happens exactly once, with the first reason that asks for it;
- * - one fiber reads `agy`'s own session files, which show the subagents' work
- *   and tokens that ACP does not carry (spec 06 section 13.6). It reads while a
- *   turn is open and does nothing otherwise.
+ * - `agy-files-watch.ts` reads `agy`'s own session files, which show the
+ *   subagents' work and tokens that ACP does not carry (spec 06 section 13.6).
+ *   The session only tells it when work opens and when a Turn replied.
  *
  * Time is measured on Effect's clock, so tests run the deadlines on a `TestClock`.
  */
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -26,7 +25,6 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import type { AcpConnection, AcpHandlers, NewSessionRequest, PromptContent } from "@hercule/acp";
 import { MCP_GATEWAY_ENTRY_NAME, SteerRefused } from "@hercule/protocol";
 import type {
@@ -79,7 +77,6 @@ import {
   buildNormalizerState,
   buildProcessEndEvents,
   closeTurn,
-  findLaunchItem,
   hideSecret,
   holdTurn,
   makeEventSecretHider,
@@ -87,48 +84,14 @@ import {
   normalizeUpdate,
   readSyntheticTurnId,
   releaseTurn,
-  setSubagentUsage,
 } from "./normalize";
 import type { NormalizerState } from "./normalize";
 import { buildQuestionNotOpen, CANCELLED_APPROVAL, CANCELLED_QUESTION } from "./requests";
-import { openAgyFiles, readRootConversationFact } from "./agy-files";
-import type { AgyFileObservation, AgyFiles } from "./agy-files";
-import {
-  buildSubagentsState,
-  endUnreadableSubagent,
-  endUnreadableSubagents,
-  hasOpenSubagentTurn,
-  interruptSubagentTurns,
-  introduceSubagent,
-  normalizeSubagentStep,
-  sumSubagentUsage,
-} from "./subagents";
+import { watchAgyFiles } from "./agy-files-watch";
+import type { AgyFilesWatch } from "./agy-files-watch";
 import { cancelOrphanApproval, cancelOrphanQuestion, startTurn } from "./turn";
 import type { InterruptResult, Turn } from "./turn";
 
-/**
- * How often the session reads `agy`'s files while something is open. A
- * subagent's steps show up in the files within half a second, so a slower read
- * would lag what the user sees. Nothing is read while no turn is open, so a
- * short interval costs nothing in an idle session.
- */
-const FILE_READ_INTERVAL = Duration.millis(500);
-/**
- * How long the session keeps reading the files after the last open turn
- * closed. The files lag what `agy` sends over ACP: in the recording
- * `subagent-full` a subagent's last step was written 80 ms after its parent's
- * reply, and a child's launch message 100 ms after its folder appeared. One
- * read at the close would miss them.
- */
-const FILE_READ_TAIL = Duration.seconds(2);
-/**
- * How long the session waits after `agy` answered a cancel, before it reads the
- * files a last time and ends the subagent turns. A subagent's step reaches its
- * file up to about 100 ms after `agy` wrote it to ACP (80 ms and 100 ms in the
- * recording `subagent-full`), so a step written just before the cancel would
- * otherwise be read after its turn ended.
- */
-const CANCEL_FILE_LAG = Duration.millis(250);
 /** How long `session/cancel` may take to be acknowledged when the session asks `agy` to stop output that has no input. */
 const CANCEL_DEADLINE = Duration.seconds(3);
 
@@ -404,21 +367,8 @@ export const startAgySession = (
     let config: ConfigChange | undefined;
     /** The wait that closes an open synthetic turn when `agy` goes quiet. */
     let syntheticTurnBound: Fiber.Fiber<void> | undefined;
-    /** The reader of `agy`'s session files. Undefined until the conversation is open, and again once the session's own files proved unreadable. */
-    let files: AgyFiles | undefined;
-    /** Whether a subagent's files, or the session's own, could not be read. The session's usage is then incomplete. */
-    let filesWereUnreadable = false;
-    /** Whether the reader showed a step of the session's own conversation. `agy` writes the first prompt there within seconds, so a Turn that replied with none shown means it wrote no transcript. */
-    let hasSeenOwnStep = false;
-    /** Whether a Turn of the session's own agent ended with its reply. */
-    let hasOwnReply = false;
-    /** Lets only one read of the files run at a time: the loop and a stop both read. */
-    const readLock = Semaphore.makeUnsafe(1);
-    /** Whether the last read left a subagent that waits for its link, so the loop reads again although no work is open. */
-    let readerIsAwaitingLink = false;
-    /** Completes when work opens while the reader of the files waits for it. */
-    let readerWake: Deferred.Deferred<void> | undefined;
-
+    /** Watches `agy`'s session files. Undefined until the conversation is open. */
+    let filesWatch: AgyFilesWatch | undefined;
     const buildBase = (toolCallId?: string) =>
       buildEnvelope(sessionId, {
         ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
@@ -457,19 +407,9 @@ export const startAgySession = (
     /** Publishes events. Nothing is published before the start is ready, so a failed start leaves no event. */
     const emitEvents = (events: ReadonlyArray<HarnessEvent>): void => {
       if (!isStarted) return;
-      if (
-        events.some(
-          (event) =>
-            event._tag === "turn.completed" &&
-            event.state === "completed" &&
-            event.turnId === current?.id,
-        )
-      ) {
-        hasOwnReply = true;
-      }
       publishEvents(events);
       boundSyntheticTurn();
-      wakeFileReader();
+      filesWatch?.wake();
     };
 
     /**
@@ -482,11 +422,6 @@ export const startAgySession = (
       if (!isStarted) return;
       const hidden = hideEventSecret(events);
       if (hidden.length > 0) emit(hidden);
-    };
-
-    /** Lets the reader of the files go on when it waits for work to open. It checks for itself that some is open. */
-    const wakeFileReader = (): void => {
-      if (readerWake !== undefined) Deferred.doneUnsafe(readerWake, Effect.void);
     };
 
     const isExited = (): boolean => Deferred.isDoneUnsafe(exitedSignal);
@@ -747,17 +682,19 @@ export const startAgySession = (
       if (state === undefined)
         return yield* Effect.die(new Error("The conversation was not read."));
 
-      // Opened before any prompt, because a resume marks what the files hold now as already shown, and the files of this process's first turn must not count as old.
-      files = yield* openAgyFiles({
+      // Started before any prompt, because a resume marks what the files hold now as already shown, and the files of this process's first turn must not count as old. It lives in the process's scope.
+      const watch = yield* watchAgyFiles({
         home: ctx.home,
         conversationId: conversation.id,
-        skipExisting: spec.continue !== undefined,
-      });
-      const subagentsState = buildSubagentsState({
-        sessionId,
-        nativeSessionId: conversation.id,
+        resumes: spec.continue !== undefined,
         known: spec.continue?.subagents ?? [],
-      });
+        normalizer: state,
+        isSessionWorkOpen: () =>
+          readRunningTurn() !== undefined || readSyntheticTurnId(state) !== undefined,
+        publish: publishEvents,
+        recordRootConversationFact: (fact) => readRunningTurn()?.recordRootConversationFact(fact),
+      }).pipe(Scope.provide(processScope));
+      filesWatch = watch;
 
       const usable = checkAccountUsable(
         agy.planLabel,
@@ -848,167 +785,10 @@ export const startAgySession = (
         ),
         scope,
       );
-      return { connection, state, nativeId: conversation.id, configChange, subagentsState };
+      return { connection, state, nativeId: conversation.id, configChange, watch };
     }).pipe(Effect.onError(() => Scope.close(processScope, Exit.void)));
 
-    const { connection, state, nativeId, configChange, subagentsState } = yield* start;
-
-    // ---- The session files ----
-
-    /** Checks whether something is open that `agy` may still write files for: the Turn, a synthetic turn, or a subagent's turn. */
-    const isWorkOpen = (): boolean =>
-      readRunningTurn() !== undefined ||
-      readSyntheticTurnId(state) !== undefined ||
-      hasOpenSubagentTurn(subagentsState);
-
-    /** Returns the events for a file that could not be read, and remembers that the session's usage is then incomplete. */
-    const recordUnreadableFiles = (conversationId: string, reason: string): HarnessEvent[] => {
-      filesWereUnreadable = true;
-      if (conversationId === nativeId) {
-        // The reader is closed for the rest of the process, so the session goes on with ACP alone.
-        files = undefined;
-        return [
-          {
-            _tag: "runtime.warning",
-            ...buildBase(),
-            message: truncateMessage(
-              `Hercule cannot read Antigravity's session files (${escapeReportedText(reason)}), so subagents' work is not shown and their tokens are not counted.`,
-            ),
-          },
-        ];
-      }
-      return [
-        {
-          _tag: "runtime.warning",
-          ...buildBase(),
-          message: truncateMessage(
-            `Hercule cannot read the session files of the Antigravity subagent ${conversationId} (${escapeReportedText(reason)}), so its work is not shown and its tokens are not counted.`,
-          ),
-        },
-      ];
-    };
-
-    /**
-     * Returns the events for files that could not be read. When they are the
-     * session's own, the reader closes and every known subagent ends with
-     * incomplete usage, because nothing of it can be read any more. Else only
-     * the subagent of those files ends.
-     */
-    const buildUnreadableFilesEvents = (conversationId: string, reason: string): HarnessEvent[] => [
-      ...recordUnreadableFiles(conversationId, reason),
-      ...(conversationId === nativeId
-        ? endUnreadableSubagents(subagentsState)
-        : endUnreadableSubagent(subagentsState, conversationId)),
-    ];
-
-    /**
-     * Gives one observation of the files to whoever shows it, and returns the
-     * events that follow from it. A step of the session's own conversation goes
-     * to the running Turn, which emits what it shows itself.
-     */
-    const routeObservation = (observation: AgyFileObservation): HarnessEvent[] => {
-      switch (observation.kind) {
-        case "step":
-          if (observation.conversationId === nativeId) {
-            hasSeenOwnStep = true;
-            const fact = readRootConversationFact(observation.step);
-            if (fact !== undefined) readRunningTurn()?.recordRootConversationFact(fact);
-            return [];
-          }
-          return normalizeSubagentStep(
-            subagentsState,
-            observation.conversationId,
-            observation.step,
-          );
-        case "subagent":
-          // The parent's launch item is found by `introduceSubagent`: by `agy`'s call id for the session's own agent, else by the step that holds the call's result.
-          return introduceSubagent(subagentsState, observation.link, (toolCallId) =>
-            findLaunchItem(state, toolCallId),
-          );
-        case "unreadable":
-          return buildUnreadableFilesEvents(observation.conversationId, observation.reason);
-        case "too-many-subagents":
-          filesWereUnreadable = true;
-          return [
-            {
-              _tag: "runtime.warning",
-              ...buildBase(),
-              message:
-                "This session has more subagents than Hercule reads, so the work of the others is not shown and their tokens are not counted.",
-            },
-          ];
-      }
-    };
-
-    /** Publishes the session's usage when what the subagents used, or whether that count is complete, changed. */
-    const publishSubagentUsage = (): void => {
-      const { usage, hasIncompleteCount } = sumSubagentUsage(subagentsState);
-      publishEvents(setSubagentUsage(state, usage, filesWereUnreadable || hasIncompleteCount));
-    };
-
-    /** Reads what is new in `agy`'s files once and publishes what follows, then the session's usage when it changed. Only one read runs at a time. */
-    const readSessionFiles: Effect.Effect<void> = readLock.withPermits(1)(
-      Effect.suspend(() => {
-        const reader = files;
-        if (reader === undefined) return Effect.void;
-        return Effect.map(reader.read, ({ observations, isAwaitingLink }) => {
-          readerIsAwaitingLink = isAwaitingLink;
-          for (const observation of observations) publishEvents(routeObservation(observation));
-          publishSubagentUsage();
-        });
-      }),
-    );
-
-    /**
-     * Closes the reader for the session's own files when a Turn replied and
-     * the reader never showed a step of them: `agy` wrote no transcript for
-     * this conversation, so waiting longer shows nothing.
-     */
-    const endReaderWithoutTranscript = Effect.sync(() => {
-      if (files === undefined || !hasOwnReply || hasSeenOwnStep) return;
-      publishEvents(
-        buildUnreadableFilesEvents(nativeId, "agy wrote no transcript for this conversation"),
-      );
-      publishSubagentUsage();
-    });
-
-    /**
-     * Reads the files every `FILE_READ_INTERVAL` while work is open, and for
-     * `FILE_READ_TAIL` after the last of it closed, because the files lag ACP
-     * and a subagent can write after its parent's reply. It also keeps reading
-     * while the reader awaits a link it will settle within 2 seconds. Then it waits until
-     * work opens again. One fiber does all of it, so nothing is read or timed
-     * while the session is idle.
-     */
-    const readFilesWhileWorkIsOpen = Effect.gen(function* () {
-      let wasOpen = false;
-      let tailEndsAt: number | undefined;
-      // A closed reader stays closed, so the loop ends with it.
-      while (files !== undefined) {
-        const now = yield* Clock.currentTimeMillis;
-        const isOpen = isWorkOpen();
-        if (isOpen) {
-          wasOpen = true;
-        } else if (wasOpen) {
-          wasOpen = false;
-          tailEndsAt = now + Duration.toMillis(FILE_READ_TAIL);
-        }
-        if (isOpen || readerIsAwaitingLink || (tailEndsAt !== undefined && now < tailEndsAt)) {
-          yield* readSessionFiles;
-          yield* Effect.sleep(FILE_READ_INTERVAL);
-        } else if (tailEndsAt !== undefined) {
-          tailEndsAt = undefined;
-          yield* endReaderWithoutTranscript;
-        } else {
-          const opened = Deferred.makeUnsafe<void>();
-          readerWake = opened;
-          yield* Deferred.await(opened);
-          readerWake = undefined;
-        }
-      }
-    });
-    // In the process's scope: closing it, at an exit, ends the reading.
-    yield* Effect.forkIn(readFilesWhileWorkIsOpen, processScope);
+    const { connection, state, nativeId, configChange, watch } = yield* start;
 
     // ---- Inputs ----
 
@@ -1180,7 +960,16 @@ export const startAgySession = (
             ).pipe(Scope.provide(scope));
             current = turn;
             preparing = false;
-            wakeFileReader();
+            watch.wake();
+            // The watcher learns from here that the session's own agent replied, so it can tell a missing transcript.
+            yield* Effect.forkIn(
+              Effect.flatMap(turn.ended, (endState) =>
+                Effect.sync(() => {
+                  if (endState === "completed") watch.recordSessionReply();
+                }),
+              ),
+              scope,
+            );
             const handoff = yield* Effect.exit(restore(Deferred.await(turn.handoff)));
             if (Exit.isFailure(handoff)) {
               // The caller is gone while `agy` may be reading the prompt, so no other prompt may follow on this process.
@@ -1224,19 +1013,6 @@ export const startAgySession = (
     );
 
     /**
-     * Ends the open subagent turns as `interrupted` after `agy` took a
-     * `session/cancel`, which stops every subagent. It waits `CANCEL_FILE_LAG`
-     * (when a subagent turn is open) and reads the files once first, so the steps a subagent wrote before the
-     * cancel are shown before its turn ends.
-     */
-    const endSubagentTurnsAfterCancel = Effect.gen(function* () {
-      // Only a turn that is open has a step that can still be on its way.
-      if (hasOpenSubagentTurn(subagentsState)) yield* Effect.sleep(CANCEL_FILE_LAG);
-      yield* readSessionFiles;
-      publishEvents(interruptSubagentTurns(subagentsState));
-    });
-
-    /**
      * The one place every way of stopping the session's work ends in. `result`
      * is what the Turn's interrupt or the answer `cancel` of an approval did.
      *
@@ -1248,10 +1024,10 @@ export const startAgySession = (
      */
     const finishStop = (turn: Turn, result: InterruptResult): Effect.Effect<void> => {
       if (result === "unresponsive") return stopUnresponsiveProcess(turn.id);
-      if (result === "cancelled") return endSubagentTurnsAfterCancel;
-      if (!hasOpenSubagentTurn(subagentsState)) return Effect.void;
+      if (result === "cancelled") return watch.settleAfterCancel;
+      if (!watch.hasOpenSubagentTurn()) return Effect.void;
       return Effect.flatMap(writeCancel, (wasWritten) =>
-        wasWritten ? endSubagentTurnsAfterCancel : Effect.void,
+        wasWritten ? watch.settleAfterCancel : Effect.void,
       );
     };
 
@@ -1263,14 +1039,14 @@ export const startAgySession = (
         return Effect.flatMap(turn.interrupt, (result) => finishStop(turn, result));
       // Output with no prompt open has a synthetic turn, and subagents can run while the session's own agent is idle. Stopping either asks `agy` to stop, and waits for nothing else.
       const syntheticTurnId = readSyntheticTurnId(state);
-      if (syntheticTurnId === undefined && !hasOpenSubagentTurn(subagentsState)) {
+      if (syntheticTurnId === undefined && !watch.hasOpenSubagentTurn()) {
         return Effect.void;
       }
       return Effect.flatMap(writeCancel, (wasWritten) => {
         if (syntheticTurnId !== undefined) {
           emitEvents(closeTurn(state, { state: "interrupted", turnId: syntheticTurnId }));
         }
-        return wasWritten ? endSubagentTurnsAfterCancel : Effect.void;
+        return wasWritten ? watch.settleAfterCancel : Effect.void;
       });
     });
 
