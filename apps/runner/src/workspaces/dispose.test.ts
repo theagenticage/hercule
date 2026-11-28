@@ -14,7 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   buildCheckout,
   cleanTemporaries,
-  hashContents,
+  snapshotContents,
   runGitOrThrow,
   createId,
   makeRemote,
@@ -92,14 +92,14 @@ describe("disposing a primary", () => {
       ),
     );
     const directory = join(storageDir, "primaries", workspaceId);
-    const before = hashContents(directory);
+    const before = snapshotContents(directory);
 
     const report = await Effect.runPromise(workspaces.dispose(buildDisposeFrame(workspaceId)));
 
     expect(report.status).toBe("failed");
     expect(report.message).toMatch(/explicit discard changes/i);
     expect(existsSync(directory)).toBe(true);
-    expect(hashContents(directory)).toBe(before);
+    expect(snapshotContents(directory)).toBe(before);
     // Still registered, so a session can still be placed in it.
     expect(Effect.runSync(workspaces.resolve(workspaceId))?.cwd).toBe(directory);
   });

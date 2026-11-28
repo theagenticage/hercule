@@ -25,7 +25,7 @@ import {
   makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "../../../../runner/src/workspaces/testing";
@@ -207,9 +207,9 @@ const createLegacyInstallation = async () => {
     streams: reader.query("SELECT * FROM session_stream ORDER BY session_id").all(),
     checkouts: reader.query("SELECT * FROM checkouts ORDER BY id").all(),
     primaryPaths: readPaths(primary),
-    primary: hashContents(primary),
-    ephemeral: hashContents(ephemeral),
-    provider: hashContents(providerHome),
+    primary: snapshotContents(primary),
+    ephemeral: snapshotContents(ephemeral),
+    provider: snapshotContents(providerHome),
     primaryHead: runGitOrThrow(primary, "rev-parse", "HEAD"),
     ephemeralHead: runGitOrThrow(ephemeral, "rev-parse", "HEAD"),
   };
@@ -375,9 +375,9 @@ describe("pre-change controller and provider-state upgrade", () => {
     "retains %s files, IDs and provider association through the real migration and public resume",
     async (kind) => {
       await withLegacyController(async (fixture, controller, wire, token) => {
-        expect(hashContents(fixture.primary)).toBe(fixture.before.primary);
-        expect(hashContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
-        expect(hashContents(fixture.providerHome)).toBe(fixture.before.provider);
+        expect(snapshotContents(fixture.primary)).toBe(fixture.before.primary);
+        expect(snapshotContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
+        expect(snapshotContents(fixture.providerHome)).toBe(fixture.before.provider);
         const original = fixture.sessions[kind === "primary" ? 0 : 1]!;
         const workspaceResponse = await get(
           controller.base,
@@ -466,9 +466,9 @@ describe("pre-change controller and provider-state upgrade", () => {
         expect(context.ctx.cwd).toBe(original.cwd);
         expect(context.ctx.home).toBe(fixture.providerHome);
         expect(context.scratch).toBeUndefined();
-        expect(hashContents(fixture.primary)).toBe(fixture.before.primary);
-        expect(hashContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
-        expect(hashContents(fixture.providerHome)).toBe(fixture.before.provider);
+        expect(snapshotContents(fixture.primary)).toBe(fixture.before.primary);
+        expect(snapshotContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
+        expect(snapshotContents(fixture.providerHome)).toBe(fixture.before.provider);
         expect(runGitOrThrow(fixture.primary, "rev-parse", "HEAD")).toBe(
           fixture.before.primaryHead,
         );
@@ -559,8 +559,8 @@ describe("pre-change controller and provider-state upgrade", () => {
         ).toBe(true);
       }
       expect(runGitOrThrow(fixture.primary, "rev-parse", "HEAD")).toBe(fixture.before.primaryHead);
-      expect(hashContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
-      expect(hashContents(fixture.providerHome)).toBe(fixture.before.provider);
+      expect(snapshotContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
+      expect(snapshotContents(fixture.providerHome)).toBe(fixture.before.provider);
     });
   });
 });

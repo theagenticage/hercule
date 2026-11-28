@@ -20,7 +20,7 @@ import {
   cleanTemporaries,
   createId,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "./testing";
@@ -125,7 +125,7 @@ describe("managed checkout availability", () => {
       const cwd = Effect.runSync(manager.resolve(frame.workspaceId))!.cwd;
       writeFileSync(join(cwd, "human-sentinel"), "unfinished human work\n");
       rmSync(join(cwd, ".git"));
-      const before = hashContents(cwd);
+      const before = snapshotContents(cwd);
       const restarted = makeTestWorkspaces({ storageDir });
 
       expect(Effect.runSync(restarted.resolve(frame.workspaceId))).toBeUndefined();
@@ -134,7 +134,7 @@ describe("managed checkout availability", () => {
       expect(observed.message).toMatch(/Git|repository|checkout|unavailable/i);
       await refuseSessionPlacement(restarted, storageDir, frame.workspaceId);
       expect(readFileSync(join(cwd, "human-sentinel"), "utf8")).toBe("unfinished human work\n");
-      expect(hashContents(cwd)).toBe(before);
+      expect(snapshotContents(cwd)).toBe(before);
     },
   );
 
@@ -154,13 +154,13 @@ describe("managed checkout availability", () => {
     renameSync(commonDirectory, `${commonDirectory}.original`);
     runGitOrThrow(storageDir, "clone", "--bare", remote.url, commonDirectory);
     writeFileSync(join(cwd, "human-sentinel"), "surviving checkout\n");
-    const before = hashContents(storageDir);
+    const before = snapshotContents(storageDir);
     const restarted = makeTestWorkspaces({ storageDir });
 
     expect(Effect.runSync(restarted.resolve(frame.workspaceId))).toBeUndefined();
     expect((await Effect.runPromise(restarted.inspect(frame.workspaceId))).status).toBe("failed");
     await refuseSessionPlacement(restarted, storageDir, frame.workspaceId);
-    expect(hashContents(storageDir)).toBe(before);
+    expect(snapshotContents(storageDir)).toBe(before);
   });
 
   it("refuses a generated root replaced by a symlink to another worktree in the same repository", async () => {
@@ -183,13 +183,13 @@ describe("managed checkout availability", () => {
     writeFileSync(join(cwd, "human-sentinel"), "first original work\n");
     renameSync(cwd, `${cwd}.original`);
     symlinkSync(other, cwd);
-    const before = hashContents(storageDir);
+    const before = snapshotContents(storageDir);
     const restarted = makeTestWorkspaces({ storageDir });
 
     expect(Effect.runSync(restarted.resolve(first.workspaceId))).toBeUndefined();
     expect((await Effect.runPromise(restarted.inspect(first.workspaceId))).status).toBe("failed");
     expect(Effect.runSync(restarted.resolve(second.workspaceId))?.cwd).toBe(other);
     await refuseSessionPlacement(restarted, storageDir, first.workspaceId);
-    expect(hashContents(storageDir)).toBe(before);
+    expect(snapshotContents(storageDir)).toBe(before);
   });
 });

@@ -9,7 +9,7 @@ import {
   cleanTemporaries,
   cloneUserCheckout,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "../../../runner/src/workspaces/testing";
@@ -117,7 +117,10 @@ describe("workspace operations with an older connected runner", () => {
     async (operation) => {
       await withFleet(async (arranged) => {
         const world = await createWorld(arranged, operation === "detach");
-        const before = { root: hashContents(world.root), source: hashContents(world.source) };
+        const before = {
+          root: snapshotContents(world.root),
+          source: snapshotContents(world.source),
+        };
         const older = await reconnectOlder(arranged);
         const response =
           operation === "attach"
@@ -154,8 +157,8 @@ describe("workspace operations with an older connected runner", () => {
           "sessionStart",
         ])
           expect(listFramesTagged(older, tag)).toHaveLength(0);
-        expect(hashContents(world.root)).toBe(before.root);
-        expect(hashContents(world.source)).toBe(before.source);
+        expect(snapshotContents(world.root)).toBe(before.root);
+        expect(snapshotContents(world.source)).toBe(before.source);
       });
     },
   );
@@ -169,7 +172,7 @@ describe("workspace operations with an older connected runner", () => {
     async (startingRevision) => {
       await withFleet(async (arranged) => {
         const world = await createWorld(arranged);
-        const before = hashContents(world.root);
+        const before = snapshotContents(world.root);
         const older = await reconnectOlder(arranged);
         const response = await post(
           arranged.harness.base,
@@ -196,7 +199,7 @@ describe("workspace operations with an older connected runner", () => {
         expect(
           ((await listed.json()) as { items: Workspace[] }).items.map((workspace) => workspace.id),
         ).toEqual([world.workspace.id]);
-        expect(hashContents(world.root)).toBe(before);
+        expect(snapshotContents(world.root)).toBe(before);
       });
     },
   );
@@ -240,7 +243,7 @@ describe("persisted work owed to a runner that reconnects without lifecycle supp
     async (discardChanges) => {
       await withFleet(async (arranged) => {
         const world = await createWorld(arranged);
-        const before = hashContents(world.root);
+        const before = snapshotContents(world.root);
         const removal = await send(
           "DELETE",
           arranged.harness.base,
@@ -262,7 +265,7 @@ describe("persisted work owed to a runner that reconnects without lifecycle supp
         expect(retained.message).toMatch(unsupported);
         expect(listFramesTagged(older, "workspaceDispose")).toHaveLength(0);
         expect(existsSync(world.root)).toBe(true);
-        expect(hashContents(world.root)).toBe(before);
+        expect(snapshotContents(world.root)).toBe(before);
         expect(readFileSync(join(world.source, "README.md"), "utf8")).toBe(
           "human original checkout\n",
         );
@@ -277,7 +280,7 @@ it("fails a persisted attachment visibly on older reconnect while preserving the
   const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
   runGitOrThrow(source, "remote", "set-url", "origin", remoteUrl);
   writeFileSync(join(source, "README.md"), "unfinished human attachment\n");
-  const before = hashContents(source);
+  const before = snapshotContents(source);
   await withFleet(async (arranged) => {
     const resourceId = await createRepo(arranged, remoteUrl);
     const response = await post(
@@ -296,7 +299,7 @@ it("fails a persisted attachment visibly on older reconnect while preserving the
     );
     expect((await readWorkspace(arranged, workspace.id)).message).toMatch(unsupported);
     expect(listFramesTagged(older, "workspaceProvision")).toHaveLength(0);
-    expect(hashContents(source)).toBe(before);
+    expect(snapshotContents(source)).toBe(before);
   });
 });
 

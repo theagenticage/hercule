@@ -28,7 +28,7 @@ import {
   cleanTemporaries,
   createId,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   makeTestWorkspaces,
   runGitOrThrow,
@@ -51,11 +51,11 @@ describe("ensureRootBoundary", () => {
   it("changes nothing when it runs again", async () => {
     const root = createTemporaryDir("hercule-root-");
     await Effect.runPromise(ensureRootBoundary(root));
-    const before = hashContents(root);
+    const before = snapshotContents(root);
 
     await Effect.runPromise(ensureRootBoundary(root));
 
-    expect(hashContents(root)).toBe(before);
+    expect(snapshotContents(root)).toBe(before);
   });
 
   it("succeeds in every one of many starts at the same time, and leaves the file", async () => {
@@ -76,11 +76,11 @@ describe("ensureRootBoundary", () => {
   it("leaves a .git repository that is already there as it is", async () => {
     const root = createTemporaryDir("hercule-root-");
     runGitOrThrow(root, "init", "--quiet");
-    const before = hashContents(root);
+    const before = snapshotContents(root);
 
     await Effect.runPromise(ensureRootBoundary(root));
 
-    expect(hashContents(root)).toBe(before);
+    expect(snapshotContents(root)).toBe(before);
     expect(lstatSync(join(root, ".git")).isDirectory()).toBe(true);
   });
 
