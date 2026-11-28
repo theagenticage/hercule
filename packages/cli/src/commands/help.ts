@@ -424,11 +424,15 @@ export const buildCommandHelp = (
   }
 
   lines.push("", "returns:");
-  const { fields, items } = command.returns;
+  const { fields, items, isUnion } = command.returns;
   if (handWritten !== undefined) {
     lines.push(...wrapParagraph(handWritten.prints, "  "));
   } else if (items === undefined) {
-    lines.push(...wrapParagraph(fields.join(", ") || "only the status", "  "));
+    // A reply that is a union holds only some of these fields, depending on the request or the state.
+    const said = isUnion
+      ? `one of several replies; the fields any of them has: ${fields.join(", ")}`
+      : fields.join(", ") || "only the status";
+    lines.push(...wrapParagraph(said, "  "));
   } else {
     // A page has an `items` field; a small fixed list is returned as a bare array.
     const said = fields.includes("items")

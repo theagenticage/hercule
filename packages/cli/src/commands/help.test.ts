@@ -174,34 +174,22 @@ describe("a command whose field of several shapes is filled from flags", () => {
 });
 
 describe("returns", () => {
-  /**
-   * Returns the id of every operation whose success schema is a list, or a
-   * struct (or a union of structs) with at least one property, read straight
-   * from the API and not from the command tree.
-   */
-  const listOperationsWithReplyFields = (): ReadonlySet<string> => {
-    const found = new Set<string>();
+  it("never says a reply is only the status when the reply has fields", () => {
+    // The oracle is the API's own success schemas, not the command tree, which is what is under test.
+    const withFields = new Set<string>();
     HttpApi.reflect(api, {
       onGroup: () => {},
       onEndpoint: ({ endpoint, group }) => {
         const ast = [...endpoint.success][0]?.ast;
         const members = ast?._tag === "Union" ? ast.types : [ast];
-        if (
-          members.some(
-            (member) =>
-              member?._tag === "Arrays" ||
-              (member?._tag === "Objects" && member.propertySignatures.length > 0),
-          )
-        ) {
-          found.add(`${group.identifier}.${endpoint.identifier}`);
-        }
+        const hasFields = members.some(
+          (member) =>
+            member?._tag === "Arrays" ||
+            (member?._tag === "Objects" && member.propertySignatures.length > 0),
+        );
+        if (hasFields) withFields.add(`${group.identifier}.${endpoint.identifier}`);
       },
     });
-    return found;
-  };
-
-  it("never says a reply is only the status when the reply has fields", () => {
-    const withFields = listOperationsWithReplyFields();
     const wrong = COMMANDS.filter(
       (command) =>
         withFields.has(command.id) &&
@@ -212,12 +200,13 @@ describe("returns", () => {
     expect(wrong).toEqual([]);
   });
 
-  it("lists the fields of every mode of a reply that is a union", () => {
+  it("lists the fields of every member of a union reply, and says no one reply holds them all", () => {
     const lines = readSection(
-      buildCommandHelp(readCommand("externalEntity.queryInbox")),
+      buildCommandHelp(readCommand("connection.pollDeviceFlow")),
       "returns:",
-    );
-    expect(lines.join(" ")).toContain("things");
-    expect(lines.join(" ")).toContain("nextCursor");
+    ).join(" ");
+    // `connection` is a field of a later member only.
+    expect(lines).toContain("connection");
+    expect(lines).toContain("one of several replies");
   });
 });
