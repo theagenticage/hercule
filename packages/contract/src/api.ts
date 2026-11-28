@@ -54,6 +54,11 @@ import { workflow } from "./groups/workflow";
 import { workflowAction } from "./groups/workflow-action";
 import { workspace } from "./groups/workspace";
 
+/**
+ * The public API. Every decode of a request (path, query, headers and body)
+ * collects all problems instead of stopping at the first, so a refused request
+ * reports every field to fix at once (spec 11, "One error per response").
+ */
 export const api = HttpApi.make("hercule")
   .add(
     setup,
@@ -102,4 +107,5 @@ export const api = HttpApi.make("hercule")
     attachment,
     controller,
   )
-  .prefix(API_PREFIX);
+  .prefix(API_PREFIX)
+  .annotate(HttpApi.ParseOptions, { errors: "all" });
