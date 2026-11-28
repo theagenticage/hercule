@@ -1,4 +1,5 @@
 import { ConnectionError, MAX_INPUT_ANSWER_WAIT_MS } from "@hercule/client-core";
+import { api } from "@hercule/contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createControllerClient, fetchWithTimeout } from "./controller-client";
 
@@ -6,8 +7,8 @@ const SETUP_URL = "http://127.0.0.1:4937/api/v1/setup";
 
 /**
  * Returns a body that sends its first byte and then nothing more. Like the
- * body of a real fetch, it fails with the signal's reason when `signal`
- * aborts.
+ * body of a fetch in Chromium, it fails with "Failed to fetch" when `signal`
+ * aborts, not with the signal's reason.
  */
 const buildStalledBody = (signal: AbortSignal): ReadableStream<Uint8Array> =>
   new ReadableStream({
@@ -16,7 +17,7 @@ const buildStalledBody = (signal: AbortSignal): ReadableStream<Uint8Array> =>
       signal.addEventListener(
         "abort",
         () => {
-          controller.error(signal.reason);
+          controller.error(new TypeError("Failed to fetch"));
         },
         { once: true },
       );
@@ -28,6 +29,77 @@ const stubFetch = (answer: (signal: AbortSignal) => Promise<Response>): void => 
   vi.stubGlobal("fetch", (_url: string, init: RequestInit) => answer(init.signal as AbortSignal));
 };
 
+/**
+ * Returns a body that sends a byte every `interval` ms, `count` times, then
+ * ends. Like the body of a fetch in Chromium, it fails with "Failed to fetch"
+ * when `signal` aborts.
+ */
+const buildTrickleBody = (
+  signal: AbortSignal,
+  interval: number,
+  count: number,
+): ReadableStream<Uint8Array> =>
+  new ReadableStream({
+    start(controller) {
+      let sent = 0;
+      const timer = setInterval(() => {
+        controller.enqueue(new TextEncoder().encode(" "));
+        sent += 1;
+        if (sent === count) {
+          clearInterval(timer);
+          controller.close();
+        }
+      }, interval);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearInterval(timer);
+          controller.error(new TypeError("Failed to fetch"));
+        },
+        { once: true },
+      );
+    },
+  });
+
+/** Returns a promise that rejects with the signal's reason when `signal` aborts, and never resolves. */
+const waitForAbort = (signal: AbortSignal): Promise<Response> =>
+  new Promise((_resolve, reject) => {
+    signal.addEventListener(
+      "abort",
+      () => {
+        reject(signal.reason as Error);
+      },
+      { once: true },
+    );
+  });
+
+/**
+ * Starts reading `response`'s body, and returns a function that reports the
+ * read's failure so far: undefined while it has not failed, else the
+ * `DOMException`'s name and message.
+ */
+const readBodyFailure = (response: Response): (() => string | undefined) => {
+  let failure: string | undefined;
+  response.text().catch((error: unknown) => {
+    failure = `${(error as DOMException).name}: ${(error as DOMException).message}`;
+  });
+  return () => failure;
+};
+
+/**
+ * Sends a request with `method` to `path` to a controller that never answers,
+ * and returns a function that reports its failure so far, as `readBodyFailure`
+ * does.
+ */
+const sendUnanswered = (path: string, method = "GET"): (() => string | undefined) => {
+  stubFetch(waitForAbort);
+  let failure: string | undefined;
+  fetchWithTimeout(`http://127.0.0.1:4937${path}`, { method }).catch((error: unknown) => {
+    failure = `${(error as DOMException).name}: ${(error as DOMException).message}`;
+  });
+  return () => failure;
+};
+
 describe("fetchWithTimeout", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -37,70 +109,117 @@ describe("fetchWithTimeout", () => {
     vi.unstubAllGlobals();
   });
 
-  it("gives up after 5 seconds on an answer whose body stalls after the headers", async () => {
-    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
-    const response = await fetchWithTimeout(SETUP_URL);
-    let failure: string | undefined;
-    response.text().catch((error: unknown) => {
-      failure = (error as DOMException).name;
-    });
+  it("gives up after 5 seconds when the headers do not arrive", async () => {
+    const failure = sendUnanswered("/api/v1/setup");
 
     await vi.advanceTimersByTimeAsync(4999);
-    expect(failure).toBeUndefined();
+    expect(failure()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
-    expect(failure).toBe("TimeoutError");
+    expect(failure()).toBe("TimeoutError: the controller did not answer within 5 s");
+  });
+
+  it("reads a body that takes 20 seconds to arrive, as long as it keeps arriving", async () => {
+    stubFetch((signal) => Promise.resolve(new Response(buildTrickleBody(signal, 4000, 5))));
+    const response = await fetchWithTimeout(SETUP_URL);
+    const text = response.text();
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expect(text).resolves.toBe("     ");
   });
 
   it.each([
     ["a steer", "/api/v1/sessions/s-1/inputs/i-1/steer"],
     ["a message sent to a session", "/api/v1/sessions/s-1/input"],
-  ])("gives %s, which waits on the runner, 2 minutes and 15 seconds", async (_case, path) => {
-    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
-    const response = await fetchWithTimeout(`http://127.0.0.1:4937${path}`, { method: "POST" });
-    let failure: string | undefined;
-    response.text().catch((error: unknown) => {
-      failure = (error as DOMException).name;
-    });
+  ])(
+    "gives %s, which waits on the runner, 2 minutes and 15 seconds for the headers",
+    async (_case, path) => {
+      const failure = sendUnanswered(path, "POST");
 
-    // The controller waits up to 2 minutes and 10 seconds for an input with
-    // images (`MAX_INPUT_ANSWER_WAIT_MS`); the limit sits 5 seconds above it.
-    expect(MAX_INPUT_ANSWER_WAIT_MS).toBe(130_000);
-    await vi.advanceTimersByTimeAsync(134_999);
-    expect(failure).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(failure).toBe("TimeoutError");
-  });
+      // The controller waits up to 2 minutes and 10 seconds for an input with
+      // images (`MAX_INPUT_ANSWER_WAIT_MS`); the limit sits 5 seconds above it.
+      expect(MAX_INPUT_ANSWER_WAIT_MS).toBe(130_000);
+      await vi.advanceTimersByTimeAsync(134_999);
+      expect(failure()).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failure()).toBe("TimeoutError: the controller did not answer within 135 s");
+    },
+  );
 
   it.each([
-    ["an image's upload", "POST", "/api/v1/attachments"],
-    ["an image's download", "GET", "/api/v1/attachments/a-1/content"],
-  ])("gives %s 120 seconds", async (_case, method, path) => {
-    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
-    const response = await fetchWithTimeout(`http://127.0.0.1:4937${path}`, { method });
-    let failure: string | undefined;
-    response.text().catch((error: unknown) => {
-      failure = (error as DOMException).name;
-    });
+    ["an image's upload", "/api/v1/attachments"],
+    ["a skill's import", "/api/v1/skills/import"],
+  ])("gives %s 120 seconds for the headers", async (_case, path) => {
+    const failure = sendUnanswered(path, "POST");
 
     await vi.advanceTimersByTimeAsync(119_999);
-    expect(failure).toBeUndefined();
+    expect(failure()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
-    expect(failure).toBe("TimeoutError");
+    expect(failure()).toBe("TimeoutError: the controller did not answer within 120 s");
   });
 
-  it("gives another operation on a steer's path 5 seconds", async () => {
+  it("gives a slow operation's body the usual 5 seconds of silence", async () => {
     stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
-    const response = await fetchWithTimeout(
-      "http://127.0.0.1:4937/api/v1/sessions/s-1/inputs/i-1",
-      { method: "DELETE" },
+    const failure = readBodyFailure(
+      await fetchWithTimeout("http://127.0.0.1:4937/api/v1/attachments", { method: "POST" }),
     );
-    let failure: string | undefined;
-    response.text().catch((error: unknown) => {
-      failure = (error as DOMException).name;
-    });
 
     await vi.advanceTimersByTimeAsync(5000);
-    expect(failure).toBe("TimeoutError");
+    expect(failure()).toBe("TimeoutError: the controller stopped sending its answer for 5 s");
+  });
+
+  it("gives the steer's path with another method 5 seconds", async () => {
+    const steer = api.groups.input.endpoints.steer;
+    expect(steer.method).toBe("POST");
+    const failure = sendUnanswered(steer.path.replace(":id", "s-1").replace(":inputId", "i-1"));
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(failure()).toBe("TimeoutError: the controller did not answer within 5 s");
+  });
+
+  it("gives an image's download, which sends its headers at once, 5 seconds", async () => {
+    const failure = sendUnanswered(
+      api.groups.attachment.endpoints.readContent.path.replace(":id", "a-1"),
+    );
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(failure()).toBe("TimeoutError: the controller did not answer within 5 s");
+  });
+
+  it("fails a body the caller aborted with the caller's reason, and stops the timer", async () => {
+    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
+    const caller = new AbortController();
+    // The first byte arrives and waits in the body: nobody reads it yet.
+    const response = await fetchWithTimeout(SETUP_URL, { signal: caller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const reason = new Error("a newer search replaced this one");
+    caller.abort(reason);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(response.text()).rejects.toBe(reason);
+  });
+
+  it("starts no timer for a chunk that is written after the caller aborted", async () => {
+    // Two chunks wait: the first fills the body's queue, the second waits
+    // behind it and is written only once the first is read.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{"));
+        controller.enqueue(new TextEncoder().encode("}"));
+      },
+    });
+    stubFetch(() => Promise.resolve(new Response(body)));
+    const caller = new AbortController();
+    const response = await fetchWithTimeout(SETUP_URL, { signal: caller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+
+    caller.abort(new Error("a newer search replaced this one"));
+    const reader = response.body!.getReader();
+    await reader.read();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each<[string, () => Promise<void>]>([
@@ -109,7 +228,7 @@ describe("fetchWithTimeout", () => {
       async () => {
         stubFetch(() => Promise.resolve(new Response('{"complete":true}')));
         const response = await fetchWithTimeout(SETUP_URL);
-        expect(vi.getTimerCount()).toBe(1);
+        expect(vi.getTimerCount()).toBeGreaterThan(0);
         await response.text();
       },
     ],
@@ -142,8 +261,8 @@ describe("fetchWithTimeout", () => {
         stubFetch(() => Promise.resolve(new Response(buildStalledBody(reset.signal))));
         const response = await fetchWithTimeout(SETUP_URL);
         const read = response.text();
-        reset.abort(new TypeError("network error"));
-        await expect(read).rejects.toThrow("network error");
+        reset.abort();
+        await expect(read).rejects.toThrow("Failed to fetch");
       },
     ],
   ])("leaves no timer once %s", async (_case, finishRequest) => {
@@ -162,7 +281,7 @@ describe("createControllerClient", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reports a login whose body stalls as a controller it cannot reach", async () => {
+  it("reports a login whose body stalls with the operation and the limit that ran out", async () => {
     stubFetch((signal) =>
       Promise.resolve(
         new Response(buildStalledBody(signal), {
@@ -183,7 +302,9 @@ describe("createControllerClient", () => {
     expect(failure).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(failure).toBeInstanceOf(ConnectionError);
-    expect((failure as ConnectionError).message).toBe("cannot reach http://127.0.0.1:4937");
+    expect((failure as ConnectionError).message).toBe(
+      "auth.login: the controller stopped sending its answer for 5 s",
+    );
   });
 
   it("returns a steer the controller answers after 8 seconds, past the usual limit", async () => {

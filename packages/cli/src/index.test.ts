@@ -1103,7 +1103,9 @@ describe("failures", () => {
       fetch,
     });
     expect(await main(["--home", home, "controller", "read"], io)).toBe(3);
-    expect(io.stderr.join("\n")).toContain("cannot reach");
+    expect(io.stderr.join("\n")).toContain(
+      "hercule: controller.read: cannot connect to http://controller.test: connect ECONNREFUSED",
+    );
   });
 
   it("exits 3 when no credential resolves", async () => {
@@ -2078,7 +2080,9 @@ describe("hercule skill import", () => {
     expect(fetch.calls.map((call) => call.query.get("name"))).toEqual(["beta", "gamma"]);
     expect(io.stdout).toHaveLength(2);
     expect(io.stdout[0]).toBe("beta: unchanged");
-    expect(io.stdout[1]).toMatch(/^gamma: failed, so the command stopped: .*cannot reach/);
+    expect(io.stdout[1]).toBe(
+      "gamma: failed, so the command stopped: skill.import: cannot connect to http://controller.test: connect ECONNREFUSED",
+    );
   });
 
   it("stops at the first skill the token may not import, and exits 1", async () => {
