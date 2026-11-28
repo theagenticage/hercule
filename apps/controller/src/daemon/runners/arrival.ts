@@ -71,7 +71,7 @@ const make = Effect.gen(function* () {
                 message,
               });
               if (settled?.moved === "failed") {
-                yield* sessions.endForWorkspace(frame.workspaceId, message);
+                yield* sessions.endQueuedForWorkspace(frame.workspaceId, message);
                 yield* runs.failRunsInWorkspace(frame.workspaceId, message);
               }
             }),

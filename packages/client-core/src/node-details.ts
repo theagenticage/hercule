@@ -11,6 +11,7 @@
  * the index, so that it stays off the desktop app's first screen.
  */
 import {
+  formatAccessMode,
   isSchedule,
   type Agent,
   type ProviderAccount,
@@ -32,7 +33,6 @@ import {
 import { resolveThreadHarnessId } from "./provider-accounts";
 import { readTimestamps } from "./run-display";
 import { formatTokenCount } from "./subagents/describe";
-import { formatAccessMode } from "./threads/access-modes";
 import { findModelName } from "./threads/model-name";
 import { findOldestOpenRequest } from "./threads/oldest-request";
 import { formatRequestQuestion } from "./threads/request-question";

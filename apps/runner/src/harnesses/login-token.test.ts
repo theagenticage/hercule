@@ -9,6 +9,7 @@
  *
  * The token in these tests is made up.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   mkdtempSync,
@@ -143,6 +144,7 @@ const contextFor = (mode: string, overrides: Partial<HarnessRunnerContext> = {})
     modelArgument: "{model}",
     credentialVariables: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
     herculeTool: { orientation: "", skill: "", claudePluginDir: "/unused" },
+    recordedFolders: unrecordedFolders,
     ...overrides,
   }) satisfies HarnessRunnerContext;
 

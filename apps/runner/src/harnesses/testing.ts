@@ -64,11 +64,14 @@ export const CWD = "/tmp/work";
 export const createLines = (): {
   readonly push: (line: string) => void;
   readonly end: () => void;
+  /** Makes the reader fail with `error` once it has read the lines pushed before. */
+  readonly fail: (error: Error) => void;
   readonly iterable: AsyncIterable<string>;
 } => {
   const queued: Array<string> = [];
   let wake: (() => void) | undefined;
   let ended = false;
+  let failure: Error | undefined;
   const wakeReader = (): void => {
     const pending = wake;
     wake = undefined;
@@ -83,10 +86,15 @@ export const createLines = (): {
       ended = true;
       wakeReader();
     },
+    fail: (error) => {
+      failure = error;
+      wakeReader();
+    },
     iterable: {
       async *[Symbol.asyncIterator]() {
         for (;;) {
           while (queued.length > 0) yield queued.shift()!;
+          if (failure !== undefined) throw failure;
           if (ended) return;
           await new Promise<void>((resolve) => {
             wake = resolve;

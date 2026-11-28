@@ -79,7 +79,12 @@ describe("applyCardMove", () => {
   });
 
   it("drops the cause of the stage when the move names a stage, and keeps it for a reorder", () => {
-    const cause = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+    const cause = {
+      kind: "fact" as const,
+      factId: 4,
+      ref: "github:pull-request:6221",
+      text: "Pull request #6221 merged",
+    };
     const board = buildBoard(
       buildCard("a", { projectId: "depots", stage: "landed", stageCause: cause }),
       buildCard("b", { projectId: "depots", stage: "landed" }),
@@ -417,7 +422,12 @@ describe("settleDropMove", () => {
 
 describe("withoutStageCause", () => {
   it("takes the cause away and keeps everything else", () => {
-    const cause = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+    const cause = {
+      kind: "fact" as const,
+      factId: 4,
+      ref: "github:pull-request:6221",
+      text: "Pull request #6221 merged",
+    };
     const card = buildCard("a", { stage: "landed", stageCause: cause });
 
     const cleared = withoutStageCause(card);

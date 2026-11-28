@@ -35,3 +35,40 @@ export const findNearestSupportedAccessMode = (
   }
   return undefined;
 };
+
+/** The names the Bureau book gives the modes. */
+const LABELS: Readonly<Record<AccessMode, string>> = {
+  "approval-required": "Approval required",
+  "auto-accept-edits": "Auto-accept edits",
+  auto: "Auto",
+  "full-access": "Full access",
+};
+
+/**
+ * Returns an access mode's name as the user reads it, such as "Auto-accept
+ * edits" for `auto-accept-edits`. Every screen shows this name. The raw value
+ * is the wire value: controls keep it as their value, and the CLI prints it.
+ * It lives here, not in the client library, so the controller and the CLI can
+ * use it too.
+ */
+export const formatAccessMode = (mode: AccessMode): string => LABELS[mode];
+
+/**
+ * Returns the sentence that tells the user a session runs in a different
+ * access mode than the one it asked for, such as "Runs in Auto-accept edits,
+ * because this harness does not support Auto.". Returns `undefined` when
+ * `requested` and `effective` are the same mode, because then there is
+ * nothing to tell.
+ *
+ * The controller writes the sentence as a Runtime Notice into the session's
+ * stream, and `hercule session spawn` prints it, so both show the same words.
+ * It names no harness because the CLI knows only the harness id, and the two
+ * lines must be identical.
+ */
+export const describeAccessModeFallback = (
+  requested: AccessMode,
+  effective: AccessMode,
+): string | undefined =>
+  requested === effective
+    ? undefined
+    : `Runs in ${formatAccessMode(effective)}, because this harness does not support ${formatAccessMode(requested)}.`;

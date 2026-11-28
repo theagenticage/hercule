@@ -4,7 +4,16 @@
  * tells git to try the next helper.
  */
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import type { CredentialAnswer } from "@hercule/protocol";
 import {
   answerCredentialQuestion,
@@ -159,21 +168,71 @@ describe("what the helper prints", () => {
 });
 
 describe("the actions git passes", () => {
-  it("prints nothing for any action other than `get`", async () => {
-    const written: Array<unknown> = [];
-    const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      written.push(chunk);
-      return true;
-    });
+  const REFUSAL = `hercule: git-credential takes one action: get, store or erase. git runs it for you. Run "git help credential" for help.\n`;
+  let stdout: MockInstance<typeof process.stdout.write>;
+  let stderr: MockInstance<typeof process.stderr.write>;
+  let stdin: MockInstance<typeof Bun.stdin.text>;
 
-    // git sends `store` and `erase` to report what it did with a credential,
-    // and this helper stores none. A missing action is not a git command at all.
-    await runCredentialAction("store");
-    await runCredentialAction("erase");
-    await runCredentialAction("git-credential");
-    await runCredentialAction(undefined);
-
-    expect(written).toEqual([]);
-    write.mockRestore();
+  beforeEach(() => {
+    // Bun ignores `process.exitCode = undefined`, so the code is reset to 0.
+    process.exitCode = 0;
+    stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    // A regression that reads stdin must fail at once, not wait for input.
+    stdin = vi.spyOn(Bun.stdin, "text").mockResolvedValue("");
   });
+
+  afterEach(() => {
+    process.exitCode = 0;
+    vi.restoreAllMocks();
+  });
+
+  // git sends `store` and `erase` to report what it did with a credential, and
+  // this helper stores none.
+  it.each([["store"], ["erase"]])("prints nothing for `%s`", async (action) => {
+    await runCredentialAction([action]);
+
+    expect(stdin).not.toHaveBeenCalled();
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  // Words after the action are ignored, as before: `get --help` answers a
+  // well-formed request and gives no credential without one.
+  it("still answers a request for `get --help`", async () => {
+    await runCredentialAction(["get", "--help"]);
+
+    expect(stdin).toHaveBeenCalledOnce();
+    expect(stderr).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  // gitcredentials(7) says a helper ignores any operation it does not know, so
+  // that git can add one later. That is not an error.
+  it.each([["foo"], ["git-credential"], ["future-operation"]])(
+    "silently ignores the unknown action `%s`",
+    async (action) => {
+      await runCredentialAction([action]);
+
+      expect(stdin).not.toHaveBeenCalled();
+      expect(stdout).not.toHaveBeenCalled();
+      expect(stderr).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+    },
+  );
+
+  // `--local` once reached the runner role as a daemon option and started a
+  // local runner. git never passes a flag, or nothing, as the action.
+  it.each([[[]], [["--local"]], [["--help"]], [["-x"]]])(
+    "refuses %j with a message and exit code 2, and reads no stdin",
+    async (args) => {
+      await runCredentialAction(args);
+
+      expect(stderr).toHaveBeenCalledWith(REFUSAL);
+      expect(stdout).not.toHaveBeenCalled();
+      expect(stdin).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(2);
+    },
+  );
 });

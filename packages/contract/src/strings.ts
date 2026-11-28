@@ -75,6 +75,14 @@ export const cutKeepingEnd = (text: string, maximum: number): string => {
   return characters.length <= maximum ? text : `...${characters.slice(-(maximum - 3)).join("")}`;
 };
 
+/**
+ * Returns `text` with its first letter in lower case: "Review requested"
+ * becomes "review requested". Text that starts with an acronym, such as
+ * "FYI", is returned unchanged, because "fYI" would misspell it.
+ */
+export const lowerFirst = (text: string): string =>
+  /^\p{Lu}{2}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
+
 /** A list of at most `maximum` items. */
 export const atMost = <S extends Schema.Top>(item: S, maximum: number) =>
   Schema.Array(item).check(Schema.isMaxLength(maximum));

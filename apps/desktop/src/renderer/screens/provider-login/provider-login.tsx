@@ -68,7 +68,7 @@ export function ProviderLogin({
   mark,
   row,
   runnerId,
-  startOnOpen = false,
+  startOnOpen: startOnOpenProp,
   onSignedIn,
 }: {
   readonly client: HerculeClient;
@@ -78,6 +78,7 @@ export function ProviderLogin({
   readonly startOnOpen?: boolean;
   readonly onSignedIn?: () => void;
 }): JSX.Element {
+  const startOnOpen = startOnOpenProp ?? false;
   const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
   const [code, setCode] = useState("");

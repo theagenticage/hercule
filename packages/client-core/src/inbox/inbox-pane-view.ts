@@ -83,6 +83,8 @@ export interface PaneLink {
   readonly title: string;
   readonly identifier?: string | undefined;
   readonly claim: string;
+  /** Present when the thing lost access: the words that say its title and identifier are the last known ones. */
+  readonly lastKnownNote?: string | undefined;
 }
 
 const buildPaneLink = (row: PlaceRow): PaneLink => ({
@@ -90,6 +92,7 @@ const buildPaneLink = (row: PlaceRow): PaneLink => ({
   pluginId: row.pluginId,
   title: row.isLocked ? row.noun : row.title,
   identifier: row.isLocked ? undefined : row.identifier,
+  lastKnownNote: row.isLocked ? undefined : row.lastKnownNote,
   claim: row.link?.kind === "confirmed" ? row.link.claimWords : "",
 });
 

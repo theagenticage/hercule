@@ -6,6 +6,9 @@ Date: 2026-11-08
 
 Accepted by [Work overview: the design and its tickets (#1026)](https://github.com/theagenticage/hercule/issues/1026), built by [#1035](https://github.com/theagenticage/hercule/issues/1035). Amends [ADR 0019](./0019-the-task-model-is-thin-workflows-own-task-semantics.md), which left what a stage means to shipped workflows and shipped none, and [ADR 0046](./0046-handing-a-signal-off-tracks-the-work-on-a-task.md), which rejected matching a pull request to its Task by the run's branch name. Keeps [ADR 0052](./0052-tasks-have-a-stage-and-threads-join-them.md) true: the core never moves a stage on its own. Builds on [ADR 0054](./0054-external-entities-are-durable-records-kept-true-by-polls.md). The rules are in [spec 09](../spec/09-tasks.md), [spec 10](../spec/10-triage-intake-and-notifications.md) and [spec 20](../spec/20-external-entities.md).
 
+**Amended 2026-11-12 ([#1113](https://github.com/theagenticage/hercule/issues/1113), [ADR 0057](./0057-a-tasks-lead-reports-its-stage-and-a-report-is-the-weakest-way-to-move-a-card.md)):** a Fact that finds the Task already at its stage now takes over the cause when the cause is a stage report, instead of leaving it. And Landed no longer means only "the thing shipped": it means finished from the agents' side, waiting for the user to sign it off. A report may set it when nothing linked is open.
+
+
 ## Context
 
 Work shows a Task as a card at a stage. Until now only a person, an agent or a workflow moved it. A pull request opened from a Thread, or merged by someone else, left the card where it was, so the board went stale and the user had to keep it true by hand.

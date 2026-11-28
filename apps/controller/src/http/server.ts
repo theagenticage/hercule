@@ -56,6 +56,12 @@
  *     runner's durable credential that no operation accepts and no grant
  *     applies to.
  *
+ * The listener's drain (`./drain.ts`) sits between CORS and the body limit,
+ * and the MCP Gateway has its own: once the controller is stopping, a request
+ * is answered with a bare 503 before any route sees it, and a request still in
+ * flight is counted until it ends. The 503 is the second response outside the
+ * error envelope, after the bare `413`.
+ *
  * Compression sits outside that order too (`compressJsonAnswers`): it runs
  * last, on the finished response, so it sees the headers CORS and the
  * envelope added and every route's answer alike.
@@ -98,6 +104,7 @@ import {
 } from "@hercule/contract";
 import { MAX_FRAME_BYTES, MAX_SKILL_BYTES, RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { withCors } from "./cors";
+import { ListenerDrain } from "./drain";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { promotionGate, setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
@@ -193,9 +200,9 @@ export const MAX_UPLOAD_BODY_BYTES = Math.max(MAX_ATTACHMENT_BYTES, MAX_SKILL_BY
  *   remote link takes about as long as the read itself (#1038).
  * - **A request in flight that has gone quiet,** such as an upload whose
  *   client stopped sending. Such a request now holds its connection for up to
- *   255 seconds instead of 10. A graceful stop of the listener waits for it,
- *   but the controller's drain deadline (`DRAIN_DEADLINE_MS` in `../index.ts`)
- *   still ends the process ten seconds after a stop signal.
+ *   255 seconds instead of 10. The controller's stop waits for it, but the
+ *   drain deadline (`DRAIN_DEADLINE_MS` in `../index.ts`) still ends the
+ *   process ten seconds after a stop signal.
  *
  * Bun's graceful stop does not wait for a kept-alive connection that is idle,
  * so the first case never delays a shutdown. WebSocket connections have their
@@ -436,10 +443,17 @@ const compressJsonAnswers = HttpMiddleware.compression({
   levels: { br: 4, gzip: 6 },
 });
 
-/** Builds the whole application as one effect, which each request runs. */
+/**
+ * Builds the whole application as one effect, which each request runs. The
+ * listener's drain sits inside CORS, so its refusal carries the CORS header
+ * and the desktop app reads it, and outside everything else: once the
+ * controller is stopping, a request is refused before any route sees it. The
+ * MCP Gateway is outside CORS and counts and refuses its own requests.
+ */
 const buildApplication = (bundle: WebBundle | undefined) =>
-  Effect.map(
-    HttpRouter.toHttpEffect(
+  Effect.gen(function* () {
+    const drain = yield* ListenerDrain;
+    const routes = yield* HttpRouter.toHttpEffect(
       Layer.mergeAll(
         routerLayer,
         liveLayer,
@@ -448,18 +462,19 @@ const buildApplication = (bundle: WebBundle | undefined) =>
         PromotionFleetRouteLayer,
         RunnerSocketRouteLayer,
       ),
-    ),
-    (routes) =>
-      withMcpRoute(
-        compressJsonAnswers(
-          withCors(
+    );
+    return withMcpRoute(
+      compressJsonAnswers(
+        withCors(
+          drain.admit(
             limitRequestBody(
               withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
             ),
           ),
         ),
       ),
-  );
+    );
+  });
 
 /**
  * Starts the background drivers, then starts serving on the current

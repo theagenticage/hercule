@@ -35,8 +35,10 @@ export interface TaskContextRows {
  *   them, and places at the same distance keep the order the linked things
  *   were linked in.
  * - `linked` is a row per linked thing. An open row's title starts with its
- *   identifier ("SHOP-123 Serve smaller photos"). A thing no Connection can
- *   read is a locked row with neither. Every row is a link of the Task
+ *   identifier ("SHOP-123 Serve smaller photos"). A restricted place (no
+ *   Connection can read it) is a locked row with neither; a work record that
+ *   lost access keeps its facts and a note that they are the last known ones.
+ *   Every row is a link of the Task
  *   itself, so the user can remove it (`canUnlink`).
  */
 export const buildTaskContextRows = (context: TaskContext): TaskContextRows => {

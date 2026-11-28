@@ -1284,6 +1284,41 @@ describe("which MCP sessions and revisions a message may name", () => {
     }
     expect(listToolPostsSince(mark)).toEqual([]);
   });
+
+  it("accepts a modern notification that carries no _meta, as agy sends roots/list_changed before a call", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const method = "notifications/roots/list_changed";
+    const answer = await sendMcpWithHeaders(
+      thread.token,
+      { jsonrpc: "2.0", method },
+      { "mcp-protocol-version": "2026-07-28", "mcp-method": method },
+    );
+    expect(answer.status).toBe(202);
+    expect(answer.text).toBe("");
+    // Only the `_meta` rules are lifted: a notification whose method header disagrees is still refused.
+    const mismatched = await sendMcpWithHeaders(
+      thread.token,
+      {
+        jsonrpc: "2.0",
+        method,
+        params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } },
+      },
+      { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" },
+    );
+    expect(mismatched.status).toBe(400);
+    expect(mismatched.body.error.code).toBe(-32020);
+  });
+
+  it("does not take a request with an unreadable id for a notification", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const answer = await sendMcpWithHeaders(
+      thread.token,
+      { jsonrpc: "2.0", id: null, method: "tools/list" },
+      { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" },
+    );
+    expect(answer.status).toBe(400);
+    expect(answer.body.error.code).toBe(-32600);
+  });
 });
 
 describe("who is calling, read after the body", () => {

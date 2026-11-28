@@ -616,6 +616,91 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
   }, 300_000);
 });
 
+/** How many links of finished Tasks the Inbox's reads are timed with, besides none. */
+const FINISHED_LINK_COUNTS = [20_000, 80_000] as const;
+
+/**
+ * Adds `count` finished Tasks (stage `done`), each with one link to a ref. The
+ * refs follow the numbering of `seed` and spread over 60,000 tickets, so a
+ * thing of the Inbox has about one finished Task at most. The links keep their
+ * records, as the daily sweep does, so the database holds many records no one
+ * concerns, as one that has seen a lot of work come and go.
+ */
+const seedFinishedTaskLinks = (count: number, offset: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const numbers = Array.from({ length: count }, (_, n) => offset + n);
+    yield* sql`
+      INSERT INTO tasks
+        (id, title, description, status, stage, priority, labels, created_at, updated_at,
+         status_changed_at, stage_changed_at, board_rank)
+      SELECT unhex(printf('%032x', value + 1)), 'Finished ' || value, '', 'done', 'done', 'normal', '[]',
+        ${AT}, ${AT}, ${AT}, ${AT}, 'a'
+      FROM json_each(${JSON.stringify(numbers)})`;
+    yield* sql`
+      INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by)
+      SELECT unhex(printf('%032x', value + 1)), 'acme:ticket:' || ((value * 7) % 60000 + 1), ${AT}, 'user'
+      FROM json_each(${JSON.stringify(numbers)})`;
+    // The records those links keep, which nobody concerns and no Task of today holds.
+    yield* sql`
+      INSERT INTO external_entities
+        (id, ref, kind, noun, pace, completeness, title, first_observed_at, updated_at)
+      SELECT randomblob(16), ref, 'acme/ticket', 'Ticket', 'fast', 'full', 'Old ' || ref, ${AT}, ${AT}
+      FROM (SELECT DISTINCT ref FROM task_entity_links)
+      WHERE ref NOT IN (SELECT ref FROM external_entities)`;
+  }).pipe(inTransaction);
+
+describe.runIf(SPEED_TESTS_ENABLED && !isCountingOnly)(
+  "the Inbox's reads with finished Tasks",
+  () => {
+    it("do not slow down with the links of finished Tasks", async () => {
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* seed(300);
+          const everything = { list: { savedQuery: "everything" } } as const;
+          const rows: Array<{
+            links: number;
+            page: number;
+            count: number;
+            scans: ReadonlyArray<string>;
+          }> = [];
+          let added = 0;
+          for (const links of [0, ...FINISHED_LINK_COUNTS]) {
+            yield* seedFinishedTaskLinks(links - added, added);
+            added = links;
+            const page = yield* measure(inbox.readFirstPage(ENVIRONMENT, everything));
+            const count = yield* measure(inbox.countInbox(ENVIRONMENT));
+            const { statements } = yield* captureStatements(inbox.countInbox(ENVIRONMENT));
+            rows.push({
+              links,
+              page: page.median,
+              count: count.median,
+              scans: yield* findBigScans(statements),
+            });
+          }
+          return rows;
+        }).pipe(Effect.provide(TestDatabase)),
+      );
+      process.stderr.write(
+        `\nthe Inbox's reads at 300 things, with links of finished Tasks, median of ${String(RUNS)}:\n` +
+          results
+            .map(
+              (row) =>
+                `  ${String(row.links).padStart(6)} links  page ${format(row.page)} ms  count ${format(row.count)} ms\n` +
+                row.scans.map((scan) => `        SCAN of a big table: ${scan}\n`).join(""),
+            )
+            .join(""),
+      );
+      const first = results[0]!;
+      const last = results.at(-1)!;
+      // A hard limit, and a guard that the time does not follow the finished Tasks.
+      expect(last.page).toBeLessThan(PAGE_TARGET_MS);
+      expect(last.page).toBeLessThan(first.page * 2);
+      expect(last.count).toBeLessThan(first.count * 2 + 1);
+    }, 300_000);
+  },
+);
+
 /**
  * Writes `part-of` claims from each `[child, parent]` pair, as one Connection
  * reported them, in one transaction.

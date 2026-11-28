@@ -16,8 +16,10 @@ export {
 } from "./service";
 export type { TakeOnRecord } from "./take-on-records";
 export { groupByTask } from "./lists";
+export type { SessionTaskMove } from "./lead";
 export type { EntityLinkPair } from "./entity-facts";
 export {
+  ALL_LIVE_TASK_LINKS_SQL,
   LIVE_TASK_LINKS_SQL,
   buildLiveTaskLinksSql,
   JOINABLE_TASK_SQL,
@@ -36,7 +38,12 @@ export {
 } from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
 export { entityFactRepository, type EntityFact } from "./entity-facts";
-export { describeStageCause, type StageCauseThing } from "./stage-cause";
+export {
+  describeStageCause,
+  describeStageReport,
+  UNTITLED_THREAD_TITLE,
+  type StageCauseThing,
+} from "./stage-cause";
 export { LinkedEntities, type LinkedEntityState } from "./linked-entities";
 export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";

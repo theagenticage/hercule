@@ -140,7 +140,12 @@ export {
   type SortKey,
 } from "./pagination";
 
-export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-modes";
+export {
+  ACCESS_MODE_CHAIN,
+  describeAccessModeFallback,
+  findNearestSupportedAccessMode,
+  formatAccessMode,
+} from "./access-modes";
 
 export { findSnapshotModel, isModelMissingFromHarness } from "./harness-models";
 
@@ -160,6 +165,7 @@ export {
   bounded,
   countCharacters,
   cutKeepingEnd,
+  lowerFirst,
 } from "./strings";
 
 export {
@@ -170,6 +176,8 @@ export {
 } from "./agent-text";
 
 export { appendPromptContext, splitPromptContext } from "./prompt-context";
+
+export { describeLostAccess, describeRestrictedThing } from "./restricted-things";
 
 export {
   parseCallbackQuery,
@@ -351,6 +359,7 @@ export {
   LIVE_SESSION_STATUSES,
   MAX_PROMPT_LENGTH,
   MAX_SESSION_IDS,
+  MAX_SESSION_RUN_IDS,
   MAX_SESSION_WORKSPACE_IDS,
   MAX_SPAWN_CHECKOUTS,
   OpenRequest,
@@ -631,6 +640,9 @@ export {
   TaskMoveInput,
   TaskPriority,
   TaskStage,
+  TaskStageReport,
+  TaskStageReportInput,
+  StageReportOutcome,
   TaskStatus,
   TaskSummary,
   TaskUndoTryAgainInput,
@@ -919,6 +931,7 @@ export {
 export {
   INITIATIVE_HUES,
   Initiative,
+  InitiativeClosedFilter,
   InitiativeCreateInput,
   InitiativeHue,
   InitiativeQuery,

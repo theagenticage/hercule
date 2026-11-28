@@ -131,6 +131,7 @@ const buildTask = (): Task => ({
   id: CARD.id,
   title: CARD.title,
   description: "",
+  leadSessionId: null,
   status: "open",
   stage: CARD.stage,
   priority: "normal",

@@ -3,6 +3,7 @@
  * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
  * are not invented.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   mkdirSync,
@@ -90,6 +91,7 @@ const CONTEXT: SessionStartContext = {
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool: HERCULE_TOOL,
+  recordedFolders: unrecordedFolders,
   attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
 };
 
@@ -1515,7 +1517,7 @@ describe("a Claude Code session", () => {
     expect(run.sent[0]?.message.content).toEqual([
       {
         type: "text",
-        text: `look at this,\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
+        text: `look at this, /skills:review it\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
       },
       {
         type: "image",
@@ -1525,7 +1527,7 @@ describe("a Claude Code session", () => {
           data: testing.PNG_BYTES.toString("base64"),
         },
       },
-      { type: "text", text: "/skills:review it" },
+      { type: "text", text: "/skills:review" },
     ]);
   });
 
@@ -4456,19 +4458,30 @@ describe("the text Claude gets for the Skill References of an input", () => {
     });
   });
 
-  it("puts the text before a skill in the leading part and the text after it in the command", () => {
+  it("keeps the user's whole text, in order, in the leading part when text comes before the skill", () => {
+    // Claude shows a command's arguments before the message's other text, so
+    // text after the skill must not become arguments: the agent would read the
+    // end of the prompt first and the start after the skill's body.
     expect(buildClaudePromptParts(buildSkillInput("please $review the diff"))).toEqual({
-      leading: "please",
-      command: "/skills:review the diff",
+      leading: "please /skills:review the diff",
+      command: "/skills:review",
     });
   });
 
-  it("replaces every skill but the last in place, and makes the last one the command", () => {
+  it("replaces every skill in place, and makes the last one the command", () => {
     expect(
       buildClaudePromptParts(buildSkillInput("please $review the diff, then $implement")),
     ).toEqual({
-      leading: "please /skills:review the diff, then",
+      leading: "please /skills:review the diff, then /skills:implement",
       command: "/skills:implement",
+    });
+  });
+
+  it("keeps a skill in the middle of a list item where the user wrote it", () => {
+    const text = "What I want:\n- one subagent to $review a good site\n- a simple CMS\n\nEnd.";
+    expect(buildClaudePromptParts(buildSkillInput(text))).toEqual({
+      leading: "What I want:\n- one subagent to /skills:review a good site\n- a simple CMS\n\nEnd.",
+      command: "/skills:review",
     });
   });
 
@@ -4478,36 +4491,54 @@ describe("the text Claude gets for the Skill References of an input", () => {
       command: "/repo-webshop:release now",
     });
     expect(buildClaudePromptParts(buildSkillInput("after $webshop:release do $review"))).toEqual({
-      leading: "after /repo-webshop:release do",
+      leading: "after /repo-webshop:release do /skills:review",
       command: "/skills:review",
     });
   });
 
   it("translates the same skill each time it appears", () => {
     expect(buildClaudePromptParts(buildSkillInput("$review, then $review again"))).toEqual({
-      leading: "/skills:review, then",
-      command: "/skills:review again",
+      leading: "/skills:review, then /skills:review again",
+      command: "/skills:review",
     });
   });
 
   it("leaves a token that names no loaded skill as typed", () => {
     expect(buildClaudePromptParts(buildSkillInput("$nothing, then $review"))).toEqual({
-      leading: "$nothing, then",
+      leading: "$nothing, then /skills:review",
       command: "/skills:review",
     });
   });
 
   it("keeps a colon after the skill in the command's text", () => {
-    expect(buildClaudePromptParts(buildSkillInput("run $review: now"))).toEqual({
-      leading: "run",
+    expect(buildClaudePromptParts(buildSkillInput("$review: now"))).toEqual({
+      leading: "",
       command: "/skills:review : now",
+    });
+    expect(buildClaudePromptParts(buildSkillInput("run $review: now"))).toEqual({
+      leading: "run /skills:review: now",
+      command: "/skills:review",
+    });
+  });
+
+  it("treats whitespace before the skill as nothing before it", () => {
+    expect(buildClaudePromptParts(buildSkillInput("\n $review this"))).toEqual({
+      leading: "",
+      command: "/skills:review this",
+    });
+  });
+
+  it("keeps trailing whitespace of the text as the user wrote it", () => {
+    expect(buildClaudePromptParts(buildSkillInput("please $review this  \n"))).toEqual({
+      leading: "please /skills:review this  \n",
+      command: "/skills:review",
     });
   });
 
   it("keeps the sender header in the leading part, ahead of the text", () => {
     expect(
       buildClaudePromptParts({ ...buildSkillInput("please $review it"), senderSessionId: SENDER }),
-    ).toEqual({ leading: `${HEADER}\n\nplease`, command: "/skills:review it" });
+    ).toEqual({ leading: `${HEADER}\n\nplease /skills:review it`, command: "/skills:review" });
     expect(
       buildClaudePromptParts({ ...buildSkillInput("$review it"), senderSessionId: SENDER }),
     ).toEqual({ leading: HEADER, command: "/skills:review it" });

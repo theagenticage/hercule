@@ -643,7 +643,11 @@ export function MessageField({
         className="composer-field"
         onPointerOver={(event) => {
           const chip = findHoveredChip(event.target, availableSkills);
-          setHovered((previous) => (previous?.anchor === chip?.anchor ? previous : chip));
+          setHovered((previous) => {
+            // Kept as it is while it names the same chip, so the card does not redraw.
+            const sameChip = previous?.anchor === chip?.anchor;
+            return sameChip ? previous : chip;
+          });
         }}
         onPointerLeave={() => {
           setHovered(null);

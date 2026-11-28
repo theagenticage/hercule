@@ -41,6 +41,7 @@ import {
   runnerRepository,
 } from "../../runners";
 import { SessionService, type StartRequest } from "../../sessions";
+import { TaskService } from "../../tasks";
 import { githubAccounts } from "../../workspaces";
 import { absorbFailures } from "../../absorbing";
 import { buildSessionCoordination } from "./coordination";
@@ -48,6 +49,7 @@ import { buildSessionCoordination } from "./coordination";
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
+  const tasks = yield* TaskService;
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
   const accounts = yield* githubAccounts;
@@ -165,10 +167,9 @@ const make = Effect.gen(function* () {
                 prepareHarnessAccount: harnessAccounts.prepare,
                 findModelDeclarations: modelCatalogs.findModelDeclarations,
                 buildCoordination: (sessionId) =>
-                  Effect.provideService(
-                    buildSessionCoordination(sessionId),
-                    SqlClient.SqlClient,
-                    sql,
+                  buildSessionCoordination(sessionId).pipe(
+                    Effect.provideService(SqlClient.SqlClient, sql),
+                    Effect.provideService(TaskService, tasks),
                   ),
                 runner,
                 localRunnerId: localRunnerId.read(),
@@ -199,6 +200,7 @@ export const DispatchLayer: Layer.Layer<
   never,
   | SqlClient.SqlClient
   | SessionService
+  | TaskService
   | ConnectionTypes
   | RunnerConnections
   | Secrets

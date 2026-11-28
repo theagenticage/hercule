@@ -132,6 +132,14 @@
  * Later only. After the upgrade the same signal is on To do, reads back, and
  * resolves with `signal done`, and the table is gone.
  *
+ * Migration 136 gives a Task a lead Thread: the oldest Thread on it, archived
+ * and Done ones included, or none. The edge binary has no way to start a
+ * Thread without a signed-in harness, so the fixture writes two Tasks into its
+ * database: one with two Threads created at different times, and one with only
+ * a session that runs a workflow step. After the upgrade `task read` returns
+ * the older Thread as `leadSessionId` for the first Task and no lead for the
+ * second.
+ *
  * It is not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -379,6 +387,30 @@ const ENTITY_LINKS_MIGRATION = 114;
  * `persistOpenPullRequestRows` seeds the rows that boot works on.
  */
 const STAGE_FACTS_MIGRATION = 117;
+
+/** The migration that adds `sessions.task_id`, which a lead Thread is found through. */
+const THREAD_TASKS_MIGRATION = 111;
+
+/**
+ * The migration that adds `tasks.lead_session_id` and fills it with the oldest
+ * Thread of each Task.
+ */
+const TASK_LEADS_MIGRATION = 136;
+
+/** The Tasks of the lead fixture, and the sessions on them. */
+const LEAD_TASKS = {
+  withThreads: {
+    id: "0199e0e7-0000-7000-8000-000000000c01",
+    title: "Compare checkout copy",
+    olderThreadCreatedAt: "2026-10-11T09:00:00.000Z",
+    newerThreadCreatedAt: "2026-10-11T10:00:00.000Z",
+  },
+  runOnly: {
+    id: "0199e0e7-0000-7000-8000-000000000c02",
+    title: "Nightly stock sync",
+    runId: "0199e0e7-0000-7000-8000-000000000c03",
+  },
+} as const;
 
 /** The stable keys of the workflows that ship with Hercule. */
 const SHIPPED_WORKFLOW_KEYS = ["card-in-review", "card-landed"] as const;
@@ -1912,6 +1944,112 @@ function persistOpenPullRequestRows(home: string): boolean {
   }
 }
 
+/** What `persistTaskLeadRows` leaves for the checks after the upgrade. */
+interface SeededTaskLeadRows {
+  /** The id of the older of the two Threads on `LEAD_TASKS.withThreads`. */
+  readonly olderThreadId: string;
+}
+
+/**
+ * Writes the Tasks of `LEAD_TASKS` into the database the edge binary created,
+ * when that database has `sessions.task_id` (migration 111) but not
+ * `tasks.lead_session_id` (migration 136). Returns the id the checks need, or
+ * `undefined` when it wrote nothing.
+ *
+ * - `withThreads` has two Threads. The newer one is written first, so the lead
+ *   is the older Thread by `created_at` and not by insertion order.
+ * - `runOnly` has one session of a workflow run, which never leads, and the
+ *   completed run that started it.
+ *
+ * The rows go straight into the database because the edge binary cannot start
+ * a Thread or a run without a signed-in harness. A session is a run's when it
+ * has both an `agent_id` and a `run_id`, so the Agent id is a random one: the
+ * column is not a foreign key.
+ */
+function persistTaskLeadRows(
+  home: string,
+  thread: Omit<Parameters<typeof persistThreadSession>[0], "title" | "nativeSessionId">,
+): SeededTaskLeadRows | undefined {
+  const version = readMigrationVersion(home);
+  if (version < THREAD_TASKS_MIGRATION || version >= TASK_LEADS_MIGRATION) return undefined;
+  const newerThreadId = persistThreadSession({
+    ...thread,
+    title: "Newer thread",
+    nativeSessionId: null,
+  });
+  const olderThreadId = persistThreadSession({
+    ...thread,
+    title: "Older thread",
+    nativeSessionId: null,
+  });
+  const runSessionId = persistThreadSession({
+    ...thread,
+    title: "Stock sync step",
+    nativeSessionId: null,
+  });
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const rankColumn = version >= TASK_BOARD_RANK_MIGRATION ? ", board_rank" : "";
+    const rankValue = version >= TASK_BOARD_RANK_MIGRATION ? ", 'V'" : "";
+    const insertTask = database.query(
+      `INSERT INTO tasks (id, title, description, status, priority, labels,
+                          created_at, updated_at, status_changed_at, stage_changed_at${rankColumn})
+       VALUES (?, ?, '', 'open', 'normal', '[]', ?, ?, ?, ?${rankValue})`,
+    );
+    for (const task of [LEAD_TASKS.withThreads, LEAD_TASKS.runOnly]) {
+      insertTask.run(
+        uuidBlob(task.id),
+        task.title,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+      );
+    }
+    database
+      .query(
+        `INSERT INTO runs (id, plan, inputs, origin, status, created_at, started_at, finished_at, task_id)
+         VALUES (?, ?, '{}', ?, 'completed', ?, ?, ?, ?)`,
+      )
+      .run(
+        uuidBlob(LEAD_TASKS.runOnly.runId),
+        JSON.stringify({ name: "Sync stock", steps: [] }),
+        JSON.stringify({ kind: "manual", actor: "user" }),
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        uuidBlob(LEAD_TASKS.runOnly.id),
+      );
+    const placeSession = database.query(
+      `UPDATE sessions SET task_id = ?, created_at = ?, agent_id = ?, run_id = ? WHERE id = ?`,
+    );
+    placeSession.run(
+      uuidBlob(LEAD_TASKS.withThreads.id),
+      LEAD_TASKS.withThreads.newerThreadCreatedAt,
+      null,
+      null,
+      uuidBlob(newerThreadId),
+    );
+    placeSession.run(
+      uuidBlob(LEAD_TASKS.withThreads.id),
+      LEAD_TASKS.withThreads.olderThreadCreatedAt,
+      null,
+      null,
+      uuidBlob(olderThreadId),
+    );
+    placeSession.run(
+      uuidBlob(LEAD_TASKS.runOnly.id),
+      SEEDED_TASK_CREATED,
+      uuidBlob(Bun.randomUUIDv7()),
+      uuidBlob(LEAD_TASKS.runOnly.runId),
+      uuidBlob(runSessionId),
+    );
+    return { olderThreadId };
+  } finally {
+    database.close();
+  }
+}
+
 /** Formats the 32 hex digits of a stored id as the dashed UUID the API prints. */
 function formatUuid(hex: string): string {
   const digits = hex.toLowerCase();
@@ -2628,7 +2766,7 @@ beforeAll(async () => {
   }
   const bytes = statSync(edgeBinary).size;
   console.log(`Downloaded ${assetName} (${String(bytes)} bytes) from the ${EDGE_TAG} release.`);
-}, 60_000);
+}, 180_000); // Downloading the edge build can take longer than 60 s on a slow link.
 
 afterAll(() => {
   state?.remove();
@@ -2985,6 +3123,13 @@ describe("upgrading from the previous edge release", () => {
         threadId: codexSessionId,
       });
       const taskStageRows = persistTaskStageRows(home, {
+        home,
+        providerAccountId: claudeAccount.id,
+        harnessId: "claude-code/claude-code",
+        runnerId: SEEDED_RUNNER_ID,
+        permissionProfileId: unrestricted.id,
+      });
+      const taskLeadRows = persistTaskLeadRows(home, {
         home,
         providerAccountId: claudeAccount.id,
         harnessId: "claude-code/claude-code",
@@ -3938,6 +4083,21 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `Skipping the pull request fixture: the edge database has no link tables, or already ran migration ${String(STAGE_FACTS_MIGRATION)}.`,
+        );
+      }
+
+      if (taskLeadRows !== undefined) {
+        const readLead = async (id: string) =>
+          expectJson<{ leadSessionId?: string | null }>(
+            await runCli(["task", "read", id, "--json"], upgraded),
+          ).leadSessionId ?? null;
+        // Migration 136 picked the older Thread by `created_at`, although it
+        // was written second, and gave the Task with only a run session none.
+        expect(await readLead(LEAD_TASKS.withThreads.id)).toBe(taskLeadRows.olderThreadId);
+        expect(await readLead(LEAD_TASKS.runOnly.id)).toBeNull();
+      } else {
+        console.log(
+          `Skipping the task lead fixture: the edge database has no session Tasks, or already ran migration ${String(TASK_LEADS_MIGRATION)}.`,
         );
       }
 

@@ -134,8 +134,8 @@ export type EntityChange = Schema.Schema.Type<typeof EntityChange>;
  * A record above the cards, such as a repository or a project. It has no
  * card, so it holds only what it says about itself.
  *
- * `restricted` is true for a place or a relation target that no Connection of
- * the user can read. It then has no `title`, and its identifier and URL are
+ * `restricted` is true for a place or a relation target that is not a full
+ * work record and that no Connection of the user can read. It then has no `title`, and its identifier and URL are
  * not sent at all: the row says "A Sentry issue you cannot open", from `noun`.
  * A title learned through someone else's read, such as an attachment's label,
  * is never used as the title.
@@ -161,6 +161,13 @@ export const EntityPlace = Schema.Struct({
   progress: Schema.optionalKey(EntityProgress),
   /** A date the source reports, for ordering places. */
   targetDate: Schema.optionalKey(Timestamp),
+  /**
+   * Present only for a full record of a work kind that no Connection can read
+   * now (`inaccessible` or `deleted`). It is not restricted: it keeps its last
+   * known facts, and the row says they are last known. Absent when the thing
+   * can be read, and for a restricted place.
+   */
+  access: Schema.optionalKey(Schema.Literals(["inaccessible", "deleted"])),
   restricted: Schema.Boolean,
   /**
    * The latest change at the source, from the thing's timeline, so a Task's

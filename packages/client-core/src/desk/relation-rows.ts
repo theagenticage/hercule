@@ -2,15 +2,17 @@
  * The rows that draw the outside graph on both Overview pages: Work's details
  * pane and the Inbox. A row is the source's mark, the title, and what the place
  * says about itself (its kind, its status, and its progress only when the
- * source reports it). A place no Connection can read is a locked row with no
- * title.
+ * source reports it). A restricted place (no Connection can read it) is a
+ * locked row with no title; a work record that lost access keeps its facts and
+ * a note that they are the last known ones.
  *
  * `part of` is a graph, not a chain: a thing can have many parents. The rows
  * of a thing list every place above it on every path, each place once, so a
  * list never shows one parent as if it were the only one.
  */
-import type {
-  EntityEdge,
+import {
+  describeLostAccess,
+  type EntityEdge,
   EntityHint,
   EntityLink,
   EntityPeer,
@@ -19,7 +21,6 @@ import type {
   EntityStatus,
 } from "@hercule/contract";
 import type { PluginName } from "../plugin-names";
-import { lowerFirst } from "../text";
 import { readEntityPluginId } from "./entity-words";
 import { describeClaim, describeHint } from "./link-claim";
 import { readOtherRef } from "./link-ends";
@@ -107,6 +108,11 @@ export interface OpenPlaceRow {
   readonly targetDate?: string;
   /** The latest change at the source, when something changed since the thing was first seen. */
   readonly latestChange?: RowChange;
+  /**
+   * Present when the thing lost access: the words that say its facts are the
+   * last known ones, such as "Last known state - you can no longer open it".
+   */
+  readonly lastKnownNote?: string;
   /** Set on a row that draws a linked thing. */
   readonly link?: RowLink;
 }
@@ -135,6 +141,7 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
     noun: place.noun,
   };
   if (place.restricted) return { ...base, isLocked: true };
+  const lastKnownNote = describeLostAccess(place.access);
   return {
     ...base,
     isLocked: false,
@@ -145,6 +152,7 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
     ...(place.status === undefined ? {} : { status: place.status }),
     ...(place.progress === undefined ? {} : { progress: buildRelationProgress(place.progress) }),
     ...(place.targetDate === undefined ? {} : { targetDate: place.targetDate }),
+    ...(lastKnownNote === undefined ? {} : { lastKnownNote }),
     ...(place.latestChange === undefined
       ? {}
       : {
@@ -158,7 +166,8 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
 
 /**
  * Returns the row that draws `peer`, a linked thing with no card of its own.
- * A restricted peer is a locked row. Its title is its noun when the source
+ * A restricted peer is a locked row. Any other peer is an open row, with a
+ * `lastKnownNote` when it lost access. Its title is its noun when the source
  * reports none.
  */
 export const buildPeerRow = (peer: EntityPeer): PlaceRow => {
@@ -169,6 +178,7 @@ export const buildPeerRow = (peer: EntityPeer): PlaceRow => {
     noun: peer.noun,
   };
   if (peer.restricted) return { ...base, isLocked: true };
+  const lastKnownNote = describeLostAccess(peer.access);
   return {
     ...base,
     isLocked: false,
@@ -176,6 +186,7 @@ export const buildPeerRow = (peer: EntityPeer): PlaceRow => {
     ...(peer.identifier === undefined ? {} : { identifier: peer.identifier }),
     ...(peer.url === undefined ? {} : { url: peer.url }),
     ...(peer.status === undefined ? {} : { status: peer.status }),
+    ...(lastKnownNote === undefined ? {} : { lastKnownNote }),
     ...(peer.latestChange === undefined
       ? {}
       : {
@@ -237,23 +248,6 @@ export const readAncestorRows = (
     level = next;
   }
   return rows;
-};
-
-/**
- * Returns the words for a place no Connection can read, such as "A Sentry
- * issue you cannot open". `place` is a locked row or a place record: only its
- * `noun` is used, and never a title, because a title learned through someone
- * else's read must not leak. `pluginName` is the plugin's display name; leave
- * it out where it is not at hand ("An issue you cannot open"). This is the one
- * place that words it, so every screen agrees on the article and the case.
- */
-export const describeLockedRow = (
-  place: { readonly noun: string },
-  pluginName?: string,
-): string => {
-  const kind = lowerFirst(place.noun);
-  const named = pluginName === undefined ? kind : `${pluginName} ${kind}`;
-  return `${/^[aeiou]/i.test(named) ? "An" : "A"} ${named} you cannot open`;
 };
 
 /** What `buildLinkedRows` is built from: one thing's links, and the records at their far ends. */

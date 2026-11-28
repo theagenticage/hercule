@@ -1146,6 +1146,71 @@ describe("buildTurns runtime notes", () => {
     expect(turns[0]?.runtimeNotes.map((note) => note.message)).toEqual(["Rate limited."]);
   });
 
+  it("keeps an error with no turn id in the newer turn after the late end of an earlier turn", () => {
+    // Codex can report the end of t1 after t2 started (spec 06 §6.2).
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnStarted(2, "t2", "2026-09-08T10:00:01.000Z"),
+        turnCompleted(3, "t1", "2026-09-08T10:00:02.000Z"),
+        errorRow(4, "2026-09-08T10:00:03.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes).toEqual([]);
+    expect(turns.find((turn) => turn.turnId === "t2")?.runtimeNotes.map((n) => n.message)).toEqual([
+      "Rate limited.",
+    ]);
+    expect(turns.find((turn) => turn.turnId === "t1")?.endState).toBe("failed");
+    expect(turns.find((turn) => turn.turnId === "t2")?.endState).toBeNull();
+  });
+
+  it("keeps the newer turn open when the earlier turn ends a second time", () => {
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnCompleted(2, "t1", "2026-09-08T10:00:01.000Z"),
+        turnStarted(3, "t2", "2026-09-08T10:00:02.000Z"),
+        turnCompleted(4, "t1", "2026-09-08T10:00:03.000Z"),
+        errorRow(5, "2026-09-08T10:00:04.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes).toEqual([]);
+    expect(turns.find((turn) => turn.turnId === "t2")?.runtimeNotes).toHaveLength(1);
+  });
+
+  it("ends the open turn at the completion of a turn from before the harness restarted", () => {
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, { _tag: "session.started", ...base(2, "2026-09-08T10:00:01.000Z") }),
+        turnStarted(3, "t2", "2026-09-08T10:00:02.000Z"),
+        turnCompleted(4, "t1", "2026-09-08T10:00:03.000Z"),
+        errorRow(5, "2026-09-08T10:00:04.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes).toHaveLength(1);
+    expect(turns.find((turn) => turn.turnId === "t2")?.runtimeNotes).toEqual([]);
+  });
+
+  it("ends the open turn at the completion of a turn that never started, so a lost start row leaves nothing open", () => {
+    const { outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnCompleted(2, "t2", "2026-09-08T10:00:01.000Z"),
+        errorRow(3, "2026-09-08T10:00:02.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes.map((note) => note.message)).toEqual(["Rate limited."]);
+  });
+
   it("keeps an error outside every turn when no turn ever began, as when a session fails to start", () => {
     const { turns, outsideRuntimeNotes } = buildTurns(
       [
@@ -1357,8 +1422,65 @@ describe("buildTurns: compaction and unknown items", () => {
         target: "182k → 31k tokens (auto)",
         result: "completed",
         todoSteps: [],
+        compactionSummary: "The user asked for a login fix.",
       },
     ]);
+  });
+
+  it.each([
+    ["a running compaction", () => buildItemRows("context_compaction", { summary: "At start." })],
+    [
+      "a compaction completed without a summary",
+      () =>
+        buildItemRows("context_compaction", undefined, {
+          status: "completed",
+          detail: { trigger: "auto", tokensBefore: 182_000, tokensAfter: 31_000 },
+        }),
+    ],
+    [
+      "a compaction completed with an empty summary",
+      () =>
+        buildItemRows("context_compaction", undefined, {
+          status: "completed",
+          detail: { summary: "" },
+        }),
+    ],
+    [
+      "a compaction completed with a blank summary",
+      () =>
+        buildItemRows("context_compaction", undefined, {
+          status: "completed",
+          detail: { summary: " \n\t " },
+        }),
+    ],
+  ])("has no summary on %s", (_name, buildRows) => {
+    expect(buildTurns(buildRows(), AGENT_ASKING_NOTHING).turns[0]!.items[0]).not.toHaveProperty(
+      "compactionSummary",
+    );
+  });
+
+  it("keeps the summary a failed compaction started with", () => {
+    const rows = buildItemRows(
+      "context_compaction",
+      { summary: "Written at the start." },
+      { status: "failed" },
+    );
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).toMatchObject({
+      result: "failed",
+      compactionSummary: "Written at the start.",
+    });
+  });
+
+  it("has no summary on another kind of item, whatever its detail holds", () => {
+    const rows = buildItemRows("unknown", undefined, {
+      status: "completed",
+      detail: { summary: "Not a compaction." },
+    });
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).not.toHaveProperty(
+      "compactionSummary",
+    );
   });
 
   it("shows a running compaction with no words after its verb", () => {
@@ -1612,6 +1734,17 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     );
 
     expect(readItems(rows)[0]!.target).toBe("182k → 31k tokens (auto)");
+  });
+
+  it("keeps the summary of a compaction's latest update when its completion has none", () => {
+    const rows = buildRowsOfItem(
+      "context_compaction",
+      { trigger: "auto" },
+      { _tag: "item.updated", detail: { summary: "Given while it ran." } },
+      { _tag: "item.completed", status: "completed", detail: { tokensAfter: 31_000 } },
+    );
+
+    expect(readItems(rows)[0]!.compactionSummary).toBe("Given while it ran.");
   });
 
   it("ignores an update for an item that never started", () => {

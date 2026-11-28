@@ -1,5 +1,6 @@
 /** Tests what the pane draws besides its asks: the meta line, the linked things and what happened. */
 import { describe, expect, it } from "vitest";
+import type { EntityLink, EntityPlace } from "@hercule/contract";
 import { buildFakeInboxDetail, buildInboxThing } from "./cards.testing";
 import { describePaneMeta, listPaneHistory, listPaneLinks } from "./inbox-pane-view";
 
@@ -103,5 +104,36 @@ describe("listPaneHistory", () => {
 describe("listPaneLinks", () => {
   it("has no links for a thing nothing links to", () => {
     expect(listPaneLinks(detail, [])).toEqual([]);
+  });
+
+  it("says the title of a linked thing that lost access is the last known one, and gives a restricted thing no title", () => {
+    const place = (ref: string, overrides: Partial<EntityPlace>): EntityPlace => ({
+      ref,
+      kind: "acme/ticket",
+      noun: "Ticket",
+      restricted: false,
+      ...overrides,
+    });
+    const link = (toRef: string): EntityLink => ({
+      fromRef: detail.ref,
+      toRef,
+      claim: { type: "source", plugin: "acme" },
+      hasPersonClaim: false,
+    });
+    const links = listPaneLinks(
+      {
+        ...detail,
+        links: [link("acme:ticket:lost"), link("acme:ticket:locked")],
+        places: [
+          place("acme:ticket:lost", { title: "Lost", access: "inaccessible" }),
+          place("acme:ticket:locked", { restricted: true }),
+        ],
+      },
+      [],
+    );
+    expect(links.map((one) => [one.title, one.lastKnownNote])).toEqual([
+      ["Lost", "Last known state - you can no longer open it"],
+      ["Ticket", undefined],
+    ]);
   });
 });

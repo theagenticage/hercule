@@ -3,9 +3,13 @@
  * context: the live thing when it could be read, and what the context block
  * kept of it when it could not.
  */
-import type { EntityCard, EntityStatus } from "@hercule/contract";
+import {
+  describeLostAccess,
+  describeRestrictedThing,
+  type EntityCard,
+  type EntityStatus,
+} from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
-import { describeLockedRow } from "../desk/relation-rows";
 import { decideShownStatus } from "./card-face";
 import { formatWholeNumber, readFieldWords } from "./field-words";
 
@@ -48,24 +52,6 @@ export interface ContextCardFace {
 }
 
 /**
- * Returns the words that qualify the facts of a thing that lost access, or
- * `undefined` for a thing that can be read. `deleted` is worded as a fact
- * only because a source said so for certain; any other lost access is that
- * the user's Connections can no longer open the thing.
- */
-const describeLostAccess = (access: EntityCard["access"]): string | undefined => {
-  switch (access) {
-    case "inaccessible":
-      return "Last known state - you can no longer open it";
-    case "deleted":
-      return "Last known state - deleted at the source";
-    case "ok":
-    case undefined:
-      return undefined;
-  }
-};
-
-/**
  * Returns the card of a thing that was read: its source, noun, identifier,
  * title and status (left out on a compact card when it is of the `norm` tone,
  * as on the Inbox's cards), and at the end of the status line the face's fact (the
@@ -78,7 +64,7 @@ const describeLostAccess = (access: EntityCard["access"]): string | undefined =>
 export const describeContextCard = (card: EntityCard): ContextCardFace => {
   const pluginId = readEntityPluginId(card.kind);
   if (card.restricted) {
-    return { pluginId, noun: card.noun, title: describeLockedRow(card), isLocked: true };
+    return { pluginId, noun: card.noun, title: describeRestrictedThing(card.noun), isLocked: true };
   }
   const status = decideShownStatus(card.card, card.status);
   const fact = readFieldWords(card.face?.fact, formatWholeNumber);

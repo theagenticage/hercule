@@ -191,7 +191,7 @@ export function Transcript({
   onBottomChange,
   lead,
   renderSpawnLines,
-  layout = "page",
+  layout: layoutProp,
   ref,
 }: {
   readonly sessionId: string;
@@ -214,6 +214,7 @@ export function Transcript({
   // would keep showing stale items. The compiler already skips the hook that
   // creates the virtualizer, but not this component, so it is opted out by
   // hand.
+  const layout = layoutProp ?? "page";
   const [timezone] = useState(() => resolveBrowserTimezone());
   const today = useStartOfToday();
   // The keys of the work stretches, and of the rows inside them, that the

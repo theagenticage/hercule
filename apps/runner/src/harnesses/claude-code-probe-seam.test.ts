@@ -6,6 +6,7 @@
  * `claude-code.test.ts` cannot catch this, because they replace the code that
  * builds the prompt.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,6 +94,7 @@ describe("the Claude Code probe's own query", () => {
           modelArgument: "{model}",
           credentialVariables: [],
           herculeTool: { orientation: "", skill: "", claudePluginDir: "/nonexistent" },
+          recordedFolders: unrecordedFolders,
           attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
         },
         { readUsage: true },

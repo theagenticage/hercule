@@ -8,6 +8,7 @@
  * It is in its own file because two test files use it: the adapter tests and
  * the approvals tests.
  */
+import { unrecordedFolders } from "../../recorded-folders.testing";
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
@@ -49,6 +50,7 @@ export const buildContext = (home: string, cwd: string | null = null): SessionSt
   // The runner resolves this once, at start. A test that depends on it sets
   // its own value.
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
+  recordedFolders: unrecordedFolders,
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -148,6 +150,8 @@ export interface Spawn {
   readonly push: (frame: unknown) => void;
   /** Makes the app-server exit on its own, without the adapter killing it. */
   readonly crash: () => void;
+  /** Makes reading the app-server's stdout fail, as a line over the limit does. */
+  readonly failRead: (message: string) => void;
   /** Writes one line to the app-server's stderr. */
   readonly complain: (line: string) => void;
 }
@@ -298,6 +302,7 @@ export const buildScriptedSeam = (
           err.end();
           resolveExited(1);
         },
+        failRead: (message) => out.fail(new Error(message)),
         complain: (line) => err.push(line),
       });
       return {

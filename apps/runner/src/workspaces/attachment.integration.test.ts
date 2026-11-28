@@ -1,4 +1,5 @@
 import { makeTestWorkspaces } from "./testing";
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   mkdirSync,
@@ -305,6 +306,7 @@ describe("recovering attachment availability", () => {
         skill: "# fixture",
         claudePluginDir: join(fixture.storageDir, "claude-plugin"),
       },
+      recordedFolders: unrecordedFolders,
       controllerUrl: "http://controller.invalid",
       baseEnv: {},
       findBinary: () => undefined,

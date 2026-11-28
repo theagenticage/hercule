@@ -41,10 +41,12 @@ import {
   readValidationIssues,
 } from "@hercule/client-core";
 import {
+  describeLostAccess,
   escapeMarkerLines,
   removeTerminalControls,
   truncateText,
   chooseMemoryCap,
+  describeAccessModeFallback,
   formatIssue,
   isSchedule,
   toIdTail,
@@ -1021,20 +1023,25 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
 };
 
 /**
- * Returns the lines printed after `session spawn`: the session, and a hint
- * with the command that reads its transcript. This is the only hint this
- * build prints after a command. A caller who has just spawned a session wants
- * to watch it. The hint does not suggest a subscription on the session: no
- * platform event about a session is emitted yet, so the controller would
+ * Returns the lines printed after `session spawn`: the session, the access
+ * mode fallback when the session runs in another mode than it asked for, and
+ * a hint with the command that reads its transcript. The hint is the only one
+ * this build prints after a command. A caller who has just spawned a session
+ * wants to watch it. The hint does not suggest a subscription on the session:
+ * no platform event about a session is emitted yet, so the controller would
  * reject it. It points at the transcript, which the caller can already read.
  * `transcript read` returns the rows so far and does not follow the session,
  * so the hint uses "read", not "watch".
  */
-const renderSpawnedSession = (session: Session): ReadonlyArray<string> => [
-  ...renderSession(session),
-  "",
-  `read what it has done so far with \`hercule transcript read ${formatCell(session.id)}\``,
-];
+const renderSpawnedSession = (session: Session): ReadonlyArray<string> => {
+  const fallback = describeAccessModeFallback(session.requestedAccessMode, session.accessMode);
+  return [
+    ...renderSession(session),
+    ...(fallback === undefined ? [] : ["", fallback]),
+    "",
+    `read what it has done so far with \`hercule transcript read ${formatCell(session.id)}\``,
+  ];
+};
 
 /**
  * Returns a workflow's source unchanged, so the output can be edited and
@@ -1170,13 +1177,20 @@ const renderTaskEntityLinked = (
 
 /**
  * Returns the lines of `entity group`: the label, one line per member (the
- * ref, then its title or "restricted"), then one line per link with who
- * claims it. A cut group says so on the last line.
+ * ref, then its title or "restricted", then the words "Last known state - ..."
+ * for a member that lost access), then one line per link with who claims it. A cut group says so on the last line.
  */
 const renderInboxGroup = (group: InboxGroupDetail): ReadonlyArray<string> => [
   `group  ${group.label} (${String(group.members.length)} ${group.members.length === 1 ? "thing" : "things"})`,
   ...group.members.map((member) =>
-    `  ${member.ref}  ${member.restricted ? "restricted" : (member.title ?? "")}`.trimEnd(),
+    [
+      `  ${member.ref}`,
+      member.restricted ? "restricted" : (member.title ?? ""),
+      describeLostAccess(member.access),
+    ]
+      .filter((part) => part !== undefined)
+      .join("  ")
+      .trimEnd(),
   ),
   ...(group.links.length === 0 ? [] : ["links"]),
   ...group.links.map((link) => {

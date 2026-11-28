@@ -28,6 +28,7 @@ import {
   deriveAccess,
   deriveYours,
   findActiveKind,
+  isRestrictedPlace,
   isWorkRecord,
   parseStoredStatus,
   type ActiveEntityKind,
@@ -235,9 +236,11 @@ export const readFarEnd = (
 ): string => (pair.fromRef === ref ? pair.toRef : pair.fromRef);
 
 /**
- * Builds the peer a record draws as. A record no Connection can read now is
- * restricted: it keeps its kind and noun and shows no title, identifier,
- * URL, status or change, and it is never the user's.
+ * Builds the peer a record draws as. A restricted place (`isRestrictedPlace`)
+ * keeps its kind and noun and shows no title, identifier, URL, status or
+ * change, and it is never the user's. A full work record that lost access is
+ * not restricted: it keeps its last known facts and carries its `access`, so a
+ * row can say they are last known.
  */
 const buildPeer = (
   row: EntityRow,
@@ -245,7 +248,10 @@ const buildPeer = (
   latestChange: EntityChange | undefined,
 ): EntityPeer => {
   const base = { ref: row.ref, kind: row.kind as string, noun: row.noun as string };
-  if (deriveAccess(observations) !== "ok") return { ...base, yours: false, restricted: true };
+  const access = deriveAccess(observations);
+  if (isRestrictedPlace({ isWorkRecord: isWorkRecord(row), access })) {
+    return { ...base, yours: false, restricted: true };
+  }
   const { status } = parseStoredStatus(row.status as string | null);
   return {
     // Only a full record of a work kind has a detail to open.
@@ -255,6 +261,7 @@ const buildPeer = (
     ...(row.title === null ? {} : { title: row.title as string }),
     ...(row.url === null ? {} : { url: row.url as string }),
     ...(status === undefined ? {} : { status }),
+    ...(access === "ok" ? {} : { access }),
     yours: deriveYours(observations),
     restricted: false,
     ...(latestChange === undefined ? {} : { latestChange }),

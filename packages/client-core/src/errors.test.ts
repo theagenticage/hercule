@@ -30,7 +30,14 @@ describe("readValidationIssues", () => {
       undefined,
     );
     expect(
-      readValidationIssues(new ConnectionError("http://controller.test", new Error("refused"))),
+      readValidationIssues(
+        new ConnectionError({
+          operation: "setup.read",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: new Error("refused"),
+        }),
+      ),
     ).toBe(undefined);
     // A RequestError fails before the request is sent. Its issues are on the
     // error itself, not in a controller response.
@@ -43,9 +50,16 @@ describe("isNotFound", () => {
   it("returns true only for a not_found response from the controller", () => {
     expect(isNotFound(new ApiError("not_found", "No workflow has that id."))).toBe(true);
     expect(isNotFound(new ApiError("forbidden", "No."))).toBe(false);
-    expect(isNotFound(new ConnectionError("http://controller.test", new Error("refused")))).toBe(
-      false,
-    );
+    expect(
+      isNotFound(
+        new ConnectionError({
+          operation: "setup.read",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: new Error("refused"),
+        }),
+      ),
+    ).toBe(false);
     expect(isNotFound(null)).toBe(false);
   });
 });
@@ -55,7 +69,14 @@ describe("isInvalidState", () => {
     expect(isInvalidState(new ApiError("invalid_state", "An Agent uses it."))).toBe(true);
     expect(isInvalidState(new ApiError("conflict", "Changed."))).toBe(false);
     expect(
-      isInvalidState(new ConnectionError("http://controller.test", new Error("refused"))),
+      isInvalidState(
+        new ConnectionError({
+          operation: "mcpServer.update",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: new Error("refused"),
+        }),
+      ),
     ).toBe(false);
     expect(isInvalidState(null)).toBe(false);
   });

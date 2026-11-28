@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { buildBoard, buildCard } from "./cards.testing";
 import { listCardMoves } from "./list-card-moves";
 
-const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+const MERGED = {
+  kind: "fact" as const,
+  factId: 4,
+  ref: "github:pull-request:6221",
+  text: "Pull request #6221 merged",
+};
 
 describe("listCardMoves", () => {
   it("lists nothing when no card changed stage", () => {

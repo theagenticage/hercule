@@ -61,6 +61,7 @@ import {
   createNotFoundError,
   createValidationError,
   DEFAULT_PAGE_LIMIT,
+  describeAccessModeFallback,
   Id,
   INPUT_SORT_FIELDS,
   EMPTY_PROMPT_MESSAGE,
@@ -199,7 +200,13 @@ import {
   type StoredSubagent,
   type SubagentEventFacts,
 } from "./subagents";
-import { hasOtherTurn, omitRawPayload, readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import {
+  hasOtherTurn,
+  omitRawPayload,
+  readAssistantTexts,
+  readOpenTurnId,
+  readTurnStanding,
+} from "./transcript-log";
 import { buildStepKey, buildTurnInput } from "./turn-input";
 import { addUsageReport, clearProcessShare } from "./usage";
 
@@ -1041,13 +1048,22 @@ const make = Effect.gen(function* () {
       // Read after the reopen wrote its row, so the Thread certainly exists.
       const thread = Option.getOrThrow(yield* sessions.one(sessionId));
       const taskId = yield* tasks.rejoinThread({
+        sessionId,
         currentTaskId: thread.taskId ?? undefined,
         workspaceId: thread.workspaceId,
         title: thread.title,
         projectId: thread.projectId ?? undefined,
         actor,
       });
-      if (taskId !== thread.taskId) yield* sessions.setTaskId(sessionId, taskId);
+      if (taskId !== thread.taskId) {
+        yield* sessions.setTaskId(sessionId, taskId);
+        yield* tasks.settleLeadAfterMove({
+          sessionId,
+          fromTaskId: thread.taskId ?? undefined,
+          toTaskId: taskId,
+          continuedFromSessionId: undefined,
+        });
+      }
       yield* audit.append({
         kind: "session.reopened",
         actor,
@@ -1077,6 +1093,22 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersWarned);
+      yield* announce({ _tag: "transcript", sessionId });
+    });
+
+  /**
+   * Writes a `runtime.notice` event stamped `at` to the session's stream, in
+   * the caller's transaction, and announces the session's transcript. Like a
+   * warning, the row takes a sequence number of its own, so it is safe while
+   * a runner's turn runs.
+   */
+  const appendRuntimeNotice = (
+    sessionId: string,
+    message: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* sessions.appendRuntimeNotice(sessionId, message, at);
       yield* announce({ _tag: "transcript", sessionId });
     });
 
@@ -1795,13 +1827,16 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Ends every session waiting on a workspace that could not be created. The
-   * sessions never started, so there is no harness to stop and nothing to send
-   * to the runner. The user needs the reason, so the runner's error message is
-   * stored as a `session.exited` row on each session's stream, where the exit
-   * is shown.
+   * Ends every `queued` session waiting on a workspace that failed. Dispatch
+   * starts a session only in a ready workspace, so these can never start, and
+   * the runner holds no process for them: nothing needs stopping or sending.
+   * A session the runner already holds (`starting`, `idle` or `busy`) is left
+   * alone, because the runner owns its process and ends the session by
+   * reporting its exit. The user needs the reason, so the runner's error
+   * message is stored as a `session.exited` row on each ended session's
+   * stream, where the exit is shown.
    */
-  const endForWorkspace = (
+  const endQueuedForWorkspace = (
     workspaceId: string,
     message: string | null,
   ): Effect.Effect<void, SqlError> =>
@@ -1809,7 +1844,7 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const ended = yield* sessions.endInWorkspace(workspaceId, at);
+        const ended = yield* sessions.endQueuedInWorkspace(workspaceId, at);
         for (const { id, runnerId } of ended) {
           yield* sessions.append(id, {
             seq: 0,
@@ -2257,6 +2292,12 @@ const make = Effect.gen(function* () {
             if (toTaskId !== fromTaskId) {
               // `setTaskId` announces the cards of both Tasks.
               yield* sessions.setTaskId(id, toTaskId);
+              yield* tasks.settleLeadAfterMove({
+                sessionId: id,
+                fromTaskId,
+                toTaskId,
+                continuedFromSessionId: undefined,
+              });
               if (fromTaskId !== undefined) yield* tasks.markSummaryDirty(fromTaskId);
               yield* tasks.markSummaryDirty(toTaskId);
               yield* audit.append({
@@ -2661,6 +2702,7 @@ const make = Effect.gen(function* () {
                 requestedTaskId: open.taskSource.requestedTaskId,
                 callerTaskId: open.taskSource.callerTaskId,
                 workspaceId: open.spec.workspaceId,
+                sessionId: open.id,
                 // A session with no Agent is a Thread. This matches the
                 // `kind` column the database derives, because a session
                 // placed here answers no conversation and runs no step.
@@ -2705,6 +2747,27 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
+        // The stream is new, so this notice is its first event. A fork has a
+        // stream of its own and gets its own notice.
+        const fallbackNotice = describeAccessModeFallback(
+          open.requestedAccessMode,
+          open.spec.accessMode,
+        );
+        if (fallbackNotice !== undefined) {
+          yield* appendRuntimeNotice(open.id, fallbackNotice, open.at);
+        }
+        // After the insert, because the lead rules read the session's kind and
+        // Task from its row. Only a fork made by `session.continue` can take
+        // over its parent's lead, and a spawned child never does.
+        if (taskId !== undefined) {
+          yield* tasks.settleLeadAfterMove({
+            sessionId: open.id,
+            fromTaskId: undefined,
+            toTaskId: taskId,
+            continuedFromSessionId:
+              open.kind === "session.continued" ? open.parentSessionId : undefined,
+          });
+        }
         if (open.mcpServerIds !== undefined && open.mcpServerIds.length > 0) {
           yield* sessions.replaceMcpServers(open.id, open.mcpServerIds);
         }
@@ -3236,6 +3299,14 @@ const make = Effect.gen(function* () {
             tokens.forgetSessions([sessionId]);
           });
           yield* announceSessionChangeById(sessionId);
+          // A failed workspace report may have committed while this start was
+          // in flight. It skipped the session then, because it was `starting`.
+          // Dispatch claims only sessions in a ready workspace, so the session
+          // would wait for ever, with no reason shown.
+          const failed = yield* sessions.readFailedWorkspaceOfQueued(sessionId);
+          if (Option.isSome(failed)) {
+            yield* endQueuedForWorkspace(failed.value.workspaceId, failed.value.message);
+          }
         }),
       ),
 
@@ -3284,7 +3355,7 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    endForWorkspace,
+    endQueuedForWorkspace,
 
     /**
      * Cancels the step prompts still waiting on the sessions of a run that
@@ -3503,17 +3574,37 @@ const make = Effect.gen(function* () {
 
     /**
      * Sets the access mode and permission profile an exited session resumes
-     * under, joining the caller's transaction. The caller also puts the same
-     * access mode in the resume spec, so the row shows what the resumed
-     * harness runs under. It is kept on the service, not read straight from
-     * the repository, because it is a write, and every write to a session
-     * goes through this service.
+     * under, joining the caller's transaction. `session` is the stored row
+     * the caller already holds, from before the change. The caller also puts
+     * the same access mode in the resume spec, so the row shows what the
+     * resumed harness runs under. It is kept on the service, not read
+     * straight from the repository, because it is a write, and every write
+     * to a session goes through this service.
+     *
+     * When the resume changes what the session asked for or got, and the
+     * harness runs it under a different mode than it asked for, the call also
+     * writes a Runtime Notice saying so. A resume that changes neither still
+     * saves the access and the profile but appends no Runtime Notice, because
+     * an assistant's session unloads and resumes often and would repeat the
+     * same notice each time.
      *
      * It checks no grant. The caller is the controller daemon, resuming an
      * assistant's session under the assistant's current settings.
      */
-    setAccess: (sessionId: string, access: SessionAccess): Effect.Effect<void, SqlError> =>
-      sessions.setAccess(sessionId, access),
+    setAccess: (session: StoredSession, access: SessionAccess): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sessions.setAccess(session.id, access);
+        const changed =
+          access.requestedAccessMode !== session.requestedAccessMode ||
+          access.accessMode !== session.accessMode;
+        const fallbackNotice = describeAccessModeFallback(
+          access.requestedAccessMode,
+          access.accessMode,
+        );
+        if (changed && fallbackNotice !== undefined) {
+          yield* appendRuntimeNotice(session.id, fallbackNotice, yield* nowIso);
+        }
+      }),
 
     /**
      * Stores one user input and the model selection the session runs under
@@ -4125,7 +4216,13 @@ const make = Effect.gen(function* () {
         // other session is ignored.
         if (Option.isNone(found) || found.value.runnerId !== runnerId) return undefined;
         const held = tracking.get(id) ?? startTracking(yield* sessions.ingestState(id));
-        const folded = fold(held, seq, event);
+        // Where the turn stands is read only for a turn end, so a delta or any
+        // other event costs no extra read.
+        const standing =
+          event._tag === "turn.completed"
+            ? yield* readTurnStanding(sql, id, event.subagentId, event.turnId)
+            : undefined;
+        const folded = fold(held, seq, event, standing);
         if (folded === undefined) return undefined;
         if (event._tag === "content.delta") {
           yield* announce({
@@ -4171,12 +4268,28 @@ const make = Effect.gen(function* () {
         const before = session.status;
         // An event for a session that has already exited is still recorded,
         // but changes nothing else: no Request, no subagent, no usage.
-        const sessionAcceptsChanges = before !== "exited";
+        //
+        // A record-only `turn.completed` is the same: the end of a past turn
+        // must not end the agent's current turn, so it closes no Request and
+        // ends no subagent (spec 06 section 6.2).
+        const eventChangesSession = before !== "exited" && !folded.recordOnly;
         // An archived session may still run until its stop arrives. A Request
         // it opens in that time would wait for an answer that is refused, so
         // it is recorded in the stream and opens nothing. Events that close
         // Requests (resolved, turn end, exit) apply as for any session.
         const opensNothing = event._tag === "request.opened" && session.archived !== null;
+        if (folded.recordOnly && event._tag === "turn.completed") {
+          yield* Effect.logInfo(
+            "Ignored the end of an earlier turn, because a newer turn of the agent started or the turn had already ended",
+          ).pipe(
+            Effect.annotateLogs({
+              runnerId,
+              sessionId: id,
+              agent: event.subagentId ?? "the session's own agent",
+              turnId: event.turnId,
+            }),
+          );
+        }
         const at = yield* nowIso;
         let toolCallsChanged = false;
         for (const row of folded.rows) {
@@ -4206,7 +4319,7 @@ const make = Effect.gen(function* () {
         // only while the session accepts changes. The time is the one the
         // board shows as the end of the turn.
         if (
-          sessionAcceptsChanges &&
+          eventChangesSession &&
           event._tag === "turn.completed" &&
           attributeEvent(event) === undefined
         ) {
@@ -4220,16 +4333,16 @@ const make = Effect.gen(function* () {
         }
         // Before the Requests, so a Request a subagent opens can name it by
         // the description this same event may have filled in.
-        const askers = sessionAcceptsChanges
+        const askers = eventChangesSession
           ? yield* applySubagentEvent(session, event)
           : new Map<SubagentId, StoredSubagent>();
         let requestsChanged = false;
-        if (sessionAcceptsChanges && !opensNothing && isRequestEvent(event)) {
+        if (eventChangesSession && !opensNothing && isRequestEvent(event)) {
           const openRequests = computeOpenRequestsAfter(event, session.openRequests);
           requestsChanged = openRequests !== session.openRequests;
           if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);
         }
-        const usageChanged = sessionAcceptsChanges && (yield* applySessionUsage(session, event));
+        const usageChanged = eventChangesSession && (yield* applySessionUsage(session, event));
         // A session starting or exiting is what counts as use of its
         // workspace. The time is shown to the user; how long the workspace is
         // kept is decided by its leases, not by this time.

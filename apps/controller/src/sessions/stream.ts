@@ -24,6 +24,14 @@
  * A session's events come from its own agent and from its subagents. Only the
  * session's own agent moves the session's status and closes its own Requests
  * at the end of a turn (spec 06 section 13.1).
+ *
+ * One agent never has two turns at once (spec 06 section 6.2). A harness can
+ * still report the end of an earlier turn after a newer one has started, or
+ * report the end of a turn twice. A `turn.completed` that names a turn which
+ * started in the agent's current process and is no longer current is record
+ * only: it is stored, and it changes nothing else, so the session stays busy
+ * and the newer turn's Requests stay open. Any other `turn.completed` counts,
+ * including one whose `turn.started` was never reported.
  */
 import {
   isAsyncQuestion,
@@ -65,11 +73,30 @@ export interface Tracked {
   readonly buffers: ReadonlyMap<string, Held>;
 }
 
+/**
+ * Where a turn stands for the agent that ran it, as stored before the event
+ * being folded:
+ *
+ * - `current`: the agent's newest turn in the session's current process, and it
+ *   has not ended.
+ * - `past`: the turn started in the current process, and it ended or a newer
+ *   turn of the agent started after it.
+ * - `unknown`: no `turn.started` of that turn id is stored in the current
+ *   process. The start may have been lost, or the harness may never report one.
+ */
+export type TurnStanding = "current" | "past" | "unknown";
+
 /** The result of folding one event: rows to append, and the status it leaves behind. */
 export interface Folded {
   readonly rows: ReadonlyArray<StreamRow>;
   /** `undefined` when this event does not change the session's status. */
   readonly status: SessionStatus | undefined;
+  /**
+   * True for a `turn.completed` of a turn that is `past` for its agent. The
+   * event is stored and must change no status, close no Request and end no
+   * subagent.
+   */
+  readonly recordOnly: boolean;
   readonly next: Tracked;
 }
 
@@ -216,6 +243,10 @@ export const isRequestEvent = (event: HarnessEvent): event is RequestEvent =>
  * Returns `open` itself when nothing changed, so a caller can tell a change by
  * comparing references. A Request reported again with an id already open
  * changes nothing.
+ *
+ * A record-only `turn.completed` (see `Folded.recordOnly`) never reaches this
+ * function: the service skips it, because the end of a past turn must not close
+ * the Requests of the agent's current turn (spec 06 section 6.2).
  */
 export const computeOpenRequestsAfter = (
   event: RequestEvent,
@@ -266,11 +297,18 @@ export const compareOpenRequests = (
  * session has already seen, which means a replayed frame that writes nothing.
  * The caller keeps `next` only after the write commits, so a failed
  * transaction leaves the state as it was.
+ *
+ * `standing` is where the turn a `turn.completed` names stands for its agent
+ * (see `TurnStanding`). The caller reads it only for a `turn.completed` and
+ * passes `undefined` for every other event. A `turn.completed` of a `past` turn
+ * is record only: `recordOnly` is true and `status` is `undefined`. One of a
+ * `current` or `unknown` turn counts (spec 06 section 6.2).
  */
 export const fold = (
   tracked: Tracked,
   reported: number,
   event: HarnessEvent,
+  standing: TurnStanding | undefined,
 ): Folded | undefined => {
   const seq = tracked.base + reported;
   if (seq <= tracked.lastSeq) return undefined;
@@ -320,7 +358,12 @@ export const fold = (
     }
     // A delta is not a boundary and moves nothing: `busy` is already where the
     // turn that produced it put the session.
-    return { rows, status: undefined, next: { lastSeq: seq, base: tracked.base, buffers } };
+    return {
+      rows,
+      status: undefined,
+      recordOnly: false,
+      next: { lastSeq: seq, base: tracked.base, buffers },
+    };
   }
 
   // The three events after which no more text arrives for the held deltas.
@@ -334,9 +377,11 @@ export const fold = (
   if (event._tag === "session.exited") flushBuffers(() => true);
 
   rows.push({ seq, at: event.at, event });
+  const recordOnly = event._tag === "turn.completed" && standing === "past";
   return {
     rows,
-    status: computeStatusAfter(event),
+    status: recordOnly ? undefined : computeStatusAfter(event),
+    recordOnly,
     next: { lastSeq: seq, base: tracked.base, buffers },
   };
 };

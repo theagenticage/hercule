@@ -1,11 +1,11 @@
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import {
-  describeLockedRow,
   formatTargetDate,
   type LockedPlaceRow,
   type OpenPlaceRow,
   type PlaceRow,
 } from "@hercule/client-core/desk";
+import { describeRestrictedThing } from "@hercule/contract";
 import type { JSX } from "react";
 import { CloseIcon } from "../../icons/close";
 import { ExternalIcon } from "../../icons/external";
@@ -93,7 +93,7 @@ function LockedRow({
       <div className="relation-go">
         <LockIcon size={13} />
         <span className="relation-title">
-          {describeLockedRow(row, namePlugin(row.pluginId, plugins))}
+          {describeRestrictedThing(row.noun, namePlugin(row.pluginId, plugins))}
         </span>
         <span className="relation-tail">
           <Claim row={row} />
@@ -160,6 +160,8 @@ function HintRow({
  *   who says it is linked over that end while the row is hovered. A link the
  *   user can remove has a button that removes it, which also takes its room
  *   only while the row is hovered or has the focus.
+ * - A thing that lost access keeps its last known facts, with the note that
+ *   they are the last known ones under its title (`lastKnownNote`).
  * - A thing that changed at its source shows the change under its title.
  * - `plugins` is what `plugin.query` returns, for the marks and the names.
  */
@@ -188,14 +190,21 @@ function RelationRow({
       <span className="relation-mark">
         <PluginMark pluginId={row.pluginId} plugins={plugins} size={14} />
       </span>
-      {row.latestChange === undefined ? (
+      {row.latestChange === undefined && row.lastKnownNote === undefined ? (
         title
       ) : (
         <span className="relation-text">
           {title}
-          <span className="relation-change" data-tone={row.latestChange.tone}>
-            {row.latestChange.say}
-          </span>
+          {row.lastKnownNote !== undefined && (
+            <span className="relation-change" data-tone="norm">
+              {row.lastKnownNote}
+            </span>
+          )}
+          {row.latestChange !== undefined && (
+            <span className="relation-change" data-tone={row.latestChange.tone}>
+              {row.latestChange.say}
+            </span>
+          )}
         </span>
       )}
       <span className="relation-tail">

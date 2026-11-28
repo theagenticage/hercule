@@ -43,7 +43,7 @@ const SHORT_HASH_LENGTH = 7;
 /**
  * Renders the head of the page: the description of `revision` as the lead,
  * then two chips, the skill's source in full and `revision`'s size, then a
- * warning line for each field of `approvalEffects`, those of `revision`: the
+ * warning line for each field of `revision.approvalEffects`: `revision` is the
  * current revision, or for a skill with no current revision the proposed one
  * the page shows. Each effect lets tools run without the approval card on Claude Code, so the
  * user sees what the skill does after an import has applied it.
@@ -54,11 +54,12 @@ const SHORT_HASH_LENGTH = 7;
 export function SkillLead({
   skill,
   revision,
-  approvalEffects,
 }: {
   readonly skill: Skill;
-  readonly revision: Pick<SkillRevision, "description" | "fileCount" | "sizeBytes">;
-  readonly approvalEffects: SkillApprovalEffects | null;
+  readonly revision: Pick<
+    SkillRevision,
+    "description" | "fileCount" | "sizeBytes" | "approvalEffects"
+  >;
 }): JSX.Element {
   return (
     <div className="skill-lead">
@@ -70,7 +71,7 @@ export function SkillLead({
         </span>
         <span className="chip">{formatSkillSize(revision.fileCount, revision.sizeBytes)}</span>
       </div>
-      <SkillApprovalWarnings effects={approvalEffects} wording="current" />
+      <SkillApprovalWarnings effects={revision.approvalEffects} wording="current" />
       {skill.checkError !== null && (
         <p className="profile-note skill-warning skill-warning--fail">
           Last check failed: <InlineCode text={skill.checkError} />

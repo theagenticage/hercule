@@ -24,7 +24,6 @@ import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as HttpRouter from "effect/http/HttpRouter";
-import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -56,6 +55,7 @@ import {
   type RunnerHello,
 } from "@hercule/protocol";
 import { readBearerToken } from "../http/bearer";
+import { ListenerDrain } from "../http/drain";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
 import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
@@ -539,6 +539,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, (request) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
+    const drain = yield* ListenerDrain;
     const credential = readBearerToken(request);
     if (credential === undefined)
       return buildErrorResponse(createUnauthenticatedError(NO_CREDENTIAL));
@@ -556,9 +557,8 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
       return buildErrorResponse(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
     }
 
-    const socket = yield* request.upgrade;
-    // After the upgrade there is no HTTP response left to send a status on.
-    yield* holdConnection(admitted.value, socket);
-    return HttpServerResponse.empty();
+    // A controller that is stopping refuses the upgrade with a 503, and the
+    // runner connects again when the controller is back.
+    return yield* drain.serveSocket(request, (socket) => holdConnection(admitted.value, socket));
   }).pipe(Effect.withSpan("runner.socket")),
 );

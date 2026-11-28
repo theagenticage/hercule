@@ -94,6 +94,7 @@ import {
   type SessionSkillsFolders,
 } from "./skills";
 import { reportMetrics, type DiskAndMemory } from "./metrics";
+import type { RecordedFolders } from "./recorded-folders";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
@@ -235,6 +236,8 @@ export interface ConnectOptions {
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
   readonly herculeTool: HarnessRunnerContext["herculeTool"];
+  /** The record of the folders harness adapters make for their processes. */
+  readonly recordedFolders: RecordedFolders;
   /**
    * Follows a forwarding pointer from a controller that moved. Returns
    * `accepted` when the runner rewrote its controller URL, and this
@@ -478,6 +481,7 @@ export const connect = (
         // Required by the shared context type, although a probe, an install and
         // a login never load the skill.
         herculeTool: options.herculeTool,
+        recordedFolders: options.recordedFolders,
         attachmentsDir: null,
         editMarks: null,
         attachmentUploader: options.attachmentUploader,
@@ -503,6 +507,7 @@ export const connect = (
         sessionSkillsFolders: options.sessionSkillsFolders,
         binDir: options.binDir,
         herculeTool: options.herculeTool,
+        recordedFolders: options.recordedFolders,
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
         findBinary: findBinaryPath,

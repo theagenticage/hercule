@@ -120,7 +120,12 @@ describe("readSenderSession", () => {
   );
 
   it("fails with any other error, such as a controller that did not answer", async () => {
-    const failure = new ConnectionError("http://localhost:4100", new Error("refused"));
+    const failure = new ConnectionError({
+      operation: "session.read",
+      url: "http://localhost:4100",
+      reason: "cannot connect to http://localhost:4100",
+      cause: new Error("refused"),
+    });
     const client = buildClient(() => Promise.reject(failure));
 
     await expect(readSenderSession(client, SENDER_ID)).rejects.toBe(failure);

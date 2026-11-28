@@ -124,6 +124,7 @@ const COMMANDS: Record<string, string> = {
   "task.readDetail": "task details",
   "task.create": "task create",
   "task.update": "task update",
+  "task.reportStage": "task report",
   "task.move": "task move",
   "task.merge": "task merge",
   "task.linkEntity": "task link",

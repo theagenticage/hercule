@@ -205,7 +205,7 @@ describe("a positional whose row resolves tails", () => {
     ]);
   });
 
-  it("resolves an initiative tail among the open and the closed initiatives, for every command that takes one", async () => {
+  it("resolves an initiative tail in one listing of every initiative, open or closed", async () => {
     const buildInitiative = (tail: string) => ({
       id: buildId(tail),
       name: "Gift card refunds",
@@ -226,7 +226,7 @@ describe("a positional whose row resolves tails", () => {
       for (const initiative of [open, closed]) {
         const { fetch, client } = stubClient((request) =>
           request.path === "/api/v1/initiatives" && request.method === "GET"
-            ? { items: [request.query.get("closed") === "true" ? closed : open] }
+            ? { items: [open, closed] }
             : initiative,
         );
         const command = lookUpCommand("initiative", verb);
@@ -238,12 +238,46 @@ describe("a positional whose row resolves tails", () => {
 
         await execute(client, command, args);
 
+        // One listing, not one per state: an initiative closed or reopened
+        // between two listings would be in neither.
         const listed = fetch.calls.filter((call) => call.path === "/api/v1/initiatives");
-        expect(listed.map((call) => call.query.get("closed"))).toEqual([null, "true"]);
+        expect(listed.map((call) => [...call.query.entries()])).toEqual([[["closed", "include"]]]);
         expect(fetch.calls.at(-1), `${verb} ${initiative.id}`).toMatchObject({ method });
         expect(fetch.calls.at(-1)!.path).toContain(initiative.id);
       }
     }
+  });
+
+  it("refuses an initiative tail that an open and a closed initiative share, and writes nothing", async () => {
+    const buildInitiative = (id: string) => ({
+      id,
+      name: "Gift card refunds",
+      intent: "",
+      hue: 150,
+      createdAt: "2026-10-10T09:00:00.000Z",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+    });
+    const open = buildInitiative("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
+    const closedTwin = {
+      ...buildInitiative("0199e0e7-7b21-7000-8000-1111aaaaaaa1"),
+      closedAt: "2026-10-11T09:00:00.000Z",
+    };
+    // What two separate listings would see when the open one is closed
+    // between them: the open listing no longer holds it, and the closed
+    // listing was read before it was closed. A match among those answers
+    // would send the write to the twin.
+    const { fetch, client } = stubClient((request) => {
+      const closed = request.query.get("closed");
+      return {
+        items: closed === "include" ? [open, closedTwin] : closed === "true" ? [closedTwin] : [],
+      };
+    });
+    const remove = lookUpCommand("initiative", "delete");
+
+    await expect(
+      execute(client, remove, await parseArguments(remove, ["aaaaaaa1"], refuseStdinRead)),
+    ).rejects.toThrow(/aaaaaaa1 matches 2 initiative ids/);
+    expect(fetch.calls.every((call) => call.method === "GET")).toBe(true);
   });
 
   it("resolves a wiki page tail in one listing of every page, archived or not, in creation order", async () => {

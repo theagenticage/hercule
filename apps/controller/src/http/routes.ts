@@ -146,6 +146,7 @@ import {
   WorkflowService,
 } from "../workflows";
 import { buildAttachmentResponse } from "./attachment-response";
+import { ListenerDrainLayer } from "./drain";
 
 /**
  * Wraps a handler's service call: the contract's errors pass through, and
@@ -321,6 +322,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("move", ({ params, payload }) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),
       )
+      .handle("reportStage", ({ payload }) => withApiErrors(tasks.reportStage(payload)))
       .handle("linkEntity", ({ params, payload }) =>
         withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
       )
@@ -975,6 +977,12 @@ const WorkflowDomainLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
 
 /**
+ * Dispatch with the Task service it reads a lead's Task title from. A layer is
+ * built once, so this shares the Task service with every other group.
+ */
+const DispatchWithTasksLayer = DispatchLayer.pipe(Layer.provide(TaskServiceWithPortsLayer));
+
+/**
  * The External Entity service with the services it is built from: the task
  * service, which makes the Task of a thing taken on, and the plugin host's
  * lookups, which read a thing at its source. Placement uses it to start a
@@ -1019,7 +1027,7 @@ const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
       Layer.provide(
-        Layer.mergeAll(PlacementDomainLayer, LiveLayer).pipe(Layer.provide(DispatchLayer)),
+        Layer.mergeAll(PlacementDomainLayer, LiveLayer).pipe(Layer.provide(DispatchWithTasksLayer)),
       ),
     ),
   ),
@@ -1264,7 +1272,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),
-    Layer.provideMerge(DispatchLayer),
+    Layer.provideMerge(DispatchWithTasksLayer),
   ),
   ProvisioningLayer,
   SessionSkillsLayer,
@@ -1294,6 +1302,8 @@ export const operationLayers = operationServices.pipe(
   // Also offered to the drivers: the summary writer asks it whether a text
   // generation could run now.
   Layer.provideMerge(TextGenerationStatusLayer),
+  // One drain for the listener and for the routes that upgrade a socket.
+  Layer.provideMerge(ListenerDrainLayer),
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */

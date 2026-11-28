@@ -441,7 +441,7 @@ const make = Effect.gen(function* () {
       headers["mcp-protocol-version"] === undefined;
     if (asksWhichRevisions) return dispatch("stateless", caller, state, undefined, message);
     if (isStatelessMessage(headers, message.params)) {
-      const refusal = checkStatelessMetadata(headers, message.method, message.params);
+      const refusal = checkStatelessMetadata(headers, message);
       return refusal === undefined
         ? dispatch("stateless", caller, state, undefined, message)
         : Effect.succeed(respondRefusal(refusal, idOrNull));
@@ -577,9 +577,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Ends every open stream and refuses new ones. The controller calls it
-     * when it is asked to stop, before the listener starts to drain, because
-     * the listener waits for every open response and these never end by
-     * themselves.
+     * when it is asked to stop, before it waits for the requests in flight,
+     * because an open stream counts as a request in flight and never ends by
+     * itself.
      */
     closeStreams: tokenStates.closeStreams,
 

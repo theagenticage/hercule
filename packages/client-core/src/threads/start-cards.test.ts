@@ -16,6 +16,7 @@ const buildTask = (overrides: Partial<Task>): Task => ({
   stage: "planned",
   priority: "normal",
   labels: [],
+  leadSessionId: null,
   provenance: [],
   createdAt: AT,
   updatedAt: AT,

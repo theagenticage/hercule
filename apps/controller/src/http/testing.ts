@@ -15,7 +15,7 @@ import type * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Exit from "effect/Exit";
-import type * as Fiber from "effect/Fiber";
+import * as Fiber from "effect/Fiber";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -152,6 +152,7 @@ import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../pr
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
+import { ListenerDrain } from "./drain";
 import { operationLayers } from "./routes";
 import { listenerOptions, serve } from "./server";
 import type { WebBundle } from "./static";
@@ -463,6 +464,7 @@ export type LiveSessionsServices =
   | DiscussionInputs
   | DiscussionService
   | SessionService
+  | TaskService
   | PluginHost
   | PromotionState
   | TextGeneration
@@ -512,6 +514,8 @@ export interface ServerHarness {
   readonly reboot: RebootArranger;
   readonly runWithLiveSessions: LiveSessionsRunner;
   readonly runWithShippedWorkflowServices: ShippedWorkflowServicesRunner;
+  /** The listener's drain, which a test uses to start the controller's shutdown. */
+  readonly drain: ListenerDrain["Service"];
   /**
    * The controller's secrets repository. A test uses it to arrange a secret
    * the public API refuses to write, such as a connection's credentials.
@@ -737,6 +741,7 @@ export const withServer = (
         const shippedWorkflowServices = yield* Effect.context<ShippedWorkflowServices>();
         const runWithShippedWorkflowServices: ShippedWorkflowServicesRunner = (effect) =>
           Effect.runPromiseExit(Effect.provideContext(effect, shippedWorkflowServices));
+        const drain = yield* ListenerDrain;
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
         const mcpServerCalls = yield* McpServerCalls;
@@ -764,6 +769,7 @@ export const withServer = (
             reboot,
             runWithLiveSessions,
             runWithShippedWorkflowServices,
+            drain,
             secrets,
             promotion,
             mcpServerCalls,
@@ -1039,6 +1045,37 @@ export const collectPushes = (
   topic: MutableLiveTopic,
 ): Effect.Effect<Collected, never, Scope.Scope> =>
   collectStream(Stream.drop(client.subscribe({ topic }), 1));
+
+/**
+ * Runs `act` while a client holds a subscription to the `task` topic, and
+ * returns the pushes the subscription received after its first one, in order.
+ * It returns once the window in which record changes are collected has passed
+ * after `act` finished, so a push that `act` caused is in the result. A test
+ * about how often a Task was announced reads the result: a Task's `created`
+ * and `updated` announcements are separate messages.
+ */
+export const collectTaskPushesDuring = async (
+  harness: Pick<ServerHarness, "base" | "live">,
+  token: string,
+  act: () => Promise<void>,
+): Promise<ReadonlyArray<LiveMessage>> => {
+  const ticket = await fetchTicket(harness.base, token);
+  const received: Array<LiveMessage> = [];
+  await onSocket(harness.base, (client) =>
+    Effect.gen(function* () {
+      yield* client.hello({ v: 1, ticket });
+      const pushes = yield* collectPushes(client, "task");
+      yield* Effect.promise(() => expectHeld(harness.live, 1, "task"));
+      yield* Effect.promise(async () => {
+        await act();
+        await waitForLiveToSettle();
+      });
+      yield* Fiber.interrupt(pushes.fiber);
+      received.push(...pushes.received);
+    }),
+  );
+  return received;
+};
 
 /** Runs a subscription's stream in the background and keeps every message it receives, in order. */
 const collectStream = <E>(

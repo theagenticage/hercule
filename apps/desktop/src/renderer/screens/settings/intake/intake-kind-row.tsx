@@ -19,7 +19,7 @@ import "./intake-settings.css";
 export function IntakeKindRow({
   label,
   hint,
-  hintIsCode = false,
+  hintIsCode: hintIsCodeProp,
   on,
   source,
   canReset,
@@ -40,6 +40,7 @@ export function IntakeKindRow({
   readonly onToggle: (on: boolean) => void;
   readonly onReset: () => void;
 }): JSX.Element {
+  const hintIsCode = hintIsCodeProp ?? false;
   const id = useId();
   const labelId = `${id}-label`;
   const hintId = `${id}-hint`;

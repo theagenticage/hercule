@@ -480,6 +480,29 @@ describe("skill.read", () => {
     expect(detail.proposedRevisions).toEqual([]);
   });
 
+  it("gives every revision its own approval effects, so a client needs no diff to warn", async () => {
+    const withFrontmatter = (lines: string) => [
+      {
+        path: "SKILL.md",
+        mode: "644" as const,
+        content: encode(`---\nname: teach\ndescription: Teaches.\n${lines}\n---\nBody\n`),
+      },
+    ];
+    const detail = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", withFrontmatter("allowed-tools: Bash(git:*)"));
+        yield* asSession(proposeSkill("teach", withFrontmatter("hooks:\n  Stop: a")));
+        return yield* Effect.flatMap(SkillService, (service) => service.read("teach"));
+      }),
+    );
+    expect(detail.history.map((revision) => revision.approvalEffects)).toEqual([
+      { allowedTools: "Bash(git:*)", hooks: null },
+    ]);
+    expect(detail.proposedRevisions.map((revision) => revision.approvalEffects)).toEqual([
+      { allowedTools: null, hooks: '{"Stop":"a"}' },
+    ]);
+  });
+
   it("is internal when the current revision's archive is missing, and says to import the skill again", async () => {
     const { error, dataDir } = await run(
       Effect.gen(function* () {

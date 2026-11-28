@@ -82,6 +82,7 @@ const buildCreatedTask = ({ title }: { readonly title: string }): Task => ({
   id: buildTaskId(60),
   title,
   description: "",
+  leadSessionId: null,
   status: "open",
   stage: "exploring",
   priority: "normal",

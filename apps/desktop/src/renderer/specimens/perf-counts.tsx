@@ -233,6 +233,7 @@ function buildWorkWorld(): {
     id: card.id,
     title: card.title,
     description: "",
+    leadSessionId: null,
     status: "open",
     stage: card.stage,
     priority: card.priority,

@@ -642,6 +642,33 @@ const make = Effect.gen(function* () {
         CROSS JOIN sessions ON id = active_id`;
 
   /**
+   * Appends an event the controller writes itself, rather than a runner
+   * reporting it, at the next position of the event's session, and joins the
+   * caller's transaction.
+   *
+   * The row takes a negative `runner_seq`: the first such event gets -1, the
+   * next -2, and so on. A runner numbers its events upward from 1, so the two
+   * number spaces never meet. This is what lets the controller write an event
+   * at any moment, even while a runner's turn is running: the write cannot
+   * take the sequence number of a runner event that is folded but not yet
+   * written, and it leaves the session's sequence offset and its cached
+   * ingest state (the text held for open items) untouched.
+   */
+  const insertControllerEvent = (event: HarnessEvent): Effect.Effect<void, SqlError> => {
+    const id = uuidFromString(event.sessionId);
+    return Effect.asVoid(sql`
+      INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
+      VALUES (
+        ${id},
+        COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+        COALESCE((SELECT MIN(runner_seq) FROM session_stream
+                  WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
+        ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
+      )
+    `);
+  };
+
+  /**
    * Announces the card of each Task that the given session rows belong to,
    * once per Task. A row with no Task changes no card.
    */
@@ -1149,17 +1176,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Appends a `runtime.warning` event stamped `at`, which the controller
-     * writes itself rather than a runner reporting it, at the next position
-     * of the session's stream, and joins the caller's transaction.
-     *
-     * The event takes a negative `runner_seq`: the first warning gets -1, the
-     * next -2, and so on. A runner numbers its events upward from 1, so the two
-     * number spaces never meet. This is what lets the controller write a
-     * warning at any moment, even while a runner's turn is running: the write
-     * cannot take the sequence number of a runner event that is folded but not
-     * yet written, and it leaves the session's sequence offset and its cached
-     * ingest state (the text held for open items) untouched.
+     * Appends a `runtime.warning` event stamped `at` to the session's stream,
+     * joining the caller's transaction. The controller writes it itself; a
+     * runner does not report it.
      *
      * `mcpServers` is given when the warning is about MCP Servers: it names
      * each server and why (spec 21 section 3.8).
@@ -1173,26 +1192,32 @@ const make = Effect.gen(function* () {
         readonly reason: McpServerWarningReason;
       }>,
     ): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const id = uuidFromString(sessionId);
-        const event: HarnessEvent = {
-          _tag: "runtime.warning",
-          eventId: crypto.randomUUID(),
-          sessionId,
-          at,
-          message,
-          ...(mcpServers === undefined ? {} : { mcpServers }),
-        };
-        yield* sql`
-          INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
-          VALUES (
-            ${id},
-            COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
-            COALESCE((SELECT MIN(runner_seq) FROM session_stream
-                      WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
-            ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
-          )
-        `;
+      insertControllerEvent({
+        _tag: "runtime.warning",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        message,
+        ...(mcpServers === undefined ? {} : { mcpServers }),
+      }),
+
+    /**
+     * Appends a `runtime.notice` event stamped `at` to the session's stream,
+     * joining the caller's transaction. The controller writes it itself; a
+     * runner does not report it. The notice has no turn: it is information
+     * about the session, not about one turn.
+     */
+    appendRuntimeNotice: (
+      sessionId: string,
+      message: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      insertControllerEvent({
+        _tag: "runtime.notice",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        message,
       }),
 
     /**
@@ -1881,6 +1906,23 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Returns the title of each listed session, keyed by session id. An id
+     * with no session has no entry. The ids reach SQLite as one JSON text, so
+     * the statement is the same for one id and for a thousand.
+     */
+    listTitles: (
+      sessionIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      Effect.gen(function* () {
+        if (sessionIds.length === 0) return new Map<string, string>();
+        const hexIds = JSON.stringify(sessionIds.map((id) => id.replaceAll("-", "")));
+        const rows = yield* sql<{ readonly id: Uint8Array; readonly title: string }>`
+          SELECT id, title FROM sessions
+          WHERE id IN (SELECT unhex(value) FROM json_each(${hexIds}))`;
+        return new Map(rows.map((row) => [uuidToString(row.id), row.title] as const));
+      }),
+
+    /**
      * Returns up to `limit` of this runner's oldest queued sessions, with what
      * the start frame needs: the exact spec each was queued with, and its
      * account and harness. `after` continues an earlier batch from where it
@@ -1948,14 +1990,39 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends every session in a workspace that has not exited, and returns those
-     * rows as they were before. The caller runs it in a transaction.
+     * Returns the workspace of a `queued` session when that workspace has
+     * failed, with the message the runner gave, or `none`.
      */
-    endInWorkspace: (
+    readFailedWorkspaceOfQueued: (
+      sessionId: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly workspaceId: string; readonly message: string | null }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly workspace_id: Uint8Array; readonly message: string | null }>`
+          SELECT w.id AS workspace_id, w.message
+          FROM sessions s JOIN workspaces w ON w.id = s.workspace_id
+          WHERE s.id = ${uuidFromString(sessionId)} AND s.status = 'queued' AND w.status = 'failed'
+        `,
+        (rows) =>
+          Option.fromNullishOr(rows[0]).pipe(
+            Option.map((row) => ({
+              workspaceId: uuidToString(row.workspace_id),
+              message: row.message,
+            })),
+          ),
+      ),
+
+    /**
+     * Ends every `queued` session in a workspace, and returns those rows as
+     * they were before. The caller runs it in a transaction.
+     */
+    endQueuedInWorkspace: (
       workspaceId: string,
       at: string,
     ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
-      endMatching(sql`workspace_id = ${uuidFromString(workspaceId)}`, at),
+      endMatching(sql`workspace_id = ${uuidFromString(workspaceId)} AND status = 'queued'`, at),
 
     /**
      * Ends every session still open on this runner, queued ones included, and

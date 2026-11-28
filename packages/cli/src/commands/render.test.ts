@@ -106,6 +106,28 @@ describe("hercule entity group", () => {
     ]);
   });
 
+  it("says the title of a member that lost access is the last known one", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          labelRef: "acme:ticket:a",
+          label: "Ticket a",
+          members: [{ ...peer("acme:ticket:a", "Ticket a"), access: "inaccessible" }],
+          links: [],
+          complete: true,
+        },
+      },
+      lookUpCommand("entity", "group"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "group  Ticket a (1 thing)",
+      "  acme:ticket:a  Ticket a  Last known state - you can no longer open it",
+    ]);
+  });
+
   it("says when the group was cut", () => {
     const lines = renderHuman(
       {
@@ -142,6 +164,49 @@ describe("hercule session spawn", () => {
     expect(lines).toContain(
       `read what it has done so far with \`hercule transcript read ${SESSION.slice(-8)}\``,
     );
+  });
+
+  it("prints the access mode fallback between the session and the hint when the modes differ", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: SESSION,
+          status: "starting",
+          openRequests: [],
+          requestedAccessMode: "auto",
+          accessMode: "auto-accept-edits",
+        },
+      },
+      lookUpCommand("session", "spawn"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines.slice(-4)).toEqual([
+      "",
+      "Runs in Auto-accept edits, because this harness does not support Auto.",
+      "",
+      `read what it has done so far with \`hercule transcript read ${SESSION.slice(-8)}\``,
+    ]);
+  });
+
+  it("prints no access mode fallback when the session runs in the mode it asked for", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: SESSION,
+          status: "starting",
+          openRequests: [],
+          requestedAccessMode: "auto",
+          accessMode: "auto",
+        },
+      },
+      lookUpCommand("session", "spawn"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines.join("\n")).not.toContain("does not support");
   });
 
   it("prints no hint after an ordinary read", () => {
@@ -2146,6 +2211,7 @@ describe("hercule skill", () => {
     fileCount: 2,
     sizeBytes: 6656,
     description: "Interviews the user.",
+    approvalEffects: { allowedTools: null, hooks: null },
     createdAt: "2026-10-18T09:00:00.000Z",
     createdBy: "user",
     appliedAt,

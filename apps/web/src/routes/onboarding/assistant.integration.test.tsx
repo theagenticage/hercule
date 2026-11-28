@@ -1,7 +1,9 @@
 /**
  * Tests the assistant step of onboarding (`/onboarding/assistant`) against a
- * stubbed controller. The step names the assistant that setup created, or
- * creates one when there is none, and only then records itself as done.
+ * stubbed controller. The step names the assistant that setup created and
+ * only then records itself as done. On a fresh install there is no assistant
+ * (the first Provider Account creates it), so the step explains that and
+ * records itself without creating one.
  */
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -12,7 +14,6 @@ import {
   expectInDocumentOrder,
   renderApp,
   stubApi,
-  type Call,
   type Handler,
 } from "../../app/testing";
 
@@ -46,8 +47,8 @@ const ASSISTANT_PATH = `/api/v1/assistants/${HERCULE.id}`;
  * Returns stub routes for a controller whose user has confirmed the timezone
  * and nothing else. The user settings are kept in memory, so a `PATCH` is
  * read back by the entry guard on the next navigation. `assistants` is what
- * `GET /api/v1/assistants` returns at first; a create adds to it and a rename
- * changes it, so a later read returns what the writes left.
+ * `GET /api/v1/assistants` returns at first; a rename changes it, so a later
+ * read returns what the write left.
  */
 const buildController = (
   assistants: readonly Assistant[],
@@ -73,11 +74,6 @@ const buildController = (
       const renamed = { ...HERCULE, ...(call.body as Partial<Assistant>) };
       list = list.map((each) => (each.id === renamed.id ? renamed : each));
       return { body: renamed };
-    },
-    "POST /api/v1/assistants": (call) => {
-      const created = { ...HERCULE, ...(call.body as Partial<Assistant>) };
-      list = [...list, created];
-      return { body: created };
     },
     ...extra,
   };
@@ -160,29 +156,46 @@ describe("the assistant step", () => {
     ).toBe(false);
   });
 
-  it("creates an assistant with the typed name when there is none, then records the step", async () => {
-    const { api, router } = await openStep([]);
+  it("explains where the assistant comes from when there is none, and lets the user continue", async () => {
+    // A fresh install: no account, no runner. Continue lands on Sessions,
+    // which reads both, so a missing stub would show up as an error there.
+    const { api, router } = await openStep([], {
+      "GET /api/v1/runners": { body: { items: [] } },
+      "GET /api/v1/provider-accounts": { body: [] },
+      "GET /api/v1/controller": {
+        body: {
+          id: "01a06d02-a000-7000-8000-000000000002",
+          publicKey: "bm90LWEta2V5",
+          version: "0.4.2",
+          defaultRunnerId: null,
+          localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+        },
+      },
+    });
 
-    await submitName("Ada");
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Your assistant comes with your first account",
+      }),
+    ).toBeDefined();
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/");
     });
-    const created = api.calls.findIndex(
-      (call) => call.method === "POST" && call.path === "/api/v1/assistants",
-    );
-    const recorded = api.calls.findIndex(
+    expect(await screen.findByText("No runner has been detected on this machine.")).toBeDefined();
+    const recorded = api.calls.find(
       (call) => call.method === "PATCH" && call.path === "/api/v1/settings",
     );
-    expect(api.calls[created]?.body).toEqual({ name: "Ada" });
-    expect(api.calls[recorded]?.body).toMatchObject({
+    expect(recorded?.body).toMatchObject({
       user: { "onboarding.completedSteps": ["timezone", "assistant"] },
     });
-    expect(created).toBeGreaterThanOrEqual(0);
-    expect(recorded).toBeGreaterThan(created);
-    expect(api.calls.some((call) => call.method === "PATCH" && call.path === ASSISTANT_PATH)).toBe(
-      false,
-    );
+    expect(
+      api.calls.some((call) => call.method !== "GET" && call.path.includes("assistants")),
+    ).toBe(false);
   });
 
   it("disables Continue while the name is empty", async () => {
@@ -212,22 +225,18 @@ describe("the assistant step", () => {
     expect(router.state.location.pathname).toBe("/onboarding/assistant");
   });
 
-  it("shows a refused create under the field, records no step and stays on the step", async () => {
-    const { api, router } = await openStep([], {
-      "POST /api/v1/assistants": {
+  it("shows a refused record under the explanation and stays on the step when there is no assistant", async () => {
+    const { router } = await openStep([], {
+      "PATCH /api/v1/settings": {
         status: 500,
         body: buildErrorBody("internal", "the database is locked"),
       },
     });
 
-    await submitName("Ada");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Continue" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("the database is locked");
-    expectInDocumentOrder([screen.getByLabelText("Name"), alert]);
-    expect(
-      api.calls.some((call) => call.method === "PATCH" && call.path === "/api/v1/settings"),
-    ).toBe(false);
     expect(router.state.location.pathname).toBe("/onboarding/assistant");
   });
 
@@ -258,41 +267,6 @@ describe("the assistant step", () => {
         index < recorded,
     );
     expect(refreshed).toBe(true);
-  });
-
-  // Added in review round 1 of #92 slice 3 (D-83). The step used the list it
-  // rendered with, so a retry after a refused settings write created a second
-  // assistant instead of renaming the one it had just created.
-  it("renames the assistant it created on a retry after the step could not be recorded", async () => {
-    let refused = false;
-    const { api, router } = await openStep([], {
-      "PATCH /api/v1/settings": (call: Call) => {
-        if (!refused) {
-          refused = true;
-          return { status: 500, body: buildErrorBody("internal", "the database is locked") };
-        }
-        return {
-          body: {
-            controller: {},
-            user: { timezone: "Europe/Amsterdam", ...(call.body as { user: object }).user },
-          },
-        };
-      },
-    });
-
-    await submitName("Ada");
-    await screen.findByRole("alert");
-    await submitName("Ada");
-
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
-    });
-    const writes = api.calls.filter(
-      (call) =>
-        (call.method === "POST" && call.path === "/api/v1/assistants") ||
-        (call.method === "PATCH" && call.path === ASSISTANT_PATH),
-    );
-    expect(writes.map((call) => call.method)).toEqual(["POST", "PATCH"]);
   });
 
   // Added in review round 1 of #92 slice 3 (F-73). `isPending` reaches the

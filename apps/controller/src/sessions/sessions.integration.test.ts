@@ -580,6 +580,12 @@ describe("session.spawn", () => {
         // call named one.
         modelSelection: { model: "clever", options: {} },
         accessMode: "approval-required",
+        // A new Thread leads its own Task, so it is told how to report the
+        // Task's stage. The sessions domain cannot import the text from the
+        // controller daemon, so the test checks its opening words.
+        coordination: expect.stringMatching(
+          /^This thread leads the Task \u201Chello\u201D on /,
+        ) as unknown,
         // Neither settings key is set, so the spec has the default timeouts.
         timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
       });
@@ -598,7 +604,10 @@ describe("session.spawn", () => {
         ),
       );
 
-      expect(row?.spec).toBe(JSON.stringify(start.spec));
+      // The coordination text is built at every start and never stored.
+      const { coordination, ...started } = start.spec;
+      expect(coordination).toContain("This thread leads the Task");
+      expect(row?.spec).toBe(JSON.stringify(started));
     });
   });
 
@@ -3534,8 +3543,11 @@ describe("session.update", () => {
         ),
       );
       // The change is stored on the session row, never in the spec the runner
-      // was started with.
-      expect(row?.spec).toBe(JSON.stringify(start.spec));
+      // was started with. The coordination text is built at every start and
+      // never stored.
+      const { coordination, ...started } = start.spec;
+      expect(coordination).toContain("This thread leads the Task");
+      expect(row?.spec).toBe(JSON.stringify(started));
     });
   });
 
@@ -4064,7 +4076,7 @@ describe("an input the runner refused with a typed failure", () => {
 
       // The turn ends, and the flush sends the waiting input as the next turn.
       arranged.wire.answering(() => "opened");
-      reportEvent(arranged.wire, ...buildTranscript(session.id)[1]!);
+      reportTurnStarted(arranged, session.id, 2);
       reportTurnCompleted(arranged, session.id, 3);
       await waitUntil("delivered the waiting input", async () => {
         const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
@@ -4603,13 +4615,7 @@ const reportHeldSessions = (
 /** Starts a session and then a turn, so the controller reads the session as busy. */
 const startBusySession = async (arranged: Arranged, prompt: string): Promise<Session> => {
   const session = await startSession(arranged, prompt);
-  reportEvent(arranged.wire, 2, {
-    eventId: crypto.randomUUID(),
-    sessionId: session.id,
-    at,
-    _tag: "turn.started",
-    turnId: `turn-${session.id}`,
-  });
+  reportTurnStarted(arranged, session.id, 2);
   return await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
 
@@ -4631,7 +4637,7 @@ const startBusySessionOn = async (
     ...base,
     eventId: crypto.randomUUID(),
     _tag: "turn.started",
-    turnId: `turn-${session.id}`,
+    turnId: "t2",
   });
   return await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
@@ -5663,6 +5669,84 @@ describe("session.respondToQuestion", () => {
     });
   });
 
+  it("ignores a late completion of an earlier turn, and ends the newer turn only when it completes", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      const queued = await sendInput(arranged, session.id, { text: "two" });
+      expect(await queued.json()).toMatchObject({ result: "queued" });
+      const base = { sessionId: session.id, at };
+      reportEvent(arranged.wire, 2, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.started",
+        turnId: "t1",
+      });
+      reportEvent(arranged.wire, 3, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.started",
+        turnId: "t2",
+      });
+      reportEvent(arranged.wire, 4, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "request.opened",
+        request: {
+          requestId: REQUEST_ID,
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: DECISIONS,
+          detail: { command: "ls -la" },
+        },
+      });
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 1);
+
+      // Codex can report the end of t1 after t2 has started.
+      reportEvent(arranged.wire, 5, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "completed",
+      });
+      await waitUntil("stored the late turn.completed", async () => {
+        const rows = await readStreamRows(arranged.harness, session.id);
+        return rows.some((row) => row.tag === "turn.completed") ? true : undefined;
+      });
+      const stillRunning = await readSession(arranged, session.id);
+      expect(stillRunning.status).toBe("busy");
+      expect(stillRunning.openRequests.map((request) => request.requestId)).toEqual([REQUEST_ID]);
+      expect(listInputFrames(arranged.wire)).toEqual([]);
+
+      reportEvent(arranged.wire, 6, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.completed",
+        turnId: "t2",
+        state: "completed",
+      });
+      // The turn's end closes the Request and sends the queued input.
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 0);
+      const sent = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+      expect(sent.map((frame) => frame.input.text)).toEqual(["two"]);
+    });
+  });
+
+  it("ends the session's turn when the turn.started of its next turn was never reported", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+
+      // The runner answers the input with `opened`, which makes the session
+      // busy. Its `turn.started` is lost, so only the turn's end arrives.
+      const sent = await sendInput(arranged, session.id, { text: "two" });
+      expect(sent.status, await sent.clone().text()).toBe(200);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      reportTurnCompleted(arranged, session.id, 5);
+
+      await waitForSession(arranged, session.id, (one) => one.status === "idle");
+    });
+  });
+
   /**
    * Each case has exactly one thing wrong with it, so the refusal names only
    * that one field.
@@ -6622,6 +6706,53 @@ describe("session.spawn into a workspace", () => {
       expect(exit!.event).toContain("could not read from remote repository");
       // The session never started, so the runner never got a start frame.
       expect(listFramesTagged(arranged.wire, "sessionStart")).toEqual([]);
+    });
+  });
+
+  it("leaves a running session alone when its ready workspace is observed unavailable", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspaceId = String(session.workspaceId);
+      reportWorkspaceReady(arranged, await readWorkspace(arranged, workspaceId));
+      // The start frame has really reached the runner.
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+
+      // The runner's own observation finds the checkout gone. The harness is
+      // still running on the runner, so only its exit report may end the session.
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId,
+        status: "failed",
+        observedAt: new Date().toISOString(),
+        message: "The selected checkout is missing.",
+      } as never);
+      await waitUntil("workspace reads failed", async () => {
+        const workspace = await readWorkspace(arranged, workspaceId);
+        return workspace.status === "failed" ? workspace : undefined;
+      });
+
+      expect((await readSession(arranged, session.id)).status).toBe("busy");
+      const stream = await readStreamRows(arranged.harness, session.id);
+      expect(stream.map((row) => row.tag)).not.toContain("session.exited");
+
+      // The user can still stop it: the runner gets the stop and reports the exit.
+      const response = await stopSession(arranged, session.id);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 1);
+      expect(sent[0]!.sessionId).toBe(session.id);
+      reportExited(arranged.wire, session.id, 2);
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
     });
   });
 

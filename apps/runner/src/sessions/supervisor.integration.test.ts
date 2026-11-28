@@ -1,4 +1,5 @@
 import { makeGithubTokenCopies } from "../credentials";
+import { unrecordedFolders } from "../recorded-folders.testing";
 import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests the supervisor the way a connection uses it: the controller's frames go
@@ -401,6 +402,7 @@ const buildConnection = (
       skill: "# hercule",
       claudePluginDir: join(under, "claude-plugin"),
     },
+    recordedFolders: unrecordedFolders,
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: path },
     findBinary: (name) => `/usr/local/bin/${name}`,

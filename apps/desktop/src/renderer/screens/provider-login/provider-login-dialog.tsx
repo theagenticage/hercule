@@ -43,7 +43,7 @@ export function ProviderLoginDialog({
   client,
   providerAccountId,
   runnerId,
-  signInAgain = false,
+  signInAgain: signInAgainProp,
   onSignedIn,
   onClose,
 }: {
@@ -54,6 +54,7 @@ export function ProviderLoginDialog({
   readonly onSignedIn?: () => void;
   readonly onClose: () => void;
 }): JSX.Element {
+  const signInAgain = signInAgainProp ?? false;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;

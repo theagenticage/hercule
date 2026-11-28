@@ -232,27 +232,21 @@ export const buildReadableCondition = (entityAlias: string): string =>
  * record that lost access is not restricted: it keeps its last known facts and
  * shows its `access`.
  *
- * Three places use this rule when they draw a thing outside the Inbox's own
- * queries: the context block of a prompt (`buildPromptContextThing`), the
- * cards (`buildEntityCard`) and the label of a linked group
- * (`buildPromptContextOrigin`).
+ * Every place that draws a thing outside the Inbox's own queries uses this
+ * rule: the context block of a prompt (`buildPromptContextThing`), the label
+ * of a linked group (`buildPromptContextOrigin`), the cards
+ * (`buildEntityCard`), and the places and peers of the Linked rows
+ * (`buildPlace`, `buildPeer`). The words for a restricted place are
+ * `describeRestrictedThing` of the contract.
+ *
+ * `buildReadableCondition` is the SQL form of the access half of this rule
+ * ("some Connection can read it"), for the Inbox's facet values and pins,
+ * which are always places.
  */
 export const isRestrictedPlace = (record: {
   readonly isWorkRecord: boolean;
   readonly access: EntityAccess;
 }): boolean => !record.isWorkRecord && record.access !== "ok";
-
-/**
- * Builds the label of a restricted place: it names the kind of record and
- * never the ref or the title. The wording matches the locked rows the apps
- * draw, such as "A pull request you cannot open". `noun` is empty or null
- * for a record that has no noun stored.
- */
-export const buildLockedLabel = (noun: string | null): string => {
-  const kind =
-    noun === null || noun === "" ? "record" : noun.charAt(0).toLowerCase() + noun.slice(1);
-  return `${/^[aeiou]/i.test(kind) ? "An" : "A"} ${kind} you cannot open`;
-};
 
 /** Checks that any Connection reports the thing as the user's own. */
 export const deriveYours = (
@@ -368,15 +362,18 @@ export const readLinkedEntityFacts = (row: EntityRow): LinkedEntityFacts => {
 };
 
 /**
- * Builds the place a record draws as above the cards. A thing no Connection
- * reads now is restricted: it keeps its kind and noun, and shows no title,
- * URL, status, progress or date.
+ * Builds the place a record draws as above the cards. A restricted place
+ * (`isRestrictedPlace`) keeps its kind and noun, and shows no title, URL,
+ * status, progress or date. A full work record that lost access is not
+ * restricted: it keeps its last known facts and carries its `access`, so a row
+ * can say they are last known.
  */
 export const buildPlace = (
   row: EntityRow,
   observations: ReadonlyArray<ObservationRow>,
 ): EntityPlace => {
-  const restricted = deriveAccess(observations) !== "ok";
+  const access = deriveAccess(observations);
+  const restricted = isRestrictedPlace({ isWorkRecord: isWorkRecord(row), access });
   const status = restricted ? undefined : parseStoredStatus(row.status as string | null).status;
   const progress = restricted
     ? undefined
@@ -392,6 +389,7 @@ export const buildPlace = (
     ...(status === undefined ? {} : { status }),
     ...(progress === undefined ? {} : { progress }),
     ...(restricted || row.target_date === null ? {} : { targetDate: row.target_date as string }),
+    ...(restricted || access === "ok" ? {} : { access }),
     restricted,
   };
 };

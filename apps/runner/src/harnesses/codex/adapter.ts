@@ -60,6 +60,7 @@ import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
+import { keepStderrTail } from "../stderr-tail";
 import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
   buildAdapterFailed,
@@ -207,12 +208,6 @@ const readTurnStartedReply = readReply(decodeTurnStartedReply, "turn/start");
 const readTurnSteeredReply = readReply(decodeTurnSteeredReply, "turn/steer");
 
 /**
- * How many of the app-server's last non-frame lines are kept, so they can be
- * reported if it fails.
- */
-const MAX_COMPLAINT_LINES = 5;
-
-/**
  * How many notifications with no thread id a session's host keeps while the
  * session is still being registered. Codex sends a few at start-up, such as a
  * config warning, so the bound is far above what a real start sends and only
@@ -247,6 +242,11 @@ interface Host extends AppServer {
   readonly textGeneration: TextGenerationWatch | undefined;
   /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
   readonly stop: Effect.Effect<void>;
+  /**
+   * Why the app-server's output could not be read, once that has happened.
+   * The session's exit gives it as its reason.
+   */
+  readFailure: string | undefined;
   /**
    * Keeps the notifications with no thread id that arrive before the session
    * is registered, so `startSession` can hand them to the session once it is.
@@ -520,9 +520,12 @@ const buildStartMarkHookOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<s
  * - ssh with the user's `~/.ssh`;
  * - the user's `~/.zshenv`, which zsh reads for every command.
  *
- * They do not get what the user's `~/.zprofile` and `~/.zshrc` set up. Codex
- * runs those once, when it builds its shell snapshot, and it builds the
- * snapshot under its own `HOME`, the empty one.
+ * A session has no shell snapshot (see `startSessionHost`), so Codex starts a
+ * login shell for each command, unless the model asks for none, and that shell
+ * reads the user's `~/.zprofile` under the real `HOME`. A snapshot would have
+ * been built under Codex's own `HOME`, the empty one, and would have left that
+ * setup out. A profile that replaces `PATH` also hides the runner's bin
+ * directory, where `hercule` and the `gh` shim are.
  *
  * TOML takes a JSON string as a basic string, so the path is written with
  * `JSON.stringify`, which also escapes any quote or backslash in it.
@@ -721,7 +724,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     host.kill();
   };
 
-  const exitSession = (held: Held, reason: ExitReason): void => {
+  const exitSession = (held: Held, reason: ExitReason, message?: string): void => {
     // Compared by identity: a stop waits on the harness, and in that time the
     // server may close the thread or the app-server may die, which already
     // ended this session. A second exit would record the same end twice.
@@ -734,6 +737,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       sessionId: held.binding.sessionId,
       at: now(),
       reason,
+      ...(message === undefined ? {} : { message: truncateMessage(message) }),
     });
     releaseHost(held.host);
   };
@@ -741,7 +745,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   /** Ends the host's session when its app-server exits on its own. */
   const onHostGone = (host: Host): void => {
     const held = findHostSession(host);
-    if (held !== undefined) exitSession(held, "process_exit");
+    if (held !== undefined) exitSession(held, "process_exit", host.readFailure);
     host.textGeneration?.serverExited();
   };
 
@@ -789,20 +793,10 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     overrides: ReadonlyArray<string>,
     textGeneration: TextGenerationWatch | undefined,
   ): Host => {
-    const complaints: Array<string> = [];
     const child = seam.appServer(buildAppServerCommand(binary, overrides), env);
-    const rememberComplaint = (line: string): void => {
-      complaints.push(line);
-      if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
-    };
-    void (async () => {
-      try {
-        for await (const line of child.stderr) if (line.trim() !== "") rememberComplaint(line);
-      } catch {
-        // A child killed while stderr is being read writes nothing more, and
-        // the lines already kept are still worth reporting.
-      }
-    })();
+    // Kept with the lines the codec warns about, so a failed request can say
+    // what the app-server complained of.
+    const complaints = keepStderrTail(child.stderr);
     const host: Host = {
       rpc: makeRpc(child, {
         // Nothing Codex sends may crash the reader. A request whose handling
@@ -830,13 +824,21 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           }
         },
         onWarning: (message) => {
-          rememberComplaint(message);
+          complaints.appendLine(message);
           warn(host, message);
+        },
+        // The app-server is stopped, and its exit then ends the session with
+        // the cause as the reason.
+        onReadError: (message) => {
+          host.readFailure = message;
+          complaints.appendLine(message);
+          void Effect.runPromise(host.stop);
         },
       }),
       kill: child.kill,
       stop: stopChild(child),
-      complaint: () => complaints.join("\n"),
+      complaint: () => complaints.lastLines().join("\n"),
+      readFailure: undefined,
       sessionId,
       textGeneration,
       framesBeforeRegistration:
@@ -975,6 +977,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         stale.kill();
       }
       const overrides = [
+        // A shell snapshot holds the session's whole environment, `HERCULE_TOKEN`
+        // included, in a file in the Harness Home that a later session of the
+        // account can read. Without it, Codex starts a login shell per command.
+        "-c",
+        "features.shell_snapshot=false",
         ...buildCompactionOverrides(spec),
         ...buildStartMarkHookOverrides(ctx),
         ...buildThreadHomeOverrides(ctx),

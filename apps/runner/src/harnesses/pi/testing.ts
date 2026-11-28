@@ -15,6 +15,7 @@
  * one-shot command. The child supports `write`, `stdout`, `stderr`, `exited`,
  * `kill` and `end`. `end` closes stdin, which tells pi to exit.
  */
+import { unrecordedFolders } from "../../recorded-folders.testing";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -74,6 +75,7 @@ export const buildContext = (
   credentialVariables: ["ZAI_API_KEY"],
   ...(credential === null ? {} : { credential }),
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
+  recordedFolders: unrecordedFolders,
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -204,6 +206,12 @@ export interface Spawn {
    * the given lines to stderr.
    */
   readonly crash: (...complaints: ReadonlyArray<string>) => void;
+  /**
+   * Makes reading pi's stdout fail, as a line over the limit does, while pi
+   * itself keeps running until the adapter stops it. `complaints` are written
+   * to stderr first.
+   */
+  readonly failRead: (message: string, ...complaints: ReadonlyArray<string>) => void;
 }
 
 /** Returns the private agent folder pi was started in. */
@@ -411,6 +419,10 @@ export const buildFakePiSeam = (
       sent: sentToThisPi,
       stdinClosed: () => closed,
       kills: () => kills,
+      failRead: (message, ...complaints) => {
+        for (const line of complaints) err.push(line);
+        out.fail(new Error(message));
+      },
       crash: (...complaints) => {
         for (const line of complaints) err.push(line);
         out.end();

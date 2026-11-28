@@ -5,8 +5,13 @@
  * turns stored rows into its input. It is pure: reading the rows is the
  * service's job.
  */
-import type { EntityFieldValue, PromptContextOrigin, PromptContextThing } from "@hercule/contract";
-import { buildLockedLabel, isRestrictedPlace } from "./entity-records";
+import {
+  describeRestrictedThing,
+  type EntityFieldValue,
+  type PromptContextOrigin,
+  type PromptContextThing,
+} from "@hercule/contract";
+import { isRestrictedPlace } from "./entity-records";
 import type { TaskableEntity } from "./repository";
 
 /**
@@ -31,7 +36,9 @@ export const buildPromptContextOrigin = (
   const labelRecord = records.find((record) => record.ref === labelRef)!;
   return {
     kind: "group",
-    label: isRestrictedPlace(labelRecord) ? buildLockedLabel(labelRecord.noun) : labelRecord.title,
+    label: isRestrictedPlace(labelRecord)
+      ? describeRestrictedThing(labelRecord.noun)
+      : labelRecord.title,
   };
 };
 

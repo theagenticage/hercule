@@ -39,13 +39,14 @@ export function SettingsNavRow({
   label,
   Icon,
   to,
-  someConnectionNeedsAttention = false,
+  someConnectionNeedsAttention: someConnectionNeedsAttentionProp,
 }: {
   readonly label: string;
   readonly Icon: (props: IconProps) => JSX.Element;
   readonly to: SettingsSectionPath | null;
   readonly someConnectionNeedsAttention?: boolean;
 }): JSX.Element {
+  const someConnectionNeedsAttention = someConnectionNeedsAttentionProp ?? false;
   const content = (
     <>
       <Icon />

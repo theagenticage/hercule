@@ -7,6 +7,18 @@ CI runs the same check on every desktop PR and posts its report as a PR comment;
 
 The renderer (`src/renderer`) follows the root `AGENTS.md` §Web app layout, with its own components in place of `@hercule/ui` and `screens/`: it never imports `@hercule/ui` (spec 17). Every read `ensureShellData` loads uses `SHELL_READ_OPTIONS`, and a test fails when one does not.
 
+## The React Compiler
+
+The renderer is built with the React Compiler, which skips a component it cannot compile without a word: the component then runs without the compiler's memoization (a draft composer without it redraws on every keystroke). `src/renderer/react-compiler.test.ts` runs the compiler over every renderer source file and fails on any skipped function, with the file, the line and the compiler's reason:
+
+```
+pnpm test:react apps/desktop/src/renderer/react-compiler.test.ts
+```
+
+- The usual cause is a default value in a destructuring, in the props (`function Chip({ size = 16 })`) or in the body (`const { data = [] } = useQuery()`). The Babel 8 the build uses makes the compiler refuse it. Take the value without the default and apply it in the body: `{ size: sizeProp }`, then `const size = sizeProp ?? 16`.
+- A `"use no memo"` directive must stay the first statement of the function body, so new lines go after it.
+- A skip that cannot be fixed, such as a function that calls `useVirtualizer` or that disables a React lint rule on purpose, goes in `ALLOWED_SKIPS` in that test with the compiler's message and the reason. The test also fails when an entry matches no skip. A function that opts out with `"use no memo"` is not a skip.
+
 ## Checks
 
 The desktop pair is the desktop app's counterpart of the root's packaging pair, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. With Docker, on a headless Linux machine or on a Mac, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files or `--shard=2/6`.
@@ -26,7 +38,7 @@ pnpm test:desktop:container  # the same in Docker on a virtual screen, on Linux 
 
 The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
 
-- **The goldens** are 438 PNGs in `apps/desktop/ui-goldens/`: the 73 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens (root `AGENTS.md`). Rendering that only a Mac shows, such as font smoothing, is not in them. Rogier checks it by eye on his Mac; it is not a step of your PR.
+- **The goldens** are 438 PNGs in `apps/desktop/ui-goldens/`: the 73 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens (`docs/agents/checks.md`). Rendering that only a Mac shows, such as font smoothing, is not in them. Rogier checks it by eye on his Mac; it is not a step of your PR.
 - **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, in CI on macOS. The book is not edited.
 
 ```

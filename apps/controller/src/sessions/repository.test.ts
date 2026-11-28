@@ -1215,7 +1215,12 @@ describe("an event the controller writes itself", () => {
     Effect.gen(function* () {
       const sessions = yield* sessionRepository;
       const event: HarnessEvent = { _tag: "session.started", eventId: mintId(), sessionId, at };
-      const folded = fold(startTracking(yield* sessions.ingestState(sessionId)), 1, event);
+      const folded = fold(
+        startTracking(yield* sessions.ingestState(sessionId)),
+        1,
+        event,
+        undefined,
+      );
       if (folded === undefined) return false;
       for (const row of folded.rows) yield* sessions.append(sessionId, row);
       return true;

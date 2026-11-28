@@ -66,6 +66,11 @@ export const classifyMessage = (json: unknown): IncomingMessage => {
   const decoded = decodeEnvelope(json);
   if (Option.isNone(decoded)) return { _tag: "invalid" };
   const message = decoded.value;
+  // Effect drops an `id` it cannot read (such as `null`) when a message decodes as a notification.
+  // JSON-RPC forbids an `id` on a notification, and such a body must not pass for one.
+  if (!("id" in message) && typeof json === "object" && json !== null && "id" in json) {
+    return { _tag: "invalid" };
+  }
   if ("method" in message && "id" in message) {
     return {
       _tag: "request",
@@ -190,39 +195,41 @@ const isObject = (value: unknown): value is JsonObject =>
 
 /**
  * Checks that a stateless message's HTTP headers agree with its JSON-RPC
- * payload, as Effect's own transport does for `2026-07-28`. Returns the
- * refusal, or `undefined` when they agree.
+ * payload and carry what `2026-07-28` requires. Returns the
+ * refusal, or `undefined` when they do.
  *
- * - `MCP-Protocol-Version` is required, must equal the revision in `_meta`,
- *   and must be the revision the gateway offers;
- * - `_meta` must carry the revision and the client's capabilities;
+ * - `MCP-Protocol-Version` is required and must be the revision the gateway
+ *   offers;
  * - `Mcp-Method` must equal the method, and for `tools/call`, `Mcp-Name` must
- *   equal the tool's name.
+ *   equal the tool's name;
+ * - a request must carry the revision and the client's capabilities in its
+ *   `_meta`, and the revision must equal the header.
  *
- * A `notifications/cancelled` is exempt from the `_meta` rules, because the
- * protocol lets it carry no `_meta` of its own.
+ * A notification is exempt from the `_meta` rules, because the `2026-07-28`
+ * specification requires `_meta` fields on requests only. A notification that
+ * does name a revision in its `_meta` must still agree with the header.
  */
 export const checkStatelessMetadata = (
   headers: HeaderMap,
-  method: string,
-  params: JsonObject,
+  message: Extract<IncomingMessage, { readonly method: string }>,
 ): RequestRefusal | undefined => {
+  const { method, params } = message;
   const version = headers["mcp-protocol-version"];
   if (version === undefined) return buildHeaderMismatch("MCP-Protocol-Version header is required");
-  const isCancellation = method === "notifications/cancelled";
+  const isNotification = message._tag === "notification";
   const meta = isObject(params["_meta"]) ? params["_meta"] : undefined;
   const claim = meta?.[REVISION_META_KEY];
-  if (!isCancellation && typeof claim !== "string") {
+  if (!isNotification && typeof claim !== "string") {
     return {
       status: 400,
       code: McpSchema.INVALID_PARAMS_ERROR_CODE,
       message: "Required request metadata is missing",
     };
   }
-  if ((!isCancellation || claim !== undefined) && claim !== version) {
+  if (claim !== undefined && claim !== version) {
     return buildHeaderMismatch("MCP-Protocol-Version header does not match request metadata");
   }
-  if (!isCancellation && !isObject(meta?.[CLIENT_CAPABILITIES_META_KEY])) {
+  if (!isNotification && !isObject(meta?.[CLIENT_CAPABILITIES_META_KEY])) {
     return {
       status: 400,
       code: McpSchema.INVALID_PARAMS_ERROR_CODE,

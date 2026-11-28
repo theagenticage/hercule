@@ -69,6 +69,13 @@ export interface ThreadItem {
    * update. Empty for any other item, and for a list that has no steps.
    */
   readonly todoSteps: readonly TodoStep[];
+  /**
+   * The summary the harness wrote of the compacted context, once a
+   * `context_compaction` item has completed with a summary that is not blank,
+   * taken from its completion or an earlier row. Absent on a running
+   * compaction and on any other kind.
+   */
+  readonly compactionSummary?: string;
 }
 
 /** The steps of every item that is not a todo list. One shared array, so a memoized component sees the same value on each projection. */
@@ -175,9 +182,10 @@ export const buildUserMessage = (
 /**
  * A `runtime.error`, `runtime.warning`, `runtime.notice` or `unknown` row: something
  * reported around the work. An error or a warning is something that went wrong,
- * such as a harness that is not installed. A notice is neutral: a note from the
- * runner, or an event this client has no arm for. The message is shown as the
- * runner wrote it, and may hold a command between backticks.
+ * such as a harness that is not installed. A notice is neutral: a note from a
+ * harness adapter or the controller, or an event this client has no arm for.
+ * The message is shown as it was stored, and may hold a command between
+ * backticks.
  */
 export interface RuntimeNote {
   /** Unique within one transcript: the row's position, with its severity. */
@@ -531,6 +539,9 @@ export interface CompletedItem<Item extends ThreadItem> {
  *
  * Any other kind keeps its target whatever the completion carries.
  *
+ * A compaction with a summary that is not blank, from the completion or an
+ * earlier row, also gets it as `compactionSummary`, text unchanged.
+ *
  * The desktop's blocks build their items on this too, so both screens end up
  * with the same words.
  */
@@ -553,6 +564,9 @@ export const buildCompletedItem = <Item extends ThreadItem>(
       ...(completion === undefined || compaction === undefined
         ? {}
         : { target: describeCompactionTarget(compaction) }),
+      ...(compaction?.summary === undefined || compaction.summary.trim() === ""
+        ? {}
+        : { compactionSummary: compaction.summary }),
     },
     update,
     compaction,
@@ -682,6 +696,8 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
+  // The turns that started since the session's harness last started.
+  let startedTurnIds = new Set<string>();
   const firstMessageItemId = findFirstMessageItemId(rows, agent);
 
   for (const row of rows) {
@@ -690,16 +706,26 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "turn.started": {
         findOrStartTurn(event.turnId, event.at).startedAt = event.at;
         openTurnId = event.turnId;
+        startedTurnIds.add(event.turnId);
         break;
       }
       case "turn.completed": {
         const turn = findOrStartTurn(event.turnId, event.at);
         turn.completedAt = event.at;
         turn.endState = event.state;
+        // The controller's rule (spec 06 §6.2): the late end of an earlier
+        // turn is only recorded, and the open turn stays open. A completion of
+        // a turn that never started ends the open turn, so a lost start row
+        // cannot leave a turn open for good.
+        const endsEarlierTurn = startedTurnIds.has(event.turnId) && openTurnId !== event.turnId;
+        if (!endsEarlierTurn) openTurnId = null;
+        break;
+      }
+      case "session.started": {
+        startedTurnIds = new Set();
         openTurnId = null;
         break;
       }
-      case "session.started":
       case "session.exited": {
         openTurnId = null;
         break;

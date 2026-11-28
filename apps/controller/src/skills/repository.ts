@@ -47,12 +47,6 @@ export interface StoredSkill {
   readonly upstreamCommit: string | null;
 }
 
-/** A Skill Revision record, with its `approvalEffects`, which the revision record leaves out. */
-export interface SkillRevisionWithEffects {
-  readonly revision: SkillRevision;
-  readonly approvalEffects: SkillApprovalEffects;
-}
-
 /** What a finished update check records on its Skill. */
 export interface SkillCheckRecord {
   /** When the check ended, which becomes `lastCheckedAt`. */
@@ -111,16 +105,13 @@ interface RevisionRow {
   readonly file_count: number;
   readonly size_bytes: number;
   readonly description: string;
+  readonly allowed_tools: string | null;
+  readonly hooks: string | null;
   readonly created_at: string;
   readonly created_by: string;
   readonly applied_at: string | null;
   readonly applied_by: string | null;
   readonly includes_third_party_content: number;
-}
-
-interface RevisionWithEffectsRow extends RevisionRow {
-  readonly allowed_tools: string | null;
-  readonly hooks: string | null;
 }
 
 const SourceJson = Schema.fromJsonString(SkillSource);
@@ -135,7 +126,7 @@ const encodeSource = Schema.encodeSync(SourceJson);
 const PROPOSED_REVISION = "r.origin = 'session' AND r.applied_at IS NULL";
 
 const REVISION_COLUMNS =
-  "hash, origin, file_count, size_bytes, description, created_at, created_by, applied_at, applied_by, includes_third_party_content";
+  "hash, origin, file_count, size_bytes, description, allowed_tools, hooks, created_at, created_by, applied_at, applied_by, includes_third_party_content";
 
 /**
  * Returns the approval effects of a revision the Skill row joined, or null
@@ -186,6 +177,7 @@ const toRevision = (row: RevisionRow): SkillRevision => ({
   fileCount: row.file_count,
   sizeBytes: row.size_bytes,
   description: row.description,
+  approvalEffects: { allowedTools: row.allowed_tools, hooks: row.hooks },
   createdAt: row.created_at,
   createdBy: row.created_by,
   appliedAt: row.applied_at,
@@ -277,21 +269,17 @@ export const skillRepository = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Returns the Skill's revision with this hash, with its approval effects, if it has one. */
+    /** Returns the Skill's revision with this hash, if it has one. */
     findRevision: (
       skillId: Uint8Array,
       hash: string,
-    ): Effect.Effect<Option.Option<SkillRevisionWithEffects>, SqlError> =>
+    ): Effect.Effect<Option.Option<SkillRevision>, SqlError> =>
       Effect.map(
-        sql<RevisionWithEffectsRow>`
-          SELECT ${sql.literal(REVISION_COLUMNS)}, allowed_tools, hooks
+        sql<RevisionRow>`
+          SELECT ${sql.literal(REVISION_COLUMNS)}
           FROM skill_revisions WHERE skill_id = ${skillId} AND hash = ${hash}
         `,
-        (rows) =>
-          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
-            revision: toRevision(row),
-            approvalEffects: { allowedTools: row.allowed_tools, hooks: row.hooks },
-          })),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toRevision),
       ),
 
     /** Inserts a revision of the Skill that was never applied. */

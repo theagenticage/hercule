@@ -33,7 +33,7 @@ import "./menus.css";
 export function ComposerMenu({
   label,
   align,
-  width = "narrow",
+  width: widthProp,
   disabled,
   triggerClassName,
   trigger,
@@ -53,6 +53,7 @@ export function ComposerMenu({
   readonly onOpen?: (() => void) | undefined;
   readonly onClosed?: (() => void) | undefined;
 }): JSX.Element {
+  const width = widthProp ?? "narrow";
   const id = useId();
   const [menu, setMenu] = useState<HTMLDivElement | null>(null);
   // Follows the browser's open state, which changes without React: on Esc

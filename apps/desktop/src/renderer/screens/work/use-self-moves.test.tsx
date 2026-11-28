@@ -16,7 +16,12 @@ import type { HeldChange } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import { useSelfMoves, type SelfMoves } from "./use-self-moves";
 
-const MERGED = { factId: 4, ref: "acme:pull-request:6221", text: "Pull request #6221 merged" };
+const MERGED = {
+  kind: "fact" as const,
+  factId: 4,
+  ref: "acme:pull-request:6221",
+  text: "Pull request #6221 merged",
+};
 
 /** The hook's parts, as the last render of the harness gave them. */
 let moves: SelfMoves;

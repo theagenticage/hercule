@@ -44,7 +44,7 @@ const appendAttachmentPaths = (
  * - one line per image naming the file the runner saved it in.
  *
  * A caller passes `text` when it sends the harness a changed copy of the
- * input's text, for example the part of it before a skill command, and still
+ * input's text, for example with its skill references replaced by Claude's names, and still
  * needs the header and the image lines around it.
  *
  * A piece that is empty is left out together with its blank line, so an

@@ -28,7 +28,7 @@ export function MarkedRow({
   mark,
   name,
   detail,
-  detailMono = false,
+  detailMono: detailMonoProp,
   end,
   children,
 }: {
@@ -39,6 +39,7 @@ export function MarkedRow({
   readonly end: ReactNode;
   readonly children?: ReactNode;
 }): JSX.Element {
+  const detailMono = detailMonoProp ?? false;
   return (
     <div className="hx-row">
       <div className="hx-head">
@@ -207,11 +208,12 @@ export function DeviceCodeSteps({
  */
 export function WaitLine({
   text,
-  spinning = true,
+  spinning: spinningProp,
 }: {
   readonly text: string;
   readonly spinning?: boolean;
 }): JSX.Element {
+  const spinning = spinningProp ?? true;
   return (
     <span className="wait" role="status">
       {spinning && <span className="spin" />}
@@ -328,7 +330,7 @@ export function FormField({
   label,
   aside,
   hint,
-  error = null,
+  error: errorProp,
   children,
 }: {
   readonly label: string;
@@ -337,6 +339,7 @@ export function FormField({
   readonly error?: ReactNode;
   readonly children: ReactNode;
 }): JSX.Element {
+  const error = errorProp ?? null;
   return (
     <LabelledField label={label} aside={aside} hint={hint} error={error}>
       <span className={error === null ? "field" : "field is-bad"}>{children}</span>
