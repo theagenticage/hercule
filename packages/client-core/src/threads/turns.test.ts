@@ -1146,6 +1146,39 @@ describe("buildTurns runtime notes", () => {
     expect(turns[0]?.runtimeNotes.map((note) => note.message)).toEqual(["Rate limited."]);
   });
 
+  it("keeps an error with no turn id in the newer turn after the late end of an earlier turn", () => {
+    // Codex can report the end of t1 after t2 started (spec 06 §6.2).
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnStarted(2, "t2", "2026-09-08T10:00:01.000Z"),
+        turnCompleted(3, "t1", "2026-09-08T10:00:02.000Z"),
+        errorRow(4, "2026-09-08T10:00:03.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes).toEqual([]);
+    expect(turns.find((turn) => turn.turnId === "t2")?.runtimeNotes.map((n) => n.message)).toEqual([
+      "Rate limited.",
+    ]);
+    expect(turns.find((turn) => turn.turnId === "t1")?.endState).toBe("failed");
+    expect(turns.find((turn) => turn.turnId === "t2")?.endState).toBeNull();
+  });
+
+  it("ends the open turn at the completion of a turn that never started, so a lost start row leaves nothing open", () => {
+    const { outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnCompleted(2, "t2", "2026-09-08T10:00:01.000Z"),
+        errorRow(3, "2026-09-08T10:00:02.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes.map((note) => note.message)).toEqual(["Rate limited."]);
+  });
+
   it("keeps an error outside every turn when no turn ever began, as when a session fails to start", () => {
     const { turns, outsideRuntimeNotes } = buildTurns(
       [

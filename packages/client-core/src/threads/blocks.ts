@@ -259,6 +259,8 @@ interface BuildingTurn {
   stretch: BuildingStretch | null;
   /** The item that started last in this turn, of any kind. */
   lastStartedItemId: string | null;
+  /** The ending drawn for the turn, or `null` while it runs and when it completed. */
+  ending: BuildingEnding | null;
 }
 
 interface BuildingStretch {
@@ -282,7 +284,7 @@ interface BuildingAgent {
 interface BuildingEnding {
   readonly kind: "ending";
   readonly turn: BuildingTurn;
-  readonly block: EndingBlock;
+  block: EndingBlock;
 }
 
 type Slot =
@@ -455,7 +457,7 @@ export const buildThreadBlocks = (
     closeStretch(turn, at);
     turn.finished = true;
     if (endState === "completed") return;
-    slots.push({
+    const ending: BuildingEnding = {
       kind: "ending",
       turn,
       block: {
@@ -465,12 +467,52 @@ export const buildThreadBlocks = (
         endState,
         duration: endState === null ? null : Date.parse(at) - Date.parse(turn.startedAt),
       },
-    });
+    };
+    turn.ending = ending;
+    slots.push(ending);
+  };
+
+  /**
+   * Replaces the ending of a turn that was cut short with the end its late
+   * `turn.completed` reports: no ending for `completed`, else the stopped or
+   * failed one. A turn that already ended with a state of its own keeps it.
+   */
+  const reviseCutShortEnding = (turn: BuildingTurn, at: string, endState: TurnEndState): void => {
+    const ending = turn.ending;
+    if (ending === null || ending.block.endState !== null) return;
+    if (endState === "completed") {
+      slots.splice(slots.indexOf(ending), 1);
+      turn.ending = null;
+      return;
+    }
+    ending.block = {
+      ...ending.block,
+      endState,
+      duration: Date.parse(at) - Date.parse(turn.startedAt),
+    };
   };
 
   const closeStretch = (turn: BuildingTurn, at: string): void => {
     if (turn.stretch !== null) turn.stretch.endedAt = at;
     turn.stretch = null;
+  };
+
+  /** Registers a turn that no row named before, without making it the current turn. */
+  const createTurn = (turnId: string, at: string): BuildingTurn => {
+    const created: BuildingTurn = {
+      turnId,
+      startedAt: at,
+      model: undefined,
+      lastAt: at,
+      finished: false,
+      drawn: false,
+      boundary: at,
+      stretch: null,
+      lastStartedItemId: null,
+      ending: null,
+    };
+    turns.set(turnId, created);
+    return created;
   };
 
   /** Returns the turn a row names, starting it when this is the first row to name it. */
@@ -484,18 +526,7 @@ export const buildThreadBlocks = (
     // ended, even when no row said so.
     const previous = state.current;
     if (previous !== null && !previous.finished) finishTurn(previous, previous.lastAt, null);
-    const started: BuildingTurn = {
-      turnId,
-      startedAt: at,
-      model: undefined,
-      lastAt: at,
-      finished: false,
-      drawn: false,
-      boundary: at,
-      stretch: null,
-      lastStartedItemId: null,
-    };
-    turns.set(turnId, started);
+    const started = createTurn(turnId, at);
     state.current = started;
     return started;
   };
@@ -528,8 +559,13 @@ export const buildThreadBlocks = (
         break;
       }
       case "turn.completed": {
-        const turn = enterTurn(event.turnId, event.at);
-        if (!turn.finished) finishTurn(turn, event.at, event.state);
+        // A completion ends the turn it names and no other. A harness can
+        // report the end of an earlier turn after the next one started
+        // (spec 06 §6.2), and that must neither end the running turn nor, for
+        // a turn no row started, make it the running one.
+        const turn = turns.get(event.turnId) ?? createTurn(event.turnId, event.at);
+        if (turn.finished) reviseCutShortEnding(turn, event.at, event.state);
+        else finishTurn(turn, event.at, event.state);
         break;
       }
       case "item.started": {

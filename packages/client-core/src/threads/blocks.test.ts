@@ -826,6 +826,63 @@ describe("buildThreadBlocks", () => {
     ]);
   });
 
+  describe("a turn end that arrives after the next turn started", () => {
+    // Codex can report the end of t1 after t2 started (spec 06 §6.2).
+    const lateEnd = (state: "completed" | "failed" | "interrupted") => [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "First"),
+      buildItemStarted("t1", "c1", "command_execution", 1),
+      buildTurnStarted("t2", 5),
+      ...buildUserMessage("t2", "u2", 5, "Second"),
+      ...buildCommand("t2", "c2", 6, 7),
+      buildTurnCompleted("t1", 8, state),
+    ];
+    const BUSY: Session = { ...BASE, status: "busy" };
+
+    it("keeps the newer turn running, and draws the earlier turn as ended without a cut-short line", () => {
+      const blocks = buildThreadBlocks(lateEnd("completed"), buildSessionAgentState(BUSY));
+
+      expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "user:u2", "work:c2"]);
+      expect(findBlock(blocks, "work", "work:c2").endedAt).toBeNull();
+    });
+
+    it.each(["failed", "interrupted"] as const)(
+      "draws the earlier turn's own ending when the late end is %s",
+      (state) => {
+        const blocks = buildThreadBlocks(lateEnd(state), buildSessionAgentState(BUSY));
+
+        expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1", "user:u2", "work:c2"]);
+        expect(findBlock(blocks, "ending", "ending:t1")).toMatchObject({
+          endState: state,
+          duration: 8000,
+        });
+      },
+    );
+
+    it("keeps the newer turn running when the earlier turn's start is not among the rows", () => {
+      const rows = [
+        buildTurnStarted("t2", 5),
+        ...buildUserMessage("t2", "u2", 5, "Second"),
+        ...buildCommand("t2", "c2", 6, 7),
+        buildTurnCompleted("t1", 8),
+      ];
+
+      const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+      expect(listKeys(blocks)).toEqual(["user:u2", "work:c2"]);
+      expect(findBlock(blocks, "work", "work:c2").endedAt).toBeNull();
+    });
+
+    it("ends the newer turn at its own completion", () => {
+      const rows = [...lateEnd("completed"), buildTurnCompleted("t2", 9)];
+
+      const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
+
+      expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "user:u2", "work:c2"]);
+      expect(findBlock(blocks, "work", "work:c2").endedAt).toBe(buildInstant(9));
+    });
+  });
+
   it("draws nothing for a turn that holds only a late item end, and completes the item where it started", () => {
     // Claude Code sends an interrupted tool's result after the turn ended, and
     // the runner opens a turn of its own for it.
