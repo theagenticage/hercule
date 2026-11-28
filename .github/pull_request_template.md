@@ -4,17 +4,19 @@
 
 ## Checks
 
-<!-- Fill in what applies, delete the rest. A required check that did not run says why. -->
+<!-- Keep every row. Write what ran and where, or "not run, because ...", or "n/a" when the change cannot affect it. -->
 
-- [ ] `pnpm typecheck`, `pnpm lint`, `pnpm dep-lint`, tests you touched:
-- [ ] Desktop app changed: `pnpm build:desktop` and `pnpm test:desktop` ran on one platform (Linux or Mac):
-- [ ] A check did not run, because:
+- `pnpm typecheck`:
+- `pnpm lint`:
+- `pnpm dep-lint`:
+- `pnpm test` (or the files you ran):
+- `pnpm build:binary` and `pnpm test:binary`:
+- Desktop: `pnpm build:desktop` and `pnpm test:desktop` (or `:container`), on Linux or Mac:
+- Desktop looks: `ui:metrics`, goldens, perf counts:
+- Android: `./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug`:
 
 ## Needs updating to see the change
 
-<!-- Tick what must be updated or restarted before you can see this. Tick none if nothing. -->
+<!-- Say which of these must be updated or restarted before the change shows: controller, runner, desktop app, Android app. Write "None" when nothing. -->
 
-- [ ] Controller
-- [ ] Runner
-- [ ] Desktop app
-- [ ] Android app
+Needs updating:
