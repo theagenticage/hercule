@@ -299,18 +299,30 @@ describe("the morning replay", () => {
       createdAt: "2026-11-03T02:00:00.000Z",
     });
     rememberBoard(buildBoard(SLOTS, NEIGHBOUR));
-    await openWork(() => buildBoard(SLOTS, NEIGHBOUR, arrival));
+    // The replay draws the new Task 300 ms after the first picture, and a slow machine can take longer than that to find the first card.
+    // So the first picture is checked in the very change that draws it, which no timer can come before.
+    let wasNewTaskInFirstPicture: boolean | undefined;
+    const watchFirstPicture = new MutationObserver(() => {
+      if (document.querySelector(`[data-card-id="${SLOTS.id}"]`) === null) return;
+      wasNewTaskInFirstPicture = document.querySelector(`[data-card-id="${arrival.id}"]`) !== null;
+      watchFirstPicture.disconnect();
+    });
+    watchFirstPicture.observe(document.body, { childList: true, subtree: true });
+    try {
+      await openWork(() => buildBoard(SLOTS, NEIGHBOUR, arrival));
+      await screen.findByRole("button", { name: /^Cache delivery slot lookups/ });
+    } finally {
+      watchFirstPicture.disconnect();
+    }
+    expect(wasNewTaskInFirstPicture).toBe(false);
 
-    await screen.findByRole("button", { name: /^Cache delivery slot lookups/ });
-    expect(queryCard("Refund emails show the wrong currency")).toBeNull();
-
-    expect(
-      await screen.findByRole(
-        "button",
-        { name: /^Refund emails show the wrong currency/ },
-        { timeout: 4_000 },
-      ),
-    ).toBeTruthy();
+    const rising = await screen.findByRole(
+      "button",
+      { name: /^Refund emails show the wrong currency/ },
+      { timeout: 4_000 },
+    );
+    // The ring that marks a new card is set when the card starts to rise, and stays until its animation ends.
+    expect(rising.dataset["new"]).toBeDefined();
     await screen.findByRole("button", { name: "Replay what changed" }, { timeout: 4_000 });
     expect(readLine()).toBe("Since you last looked: one new");
   });
