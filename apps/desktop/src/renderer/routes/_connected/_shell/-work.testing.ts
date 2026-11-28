@@ -72,6 +72,7 @@ export const buildCreatedTask = (title: string, projectId: string | undefined): 
   id: buildTaskId(50),
   title,
   description: "",
+  leadSessionId: null,
   status: "open",
   stage: "exploring",
   priority: "normal",

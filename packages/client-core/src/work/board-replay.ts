@@ -17,13 +17,19 @@ export interface BoardSnapshot {
   readonly isTruncated: boolean;
 }
 
-/** Returns the snapshot of `board`: for each card its id, stage, Project and `stageCause`. */
+/**
+ * Returns the snapshot of `board`: for each card its id, stage, Project and,
+ * when a fact placed it, that `stageCause`. A report's cause is left out: its
+ * text quotes the title of the reporting Thread, which a snapshot must not
+ * hold. The replay draws a held card without a cause, which is how it draws a
+ * card that a drag placed.
+ */
 export const buildBoardSnapshot = (board: WorkBoard): BoardSnapshot => ({
   cards: board.cards.map((card) => ({
     id: card.id,
     stage: card.stage,
     ...(card.projectId === undefined ? {} : { projectId: card.projectId }),
-    ...(card.stageCause === undefined ? {} : { stageCause: card.stageCause }),
+    ...(card.stageCause?.kind === "fact" ? { stageCause: card.stageCause } : {}),
   })),
   isTruncated: board.truncated,
 });

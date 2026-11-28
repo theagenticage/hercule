@@ -110,6 +110,7 @@ const buildPlannedTask = ({ id, title, priority, ref }: SpecimenTask): Task => {
     id,
     title,
     description: "",
+    leadSessionId: null,
     status: "open",
     stage: "planned",
     priority,

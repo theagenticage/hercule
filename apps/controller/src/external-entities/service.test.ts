@@ -823,7 +823,11 @@ describe("taking several things on as one Task", () => {
       const prepared = yield* service.prepareThingsForTask(ids);
       return yield* withTransaction(
         sql,
-        service.takeOnAsOneTask(prepared, { title, projectId: undefined }),
+        service.takeOnAsOneTask(prepared, {
+          title,
+          projectId: undefined,
+          leadSessionId: "01a22093-0000-7000-8000-000000000001",
+        }),
       );
     });
 
@@ -920,7 +924,11 @@ describe("taking several things on as one Task", () => {
         const error = yield* Effect.flip(
           withTransaction(
             sql,
-            service.takeOnAsOneTask(prepared, { title: "Never made", projectId: undefined }),
+            service.takeOnAsOneTask(prepared, {
+              title: "Never made",
+              projectId: undefined,
+              leadSessionId: "01a22093-0000-7000-8000-000000000001",
+            }),
           ),
         );
         return { error, taskCount: yield* countTasks };

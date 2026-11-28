@@ -321,6 +321,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("move", ({ params, payload }) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),
       )
+      .handle("reportStage", ({ payload }) => withApiErrors(tasks.reportStage(payload)))
       .handle("linkEntity", ({ params, payload }) =>
         withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
       )
@@ -975,6 +976,12 @@ const WorkflowDomainLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
 
 /**
+ * Dispatch with the Task service it reads a lead's Task title from. A layer is
+ * built once, so this shares the Task service with every other group.
+ */
+const DispatchWithTasksLayer = DispatchLayer.pipe(Layer.provide(TaskServiceWithPortsLayer));
+
+/**
  * The External Entity service with the services it is built from: the task
  * service, which makes the Task of a thing taken on, and the plugin host's
  * lookups, which read a thing at its source. Placement uses it to start a
@@ -1019,7 +1026,7 @@ const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
       Layer.provide(
-        Layer.mergeAll(PlacementDomainLayer, LiveLayer).pipe(Layer.provide(DispatchLayer)),
+        Layer.mergeAll(PlacementDomainLayer, LiveLayer).pipe(Layer.provide(DispatchWithTasksLayer)),
       ),
     ),
   ),
@@ -1264,7 +1271,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),
-    Layer.provideMerge(DispatchLayer),
+    Layer.provideMerge(DispatchWithTasksLayer),
   ),
   ProvisioningLayer,
   SessionSkillsLayer,

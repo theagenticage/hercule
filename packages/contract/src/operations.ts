@@ -141,6 +141,12 @@ const TABLE = {
   // `session.read` and `run.read`). A caller without them gets `Forbidden`,
   // not a thinner board. A GET only reads, so the row needs no `readOnly`.
   "task.queryBoard": { requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
+  // No `usableIn`: a report only means something from a session, so a bound action never runs it.
+  "task.reportStage": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/report-stage",
+  },
   // Reads whether any live Task has a failed run, so the service also needs
   // `run.query`.
   "task.readAttention": {

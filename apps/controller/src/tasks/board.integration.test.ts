@@ -92,6 +92,7 @@ interface SessionToWrite {
   readonly requests?: ReadonlyArray<SessionRequest>;
   readonly createdAt?: string;
   readonly lastTurnEndedAt?: string;
+  readonly title?: string;
 }
 
 /** Writes a session of a Task and returns its id. */
@@ -105,7 +106,7 @@ const insertSession = (harness: ServerHarness, session: SessionToWrite) =>
       const kind = session.kind ?? "thread";
       yield* sessions.insert({
         id,
-        title: "A session",
+        title: session.title ?? "A session",
         role: undefined,
         permissionProfileId: uuidToString(mintUuid()),
         agentId: kind === "thread" ? undefined : uuidToString(mintUuid()),
@@ -392,6 +393,57 @@ describe("task.queryBoard", () => {
         "store 1",
         "store 2",
       ]);
+    });
+  });
+
+  it("gives a card the words of the Stage Report that placed its stage, and none once the stage moved on", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const reported = await insertTask(harness, "Reported", { stage: "planned" });
+      const untitled = await insertTask(harness, "Untitled report", { stage: "building" });
+      const moved = await insertTask(harness, "Moved on", { stage: "building" });
+      const reportingSession = await insertSession(harness, {
+        taskId: reported,
+        title: "Pricing research",
+      });
+      const untitledSession = await insertSession(harness, { taskId: untitled, title: " " });
+      const movedSession = await insertSession(harness, { taskId: moved, title: "Old report" });
+      const markReport = (taskId: string, sessionId: string) =>
+        writeInDatabase(
+          harness,
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`UPDATE tasks SET stage_cause_session_id = ${uuidFromString(sessionId)}
+                       WHERE id = ${uuidFromString(taskId)}`;
+          }),
+        );
+      await markReport(reported, reportingSession);
+      await markReport(untitled, untitledSession);
+      await markReport(moved, movedSession);
+      // Any other write of the stage clears the column, as `taskRepository` does.
+      await writeInDatabase(
+        harness,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE tasks SET stage_cause_session_id = NULL
+                     WHERE id = ${uuidFromString(moved)}`;
+        }),
+      );
+
+      const cards = indexByTitle((await readBoard(harness.base, token)).cards);
+      expect(cards.get("Reported")?.stageCause).toEqual({
+        kind: "report",
+        sessionId: reportingSession,
+        stageRevision: expect.any(Number) as number,
+        text: "\u201cPricing research\u201d says Planned",
+      });
+      expect(cards.get("Untitled report")?.stageCause).toEqual({
+        kind: "report",
+        sessionId: untitledSession,
+        stageRevision: expect.any(Number) as number,
+        text: "\u201cUntitled thread\u201d says Building",
+      });
+      expect(cards.get("Moved on")?.stageCause).toBeUndefined();
     });
   });
 });

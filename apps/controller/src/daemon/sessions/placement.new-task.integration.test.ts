@@ -20,7 +20,7 @@ import {
   type Thing,
 } from "../../external-entities/testing";
 import { withTransaction } from "../../db";
-import { get, post, send } from "../../http/testing";
+import { collectTaskPushesDuring, get, post, send } from "../../http/testing";
 import {
   createProfile,
   findProviderAccountId,
@@ -162,6 +162,31 @@ describe("session.spawn with newTask", () => {
       ]);
       const created = await arranged.harness.platformEvents("task.created");
       expect(created.at(-1)?.actor).toBe("user");
+    });
+  });
+
+  it("makes the Thread the lead of its new Task, and task.created already carries it", async () => {
+    await withThings(async (arranged, account) => {
+      const thing = await arrange(arranged, account, "WEB-1");
+
+      let session: Session | undefined;
+      const pushes = await collectTaskPushesDuring(arranged.harness, arranged.token, async () => {
+        session = await spawnOk(arranged, {
+          newTask: { title: "Fix the refund flow", entityIds: [thing.id] },
+        });
+      });
+
+      expect((await readTask(arranged, session!.taskId!)).leadSessionId).toBe(session!.id);
+      const created = (await arranged.harness.platformEvents("task.created")).filter(
+        (event) => (event.payload as { task: Task }).task.id === session!.taskId,
+      );
+      expect(created).toHaveLength(1);
+      expect((created[0]!.payload as { task: Task }).task.leadSessionId).toBe(session!.id);
+      // The lead is written with the Task, so no second announcement of the
+      // Task follows the first, and the board reads the Task once.
+      expect(
+        pushes.filter((push) => push._tag === "invalidate" && push.ids.includes(session!.taskId!)),
+      ).toEqual([{ _tag: "invalidate", ids: [session!.taskId!], kind: "created" }]);
     });
   });
 

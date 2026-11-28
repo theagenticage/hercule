@@ -49,6 +49,7 @@ export const AUDIT_KINDS = [
   "task.deleted",
   "task.summarized",
   "task.merged",
+  "task.stageReported",
   "task.failureRestored",
   "project.created",
   "project.updated",

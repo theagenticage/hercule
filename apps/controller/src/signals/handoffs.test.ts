@@ -99,6 +99,7 @@ const RECORDED_TASK: Task = {
   stage: "building",
   priority: "normal",
   labels: [],
+  leadSessionId: null,
   provenance: [],
   createdAt: AT,
   updatedAt: AT,

@@ -30,6 +30,7 @@ const TASK: Task = {
   stage: "planned",
   priority: "normal",
   labels: ["hardware"],
+  leadSessionId: null,
   provenance: [{ ref: "github:issue:o/r#42", at: AT, actor: "user" }],
   createdAt: AT,
   updatedAt: AT,
