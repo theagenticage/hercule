@@ -347,20 +347,19 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(started?.params?.config).toMatchObject({
       "mcp_servers.tools.bearer_token_env_var": SESSION_TOKEN_VARIABLE,
     });
-    // While the session runs, Codex keeps a snapshot of the shell's environment in
-    // `shell_snapshots/`, and that file holds every variable, the token included.
-    // Codex deletes it when the app-server exits, so it is left out here. After
-    // the stop it is checked too.
+    // The session has no shell snapshot (`features.shell_snapshot=false`). With
+    // one, Codex would write every variable, the token included, to
+    // `shell_snapshots/` while the session runs. Codex removes the file only
+    // when the session exits cleanly, so a session that is killed leaves it
+    // behind. The scan covers the whole Harness Home, while the session runs
+    // and after it stops.
     const scanFolders = [home, userHome, cwd];
-    const findTokenFiles = (includeSnapshots: boolean) =>
-      scanFolders
-        .flatMap(listFiles)
-        .filter((file) => includeSnapshots || !file.includes("/shell_snapshots/"))
-        .filter((file) => readFileSync(file).includes(TOKEN));
+    const findTokenFiles = () =>
+      scanFolders.flatMap(listFiles).filter((file) => readFileSync(file).includes(TOKEN));
     expect(scanFolders.flatMap(listFiles).length).toBeGreaterThan(0);
-    expect(findTokenFiles(false)).toEqual([]);
+    expect(findTokenFiles()).toEqual([]);
     await run.stop();
-    expect(findTokenFiles(true)).toEqual([]);
+    expect(findTokenFiles()).toEqual([]);
   });
 
   describe("when a trusted project's config sets an MCP server", () => {

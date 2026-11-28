@@ -520,9 +520,12 @@ const buildStartMarkHookOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<s
  * - ssh with the user's `~/.ssh`;
  * - the user's `~/.zshenv`, which zsh reads for every command.
  *
- * They do not get what the user's `~/.zprofile` and `~/.zshrc` set up. Codex
- * runs those once, when it builds its shell snapshot, and it builds the
- * snapshot under its own `HOME`, the empty one.
+ * A session has no shell snapshot (see `startSessionHost`), so Codex starts a
+ * login shell for each command, unless the model asks for none, and that shell
+ * reads the user's `~/.zprofile` under the real `HOME`. A snapshot would have
+ * been built under Codex's own `HOME`, the empty one, and would have left that
+ * setup out. A profile that replaces `PATH` also hides the runner's bin
+ * directory, where `hercule` and the `gh` shim are.
  *
  * TOML takes a JSON string as a basic string, so the path is written with
  * `JSON.stringify`, which also escapes any quote or backslash in it.
@@ -975,6 +978,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         stale.kill();
       }
       const overrides = [
+        // A shell snapshot holds the session's whole environment, `HERCULE_TOKEN`
+        // included, in a file in the Harness Home that a later session of the
+        // account can read. Without it, Codex starts a login shell per command.
+        "-c",
+        "features.shell_snapshot=false",
         ...buildCompactionOverrides(spec),
         ...buildStartMarkHookOverrides(ctx),
         ...buildThreadHomeOverrides(ctx),
