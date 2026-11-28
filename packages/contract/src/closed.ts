@@ -5,9 +5,9 @@
  * The struct is what `settings.update` needs.
  *
  * Rejecting an unknown key is a decoding option, `onExcessProperty: "error"`,
- * and the transport never sets it: `HttpApiBuilder` decodes every payload with
- * `Schema.decodeUnknownEffect(schema)` and no options, and Effect 4 carries the
- * option nowhere in the AST, so no annotation can express it. A payload that
+ * and the transport never sets it: `api` sets only `errors: "all"` for every
+ * decode, and Effect 4 carries `onExcessProperty` nowhere in the AST, so no
+ * annotation on the schema can express it. A payload that
  * must reject unknown keys therefore has to say so in its own shape.
  *
  * The shape is a struct plus one index signature over the keys the struct does
