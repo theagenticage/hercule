@@ -94,12 +94,14 @@ const describeFailure = (error: unknown): string =>
  * Removes the folder one record names, and then the record, and logs what it
  * did. Never fails: a folder that cannot be removed is logged with the reason.
  *
- * A record is only trusted when it is whole: the file is named by the hash of
- * the path in it, and the folder has the shape of a folder `make` creates. A
- * record cut short by a crash, or one an agent wrote into the records
- * directory, names a different path or a different shape, and is dropped
- * without touching the path. Without that check such a record could make the
- * runner remove a Harness Home.
+ * A record is only followed when two things hold: the file is named by the hash
+ * of the path in it, and the folder's name has the shape of a folder `make`
+ * creates. The hash catches a record that a crash cut short. The shape keeps
+ * a damaged record from ever pointing at something like a Harness Home. Neither
+ * stops someone who writes a record on purpose with the right hash and a
+ * `hercule-...` name: that record removes that one folder. The records
+ * directory is in the runner's own storage, and whoever can write there can
+ * already delete those folders directly.
  */
 const sweepRecord = (recordsDir: string, name: string): Effect.Effect<void> =>
   Effect.try({
