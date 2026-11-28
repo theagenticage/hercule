@@ -6,7 +6,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll } from "vitest";
 import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
@@ -184,49 +183,53 @@ export const buildPluginWithProviderPerHarness = (
 
 const SUBSCRIPTION_KIND = "subscription";
 
-const homes: Array<string> = [];
-
-// Registered on the suite of the file that imports this module, which is the
-// only scope that knows when its last stack is no longer used.
-afterAll(() => {
-  for (const home of homes) rmSync(home, { recursive: true, force: true });
-  homes.length = 0;
-});
+/**
+ * Creates a temporary Hercule Home folder that is deleted when the scope
+ * closes, whether the test passed, failed or timed out. Returns its path.
+ */
+const createTemporaryHome = Effect.acquireRelease(
+  Effect.sync(() => mkdtempSync(join(tmpdir(), "hercule-plugins-"))),
+  (home) => Effect.sync(() => rmSync(home, { recursive: true, force: true })),
+);
 
 /**
  * Builds the real plugin services on a temporary database file, including a real
  * master key file, with a `PluginObserver` that does nothing. A plugin's
  * secrets are rows in the secrets table, so the encryption is part of what
  * is tested.
+ *
+ * Each build of the layer gets its own Hercule Home folder, and the folder is
+ * deleted when the layer's scope closes.
  */
-export const buildPluginStack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
-  homes.push(home);
-  return PluginsLayer.pipe(
-    // This stack stores no workflows, so no one listens to a status change.
-    Layer.provide(Layer.succeed(PluginObserver)({ pluginStatusChanged: () => Effect.void })),
-    Layer.provideMerge(
-      PluginHostLayer.pipe(
-        Layer.provide(IngestExecutorLayer),
-        // Merged, so a test can build an ingest context of its own.
-        Layer.provideMerge(OpenSignalsLayer),
-        // The ingest records Task facts, which are Platform Events. Only the
-        // ingest gets the writer: a service of its own in the stack's output
-        // changes how the layers above it are built.
-        Layer.provideMerge(EntityObservationsLayer.pipe(Layer.provide(PlatformEventsLayer))),
+export const buildPluginStack = () =>
+  Layer.unwrap(
+    Effect.map(createTemporaryHome, (home) =>
+      PluginsLayer.pipe(
+        // This stack stores no workflows, so no one listens to a status change.
+        Layer.provide(Layer.succeed(PluginObserver)({ pluginStatusChanged: () => Effect.void })),
+        Layer.provideMerge(
+          PluginHostLayer.pipe(
+            Layer.provide(IngestExecutorLayer),
+            // Merged, so a test can build an ingest context of its own.
+            Layer.provideMerge(OpenSignalsLayer),
+            // The ingest records Task facts, which are Platform Events. Only the
+            // ingest gets the writer: a service of its own in the stack's output
+            // changes how the layers above it are built.
+            Layer.provideMerge(EntityObservationsLayer.pipe(Layer.provide(PlatformEventsLayer))),
+          ),
+        ),
+        Layer.provideMerge(ConnectionTypesLayer),
+        Layer.provideMerge(PluginConfigsLayer),
+        Layer.provideMerge(SecretLayer),
+        Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+        Layer.provideMerge(NotificationServiceTestLayer),
+        Layer.provideMerge(AuditLogLayer),
+        Layer.provideMerge(ServingPromotionStateLayer),
+        Layer.provideMerge(TestDatabase),
+        Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
       ),
     ),
-    Layer.provideMerge(ConnectionTypesLayer),
-    Layer.provideMerge(PluginConfigsLayer),
-    Layer.provideMerge(SecretLayer),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-    Layer.provideMerge(NotificationServiceTestLayer),
-    Layer.provideMerge(AuditLogLayer),
-    Layer.provideMerge(ServingPromotionStateLayer),
-    Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
-};
 
 /** The actor every call runs as, the same as a request through the API. */
 export const USER: Actor = {
