@@ -175,7 +175,7 @@ describe("the stage revision", () => {
         const task = yield* createTask(stage);
         yield* TestClock.adjust(60_000);
         if ("move" in change) yield* tasks.move({ id: task.id, ...change.move });
-        else yield* tasks.update({ id: task.id, ...change });
+        else yield* tasks.update({ taskId: task.id, ...change });
         return {
           task,
           after: yield* tasks.read(task.id),
@@ -402,7 +402,7 @@ describe("reverseEntityHandoff", () => {
     [
       "it was edited",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id: taskId, title: "Renamed" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, title: "Renamed" })),
       "edited",
     ],
     [
@@ -414,7 +414,7 @@ describe("reverseEntityHandoff", () => {
     [
       "its stage was set to the one it has",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id: taskId, stage: "building" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, stage: "building" })),
       "moved",
     ],
     [
@@ -452,7 +452,7 @@ describe("reverseEntityHandoff", () => {
           const revisionBefore = yield* readStageRevision(handoff.taskId);
           // The workflow that ships with the product writes it, as a run.
           const moved = yield* tasks
-            .update({ id: handoff.taskId, stage: "in-review", stageFactId: fact.id })
+            .update({ taskId: handoff.taskId, stage: "in-review", stageFactId: fact.id })
             .pipe(Effect.provideService(CurrentActor, RUN));
           const revisionAfter = yield* readStageRevision(handoff.taskId);
           const reversal = yield* reverse(handoff);
@@ -499,7 +499,7 @@ describe("reverseEntityHandoff", () => {
         const deleted = yield* handOffNewTask;
         yield* tasks.delete(deleted.taskId);
         const finished = yield* handOffContinuedTask("planned");
-        yield* tasks.update({ id: finished.taskId, stage: "done" });
+        yield* tasks.update({ taskId: finished.taskId, stage: "done" });
         return [yield* reverse(deleted), yield* reverse(finished)];
       }),
     );
@@ -750,7 +750,7 @@ describe("readAttention", () => {
         for (const end of ["done", "dropped", "deleted"] as const) {
           const failed = yield* failTask();
           if (end === "deleted") yield* tasks.delete(failed.id);
-          else yield* tasks.update({ id: failed.id, stage: end });
+          else yield* tasks.update({ taskId: failed.id, stage: end });
           steps.push(yield* readAnyFailure);
         }
         return steps;

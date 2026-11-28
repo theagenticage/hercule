@@ -13,7 +13,6 @@ export {
   type QueryInput,
   type TaskPage,
   type TaskUndoRefusal,
-  type UpdateInput,
 } from "./service";
 export type { TakeOnRecord } from "./take-on-records";
 export { groupByTask } from "./lists";

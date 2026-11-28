@@ -221,7 +221,7 @@ describe("the facts an entity write makes", () => {
         yield* arrangeConnection;
         yield* arrange({ ref: pr(1), lifecycle: "open" });
         const task = yield* createTaskLinking("Finished", pr(1));
-        yield* tasks.update({ id: task.id, stage: "done" });
+        yield* tasks.update({ taskId: task.id, stage: "done" });
         const before = (yield* readFacts).length;
         yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed"));
         return { before, after: (yield* readFacts).length };
@@ -331,10 +331,10 @@ describe("the facts a new link makes", () => {
         yield* arrange({ ref: pr(1), lifecycle: "open" });
         const task = yield* createTaskLinking("Blank");
         yield* TestClock.adjust(A_MINUTE);
-        yield* tasks.update({ id: task.id, provenance: [{ ref: pr(1) }, { ref: pr(2) }] });
+        yield* tasks.update({ taskId: task.id, provenance: [{ ref: pr(1) }, { ref: pr(2) }] });
         // Linking the same ref again is not a new link.
         yield* TestClock.adjust(A_MINUTE);
-        yield* tasks.update({ id: task.id, provenance: [{ ref: pr(1) }] });
+        yield* tasks.update({ taskId: task.id, provenance: [{ ref: pr(1) }] });
         return yield* readFacts;
       }),
     );
@@ -395,7 +395,7 @@ describe("the facts of a first install", () => {
         // The links come first, so the link facts do not hide what the install writes.
         const linked = yield* createTaskLinking("Linked", pr(1), pr(2), pr(3));
         const finished = yield* createTaskLinking("Finished", pr(1));
-        yield* tasks.update({ id: finished.id, stage: "done" });
+        yield* tasks.update({ taskId: finished.id, stage: "done" });
         yield* arrange({ ref: pr(1), lifecycle: "open" }, { ref: pr(2), lifecycle: "completed" });
         yield* withTransaction(sql, tasks.recordFirstInstallFacts());
         return { facts: yield* readFacts, linked };

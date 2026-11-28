@@ -162,7 +162,7 @@ describe("the place of a Task in its cell", () => {
         yield* createInCell("stays", "planned", project);
         yield* createInCell("already there 1", destination.stage, destination.projectId);
         yield* createInCell("already there 2", destination.stage, destination.projectId);
-        yield* tasks.update({ id: mover.id, ...patch });
+        yield* tasks.update({ taskId: mover.id, ...patch });
         return {
           origin: yield* readCellTitles(project, "planned"),
           destination: yield* readCellTitles(destination.projectId, destination.stage),
@@ -181,7 +181,7 @@ describe("the place of a Task in its cell", () => {
         const first = yield* createInCell("first", "planned");
         yield* createInCell("second", "planned");
         const ranks = yield* repository.listCellRanks({ projectId: null, stage: "planned" });
-        yield* tasks.update({ id: first.id, title: "renamed", priority: "high" });
+        yield* tasks.update({ taskId: first.id, title: "renamed", priority: "high" });
         const after = yield* repository.listCellRanks({ projectId: null, stage: "planned" });
         return { ranks, after };
       }),
@@ -264,9 +264,9 @@ describe("the failure a Task shows", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const task = yield* createFailedTask;
-        yield* tasks.update({ id: task.id, stage: "in-review" });
-        yield* tasks.update({ id: task.id, stage: "landed" });
-        yield* tasks.update({ id: task.id, title: "Add a refund button" });
+        yield* tasks.update({ taskId: task.id, stage: "in-review" });
+        yield* tasks.update({ taskId: task.id, stage: "landed" });
+        yield* tasks.update({ taskId: task.id, title: "Add a refund button" });
         return yield* readState(task.id);
       }),
     );
@@ -408,13 +408,13 @@ describe("the failure a Task shows", () => {
       "Done",
       "task-finished",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id: taskId, stage: "done" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, stage: "done" })),
     ],
     [
       "Drop",
       "task-finished",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id: taskId, stage: "dropped" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, stage: "dropped" })),
     ],
     [
       "a delete",
@@ -488,9 +488,9 @@ describe("the failure a Task shows", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const task = yield* createFailedTask;
-        yield* tasks.update({ id: task.id, stage: "done" });
+        yield* tasks.update({ taskId: task.id, stage: "done" });
         const done = yield* readState(task.id);
-        yield* tasks.update({ id: task.id, stage: "building" });
+        yield* tasks.update({ taskId: task.id, stage: "building" });
         return { done, reopened: yield* readState(task.id) };
       }),
     );

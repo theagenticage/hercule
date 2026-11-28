@@ -281,7 +281,7 @@ describe("the facts a plugin's report makes", () => {
         yield* reconcile(ingest, [pullRequest(1)]);
         const tasks = yield* TaskService;
         const task = yield* createTaskLinking("Review", pr(1));
-        yield* tasks.update({ id: task.id, stage: "done" });
+        yield* tasks.update({ taskId: task.id, stage: "done" });
         const before = yield* readOutcome;
         yield* refresh(ingest, pullRequest(1, { lifecycle: "completed" }));
         return { before, after: yield* readOutcome };

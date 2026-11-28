@@ -55,7 +55,7 @@ const landByFact = (taskId: string, factId: number) =>
   Effect.gen(function* () {
     yield* TestClock.adjust(A_MINUTE);
     const tasks = yield* TaskService;
-    return yield* tasks.update({ id: taskId, stage: "landed", stageFactId: factId });
+    return yield* tasks.update({ taskId, stage: "landed", stageFactId: factId });
   });
 
 const MERGED = {
@@ -92,11 +92,13 @@ describe("the cause of a card's stage", () => {
     ],
     [
       "an edit of the stage",
-      (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "landed" })),
+      (id: string) =>
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, stage: "landed" })),
     ],
     [
       "a legacy status write that moves the stage",
-      (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.update({ id, status: "open" })),
+      (id: string) =>
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, status: "open" })),
     ],
   ])("is gone after %s", async (_name, write) => {
     const cause = await run(
