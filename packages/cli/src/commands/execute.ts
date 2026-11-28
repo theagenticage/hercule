@@ -123,8 +123,8 @@ const readAll = async (
 const nameListedThing = (listing: Command): string => listing.words.at(-2)!;
 
 /**
- * Returns every id in the lists that resolve the tails of `field`, read in
- * full with each of the field's `resolvesQueries`.
+ * Returns every id in the list that resolves the tails of `field`, read in
+ * full with the field's `resolvesQuery`.
  *
  * A list addressed by path parameters (a session's subagents) is read with
  * the command's own path parameters of the same names, `scope`, so a tail is
@@ -151,14 +151,8 @@ const readListedIds = async (
   const stable = listing.sortFields.includes("createdAt")
     ? { sort: [{ field: "createdAt", direction: "asc" }] }
     : {};
-  const answers = await Promise.all(
-    field.resolvesQueries.map((query) => readAll(client, listing, { ...query, ...stable }, params)),
-  );
-  const ids = answers
-    .flat()
-    .map((item) => item["id"])
-    .filter((id): id is string => typeof id === "string");
-  return [...new Set(ids)];
+  const items = await readAll(client, listing, { ...field.resolvesQuery, ...stable }, params);
+  return items.map((item) => item["id"]).filter((id): id is string => typeof id === "string");
 };
 
 /**

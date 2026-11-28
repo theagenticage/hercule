@@ -6,13 +6,15 @@
  * A list is one keyset query in creation order. The open list and the closed
  * list each write the exact `WHERE` condition of their partial index
  * (`initiatives_open`, `initiatives_closed`); SQLite only uses a partial index
- * when the query repeats its condition.
+ * when the query repeats its condition. The list of every Initiative has no
+ * partial index of its own: it reads the whole table, which holds a few dozen
+ * rows, and only the command line asks for it.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { Initiative, InitiativeHue } from "@hercule/contract";
+import type { Initiative, InitiativeClosedFilter, InitiativeHue } from "@hercule/contract";
 import {
   mintUuid,
   buildPage,
@@ -26,12 +28,14 @@ import {
 
 /**
  * The page size and cursor of an Initiative list, and which list it is: the
- * open Initiatives or the closed ones, optionally in one project's lane.
+ * open Initiatives, the closed ones (`only`) or every one (`include`),
+ * optionally in one project's lane.
  */
 export interface InitiativePageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
-  readonly closed: boolean;
+  /** `undefined` lists the open Initiatives. */
+  readonly closed: InitiativeClosedFilter | undefined;
   readonly projectId: string | undefined;
 }
 
@@ -196,8 +200,8 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns one page of the open Initiatives, or of the closed ones, in
-     * creation order. Fails with a `CursorError` if the cursor is invalid.
+     * Returns one page of the open Initiatives, of the closed ones, or of
+     * every one, in creation order. Fails with a `CursorError` if the cursor is invalid.
      */
     list: (
       request: InitiativePageRequest,
@@ -215,10 +219,14 @@ const make = Effect.gen(function* () {
           request.projectId === undefined
             ? sql`1 = 1`
             : sql`project_id = ${uuidFromString(request.projectId)}`;
-        // The two conditions repeat the partial indexes' conditions exactly.
-        const state = request.closed
-          ? sql`deleted_at IS NULL AND closed_at IS NOT NULL`
-          : sql`deleted_at IS NULL AND closed_at IS NULL`;
+        // The open and the closed condition repeat their partial index's
+        // condition exactly.
+        const state =
+          request.closed === "include"
+            ? sql`deleted_at IS NULL`
+            : request.closed === "only"
+              ? sql`deleted_at IS NULL AND closed_at IS NOT NULL`
+              : sql`deleted_at IS NULL AND closed_at IS NULL`;
         const rows = yield* sql<InitiativeRow>`
           SELECT ${sql.literal(COLUMNS)} FROM initiatives
           WHERE ${state} AND ${inLane} AND ${keyset} ${order} LIMIT ${request.limit + 1}

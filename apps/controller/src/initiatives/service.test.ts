@@ -454,7 +454,7 @@ describe("initiative.delete and the Tasks on the Initiative", () => {
 });
 
 describe("initiative.query", () => {
-  it("lists the open Initiatives in creation order, and the closed ones when asked", async () => {
+  it("lists the open Initiatives in creation order, the closed ones for `only`, and every one for `include`", async () => {
     const lists = await run(
       Effect.gen(function* () {
         const initiatives = yield* InitiativeService;
@@ -466,21 +466,24 @@ describe("initiative.query", () => {
         const [a, b, c, d] = ids;
         yield* initiatives.close(b!);
         yield* initiatives.close(d!);
-        const names = (closed: boolean | undefined) =>
+        // A deleted Initiative is in no list, `include` included.
+        const gone = yield* initiatives.create({ name: "E" });
+        yield* initiatives.delete(gone.id);
+        const names = (closed: "only" | "include" | undefined) =>
           initiatives
             .query(closed === undefined ? {} : { closed })
             .pipe(Effect.map((page) => page.items.map((item) => item.name)));
         return {
           ids: { a, b, c, d },
           byDefault: yield* names(undefined),
-          open: yield* names(false),
-          closed: yield* names(true),
+          closed: yield* names("only"),
+          every: yield* names("include"),
         };
       }),
     );
     expect(lists.byDefault).toEqual(["A", "C"]);
-    expect(lists.open).toEqual(["A", "C"]);
     expect(lists.closed).toEqual(["B", "D"]);
+    expect(lists.every).toEqual(["A", "B", "C", "D"]);
   });
 
   it("lists only the Initiatives of one project's lane, and pages with a cursor", async () => {

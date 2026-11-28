@@ -141,8 +141,8 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns one page of the open Initiatives, or of the closed ones when
-     * `closed` is true, in creation order.
+     * Returns one page of the open Initiatives in creation order. `closed`
+     * `only` lists the closed ones instead, and `include` lists every one.
      */
     query: (
       input: InitiativeQuery,
@@ -157,7 +157,7 @@ const make = Effect.gen(function* () {
           initiatives.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            closed: closed ?? false,
+            closed,
             projectId,
           }),
         );

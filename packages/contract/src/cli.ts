@@ -64,13 +64,12 @@ export type FieldRow =
       /**
        * The query sent to the list operation `resolves` names, when its
        * default listing does not hold the ids this field takes. A value is
-       * written as the operation's query schema types
-       * it: `{ closed: true }`, not `"true"`. A list of queries sends each of
-       * them and matches the tail among the ids of all the answers:
-       * `[{}, { closed: true }]` matches among the open and the closed
-       * initiatives.
+       * written as the operation's query schema types it: `{ archived:
+       * "include" }` lists every Wiki Page, archived or not. It is one query,
+       * because the tail is matched within one listing, which cannot change
+       * between two reads.
        */
-      readonly resolvesQuery?: ResolvingQuery | ReadonlyArray<ResolvingQuery>;
+      readonly resolvesQuery?: ResolvingQuery;
       /**
        * Makes the command send each word of a list positional as one object
        * of the list, written `{ <itemKey>: <word> }`. It is for a list of
@@ -293,11 +292,14 @@ const SKILL_REVIEW_FORBIDDEN =
   "the session lacks skill.apply, which only the user gives, or it has read third-party messages, which no grant overrides; ask the user to do it on the Skills screen";
 
 /**
- * The queries that read both the open and the closed initiatives. A command
- * that takes an initiative's id tail resolves it through these, so a tail
- * keeps working after the initiative is closed.
+ * The query that lists every initiative, open or closed. `initiative.query`
+ * leaves closed initiatives out by default, and every command that takes an
+ * initiative's id tail resolves it through this one listing: a tail then
+ * names the same initiative whatever its state. One listing, not one per
+ * state, because an initiative that is closed or reopened between two
+ * listings would be in neither.
  */
-const OPEN_AND_CLOSED_INITIATIVES = [{}, { closed: true }] as const;
+const EVERY_INITIATIVE = { closed: "include" } as const;
 
 /**
  * The query that lists every Wiki Page, archived or not. `wikiPage.query`
@@ -706,7 +708,7 @@ export const CLI = {
         flag: "initiative",
         help: "Only tasks on this initiative, by its id or a tail of eight or more characters.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
       handedOff: {
         flag: "handed-off",
@@ -790,7 +792,7 @@ export const CLI = {
         flag: "initiative",
         help: "The open initiative this task belongs to, by its id or a tail of eight or more characters. Find one with `hercule initiative list`.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
       provenance: {
         flag: "provenance",
@@ -841,7 +843,7 @@ export const CLI = {
         flag: "initiative",
         help: "Put the task on this initiative, by its id or a tail of eight or more characters; `null` takes it off its initiative. A closed initiative takes no task that is not on it already.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
       addLabels: {
         flag: "add-label",
@@ -889,7 +891,7 @@ export const CLI = {
         flag: "initiative",
         help: "The initiative to put the task on, by its id or a tail of eight or more characters; `null` takes it off its initiative.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
       afterTaskId: {
         flag: "after",
@@ -1036,11 +1038,16 @@ export const CLI = {
   "initiative.query": {
     command: "initiative list",
     help: "Lists initiatives: the lasting intents the user groups tasks under, oldest first. Closed ones are left out unless you ask for them. Use it to find the id that `hercule task update --initiative` and the other `hercule initiative` commands take.",
-    examples: [{ args: [] }, { args: ["--closed", "true"] }, { args: ["--project", "9c41d7e0"] }],
+    examples: [
+      { args: [] },
+      { args: ["--closed", "only"] },
+      { args: ["--closed", "include"] },
+      { args: ["--project", "9c41d7e0"] },
+    ],
     fields: {
       closed: {
         flag: "closed",
-        help: "true lists the closed initiatives instead of the open ones. Leave it off for the open ones.",
+        help: "`only` lists the closed initiatives instead of the open ones, and `include` lists every initiative, open and closed. Leave it off for the open ones.",
       },
       projectId: {
         flag: "project",
@@ -1058,7 +1065,7 @@ export const CLI = {
         positional: true,
         help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
     },
   },
@@ -1124,7 +1131,7 @@ export const CLI = {
         positional: true,
         help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
       name: { flag: "name", help: "A new name." },
       intent: { flag: "intent", help: "A new intent." },
@@ -1157,7 +1164,7 @@ export const CLI = {
         positional: true,
         help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -1171,7 +1178,7 @@ export const CLI = {
         positional: true,
         help: "The initiative's id, or a tail of eight or more characters. An open one is found too.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -1185,7 +1192,7 @@ export const CLI = {
         positional: true,
         help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
-        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
+        resolvesQuery: EVERY_INITIATIVE,
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
