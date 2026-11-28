@@ -164,7 +164,7 @@ function TextGenerationRow(): JSX.Element {
 function ValueRow({
   label,
   hint,
-  mono = false,
+  mono: monoProp,
   children,
 }: {
   readonly label: string;
@@ -172,6 +172,7 @@ function ValueRow({
   readonly mono?: boolean;
   readonly children: string;
 }): JSX.Element {
+  const mono = monoProp ?? false;
   return (
     <SettingRow
       label={label}

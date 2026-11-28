@@ -17,7 +17,7 @@ export function SettingTextRow({
   label,
   hint,
   value,
-  readOnly = false,
+  readOnly: readOnlyProp,
   error,
   onCommit,
   onEditStart,
@@ -33,6 +33,7 @@ export function SettingTextRow({
   /** The platform the app runs on, which decides the key that commits with ⏎: ⌘ on a Mac, Ctrl on Linux. */
   readonly platform: DesktopPlatform;
 }): JSX.Element {
+  const readOnly = readOnlyProp ?? false;
   const id = useId();
   const draft = useTextDraft(platform, value, onCommit, onEditStart);
   return (

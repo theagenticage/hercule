@@ -26,7 +26,7 @@ export function ChooseFolder({
   pending,
   error,
   hasGitHub,
-  localRunnerUnavailable = false,
+  localRunnerUnavailable: localRunnerUnavailableProp,
   onPick,
 }: {
   readonly pending: boolean;
@@ -36,6 +36,7 @@ export function ChooseFolder({
   readonly localRunnerUnavailable?: boolean;
   readonly onPick: () => void;
 }): JSX.Element {
+  const localRunnerUnavailable = localRunnerUnavailableProp ?? false;
   return (
     <>
       <button type="button" className="pick-folder" disabled={pending} onClick={onPick}>

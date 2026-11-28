@@ -104,19 +104,23 @@ export function usePopoverMenu(): PopoverMenu {
       },
     },
     menuProps: { ref: menuRef, id: menuId, onToggle: handleToggle, onKeyDown: handleKeys },
-    buildItemProps: (item, { disabled = false, checked } = {}) => ({
-      role: checked === undefined ? "menuitem" : "menuitemradio",
-      className: item === activeItem ? "is-active" : undefined,
-      "data-item": item,
-      ...(disabled ? { "aria-disabled": true } : {}),
-      ...(checked === undefined ? {} : { "aria-checked": checked }),
-      onFocus: () => {
-        setActiveItem(disabled ? null : item);
-      },
-      onPointerEnter: (event) => {
-        event.currentTarget.focus({ preventScroll: true });
-      },
-    }),
+    buildItemProps: (item, options) => {
+      const disabled = options?.disabled ?? false;
+      const checked = options?.checked;
+      return {
+        role: checked === undefined ? "menuitem" : "menuitemradio",
+        className: item === activeItem ? "is-active" : undefined,
+        "data-item": item,
+        ...(disabled ? { "aria-disabled": true } : {}),
+        ...(checked === undefined ? {} : { "aria-checked": checked }),
+        onFocus: () => {
+          setActiveItem(disabled ? null : item);
+        },
+        onPointerEnter: (event) => {
+          event.currentTarget.focus({ preventScroll: true });
+        },
+      };
+    },
     close: () => {
       menuRef.current?.hidePopover();
     },

@@ -109,8 +109,8 @@ export function ModelMenuList({
   newModelActions,
   onEnterLane,
   onLeaveLane,
-  highlightedAccountId = null,
-  foldingProfile = null,
+  highlightedAccountId: highlightedAccountIdProp,
+  foldingProfile: foldingProfileProp,
   onFoldEnd,
 }: {
   readonly menu: ModelMenu;
@@ -126,6 +126,8 @@ export function ModelMenuList({
   readonly foldingProfile?: ModelMenuProfile | null;
   readonly onFoldEnd?: (() => void) | undefined;
 }): JSX.Element {
+  const highlightedAccountId = highlightedAccountIdProp ?? null;
+  const foldingProfile = foldingProfileProp ?? null;
   const listRef = useRef<HTMLDivElement>(null);
   const focusRequest = useRef<FocusRequest | null>(null);
   const [, redraw] = useState(0);

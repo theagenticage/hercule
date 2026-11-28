@@ -54,7 +54,7 @@ const renderSpec = (spec: SkillChipSpec, rootProps: object = {}): ReactNode => {
  */
 export function SkillChip({
   name,
-  placement = "composer",
+  placement: placementProp,
   onPointerEnter,
   onPointerLeave,
 }: {
@@ -63,6 +63,7 @@ export function SkillChip({
   readonly onPointerEnter?: PointerEventHandler<HTMLElement>;
   readonly onPointerLeave?: PointerEventHandler<HTMLElement>;
 }): JSX.Element {
+  const placement = placementProp ?? "composer";
   return (
     <>
       {renderSpec(buildSkillChipSpec(name, { placement }), {

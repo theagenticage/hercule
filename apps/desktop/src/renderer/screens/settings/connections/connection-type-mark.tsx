@@ -13,13 +13,14 @@ import { PluginMark } from "../../../marks/plugin-mark";
 export function ConnectionTypeMark({
   type,
   plugins,
-  size = 16,
+  size: sizeProp,
 }: {
   /** The Connection type, as a Connection or the plugin list holds it. */
   readonly type: string;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly size?: number;
 }): JSX.Element {
+  const size = sizeProp ?? 16;
   const pluginId = parsePluginId(type);
   return pluginId === null ? (
     <ConnectionsIcon size={size} />
