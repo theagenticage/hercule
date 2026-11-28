@@ -105,6 +105,16 @@ describe("a command run inside a session", () => {
     expect(ran.stderr).not.toContain(REFUSAL);
   });
 
+  it("refuses `hercule git-credential --local` instead of starting a runner", () => {
+    // `--local` once passed through to the runner role as `hercule runner
+    // --local` and started a local runner on the default Home.
+    const ran = runInSession(["git-credential", "--local"]);
+
+    expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(2);
+    expect(ran.stderr).toContain("git-credential takes one action: get, store or erase");
+    expect(existsSync(join(scratch.home, ".hercule"))).toBe(false);
+  });
+
   it("reports a mistyped runner option as a typo, not as a missing Home", () => {
     // The command line is checked before the Home, so the agent is told
     // about the mistake it can fix first.

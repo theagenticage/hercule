@@ -159,7 +159,7 @@ describe("what the helper prints", () => {
 });
 
 describe("the actions git passes", () => {
-  it("prints nothing for any action other than `get`", async () => {
+  it("prints nothing for `store` and `erase`", async () => {
     const written: Array<unknown> = [];
     const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
       written.push(chunk);
@@ -167,13 +167,38 @@ describe("the actions git passes", () => {
     });
 
     // git sends `store` and `erase` to report what it did with a credential,
-    // and this helper stores none. A missing action is not a git command at all.
-    await runCredentialAction("store");
-    await runCredentialAction("erase");
-    await runCredentialAction("git-credential");
-    await runCredentialAction(undefined);
+    // and this helper stores none.
+    await runCredentialAction(["store"]);
+    await runCredentialAction(["erase"]);
 
     expect(written).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
     write.mockRestore();
   });
+
+  // Each of these once reached the runner role as a daemon option or was
+  // accepted silently. `--local` started a local runner.
+  it.each([[[]], [["--local"]], [["--help"]], [["foo"]], [["git-credential"]], [["get", "extra"]]])(
+    "refuses %j with a message and exit code 2, and reads no stdin",
+    async (args) => {
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const stdin = vi.spyOn(Bun.stdin, "text");
+      try {
+        await runCredentialAction(args);
+
+        expect(stderr).toHaveBeenCalledWith(
+          `hercule: git-credential takes one action: get, store or erase. git runs it for you. Run "git help credential" for help.\n`,
+        );
+        expect(stdout).not.toHaveBeenCalled();
+        expect(stdin).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(2);
+      } finally {
+        process.exitCode = undefined;
+        stderr.mockRestore();
+        stdout.mockRestore();
+        stdin.mockRestore();
+      }
+    },
+  );
 });

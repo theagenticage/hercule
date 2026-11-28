@@ -56,11 +56,12 @@ function route(
     case "service":
       return { role: "service", args: withoutVerb };
     // git runs this command for each request, and the runner's own socket
-    // handles it rather than the public API. The role acts on the action git
-    // gives. With no action, the verb itself is passed along, so a bare
-    // `hercule git-credential` cannot be read as `hercule runner` and start a daemon.
+    // handles it rather than the public API. The verb stays in the line, so
+    // the runner role sees `git-credential` first and can never read a flag
+    // after it, such as `--local`, as `hercule runner --local` and start a
+    // daemon.
     case "git-credential":
-      return { role: "runner", args: subcommand === undefined ? argv : withoutVerb };
+      return { role: "runner", args: argv };
     case "runner":
       // Needed as long as `hercule runner` is both the daemon and a CLI noun:
       // help for either is one screen, and the CLI renders it.

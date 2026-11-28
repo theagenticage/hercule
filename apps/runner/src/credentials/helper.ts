@@ -95,15 +95,31 @@ export const answerCredentialQuestion = async (
   }
 };
 
+/** The three actions git passes to a credential helper. */
+const CREDENTIAL_ACTIONS: ReadonlySet<string> = new Set(["get", "store", "erase"]);
+
 /**
  * Runs `hercule git-credential <action>`. git passes the request on stdin.
  *
+ * `args` are the words after `git-credential`. Exactly one must be an action
+ * git passes:
+ *
  * - `get` prints the credential, or nothing when there is none.
  * - `store` and `erase` do nothing, because this helper stores no credentials.
- * - Any other action also does nothing and succeeds, because git shows the
- *   user an error for a helper that fails.
+ *
+ * With anything else, this prints a refusal on stderr, reads nothing from
+ * stdin, and sets the exit code to 2. git never passes anything else, so
+ * this only happens when a person or a script runs the command by hand.
  */
-export const runCredentialAction = async (action: string | undefined): Promise<void> => {
+export const runCredentialAction = async (args: readonly string[]): Promise<void> => {
+  const action = args[0];
+  if (args.length !== 1 || action === undefined || !CREDENTIAL_ACTIONS.has(action)) {
+    process.stderr.write(
+      `hercule: git-credential takes one action: get, store or erase. git runs it for you. Run "git help credential" for help.\n`,
+    );
+    process.exitCode = 2;
+    return;
+  }
   if (action !== "get") return;
   process.stdout.write(await answerCredentialQuestion(await Bun.stdin.text(), process.env));
 };

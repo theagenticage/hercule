@@ -173,12 +173,10 @@ export async function run(argv: readonly string[]): Promise<void> {
       verb === "--local" ? runLocalRunner(home) : runDaemon(home),
     );
   }
-  if (verb !== "join" && verb !== "set-controller") {
-    // Any other subcommand that reaches this role came from
-    // `hercule git-credential`, because the dispatcher sends every other
-    // runner subcommand to the CLI. git passes the action name, and only `get`
-    // returns anything. It reads no Home, so it runs inside a session too.
-    return await runCredentialAction(verb);
+  if (verb === "git-credential") {
+    // git runs this command for each request. It reads no Home, so it runs
+    // inside a session too.
+    return await runCredentialAction(rest.slice(1));
   }
 
   const args = rest.slice(1);
