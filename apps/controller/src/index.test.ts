@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import { ServeError } from "effect/http/HttpServerError";
 import { MigrationError } from "effect/sql/Migrator";
 import { HerculeHomeError } from "./config";
-import { explain, STILL_STOPPING, untilStopped } from "./index";
+import { explain, STILL_OPEN, STILL_STOPPING, untilStopped } from "./index";
 
 describe("explain", () => {
   it("says what Hercule was doing to the path, which is not always creating it", () => {
@@ -87,5 +87,39 @@ describe("the stop request", () => {
     // The handlers were removed when the scope closed, so a second boot in the
     // same process starts clean.
     expect(process.listenerCount("SIGTERM") + process.listenerCount("SIGINT")).toBe(before);
+  });
+
+  it("gives up after ten seconds, says so, and exits with code 0", async () => {
+    // The deadline is a timer that calls `process.exit`, so both are replaced:
+    // the timer by a fake clock, and the exit by a spy.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const said: Array<string> = [];
+    const log = console.log;
+    console.log = (line: unknown) => said.push(String(line));
+    let exitedWith: ReadonlyArray<unknown> | undefined;
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const stopped = yield* untilStopped;
+            sendSignal("SIGTERM");
+            yield* stopped;
+
+            vi.advanceTimersByTime(9_999);
+            expect(exit).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1);
+          }),
+        ),
+      );
+    } finally {
+      console.log = log;
+      vi.useRealTimers();
+      exitedWith = exit.mock.calls.map(([code]) => code);
+      exit.mockRestore();
+    }
+
+    expect(said).toContain(STILL_OPEN);
+    expect(exitedWith).toEqual([0]);
   });
 });

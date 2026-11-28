@@ -56,9 +56,11 @@
  *     runner's durable credential that no operation accepts and no grant
  *     applies to.
  *
- * The listener's drain wraps everything else, the MCP Gateway included
- * (`./drain.ts`): once the controller is stopping, a request is answered
- * with a 503 before CORS or any route sees it.
+ * The listener's drain (`./drain.ts`) sits between CORS and the body limit,
+ * and the MCP Gateway has its own: once the controller is stopping, a request
+ * is answered with a bare 503 before any route sees it, and a request still in
+ * flight is counted until it ends. The 503 is the second response outside the
+ * error envelope, after the bare `413`.
  *
  * Compression sits outside that order too (`compressJsonAnswers`): it runs
  * last, on the finished response, so it sees the headers CORS and the
@@ -443,9 +445,10 @@ const compressJsonAnswers = HttpMiddleware.compression({
 
 /**
  * Builds the whole application as one effect, which each request runs. The
- * listener's drain wraps all of it, so a controller that is stopping refuses
- * every request, including the MCP Gateway's and the sockets', and counts the
- * ones it still has to wait for.
+ * listener's drain sits inside CORS, so its refusal carries the CORS header
+ * and the desktop app reads it, and outside everything else: once the
+ * controller is stopping, a request is refused before any route sees it. The
+ * MCP Gateway is outside CORS and counts and refuses its own requests.
  */
 const buildApplication = (bundle: WebBundle | undefined) =>
   Effect.gen(function* () {
@@ -460,10 +463,10 @@ const buildApplication = (bundle: WebBundle | undefined) =>
         RunnerSocketRouteLayer,
       ),
     );
-    return drain.track(
-      withMcpRoute(
-        compressJsonAnswers(
-          withCors(
+    return withMcpRoute(
+      compressJsonAnswers(
+        withCors(
+          drain.admit(
             limitRequestBody(
               withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
             ),

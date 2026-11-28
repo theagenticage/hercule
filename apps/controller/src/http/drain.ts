@@ -8,35 +8,37 @@
  * controller runs one after the other (`../index.ts`):
  *
  * 1. `finishRequests`: from now on every new request is refused with a 503, a
- *    socket upgrade included. It returns once every plain request admitted
- *    before has finished, so a request waiting for a runner's reply still gets
- *    it.
+ *    socket upgrade included. It returns once every request admitted before
+ *    has finished, so a request waiting for a runner's reply still gets it.
+ *    An open socket does not count: its request is only waiting for the
+ *    connection to end.
  * 2. `closeSockets`: closes every socket with the going-away code, then waits
  *    until the route that served each one has ended. A runner's route records
  *    that the runner left as it ends, so that write is done when this returns.
  *
- * A request is counted until its request scope closes, not until its handler
- * returns. The handler of a streamed response returns before the body is
- * sent, and the platform moves the scope onto the body stream, so the scope
- * closes when the last byte has been sent.
+ * `admit` counts every admitted request until its request scope closes, not
+ * until its handler returns. The handler of a streamed response returns
+ * before the body is sent, and the platform moves the scope onto the body
+ * stream, so the scope closes when the last byte has been sent. A request
+ * that asks for a WebSocket is counted like any other: a route may still
+ * answer it as a plain request, and wait for a runner while it does.
  *
- * A route upgrades a request only through `upgrade`. That is what makes every
- * open socket known to the drain, and what keeps a socket from opening after
- * the drain has begun.
+ * A route serves a WebSocket only through `serveSocket`. That is what makes
+ * every open socket known to the drain, and what keeps a socket from opening
+ * after the drain has begun. A request counts as a socket from the moment
+ * `serveSocket` registers it, so `finishRequests` waits for the requests that
+ * are not sockets: the requests in flight minus the sockets registered.
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
-import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import type { HttpServerError } from "effect/http/HttpServerError";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Socket from "effect/socket/Socket";
-import { createInternalError } from "@hercule/contract";
 import { GOING_AWAY_CLOSE_CODE } from "@hercule/protocol";
-import { buildErrorResponse } from "./envelope";
 
 /**
  * The reason sent with the going-away close. A WebSocket close reason holds at
@@ -46,134 +48,158 @@ const STOPPING_CLOSE_REASON = "the controller is stopping";
 
 const STOPPING_MESSAGE = "Hercule is stopping; try again once it is back.";
 
-/** The error `upgrade` fails with once the drain has begun. */
-export class ListenerStopping extends Data.TaggedError("ListenerStopping") {}
-
 /**
- * Builds the answer to a request that arrives once the drain has begun: a 503
- * with the error envelope. The contract has no error code for "unavailable"
- * (`controller_sealed` carries the address of a new machine, and there is
- * none), so the body uses `internal`, which clients show as a plain message.
+ * Builds the answer to a request that arrives once the drain has begun: a
+ * bare 503 with a plain-text message, outside the error envelope, like the
+ * transport's bare 413. The contract has no error code that renders as 503
+ * and means "stopping" (`controller_sealed` carries the address of a new
+ * machine, and there is none), and `internal` renders as 500. The connection
+ * is closed, so a client does not send its next request on it.
  */
-export const buildStoppingResponse = (): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.setStatus(buildErrorResponse(createInternalError(STOPPING_MESSAGE)), 503);
+const buildStoppingResponse = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.text(STOPPING_MESSAGE, { status: 503, headers: { connection: "close" } });
 
-/** A socket the drain knows about: the effect that closes it. */
-interface OpenSocket {
-  readonly close: Effect.Effect<void>;
-}
-
-/** What opening a socket returns: the socket for the route, and the drain's record of it. */
-interface OpenedSocket {
-  readonly socket: Socket.Socket;
-  readonly open: OpenSocket;
-}
+/** An open socket as the drain holds it: the effect that closes it with the going-away code. */
+type CloseSocket = Effect.Effect<void>;
 
 const make = Effect.sync(() => {
   let draining = false;
 
-  // Each latch is open while its count is zero, so waiting for "none left"
-  // is waiting for the latch.
   let requestsInFlight = 0;
-  const noRequestsInFlight = Latch.makeUnsafe(true);
-  const openSockets = new Set<OpenSocket>();
+  const openSockets = new Set<CloseSocket>();
+  // Open while no request is in flight apart from the open sockets', and
+  // while no socket is open.
+  const requestsFinished = Latch.makeUnsafe(true);
   const noOpenSockets = Latch.makeUnsafe(true);
 
-  const startRequest = Effect.sync(() => {
+  /** Opens or closes the two latches to match the counts. Call it after every change of them. */
+  const settle = (): void => {
+    if (requestsInFlight <= openSockets.size) requestsFinished.openUnsafe();
+    else requestsFinished.closeUnsafe();
+    if (openSockets.size === 0) noOpenSockets.openUnsafe();
+    else noOpenSockets.closeUnsafe();
+  };
+
+  /**
+   * Admits a request, unless the drain has begun. The check and the count are
+   * one synchronous step, so no request is admitted after `finishRequests`
+   * began waiting.
+   */
+  const admitRequest = Effect.sync((): boolean => {
+    if (draining) return false;
     requestsInFlight++;
-    noRequestsInFlight.closeUnsafe();
+    settle();
+    return true;
   });
+
   const endRequest = Effect.sync(() => {
     requestsInFlight--;
-    if (requestsInFlight === 0) noRequestsInFlight.openUnsafe();
+    settle();
   });
 
   /**
    * Upgrades the request, takes the socket's writer and registers the socket.
-   * The upgrade counts as a request in flight until the socket is registered,
-   * so `finishRequests` also waits for an upgrade that started before it.
+   * The registration follows the platform's upgrade with nothing in between
+   * that could be interrupted or could wait.
+   *
+   * The platform's upgrade waits for Bun's `open` callback, which comes after
+   * the handshake. A peer that never completes the handshake keeps this
+   * waiting, and its request stays counted as in flight, so only the drain
+   * deadline ends the wait.
    */
-  const openSocket = (
-    request: HttpServerRequest.HttpServerRequest,
-  ): Effect.Effect<OpenedSocket, HttpServerError, Scope.Scope> =>
-    Effect.andThen(
-      startRequest,
-      Effect.gen(function* () {
-        const socket = yield* request.upgrade;
-        const { write } = yield* socket.writer;
-        const open: OpenSocket = {
-          // Closing a socket that is already closed does nothing.
-          close: Effect.ignore(
-            write(new Socket.CloseEvent(GOING_AWAY_CLOSE_CODE, STOPPING_CLOSE_REASON)),
-          ),
-        };
-        openSockets.add(open);
-        noOpenSockets.closeUnsafe();
-        return { socket, open };
-      }).pipe(Effect.ensuring(endRequest)),
-    );
+  const openSocket = (request: HttpServerRequest.HttpServerRequest) =>
+    Effect.gen(function* () {
+      const socket = yield* request.upgrade;
+      const { write } = yield* socket.writer;
+      // Closing a socket that is already closed does nothing.
+      const close: CloseSocket = Effect.ignore(
+        write(new Socket.CloseEvent(GOING_AWAY_CLOSE_CODE, STOPPING_CLOSE_REASON)),
+      );
+      yield* Effect.sync(() => {
+        openSockets.add(close);
+        settle();
+      });
+      return { socket, close };
+    });
 
-  const closeAndForget = ({ open }: OpenedSocket) =>
+  /** Closes the socket if it is still open, and forgets it. */
+  const closeAndForget = (close: CloseSocket) =>
     Effect.andThen(
-      open.close,
+      close,
       Effect.sync(() => {
-        openSockets.delete(open);
-        if (openSockets.size === 0) noOpenSockets.openUnsafe();
+        openSockets.delete(close);
+        settle();
       }),
     );
 
   return {
     /**
-     * Wraps the whole application. Once the drain has begun, answers every
-     * request with the 503 and runs nothing. Before that, counts a request
-     * until its request scope closes. A request that asks for a WebSocket is
-     * not counted, because its scope lasts as long as the connection.
+     * Wraps the application. Once the drain has begun, answers every request
+     * with the 503 and runs nothing. Before that, counts every request, one
+     * that asks for a WebSocket included, until its request scope closes.
+     *
+     * The check, the count and the registration of the count's release on the
+     * request scope are one step that cannot be interrupted, so a request is
+     * never counted without being released.
      */
-    track: <E, R>(
+    admit: <E, R>(
       app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-    ): Effect.Effect<
-      HttpServerResponse.HttpServerResponse,
-      E,
-      R | HttpServerRequest.HttpServerRequest | Scope.Scope
-    > =>
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R | Scope.Scope> =>
       Effect.gen(function* () {
-        if (draining) return buildStoppingResponse();
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        if (request.headers["upgrade"]?.toLowerCase() !== "websocket") {
-          yield* Effect.acquireRelease(startRequest, () => endRequest);
-        }
+        const admitted = yield* Effect.acquireRelease(admitRequest, (wasAdmitted) =>
+          wasAdmitted ? endRequest : Effect.void,
+        );
+        if (!admitted) return buildStoppingResponse();
         return yield* app;
       }),
 
     /**
-     * Upgrades a request to a WebSocket and registers the socket until the
-     * scope closes. Fails with `ListenerStopping` once the drain has begun,
-     * so a route turns that into `buildStoppingResponse()`; fails with the
-     * platform's error when the request cannot be upgraded.
+     * Serves a WebSocket: upgrades the request, runs `body` with the socket,
+     * and returns the route's response. Once the drain has begun, runs
+     * nothing and returns the bare 503. After `body` ends, returns an empty
+     * response, because an upgraded request has no response left to send.
+     * Fails with the platform's error when the request cannot be upgraded,
+     * and with `body`'s errors.
      *
-     * The check, the upgrade and the registration are one step that cannot be
-     * interrupted, so no socket is left open and unknown to the drain.
-     * Closing the scope sends the going-away close, if the socket is still
-     * open, and forgets the socket.
+     * The check at the start and the registration after the platform's
+     * upgrade are both synchronous, and the acquire is uninterruptible, so no
+     * socket is left open and unknown to the drain. A request admitted before
+     * the drain but upgrading after it is refused. When `body` ends, the
+     * socket gets the going-away close if it is still open, and is forgotten.
      */
-    upgrade: (
+    serveSocket: <E, R>(
       request: HttpServerRequest.HttpServerRequest,
-    ): Effect.Effect<Socket.Socket, ListenerStopping | HttpServerError, Scope.Scope> =>
-      Effect.acquireRelease(
-        Effect.suspend(
-          (): Effect.Effect<OpenedSocket, ListenerStopping | HttpServerError, Scope.Scope> =>
-            draining ? Effect.fail(new ListenerStopping()) : openSocket(request),
-        ),
-        closeAndForget,
-      ).pipe(Effect.map(({ socket }) => socket)),
+      body: (socket: Socket.Socket) => Effect.Effect<unknown, E, R>,
+    ): Effect.Effect<
+      HttpServerResponse.HttpServerResponse,
+      E | HttpServerError,
+      Exclude<R, Scope.Scope>
+    > =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const opened = yield* Effect.acquireRelease(
+            Effect.suspend(
+              (): Effect.Effect<
+                { readonly socket: Socket.Socket; readonly close: CloseSocket } | undefined,
+                HttpServerError,
+                Scope.Scope
+              > => (draining ? Effect.succeed(undefined) : openSocket(request)),
+            ),
+            (one) => (one === undefined ? Effect.void : closeAndForget(one.close)),
+          );
+          if (opened === undefined) return buildStoppingResponse();
+          yield* body(opened.socket);
+          return HttpServerResponse.empty();
+        }),
+      ),
 
     /**
      * Begins the drain, then waits until every request admitted before it has
-     * finished. Safe to call more than once.
+     * finished. Open sockets are not waited for. Safe to call more than once.
      */
     finishRequests: Effect.suspend(() => {
       draining = true;
-      return noRequestsInFlight.await;
+      return requestsFinished.await;
     }),
 
     /**
@@ -182,7 +208,7 @@ const make = Effect.sync(() => {
      */
     closeSockets: Effect.suspend(() =>
       Effect.andThen(
-        Effect.forEach([...openSockets], (open) => open.close, { discard: true }),
+        Effect.forEach([...openSockets], (close) => close, { discard: true }),
         noOpenSockets.await,
       ),
     ),

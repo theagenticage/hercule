@@ -23,8 +23,10 @@
  * controller daemon's drivers and the provider probes), so a future scheduler
  * adds a step there rather than changing this structure.
  */
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
+import * as Option from "effect/Option";
 import type { ServeError } from "effect/http/HttpServerError";
 import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
@@ -117,6 +119,18 @@ export const STILL_OPEN = "Connections were still open; Hercule stopped anyway."
 const DRAIN_DEADLINE_MS = 10_000;
 
 /**
+ * How long the stop waits for the requests in flight before it goes on and
+ * stops the local runner. Half of `DRAIN_DEADLINE_MS`: when the full deadline
+ * passes, the process exits and kills the local runner, so a runner that is
+ * stopped only then never gets to say goodbye. The other half is what it needs
+ * to do so.
+ */
+const FINISH_REQUESTS_DEADLINE_MS = DRAIN_DEADLINE_MS / 2;
+
+/** The message printed when a request in flight outlasts `FINISH_REQUESTS_DEADLINE_MS`. */
+const REQUESTS_STILL_IN_FLIGHT = `Requests were still in flight after ${FINISH_REQUESTS_DEADLINE_MS / 1000} s; stopping the local runner anyway.`;
+
+/**
  * Installs the SIGINT and SIGTERM handlers, and returns an effect that
  * completes when the first of those signals arrives.
  *
@@ -189,9 +203,17 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     // drain waits for include them, so they are closed before it starts.
     yield* closeMcpStreams;
     // From here on every new request, a reconnecting runner's included, is
-    // refused. The requests already in flight finish first: one of them may
-    // be waiting for a runner's reply.
-    yield* drain.finishRequests;
+    // refused. The requests already in flight finish first, for as long as
+    // `FINISH_REQUESTS_DEADLINE_MS`: one of them may be waiting for a runner's
+    // reply.
+    const finished = yield* Effect.timeoutOption(
+      drain.finishRequests,
+      Duration.millis(FINISH_REQUESTS_DEADLINE_MS),
+    );
+    if (Option.isNone(finished)) {
+      console.log(REQUESTS_STILL_IN_FLIGHT);
+      yield* Effect.logWarning(REQUESTS_STILL_IN_FLIGHT);
+    }
     // After the requests, because one of them may be waiting for the local
     // runner. Before the sockets close: the local runner says goodbye over
     // its socket to this controller, and a controller that had already closed

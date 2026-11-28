@@ -24,7 +24,6 @@ import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as HttpRouter from "effect/http/HttpRouter";
-import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -56,7 +55,7 @@ import {
   type RunnerHello,
 } from "@hercule/protocol";
 import { readBearerToken } from "../http/bearer";
-import { buildStoppingResponse, ListenerDrain } from "../http/drain";
+import { ListenerDrain } from "../http/drain";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
 import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
@@ -558,14 +557,8 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
       return buildErrorResponse(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
     }
 
-    const socket = yield* drain.upgrade(request);
-    // After the upgrade there is no HTTP response left to send a status on.
-    yield* holdConnection(admitted.value, socket);
-    return HttpServerResponse.empty();
-  }).pipe(
-    // A controller that is stopping accepts no new connection. The runner
-    // reconnects when the controller is back.
-    Effect.catchTag("ListenerStopping", () => Effect.succeed(buildStoppingResponse())),
-    Effect.withSpan("runner.socket"),
-  ),
+    // A controller that is stopping refuses the upgrade with a 503, and the
+    // runner connects again when the controller is back.
+    return yield* drain.serveSocket(request, (socket) => holdConnection(admitted.value, socket));
+  }).pipe(Effect.withSpan("runner.socket")),
 );

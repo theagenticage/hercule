@@ -36,7 +36,6 @@ import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as NetAddress from "effect/net/NetAddress";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as RpcServer from "effect/rpc/RpcServer";
@@ -61,7 +60,7 @@ import {
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, requireGrant, type UserActor } from "../actor";
 import { Credentials } from "../credentials";
-import { buildStoppingResponse, ListenerDrain } from "../http/drain";
+import { ListenerDrain } from "../http/drain";
 import { WsTickets } from "./tickets";
 import { LiveTopics, type LiveQueue } from "./topics";
 
@@ -382,21 +381,22 @@ const handlers = live.toLayer(
  * sockets in a loop; here the loop is the route, so `run` only keeps the
  * function that serves one socket for the route to call.
  */
-const makeProtocol = Effect.gen(function* () {
+const buildLiveSocketProtocol = Effect.gen(function* () {
   const drain = yield* ListenerDrain;
   const router = yield* HttpRouter.HttpRouter;
 
-  const serveSocket = Deferred.makeUnsafe<(socket: Socket.Socket) => Effect.Effect<void>>();
+  const socketHandler = Deferred.makeUnsafe<(socket: Socket.Socket) => Effect.Effect<void>>();
   const server = SocketServer.SocketServer.of({
     // The protocol never reads the address, and this server has no port of its own.
     address: NetAddress.unixPathAddress(LIVE_SOCKET_PATH),
     // Keeps the handler together with the services it needs, so the route can
-    // call it with nothing left to provide. A failure of the handler is
-    // ignored: the protocol's own handler cannot fail.
+    // call it with nothing left to provide. The handler's typed failures are
+    // discarded, because the route has nobody to report them to; defects
+    // still propagate to the route.
     run: <R, E, A>(handler: (socket: Socket.Socket) => Effect.Effect<A, E, R>) =>
       Effect.gen(function* () {
         const services = yield* Effect.context<R>();
-        yield* Deferred.succeed(serveSocket, (socket) =>
+        yield* Deferred.succeed(socketHandler, (socket) =>
           Effect.ignore(Effect.provideContext(handler(socket), services)),
         );
         return yield* Effect.never;
@@ -408,14 +408,12 @@ const makeProtocol = Effect.gen(function* () {
     LIVE_SOCKET_PATH,
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const socket = yield* drain.upgrade(request);
-      const serve = yield* Deferred.await(serveSocket);
-      yield* serve(socket);
-      return HttpServerResponse.empty();
+      // A controller that is stopping refuses the upgrade with a 503, and the
+      // client connects again when the controller is back.
+      return yield* drain.serveSocket(request, (socket) =>
+        Effect.flatMap(Deferred.await(socketHandler), (handle) => handle(socket)),
+      );
     }).pipe(
-      // A controller that is stopping accepts no new connection. The client
-      // connects again when the controller is back.
-      Effect.catchTag("ListenerStopping", () => Effect.succeed(buildStoppingResponse())),
       // A request that cannot be upgraded is a defect, as it was when the RPC
       // server upgraded it.
       Effect.orDie,
@@ -438,6 +436,6 @@ export const LiveSocketLayer: Layer.Layer<
   HttpRouter.HttpRouter | WsTickets | LiveTopics | Credentials | ListenerDrain
 > = RpcServer.layer(live).pipe(
   Layer.provide(handlers),
-  Layer.provide(Layer.effect(RpcServer.Protocol)(makeProtocol)),
+  Layer.provide(Layer.effect(RpcServer.Protocol)(buildLiveSocketProtocol)),
   Layer.provide(RpcSerialization.layerJson),
 );
