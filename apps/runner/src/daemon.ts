@@ -136,6 +136,25 @@ const prepareRunnerTooling = (
   );
 
 /**
+ * Deletes a folder a previous run left behind. Never fails: when a file in it
+ * cannot be deleted (for example one a container created as root), the log
+ * names the folder and the reason, and the folder stays. Leftovers are only
+ * cleanup, so they must not keep the runner from starting.
+ */
+const removeLeftoverFolder = (path: string): Effect.Effect<void> =>
+  Effect.try({
+    try: () => rmSync(path, { recursive: true, force: true }),
+    catch: (error) => (error instanceof Error ? error.message : String(error)),
+  }).pipe(
+    Effect.catch((reason) =>
+      Effect.logWarning(
+        `could not delete the leftover folder ${path}: ${reason}. The runner starts anyway. ` +
+          "Delete the folder by hand, or change the owner of the files in it back to the runner's user, to free the space.",
+      ),
+    ),
+  );
+
+/**
  * Runs the runner daemon until the controller retires this runner. Fails with
  * `NotEnrolled` when `runner.json` is missing or invalid, or the credential
  * socket cannot be served, with `ToolingUnavailable` when the tooling
@@ -246,10 +265,9 @@ export const runDaemon = (
       // No session outlives this process, so anything in these directories
       // was left behind by the last run. Delete them here, so they do not
       // grow with every crash.
-      rmSync(scratchDir, { recursive: true, force: true });
-      rmSync(attachmentsDir, { recursive: true, force: true });
-      rmSync(editMarksDir, { recursive: true, force: true });
-      rmSync(sessionSkillsDir, { recursive: true, force: true });
+      for (const leftover of [scratchDir, attachmentsDir, editMarksDir, sessionSkillsDir]) {
+        yield* removeLeftoverFolder(leftover);
+      }
       // A token login keeps its scratch folder in the machine's temp directory,
       // where a runner killed in the middle of one leaves it.
       removeStaleSetupTokenFolders(tmpdir(), Date.now());

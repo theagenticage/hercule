@@ -103,6 +103,10 @@ const runUntilStopped = async (
           Effect.raceFirst(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
         ),
       ).pipe(
+        // The reason the runner stopped also goes to its own log, not only to
+        // standard error, which is the controller's stderr log for a local
+        // runner.
+        Effect.tapError((error) => Effect.logError(`the runner stopped: ${error.message}`)),
         // Stop any harness login in progress. A login process blocked on
         // stdin would otherwise outlive this process, still waiting for a
         // credential.
