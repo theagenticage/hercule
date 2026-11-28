@@ -55,9 +55,14 @@ import { workflowAction } from "./groups/workflow-action";
 import { workspace } from "./groups/workspace";
 
 /**
- * The public API. Every decode of a request (path, query, headers and body)
- * collects all problems instead of stopping at the first, so a refused request
- * reports every field to fix at once (spec 11, "One error per response").
+ * The public API. Each decode of a request part (path, query, headers, body)
+ * collects every problem in that part instead of stopping at the first, so a
+ * refused request names every field to fix at once (spec 11, "One error per
+ * response").
+ *
+ * The parts are still decoded one after the other, path first and body last,
+ * and the first part that fails is the refusal: a bad id hides a bad body. A
+ * `closedRecord` also stops at its first bad key.
  */
 export const api = HttpApi.make("hercule")
   .add(
