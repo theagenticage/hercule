@@ -109,12 +109,19 @@ describe("mcpServer.create", () => {
       const otherType = await refuse({ contributionId: "acme/desk", connectionId: bolt });
       expect(otherType.issues).toEqual([["source", "connectionId"]]);
       expect(otherType.message).toBeDefined();
-      for (const name of ["Desk", "my-desk", "a__b", "hercule", "a".repeat(17), ""]) {
+      for (const name of ["Desk", "my-desk", "a__b", "hercule", "a".repeat(17)]) {
         expect(
           (await refuse({ contributionId: "acme/desk", connectionId: acme, name })).issues,
           name,
         ).toEqual([["source", "name"]]);
       }
+      // An empty name breaks two rules, the length and the characters, and both are reported.
+      expect(
+        (await refuse({ contributionId: "acme/desk", connectionId: acme, name: "" })).issues,
+      ).toEqual([
+        ["source", "name"],
+        ["source", "name"],
+      ]);
       expect(await controller.harness.audit("mcpServer.created")).toEqual([]);
 
       const first = await createServer(controller, {
