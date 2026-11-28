@@ -477,12 +477,12 @@ describe("importSkillArchive", () => {
   });
 
   it("rejects with an error about the connection or the credential, so the import stops", async () => {
-    const unreachable = new ConnectionError(
-      "skill.import",
-      "http://controller.test",
-      "cannot connect to http://controller.test",
-      undefined,
-    );
+    const unreachable = new ConnectionError({
+      operation: "skill.import",
+      url: "http://controller.test",
+      reason: "cannot connect to http://controller.test",
+      cause: undefined,
+    });
     const forbidden = new ApiError("forbidden", "you lack skill.write");
     await expect(importFailing(unreachable)).rejects.toBe(unreachable);
     await expect(importFailing(forbidden)).rejects.toBe(forbidden);
@@ -500,12 +500,12 @@ describe("isSkillImportRefusal", () => {
     expect(isSkillImportRefusal(new ApiError("unauthenticated", "signed out"))).toBe(false);
     expect(
       isSkillImportRefusal(
-        new ConnectionError(
-          "skill.import",
-          "http://controller.test",
-          "cannot connect to http://controller.test",
-          undefined,
-        ),
+        new ConnectionError({
+          operation: "skill.import",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: undefined,
+        }),
       ),
     ).toBe(false);
     expect(isSkillImportRefusal(new Error("anything else"))).toBe(false);

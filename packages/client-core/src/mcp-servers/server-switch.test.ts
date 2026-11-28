@@ -102,12 +102,12 @@ const setup = async (initial: readonly McpServer[] = []) => {
               : server,
           );
           if (lostReply)
-            throw new ConnectionError(
-              "mcpServer.update",
-              "http://controller.test",
-              "the connection to http://controller.test was lost while the answer arrived",
-              new Error("reset"),
-            );
+            throw new ConnectionError({
+              operation: "mcpServer.update",
+              url: "http://controller.test",
+              reason: "the connection to http://controller.test was lost while the answer arrived",
+              cause: new Error("reset"),
+            });
           return { answeredWith: "not a record" };
         },
       ),
@@ -1007,12 +1007,12 @@ describe("the Replace dialog", () => {
 
     it("says what the list shows, and that the outcome is not known, when the server is not on the Connection", async () => {
       const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
-      world.updateFails = new ConnectionError(
-        "mcpServer.update",
-        "http://controller.test",
-        "the connection to http://controller.test was lost while the answer arrived",
-        new Error("reset"),
-      );
+      world.updateFails = new ConnectionError({
+        operation: "mcpServer.update",
+        url: "http://controller.test",
+        reason: "the connection to http://controller.test was lost while the answer arrived",
+        cause: new Error("reset"),
+      });
 
       switches.confirmReplace(WORK);
       await settle(WORK);
@@ -1078,12 +1078,12 @@ describe("the Replace dialog", () => {
 
     it("is done, not refused with Nothing was replaced, when a second Replace is refused because the first one committed after the list was read", async () => {
       const { world, switches, settle, view } = await openDialog([docsByUrl("s-a")]);
-      world.updateFails = new ConnectionError(
-        "mcpServer.update",
-        "http://controller.test",
-        "the connection to http://controller.test was lost while the answer arrived",
-        new Error("reset"),
-      );
+      world.updateFails = new ConnectionError({
+        operation: "mcpServer.update",
+        url: "http://controller.test",
+        reason: "the connection to http://controller.test was lost while the answer arrived",
+        cause: new Error("reset"),
+      });
       switches.confirmReplace(WORK);
       await settle(WORK);
       expect(view().notice?.kind).toBe("refused");

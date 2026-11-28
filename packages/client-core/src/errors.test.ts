@@ -31,12 +31,12 @@ describe("readValidationIssues", () => {
     );
     expect(
       readValidationIssues(
-        new ConnectionError(
-          "setup.read",
-          "http://controller.test",
-          "cannot connect to http://controller.test",
-          new Error("refused"),
-        ),
+        new ConnectionError({
+          operation: "setup.read",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: new Error("refused"),
+        }),
       ),
     ).toBe(undefined);
     // A RequestError fails before the request is sent. Its issues are on the
@@ -52,12 +52,12 @@ describe("isNotFound", () => {
     expect(isNotFound(new ApiError("forbidden", "No."))).toBe(false);
     expect(
       isNotFound(
-        new ConnectionError(
-          "setup.read",
-          "http://controller.test",
-          "cannot connect to http://controller.test",
-          new Error("refused"),
-        ),
+        new ConnectionError({
+          operation: "setup.read",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: new Error("refused"),
+        }),
       ),
     ).toBe(false);
     expect(isNotFound(null)).toBe(false);
@@ -70,12 +70,12 @@ describe("isInvalidState", () => {
     expect(isInvalidState(new ApiError("conflict", "Changed."))).toBe(false);
     expect(
       isInvalidState(
-        new ConnectionError(
-          "mcpServer.update",
-          "http://controller.test",
-          "cannot connect to http://controller.test",
-          new Error("refused"),
-        ),
+        new ConnectionError({
+          operation: "mcpServer.update",
+          url: "http://controller.test",
+          reason: "cannot connect to http://controller.test",
+          cause: new Error("refused"),
+        }),
       ),
     ).toBe(false);
     expect(isInvalidState(null)).toBe(false);

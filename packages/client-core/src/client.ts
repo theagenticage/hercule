@@ -8,10 +8,11 @@
  * derived from `api`, so an operation added to the contract appears here with
  * no edit.
  */
-import { api, MAX_INPUT_ANSWER_WAIT, type Attachment } from "@hercule/contract";
-import { Context, Duration, Effect, Result } from "effect";
+import { api, MAX_INPUT_ANSWER_WAIT, type Attachment, type OperationId } from "@hercule/contract";
+import { Cause, Context, Duration, Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import type * as HttpApi from "effect/http-api/HttpApi";
@@ -166,6 +167,27 @@ const SentToken = Context.Reference<string | null>("@hercule/client-core/SentTok
   defaultValue: () => null,
 });
 
+/**
+ * Returns the failure of a call that `toClientError` should convert.
+ *
+ * A declared error status (such as 401) whose body fails to read fails with
+ * two failures in one cause: first a `StatusCodeError`, then the `DecodeError`
+ * that says why the body could not be read. `Effect.result` keeps only the
+ * first, which would report the status and hide that the connection broke. So
+ * the `DecodeError` is returned when the cause has one, and otherwise the
+ * first failure. Returns `undefined` for a cause without failures, such as an
+ * interruption.
+ */
+const pickReportedFailure = (cause: Cause.Cause<unknown>): unknown => {
+  const failures = cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error);
+  return (
+    failures.find(
+      (failure) =>
+        HttpClientError.isHttpClientError(failure) && failure.reason._tag === "DecodeError",
+    ) ?? failures[0]
+  );
+};
+
 /** Creates a client for the controller at `options.baseUrl`. */
 export const createClient = (options: ClientOptions): HerculeClient => {
   const store = options.tokenStore;
@@ -262,7 +284,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
    * exports no spans.
    */
   const run = (
-    operation: string,
+    operation: OperationId,
     effect: Effect.Effect<unknown, unknown>,
     tokenFrom: ((result: unknown) => string | null) | undefined,
     signal?: AbortSignal,
@@ -281,6 +303,11 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     return Effect.runPromise(
       Effect.result(
         effect.pipe(
+          Effect.catchCause((cause) =>
+            cause.reasons.some(Cause.isFailReason)
+              ? Effect.fail(pickReportedFailure(cause))
+              : Effect.failCause(cause),
+          ),
           Effect.provideService(FetchHttpClient.Fetch, send as typeof globalThis.fetch),
           Effect.provideService(HttpClient.TracerPropagationEnabled, false),
           Effect.provideService(SentToken, sentToken),
@@ -341,7 +368,10 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   for (const group of Object.values(api.groups)) {
     client[group.identifier] = Object.fromEntries(
       Object.keys(group.endpoints).map((name) => {
-        const operation = `${group.identifier}.${name}`;
+        // True because the contract builds each endpoint's id as
+        // `<group identifier>.<endpoint name>`, and every id is in the
+        // operation table (checked by the contract's api test).
+        const operation = `${group.identifier}.${name}` as OperationId;
         const tokenFrom = TOKEN_FROM[operation];
         let call: Call | undefined;
         return [

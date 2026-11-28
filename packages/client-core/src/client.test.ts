@@ -617,6 +617,33 @@ describe("createClient with a token store", () => {
     assert.strictEqual(client.getToken(), null);
   });
 
+  it("reports a connection failure, not the status, when a declared error's body stalls", async () => {
+    // The 401 headers arrive, then the body fails with a time limit's error.
+    const store = createFakeStore("tok_kept");
+    const body = new ReadableStream({
+      start: (controller) =>
+        controller.error(
+          new DOMException("the controller stopped sending its answer for 5 s", "TimeoutError"),
+        ),
+    });
+    const { fetch } = stubFetch(
+      () => new Response(body, { status: 401, headers: { "content-type": "application/json" } }),
+    );
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    const error = await client.profile.read(PROFILE).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert.instanceOf(error, ConnectionError);
+    assert.strictEqual(
+      error.message,
+      "profile.read: the controller stopped sending its answer for 5 s",
+    );
+    assert.strictEqual(store.held, "tok_kept");
+  });
+
   it("keeps the token on any other failure", async () => {
     const store = createFakeStore("tok_kept");
     const { fetch } = stubFetch(() =>

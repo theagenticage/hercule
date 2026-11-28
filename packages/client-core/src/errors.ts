@@ -13,6 +13,7 @@ import {
   listDecodeIssues,
   type ErrorCode,
   type Issue,
+  type OperationId,
 } from "@hercule/contract";
 import { Schema } from "effect";
 import * as HttpClientError from "effect/http/HttpClientError";
@@ -97,13 +98,25 @@ export class ConnectionError extends Error {
   override readonly name = "ConnectionError";
   /** The controller's address. */
   readonly url: string;
-  /** The operation that failed, as `<group>.<name>`, such as `workspace.query`. */
-  readonly operation: string;
+  /** The operation that failed, such as `workspace.query`. */
+  readonly operation: OperationId;
+  /**
+   * What went wrong, as a phrase that starts in lower case and has no final
+   * period, such as "the controller did not answer within 5 s". The message is
+   * the operation and this phrase.
+   */
+  readonly reason: string;
 
-  constructor(operation: string, url: string, reason: string, cause: unknown) {
-    super(`${operation}: ${reason}`, { cause });
-    this.url = url;
-    this.operation = operation;
+  constructor(details: {
+    readonly operation: OperationId;
+    readonly url: string;
+    readonly reason: string;
+    readonly cause: unknown;
+  }) {
+    super(`${details.operation}: ${details.reason}`, { cause: details.cause });
+    this.url = details.url;
+    this.operation = details.operation;
+    this.reason = details.reason;
   }
 }
 
@@ -246,7 +259,7 @@ const describeConnectionFailure = (
 ): string => {
   const cause: unknown = reason.cause;
   if (isTimeout(cause)) return cause.message;
-  if (reason._tag === "InvalidUrlError") return `${url} is not a valid address`;
+  if (reason._tag === "InvalidUrlError") return `the address ${url} is not valid`;
   if (reason._tag === "DecodeError") {
     return `the connection to ${url} was lost while the answer arrived`;
   }
@@ -267,7 +280,7 @@ const describeConnectionFailure = (
  *
  * A `ConnectionError` means no complete response arrived: the request could
  * not be sent, or the connection was lost or aborted while the body arrived.
- * `operation` (`<group>.<name>`) and `url` go into its message.
+ * `operation` and `url` go into its message.
  *
  * A response that arrived but could not be decoded becomes an `internal`
  * `ApiError`, with the original failure kept as `cause`. That covers:
@@ -280,7 +293,7 @@ const describeConnectionFailure = (
  */
 export const toClientError = (
   failure: unknown,
-  operation: string,
+  operation: OperationId,
   url: string,
   sent: boolean,
 ): RequestError | ApiError | ConnectionError => {
@@ -300,7 +313,12 @@ export const toClientError = (
       reason._tag === "InvalidUrlError" ||
       (reason._tag === "DecodeError" && isConnectionLoss(reason.cause))
     ) {
-      return new ConnectionError(operation, url, describeConnectionFailure(reason, url), failure);
+      return new ConnectionError({
+        operation,
+        url,
+        reason: describeConnectionFailure(reason, url),
+        cause: failure,
+      });
     }
   }
 

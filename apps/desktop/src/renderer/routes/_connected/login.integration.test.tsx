@@ -104,7 +104,7 @@ describe("the sign-in screen", () => {
     const { user } = await openSignIn(refuseConnection);
     await signIn(user);
     expect((await screen.findByRole("alert")).textContent).toBe(
-      `auth.login: cannot connect to ${CONTROLLER_URL}`,
+      `Cannot connect to ${CONTROLLER_URL}.`,
     );
   });
 

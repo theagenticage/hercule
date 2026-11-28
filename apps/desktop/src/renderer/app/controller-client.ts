@@ -22,9 +22,9 @@ import { api } from "@hercule/contract";
  * status and the headers. The body is not included; BODY_SILENCE_MS covers it.
  *
  * Main's check of a controller URL (`main/controller-check.ts`) waits 5
- * seconds for its whole answer, which is at most 64 KiB. A controller that
- * passes the check therefore also starts its answers within this limit, so
- * the app does not give up at launch on a controller that Connect accepted.
+ * seconds for its whole answer, which is at most 64 KiB. That bounds only the
+ * check's own probe. A controller that passes it normally starts its answers
+ * within this limit too, but that is not guaranteed for every later request.
  *
  * The wait starts when `fetch` is called, so it also counts the time the
  * request queues for one of Chromium's 6 connections to the controller. The
@@ -37,7 +37,7 @@ export const HEADER_WAIT_MS = 5000;
  * up. The limit applies to silence, not to the whole body, so a large answer
  * on a slow link is never cut off while its bytes keep arriving.
  */
-export const BODY_SILENCE_MS = 5000;
+const BODY_SILENCE_MS = 5000;
 
 /**
  * How long a request to an operation in RUNNER_WAITING_OPERATIONS waits for
@@ -166,12 +166,13 @@ export const fetchWithTimeout: FetchLike = async (url, init) => {
 
   const headerWait = decideHeaderWait(url, init?.method ?? "GET");
   startTimer(headerWait, `the controller did not answer within ${formatSeconds(headerWait)}`);
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout.signal]) : timeout.signal;
+  // Whoever aborts the request, the timer has nothing left to guard. Without
+  // this, the timer of a body that nobody reads would keep running.
+  signal.addEventListener("abort", stopTimer, { once: true });
   let response: Response;
   try {
-    response = await fetch(url, {
-      ...init,
-      signal: init?.signal ? AbortSignal.any([init.signal, timeout.signal]) : timeout.signal,
-    });
+    response = await fetch(url, { ...init, signal });
   } catch (error) {
     stopTimer();
     throw error;
@@ -198,12 +199,12 @@ export const fetchWithTimeout: FetchLike = async (url, init) => {
       controller.enqueue(chunk);
     },
   });
-  // When the timer aborts the request, Chromium fails the body with a plain
-  // "Failed to fetch", which does not say why. So a failure after the timer
-  // fired is passed on with the timer's reason instead.
+  // When the request is aborted, Chromium fails the body with a plain
+  // "Failed to fetch", which does not say why. So a failure after an abort is
+  // passed on with the abort's reason instead: our timeout's, or the caller's.
   response.body.pipeTo(writable, { preventAbort: true }).then(stopTimer, (error: unknown) => {
     stopTimer();
-    writable.abort(timeout.signal.aborted ? timeout.signal.reason : error).catch(() => {});
+    writable.abort(signal.aborted ? signal.reason : error).catch(() => {});
   });
   return new Response(readable, {
     status: response.status,

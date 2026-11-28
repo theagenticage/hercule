@@ -1,4 +1,5 @@
 import { ConnectionError, MAX_INPUT_ANSWER_WAIT_MS } from "@hercule/client-core";
+import { api } from "@hercule/contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createControllerClient, fetchWithTimeout } from "./controller-client";
 
@@ -166,11 +167,37 @@ describe("fetchWithTimeout", () => {
     expect(failure()).toBe("TimeoutError: the controller stopped sending its answer for 5 s");
   });
 
-  it("gives another operation on a steer's path 5 seconds", async () => {
-    const failure = sendUnanswered("/api/v1/sessions/s-1/inputs/i-1", "DELETE");
+  it("gives the steer's path with another method 5 seconds", async () => {
+    const steer = api.groups.input.endpoints.steer;
+    expect(steer.method).toBe("POST");
+    const failure = sendUnanswered(steer.path.replace(":id", "s-1").replace(":inputId", "i-1"));
 
     await vi.advanceTimersByTimeAsync(5000);
     expect(failure()).toBe("TimeoutError: the controller did not answer within 5 s");
+  });
+
+  it("gives an image's download, which sends its headers at once, 5 seconds", async () => {
+    const failure = sendUnanswered(
+      api.groups.attachment.endpoints.readContent.path.replace(":id", "a-1"),
+    );
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(failure()).toBe("TimeoutError: the controller did not answer within 5 s");
+  });
+
+  it("fails a body the caller aborted with the caller's reason, and stops the timer", async () => {
+    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
+    const caller = new AbortController();
+    // The first byte arrives and waits in the body: nobody reads it yet.
+    const response = await fetchWithTimeout(SETUP_URL, { signal: caller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const reason = new Error("a newer search replaced this one");
+    caller.abort(reason);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(response.text()).rejects.toBe(reason);
   });
 
   it.each<[string, () => Promise<void>]>([
@@ -179,7 +206,7 @@ describe("fetchWithTimeout", () => {
       async () => {
         stubFetch(() => Promise.resolve(new Response('{"complete":true}')));
         const response = await fetchWithTimeout(SETUP_URL);
-        expect(vi.getTimerCount()).toBe(1);
+        expect(vi.getTimerCount()).toBeGreaterThan(0);
         await response.text();
       },
     ],

@@ -70,7 +70,7 @@ import {
   NO_SIDEBAR_RECORDS,
 } from "./fake-controller";
 import { buildRouterContext, type RouterContext } from "./context";
-import { BODY_SILENCE_MS, HEADER_WAIT_MS } from "./controller-client";
+import { HEADER_WAIT_MS } from "./controller-client";
 import { SHARED_READ_WINDOW_MS } from "./live";
 import { createAppRouter } from "./router";
 
@@ -411,15 +411,19 @@ export const holdAnswer = (): {
 };
 
 /**
- * Stops the app's request time limits (`HEADER_WAIT_MS` and `BODY_SILENCE_MS`)
- * from firing for the rest of the test, so a request that the test holds stays pending
- * however slowly the test's other steps run. Without it, a busy machine can
- * take longer than the limit, and the app fails the held request with a
- * `ConnectionError` the test did not plan. It replaces each timer of either
- * length with a real timer that never fires by itself, and restores
+ * Stops the app's wait for the headers of an answer (`HEADER_WAIT_MS`) from
+ * firing for the rest of the test, so a request that the test holds stays
+ * pending however slowly the test's other steps run. Without it, a busy
+ * machine can take longer than the wait, and the app fails the held request
+ * with a `ConnectionError` the test did not plan. It replaces each timer of
+ * that length with a real timer that never fires by itself, and restores
  * `setTimeout` when the test ends. Fake timers cannot be used here: Testing
- * Library's `findBy` and `waitFor` wait on a timer of their own, which a fake
- * clock never fires. Any other timer of either length is held too.
+ * Library's `findBy` and `waitFor` wait on a timer of its own, which a fake
+ * clock never fires. Any other timer of that length is held too.
+ *
+ * It does not hold the limit on a body that stops arriving. A held request
+ * has its headers, because the test holds the answer itself, so no body is
+ * in flight.
  */
 export const stopRequestTimeLimit = (): void => {
   const realSetTimeout = globalThis.setTimeout;
@@ -428,7 +432,7 @@ export const stopRequestTimeLimit = (): void => {
     .mockImplementation(((callback: () => void, delay?: number, ...rest: unknown[]) =>
       realSetTimeout(
         callback,
-        delay === HEADER_WAIT_MS || delay === BODY_SILENCE_MS ? 2 ** 30 : delay,
+        delay === HEADER_WAIT_MS ? 2 ** 30 : delay,
         ...rest,
       )) as typeof setTimeout);
   onTestFinished(() => {

@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
-import { ApiError, isMutationRunning } from "@hercule/client-core";
+import { ApiError, ConnectionError, isMutationRunning } from "@hercule/client-core";
 import { CONNECT_PATH } from "../../app/entry-guard";
 import { openLaunchScreen } from "../../app/last-screen";
 import { CenteredFooter, CenteredScreen } from "../../screens/centered-screen";
@@ -21,14 +21,19 @@ const SIGN_IN_KEY = ["auth.login"];
 /**
  * Returns the line that explains why signing in failed. A wrong username and
  * a wrong password get one message, so the form never reveals which one was
- * right. Any other failure shows its own message, which for a
- * `ConnectionError` says whether the app could not connect to the controller
- * or the controller did not answer in time.
+ * right. A `ConnectionError` shows its reason as a sentence, such as "The
+ * controller did not answer within 5 s.", without the operation's name. Any
+ * other failure shows its own message.
  */
-const describeSignInFailure = (error: Error): string =>
-  error instanceof ApiError && error.code === "unauthenticated"
-    ? "Wrong username or password."
-    : error.message;
+const describeSignInFailure = (error: Error): string => {
+  if (error instanceof ApiError && error.code === "unauthenticated") {
+    return "Wrong username or password.";
+  }
+  if (error instanceof ConnectionError) {
+    return `${error.reason.charAt(0).toUpperCase()}${error.reason.slice(1)}.`;
+  }
+  return error.message;
+};
 
 function SignIn(): JSX.Element {
   const { controller, queryClient, appearance } = Route.useRouteContext();

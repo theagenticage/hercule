@@ -395,10 +395,15 @@ describe("describeThreadStartError", () => {
     expect(
       describeThreadStartError(
         "Fix it",
-        new ConnectionError("thread.start", "http://c", "cannot connect to http://c", "down"),
+        new ConnectionError({
+          operation: "session.spawn",
+          url: "http://c",
+          reason: "cannot connect to http://c",
+          cause: "down",
+        }),
       ),
     ).toBe(
-      "“Fix it” was not started as a thread: thread.start: cannot connect to http://c. Try again.",
+      "“Fix it” was not started as a thread: session.spawn: cannot connect to http://c. Try again.",
     );
     expect(describeThreadStartError("Fix it", new ApiError("internal", "boom"))).toMatch(
       /boom\. Try again\.$/,
