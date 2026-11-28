@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Assistant } from "@hercule/contract";
+import { assistantsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   expectInDocumentOrder,
@@ -196,6 +197,28 @@ describe("the assistant step", () => {
     expect(
       api.calls.some((call) => call.method !== "GET" && call.path.includes("assistants")),
     ).toBe(false);
+  });
+
+  it("fills the field with the assistant's name when the assistant appears after the step opened", async () => {
+    let list: readonly Assistant[] = [];
+    const { client, queryClient } = await openStep([], {
+      "GET /api/v1/assistants": () => ({ body: { items: list } }),
+    });
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "Your assistant comes with your first account",
+    });
+
+    list = [HERCULE];
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: assistantsQuery(client).queryKey });
+    });
+
+    const field = await screen.findByLabelText<HTMLInputElement>("Name");
+    expect(field.value).toBe("Hercule");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(
+      false,
+    );
   });
 
   it("disables Continue while the name is empty", async () => {
