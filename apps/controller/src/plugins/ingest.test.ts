@@ -18,7 +18,7 @@ import {
   type StoredConnection,
 } from "../connections";
 import { serializeTokens } from "../oauth";
-import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
+import { buildJsonResponse } from "../connections/testing";
 import { nowIso } from "../db";
 import { Secrets } from "../secrets";
 import {
@@ -39,6 +39,7 @@ import {
   type EventSourceFixture,
 } from "./testing";
 import { inTransaction } from "../db/testing";
+import { startFakeOAuthProvider } from "../oauth/testing";
 
 const START = Date.parse("2026-09-01T12:00:00.000Z");
 
@@ -548,7 +549,7 @@ describe("IngestLoops failures", () => {
 
 describe("an AuthError while a refresh of the Connection's token is in flight", () => {
   it("does not mark the Connection once the refresh has stored its new token", async () => {
-    const provider = createDeviceProvider();
+    const provider = startFakeOAuthProvider();
     const fixture = createEventSourceFixture({ deviceProviderUrl: provider.base });
     const rejected = Deferred.makeUnsafe<void>();
     let polls = 0;

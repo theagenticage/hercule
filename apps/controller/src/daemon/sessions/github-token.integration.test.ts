@@ -19,12 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import type { GithubTokenAnswer, SessionStart } from "@hercule/protocol";
-import {
-  buildJsonResponse,
-  createDeviceProvider,
-  listConnections,
-  type DeviceProvider,
-} from "../../connections/testing";
+import { buildJsonResponse, listConnections } from "../../connections/testing";
 import { withTransaction } from "../../db";
 import { post, send } from "../../http/testing";
 import {
@@ -42,6 +37,7 @@ import {
   type Wire,
 } from "../../sessions/testing";
 import { disableConnection } from "../../workspaces/testing";
+import { type ListeningFakeOAuthProvider, startFakeOAuthProvider } from "../../oauth/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
@@ -55,7 +51,7 @@ const HOUR_SECONDS = 60 * MINUTE_SECONDS;
  * The GitHub Connection type with a device flow against the test provider,
  * and a pasted token as the other way to connect.
  */
-const buildGithubPlugin = (provider: DeviceProvider): Plugin => ({
+const buildGithubPlugin = (provider: ListeningFakeOAuthProvider): Plugin => ({
   manifest: {
     id: "github",
     displayName: "GitHub",
@@ -84,9 +80,9 @@ const buildGithubPlugin = (provider: DeviceProvider): Plugin => ({
 
 /** Runs `body` against a fleet whose controller has the GitHub type and a provider to refresh against. */
 const withGithubFleet = async (
-  body: (arranged: Arranged, provider: DeviceProvider) => Promise<void>,
+  body: (arranged: Arranged, provider: ListeningFakeOAuthProvider) => Promise<void>,
 ): Promise<void> => {
-  const provider = createDeviceProvider();
+  const provider = startFakeOAuthProvider();
   try {
     await withAgentFleet((arranged) => body(arranged, provider), {
       plugins: [buildGithubPlugin(provider)],
@@ -102,7 +98,7 @@ const withGithubFleet = async (
  * `refreshedExpiresIn` seconds, once `beforeRefresh` is done.
  */
 const answerTokens = (
-  provider: DeviceProvider,
+  provider: ListeningFakeOAuthProvider,
   expiresIn: number,
   { refreshedExpiresIn = 8 * HOUR_SECONDS, beforeRefresh = () => Promise.resolve() } = {},
 ): void => {
@@ -132,7 +128,7 @@ const answerTokens = (
  */
 const EXPIRED_ON_ARRIVAL_SECONDS = 0;
 
-const refreshesAsked = (provider: DeviceProvider): number =>
+const refreshesAsked = (provider: ListeningFakeOAuthProvider): number =>
   provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
 
 /** Signs in to GitHub through the device flow, and returns the new Connection's id. */

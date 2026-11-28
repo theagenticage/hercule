@@ -35,14 +35,16 @@ import {
   buildAccount,
   buildAccountName,
   buildJsonResponse,
-  createDeviceProvider,
-  DEVICE_CODE,
   listConnections,
   readConnectionsSurface,
   type ConnectionRecord,
-  type DeviceProvider,
   type TestPlugin,
 } from "./testing";
+import {
+  DEVICE_CODE,
+  type ListeningFakeOAuthProvider,
+  startFakeOAuthProvider,
+} from "../oauth/testing";
 
 /** The start's response body. */
 interface DeviceStart {
@@ -74,7 +76,7 @@ const DEVICE_TYPE = "devicey/device-type";
 const buildConnectionTypePlugin = (options: {
   readonly id: string;
   readonly type: string;
-  readonly device?: DeviceProvider;
+  readonly device?: ListeningFakeOAuthProvider;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
   const provider = options.device;
@@ -124,7 +126,7 @@ const buildConnectionTypePlugin = (options: {
 };
 
 /** Builds new plugins for each test, so no activation context outlives its test. */
-const buildPlugins = (provider: DeviceProvider) => ({
+const buildPlugins = (provider: ListeningFakeOAuthProvider) => ({
   device: buildConnectionTypePlugin({ id: "devicey", type: "device-type", device: provider }),
   pasted: buildConnectionTypePlugin({ id: "pasted", type: "pasted-type" }),
 });
@@ -136,10 +138,10 @@ const withDevice = async (
     harness: ServerHarness,
     registry: Registry,
     token: string,
-    provider: DeviceProvider,
+    provider: ListeningFakeOAuthProvider,
   ) => Promise<void>,
 ): Promise<void> => {
-  const provider = createDeviceProvider();
+  const provider = startFakeOAuthProvider();
   const registry = buildPlugins(provider);
   try {
     await withServer(
@@ -198,7 +200,7 @@ const allowPoll = (sql: SqlClient.SqlClient, setupId: string): Promise<void> =>
   );
 
 /** Makes the token endpoint issue a token, as it does once the user approves. */
-const approve = (provider: DeviceProvider, accessToken = GOOD_TOKEN): void => {
+const approve = (provider: ListeningFakeOAuthProvider, accessToken = GOOD_TOKEN): void => {
   provider.answers.token = () =>
     buildJsonResponse({ access_token: accessToken, token_type: "bearer", scope: "repo" });
 };
@@ -826,7 +828,10 @@ describe("the access token of a connection set up by a device flow", () => {
    * A refresh answers with new tokens and rotates the refresh token: the
    * endpoint accepts `refresh-1` once, and refuses every later refresh.
    */
-  const useRotatingRefreshToken = (provider: DeviceProvider, expiresIn: number): void => {
+  const useRotatingRefreshToken = (
+    provider: ListeningFakeOAuthProvider,
+    expiresIn: number,
+  ): void => {
     provider.answers.token = () => {
       const request = provider.tokenRequests.at(-1);
       if (request?.["grant_type"] !== "refresh_token") {
@@ -848,14 +853,16 @@ describe("the access token of a connection set up by a device flow", () => {
     };
   };
 
-  const refreshRequests = (provider: DeviceProvider): ReadonlyArray<Record<string, string>> =>
+  const refreshRequests = (
+    provider: ListeningFakeOAuthProvider,
+  ): ReadonlyArray<Record<string, string>> =>
     provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token");
 
   /** Signs in through the device flow and returns the new connection's id. */
   const signIn = async (
     { base, sql }: ServerHarness,
     token: string,
-    provider: DeviceProvider,
+    provider: ListeningFakeOAuthProvider,
   ): Promise<string> => {
     const { setupId } = await startDeviceOrFail(base, token);
     await allowPoll(sql, setupId);
@@ -905,7 +912,10 @@ describe("the access token of a connection set up by a device flow", () => {
   );
 
   /** Makes every refresh answer with `REFRESHED_TOKEN`, valid for `expiresIn` seconds. */
-  const answerRefreshesExpiring = (provider: DeviceProvider, expiresIn: unknown): void => {
+  const answerRefreshesExpiring = (
+    provider: ListeningFakeOAuthProvider,
+    expiresIn: unknown,
+  ): void => {
     provider.answers.token = () =>
       buildJsonResponse({
         access_token: REFRESHED_TOKEN,
