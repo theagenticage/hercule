@@ -5,7 +5,7 @@
  * for every harness, because the controller sends the account's own forms of
  * them (spec 06 section 10.4).
  */
-import { lstatSync, mkdirSync, readlinkSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessAccount, HarnessHome } from "@hercule/protocol";
 
@@ -36,9 +36,11 @@ export const buildHarnessHomePath = (storageDir: string, harnessHome: HarnessHom
  *
  * What it does not protect against:
  *
- * - A process of the runner's own user that is writing into the storage
- *   directory right now. It can already read every Harness Home, and it can
- *   swap a folder for a link between this check and the harness's first use.
+ * - A process of the runner's own user that writes into the storage directory
+ *   while this runs or afterwards. It can already read every Harness Home. It
+ *   can also replace a folder with a link after it was checked, either during
+ *   this walk or before the harness first uses the Home. The check holds only
+ *   while the storage tree stays as it is.
  * - The storage directory itself and the folders above it. They are the
  *   runner's own location and may be links on purpose (`/home` on some systems).
  * - Links inside a Harness Home. What a harness or an adapter keeps there is
@@ -49,33 +51,25 @@ export const createHarnessHome = (storageDir: string, harnessHome: HarnessHome):
   let folder = storageDir;
   for (const component of harnessHome.split("/")) {
     folder = join(folder, component);
-    // One level at a time and without `recursive`, so no folder is created
-    // below a link: each one is looked at right after it is made or found.
+    // One level at a time and without `recursive`, so each folder is looked at
+    // right after it is made or found, before the next one is made below it.
     try {
       mkdirSync(folder, { mode: 0o700 });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
-    refuseUnlessRealFolder(folder);
+    const stat = lstatSync(folder);
+    if (stat.isSymbolicLink()) {
+      throw new Error(
+        `The Harness Home folder ${folder} is a link, not a real folder. The runner does not ` +
+          "follow links in its storage directory. Remove the link and try again.",
+      );
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`The Harness Home path ${folder} is not a folder. Remove it and try again.`);
+    }
   }
   return folder;
-};
-
-/** Fails with a message that names `path` when it is a link, or is not a folder. */
-const refuseUnlessRealFolder = (path: string): void => {
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink()) {
-    throw new Error(
-      `The Harness Home folder ${path} is a link to ${readlinkSync(path)}, not a real folder. ` +
-        "The runner does not follow links in its storage directory, so that two accounts never " +
-        "share one Harness Home. Remove the link and try again.",
-    );
-  }
-  if (!stat.isDirectory()) {
-    throw new Error(
-      `The Harness Home path ${path} is a file, not a folder. Remove it and try again.`,
-    );
-  }
 };
 
 /**

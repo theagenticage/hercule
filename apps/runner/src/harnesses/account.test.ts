@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,7 +44,7 @@ describe("a Harness Home that is a link or sits below one", () => {
     mkdirSync(join(storage, "providers/homes/acct-1/pi"), { recursive: true });
     symlinkSync(join(storage, "providers/homes/acct-2/pi/pi"), join(storage, HOME));
     expect(() => createHarnessHome(storage, HOME)).toThrow(
-      `The Harness Home folder ${join(storage, HOME)} is a link to ${join(storage, "providers/homes/acct-2/pi/pi")}`,
+      `The Harness Home folder ${join(storage, HOME)} is a link, not a real folder`,
     );
   });
 
@@ -54,8 +63,7 @@ describe("a Harness Home that is a link or sits below one", () => {
     expect(() => createHarnessHome(storage, HOME)).toThrow(
       `folder ${join(storage, linkPath)} is a link`,
     );
-    expect(statSync(elsewhere).isDirectory()).toBe(true);
-    expect(() => statSync(join(elsewhere, "pi"))).toThrow();
+    expect(readdirSync(elsewhere)).toEqual([]);
   });
 
   it("is refused when the link points back inside the storage directory", () => {
@@ -65,12 +73,21 @@ describe("a Harness Home that is a link or sits below one", () => {
     expect(() => createHarnessHome(storage, HOME)).toThrow("is a link");
   });
 
+  it("is refused when the link is dangling, and its target is not created", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers"), { recursive: true });
+    const target = join(storage, "gone");
+    symlinkSync(target, join(storage, "providers/homes"));
+    expect(() => createHarnessHome(storage, HOME)).toThrow("is a link");
+    expect(existsSync(target)).toBe(false);
+  });
+
   it("is refused when a component is a file", () => {
     const storage = makeStorage();
     mkdirSync(join(storage, "providers/homes"), { recursive: true });
     writeFileSync(join(storage, "providers/homes/acct-1"), "");
     expect(() => createHarnessHome(storage, HOME)).toThrow(
-      `${join(storage, "providers/homes/acct-1")} is a file, not a folder`,
+      `${join(storage, "providers/homes/acct-1")} is not a folder`,
     );
   });
 
@@ -81,6 +98,7 @@ describe("a Harness Home that is a link or sits below one", () => {
     const linked = join(holder, "storage");
     symlinkSync(real, linked);
     expect(createHarnessHome(linked, HOME)).toBe(join(linked, HOME));
+    expect(statSync(join(real, HOME)).isDirectory()).toBe(true);
   });
 });
 
