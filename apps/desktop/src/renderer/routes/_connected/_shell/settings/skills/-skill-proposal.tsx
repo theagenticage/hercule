@@ -246,13 +246,14 @@ function OpenProposalChanges({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const diff = useQuery(skillDiffQuery(client, skill.name, revision.revisionHash));
-  const approvalEffects = diff.data?.approvalEffects ?? null;
   return (
     <>
-      {hasLead && <SkillLead skill={skill} revision={revision} approvalEffects={approvalEffects} />}
+      {hasLead && <SkillLead skill={skill} revision={revision} />}
       <section className="set-sec">
         <h2>{isNewSkill ? "What it adds" : "What it changes"}</h2>
-        {!hasLead && <SkillApprovalWarnings effects={approvalEffects} wording="afterApply" />}
+        {!hasLead && (
+          <SkillApprovalWarnings effects={revision.approvalEffects} wording="afterApply" />
+        )}
         {diff.data !== undefined && <SkillFileChanges files={diff.data.files} />}
         {diff.isPending && <p className="set-note">Reading the changes…</p>}
         {diff.error !== null && (

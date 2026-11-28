@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
-import type { Skill } from "@hercule/contract";
+import type { Skill, SkillRevision } from "@hercule/contract";
 import { readSkillsAgain, skillDiffQuery } from "../../../../../app/queries";
 import { SkillBand, SkillFileChanges } from "../../../../../screens/settings/skills/skill-changes";
 import { SkillApprovalWarnings } from "../../../../../screens/settings/skills/skill-page";
@@ -11,8 +11,8 @@ import { SkillApprovalWarnings } from "../../../../../screens/settings/skills/sk
  * Renders the update waiting on `skill` under the lead of its page (spec 17
  * §Settings, Skills, Updates): the band with Update, which applies the
  * revision with `skill.apply`, then the section "What it changes", with the
- * warning lines for the update's approval effects and the files it changes,
- * read with `skill.diff`. Renders nothing unless the skill has a GitHub
+ * warning lines for the approval effects of `availableRevision`, the page's
+ * record of the update, and the files it changes, read with `skill.diff`. Renders nothing unless the skill has a GitHub
  * source, a current revision and an available one.
  *
  * The page's loader reads the diff when the page opens on an update. An
@@ -21,11 +21,24 @@ import { SkillApprovalWarnings } from "../../../../../screens/settings/skills/sk
  * read until they are. The page draws this section afresh for each
  * available revision, so an error from Update on an older one goes with it.
  */
-export function SkillUpdateSection({ skill }: { readonly skill: Skill }): JSX.Element | null {
+export function SkillUpdateSection({
+  skill,
+  availableRevision,
+}: {
+  readonly skill: Skill;
+  readonly availableRevision: SkillRevision | null;
+}): JSX.Element | null {
   const { source, availableRevisionHash, currentRevisionHash } = skill;
   if (source.kind !== "github" || availableRevisionHash === null || currentRevisionHash === null)
     return null;
-  return <WaitingUpdate skill={skill} repo={source.repo} revisionHash={availableRevisionHash} />;
+  return (
+    <WaitingUpdate
+      skill={skill}
+      repo={source.repo}
+      revisionHash={availableRevisionHash}
+      approvalEffects={availableRevision?.approvalEffects ?? null}
+    />
+  );
 }
 
 /**
@@ -36,10 +49,12 @@ function WaitingUpdate({
   skill,
   repo,
   revisionHash,
+  approvalEffects,
 }: {
   readonly skill: Skill;
   readonly repo: string;
   readonly revisionHash: string;
+  readonly approvalEffects: SkillRevision["approvalEffects"] | null;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
@@ -76,7 +91,7 @@ function WaitingUpdate({
       </div>
       <section className="set-sec">
         <h2>What it changes</h2>
-        <SkillApprovalWarnings effects={skill.availableApprovalEffects} wording="afterUpdate" />
+        <SkillApprovalWarnings effects={approvalEffects} wording="afterUpdate" />
         {diff.data !== undefined && <SkillFileChanges files={diff.data.files} />}
         {diff.isPending && <p className="set-note">Reading the changes…</p>}
         {diff.error !== null && (
