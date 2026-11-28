@@ -1689,6 +1689,22 @@ const make = Effect.gen(function* () {
                                             reported_at = excluded.reported_at`),
 
     /**
+     * Moves the source Task's Stage Report claim to the survivor when the
+     * survivor has none, and deletes whatever claim the source still holds. The
+     * table has one row per Task, so the survivor's own claim always stays.
+     */
+    moveStageClaim: (sourceId: string, survivorId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sql`
+          UPDATE task_stage_reports SET task_id = ${uuidFromString(survivorId)}
+          WHERE task_id = ${uuidFromString(sourceId)}
+            AND NOT EXISTS (
+              SELECT 1 FROM task_stage_reports WHERE task_id = ${uuidFromString(survivorId)}
+            )`;
+        yield* sql`DELETE FROM task_stage_reports WHERE task_id = ${uuidFromString(sourceId)}`;
+      }),
+
+    /**
      * Returns the id of the Task a session is on, or none when the session is
      * on no Task or has no row. The id is taken as stored: a merged Task is
      * not followed to its survivor.

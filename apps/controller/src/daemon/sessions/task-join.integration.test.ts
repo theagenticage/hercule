@@ -16,7 +16,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { Session, SessionSpawnInput, Task } from "@hercule/contract";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
 import { withTransaction } from "../../db";
-import { del, get, post, send } from "../../http/testing";
+import { collectTaskPushesDuring, del, get, post, send } from "../../http/testing";
 import { sessionRepository } from "../../sessions";
 import {
   at,
@@ -1236,19 +1236,21 @@ describe("the lead of a Task", () => {
     });
   });
 
-  it("is announced once with the Task a new Thread makes: task.created carries the lead and no task.updated follows", async () => {
+  it("is announced once with the Task a new Thread makes: task.created carries the lead and no second announcement follows", async () => {
     await withFleet(async (arranged) => {
-      const first = await spawnOk(arranged);
-      const taskId = first.taskId!;
+      let first: Session | undefined;
+      const pushes = await collectTaskPushesDuring(arranged.harness, arranged.token, async () => {
+        first = await spawnOk(arranged);
+      });
+      const taskId = first!.taskId!;
       const created = (await arranged.harness.platformEvents("task.created")).filter(
         (event) => (event.payload as { task: Task }).task.id === taskId,
       );
       expect(created).toHaveLength(1);
-      expect((created[0]!.payload as { task: Task }).task.leadSessionId).toBe(first.id);
-      const updated = (await arranged.harness.platformEvents("task.updated")).filter(
-        (event) => (event.payload as { task: Task }).task.id === taskId,
-      );
-      expect(updated).toEqual([]);
+      expect((created[0]!.payload as { task: Task }).task.leadSessionId).toBe(first!.id);
+      expect(
+        pushes.filter((push) => push._tag === "invalidate" && push.ids.includes(taskId)),
+      ).toEqual([{ _tag: "invalidate", ids: [taskId], kind: "created" }]);
     });
   });
 

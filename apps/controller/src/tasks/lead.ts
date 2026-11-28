@@ -1,5 +1,5 @@
 /**
- * The lead of a Task: the one Thread that speaks for it (`tasks.lead_session_id`).
+ * The lead of a Task: the one Thread that reports its stage (`tasks.lead_session_id`).
  *
  * This module owns the rules for who leads and the SQL that keeps the column
  * true. `TaskService` is the only caller. The rules:
@@ -17,8 +17,7 @@
  * - When a Thread leaves a Task it leads, the oldest Thread left on that Task
  *   leads, or nobody when none is left.
  * - A merge keeps the survivor's lead and takes the source's only when the
- *   survivor has none. It also moves the source's stage report to the survivor
- *   under the same condition.
+ *   survivor has none.
  *
  * Callers pass no candidates: the functions read membership and kind from the
  * database, so they must run after the session's row was written, in the same
@@ -28,11 +27,11 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { uuidFromString, uuidToString } from "../db";
+import { uuidFromString } from "../db";
 import { buildLiveTaskCondition } from "./repository";
 
 /** What happened to a session's Task, as far as the lead rules care. */
-export interface LeadMove {
+export interface SessionTaskMove {
   readonly sessionId: string;
   /** The Task the session was on before, or undefined when it is new or had none. */
   readonly fromTaskId: string | undefined;
@@ -44,33 +43,6 @@ export interface LeadMove {
 
 export const makeLeads = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-
-  const readLead = (taskId: string): Effect.Effect<string | null, SqlError> =>
-    Effect.map(
-      sql<{ readonly lead_session_id: Uint8Array | null }>`
-        SELECT lead_session_id FROM tasks WHERE id = ${uuidFromString(taskId)}
-      `,
-      (rows) => (rows[0]?.lead_session_id == null ? null : uuidToString(rows[0].lead_session_id)),
-    );
-
-  const writeLead = (taskId: string, leadId: string | null): Effect.Effect<void, SqlError> =>
-    Effect.asVoid(sql`
-      UPDATE tasks
-      SET lead_session_id = ${leadId === null ? null : uuidFromString(leadId)}
-      WHERE id = ${uuidFromString(taskId)}
-    `);
-
-  /** Returns the oldest Thread on the Task, by `(created_at, id)`, or null when it has none. */
-  const readOldestThread = (taskId: string): Effect.Effect<string | null, SqlError> =>
-    Effect.map(
-      sql<{ readonly id: Uint8Array }>`
-        SELECT id FROM sessions
-        WHERE task_id = ${uuidFromString(taskId)} AND kind = 'thread'
-        ORDER BY created_at, id
-        LIMIT 1
-      `,
-      (rows) => (rows[0] === undefined ? null : uuidToString(rows[0].id)),
-    );
 
   return {
     /**
@@ -98,7 +70,7 @@ export const makeLeads = Effect.gen(function* () {
      * when nothing did). Call it after the session's `task_id` was written,
      * inside that write's transaction. Fails only with `SqlError`.
      */
-    settleLeadAfterMove: (move: LeadMove): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    settleLeadAfterMove: (move: SessionTaskMove): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
         const changed: Array<string> = [];
         if (move.toTaskId !== undefined) {
@@ -126,19 +98,31 @@ export const makeLeads = Effect.gen(function* () {
           if (joined.length > 0) changed.push(move.toTaskId);
         }
         if (move.fromTaskId !== undefined && move.fromTaskId !== move.toTaskId) {
-          if ((yield* readLead(move.fromTaskId)) === move.sessionId) {
-            yield* writeLead(move.fromTaskId, yield* readOldestThread(move.fromTaskId));
-            changed.push(move.fromTaskId);
-          }
+          // The oldest Thread left on the Task, by `(created_at, id)`, takes
+          // over, or the lead becomes null when none is left. Only a Task the
+          // session led is touched.
+          const handedOver = yield* sql`
+            UPDATE tasks
+            SET lead_session_id = (
+              SELECT id FROM sessions
+              WHERE task_id = tasks.id AND kind = 'thread'
+              ORDER BY created_at, id
+              LIMIT 1
+            )
+            WHERE id = ${uuidFromString(move.fromTaskId)}
+              AND lead_session_id = ${uuidFromString(move.sessionId)}
+            RETURNING id
+          `;
+          if (handedOver.length > 0) changed.push(move.fromTaskId);
         }
         return changed;
       }),
 
     /**
-     * Settles the lead and the stage report of a merge, after the source's
-     * sessions were moved to the survivor. The survivor keeps its own lead and
-     * its own report row. When it has none, it takes the source's. Whatever
-     * the source still holds is cleared or deleted. Fails only with `SqlError`.
+     * Settles the lead of a merge, after the source's sessions were moved to
+     * the survivor. The survivor keeps its own lead. When it has none, it takes
+     * the source's. The source never leads afterwards. Fails only with
+     * `SqlError`.
      */
     settleLeadAfterMerge: (input: {
       readonly survivorTaskId: string;
@@ -147,19 +131,15 @@ export const makeLeads = Effect.gen(function* () {
       Effect.gen(function* () {
         const survivor = uuidFromString(input.survivorTaskId);
         const source = uuidFromString(input.sourceTaskId);
-        const sourceLead = yield* readLead(input.sourceTaskId);
-        if ((yield* readLead(input.survivorTaskId)) === null && sourceLead !== null) {
-          yield* writeLead(input.survivorTaskId, sourceLead);
-        }
-        yield* writeLead(input.sourceTaskId, null);
-        // The table has one row per Task, so the move is guarded: it would
-        // break the primary key when the survivor already has a row.
         yield* sql`
-          UPDATE task_stage_reports SET task_id = ${survivor}
-          WHERE task_id = ${source}
-            AND NOT EXISTS (SELECT 1 FROM task_stage_reports WHERE task_id = ${survivor})
+          UPDATE tasks
+          SET lead_session_id = COALESCE(
+            lead_session_id,
+            (SELECT lead_session_id FROM tasks WHERE id = ${source})
+          )
+          WHERE id = ${survivor}
         `;
-        yield* sql`DELETE FROM task_stage_reports WHERE task_id = ${source}`;
+        yield* sql`UPDATE tasks SET lead_session_id = NULL WHERE id = ${source}`;
       }),
   };
 });

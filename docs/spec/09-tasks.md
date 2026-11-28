@@ -320,7 +320,7 @@ The same write clears the cause, even when the stage is the same. A merge also c
 | A completed link unreadable, then readable with the same lifecycle | Its own Fact, and the card lands |
 | The last open link unlinked | Its own Fact, and the card lands |
 
-Agents use the same `task.update`. A session that passes `stageFactId` is held to the same checks, and one that passes none is making a stage decision of its own. The agent report tool is built as [Stage reports](#stage-reports), which is weaker than this check: a report never beats a Fact.
+Agents use the same `task.update`. A session that passes `stageFactId` is held to the same checks, and one that passes none is making a stage decision of its own. The agent report tool is built as [Stage reports](#stage-reports), which is weaker than this check: a report never beats a Fact that still holds ([Stage reports](#stage-reports)).
 
 ### The cause of a move
 
@@ -457,7 +457,7 @@ A Task's lead is the Thread that speaks for it. It is stored on the Task (`lead_
 - **Only a Thread can lead.** A session of kind `agent` or `run` is a helper. A Task worked only by runs has no lead, and its stage comes from its handoff, from Facts and from the user. So a review workflow's steps never move a card to In review.
 - The user cannot choose the lead.
 
-The lead, and only the lead, is told about reporting. The text is built per session at start, with the coordination text and with or without a checkout, so helpers never see it. pi receives it as well: its adapter joins the coordination text into its instructions.
+The lead, and only the lead, is told about reporting. The text is built per session at start, with the coordination text and with or without a checkout, so helpers never see it. A lead whose permission profile lacks `task.update` does not get it either, because its reports would only be refused. pi receives it as well: its adapter joins the coordination text into its instructions.
 
 ### The operation
 
@@ -481,7 +481,7 @@ Otherwise, in one transaction, it stores the stage as the Task's claim in `task_
 - **A stale Fact does not hold the card.** The `fact` outcome applies only while the Fact still stands: it is not voided (the user unlinked its thing) and something linked is still open. A pull request opens and the card goes to In review; while that pull request is open, the card stays in review. If the pull request is closed without merging, or unlinked, nothing holds the card there any more, and no other linked work is still open, the lead's report moves it. Linked work is counted once per report.
 - **A `moved` report is not a person's write.** The fence is left alone, so the next Fact still applies. `stage_cause_fact_id` is cleared and `stage_cause_session_id` is set to the lead. `stage_revision` rises, as for any decision by an agent. The card goes last in its new cell. One `task.updated` is emitted, stamped `session:<id>`.
 - **Every accepted report is audited.** One entry `task.stageReported` per report that passes the caller checks, with one of the six outcomes, whatever it was ([./08](./08-events-and-connections.md)).
-- The call answers with the outcome and one line the agent can act on, such as "Kept at In review: pull request #12 is still open, and facts outrank reports." A kept report is not an error.
+- The call answers with the outcome and one line the agent can act on, such as "Kept at In review: something linked to this Task is still open, and facts outrank reports. If the card should move now, tell the user." A kept report is not an error.
 
 ### What changes for other stage writes
 
@@ -490,7 +490,7 @@ Otherwise, in one transaction, it stores the stage as the Task's claim in `task_
 - A merge keeps the survivor's own last claim in `task_stage_reports`. A survivor with no claim takes the source's, the same rule as for the lead.
 - An agent's plain `task.update --stage` is unchanged. It counts like a drag, because an agent may be doing what the user told it. The lead is told to use `task report` for its own Task.
 
-The card reads a report's cause as `stageCause` with `kind: "report"`, `sessionId`, `stageRevision` (the Task's stage revision when the report placed the stage, which identifies the report move for clients) and `text`, such as "“Pricing research” says Planned" ([./11](./11-public-api-and-agent-surface.md#task)).
+The card reads a report's cause as `stageCause` with `kind: "report"`, `sessionId`, `stageRevision` (the Task's stage revision when the report placed the stage, which identifies the report move for clients) and `text`, such as "“Pricing research” says Planned" ([./11](./11-public-api-and-agent-surface.md#task)). The sentence has at most 32 characters, because the card's cause label is one line: a long title is cut at a word and ends with "…", and the ending "” says Planned" is never cut.
 
 ## Threads and their Tasks
 

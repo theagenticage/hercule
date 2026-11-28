@@ -869,7 +869,7 @@ export const CLI = {
     fields: {
       stage: {
         flag: "stage",
-        help: "The stage the work is in now. exploring: working out what to do, nothing is settled yet. planned: what to do is agreed, and building has not started. building: making the thing. in-review: built, and being reviewed. landed: finished from your side, waiting for the user to look. A report never beats a fact about a linked pull request or ticket, and a repeated report never undoes the user's move. done and dropped are the user's to set and are refused.",
+        help: "The stage the work is in now. exploring: working out what to do, nothing is settled yet. planned: what to do is agreed, and building has not started. building: making the thing. in-review: built, and being reviewed. landed: finished from your side, waiting for the user to look. A report never beats a fact while something linked is still open, and a repeated report never undoes the user's move. done and dropped are the user's to set and are refused.",
       },
     },
     errors: {

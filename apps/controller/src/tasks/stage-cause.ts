@@ -88,16 +88,19 @@ export const describeStage = (stage: TaskStage): string => STAGE_WORDS[stage];
  */
 export const UNTITLED_THREAD_TITLE = "Untitled thread";
 
+/** The most characters of a Stage Report's sentence: the card's cause label holds about 32. */
+export const MAX_STAGE_REPORT_TEXT = 32;
+
 /**
- * Returns the sentence that says why a Stage Report moved a card, such as
+ * Returns the sentence that explains why a Stage Report moved a card, such as
  * "\u201cPricing research\u201d says Planned". `stage` is the card's current stage,
  * which a Stage Report placed. A blank `sessionTitle` reads "Untitled
  * thread". Only the title is cut (at a word), so the whole text fits
- * `MAX_STAGE_CAUSE_TEXT` and always ends with the stage.
+ * `MAX_STAGE_REPORT_TEXT` and always ends with the stage.
  */
 export const describeStageReport = (sessionTitle: string, stage: TaskStage): string => {
   const title = sessionTitle.trim() === "" ? UNTITLED_THREAD_TITLE : sessionTitle.trim();
   const suffix = `\u201d says ${describeStage(stage)}`;
-  const room = MAX_STAGE_CAUSE_TEXT - suffix.length - 1; // 1 for the opening quote
+  const room = MAX_STAGE_REPORT_TEXT - suffix.length - 1; // 1 for the opening quote
   return `\u201c${cutTextAtWord(title, room)}${suffix}`;
 };

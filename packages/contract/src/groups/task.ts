@@ -561,8 +561,8 @@ export const TaskMoveInput = Schema.Struct({
 export type TaskMoveInput = Schema.Schema.Type<typeof TaskMoveInput>;
 
 /**
- * Refuses `done` and `dropped` as a reported stage, with a message that tells
- * the agent what to do instead. Done is the user's sign-off and Drop is the
+ * Refuses `done` and `dropped` as a reported stage, with a message that explains
+ * what the agent should do instead. Done is the user's sign-off and Drop is the
  * user's decision, so an agent never reports either.
  */
 const refuseUserOnlyStage = Schema.makeFilter((stage: TaskStage) =>
@@ -574,8 +574,8 @@ const refuseUserOnlyStage = Schema.makeFilter((stage: TaskStage) =>
 );
 
 /**
- * The input of `task.reportStage`: the stage the calling Thread says its Task
- * is in. It names no Task, because the controller finds the Task from the
+ * The input of `task.reportStage`: the stage the calling Thread reports for its
+ * Task. It names no Task, because the controller finds the Task from the
  * calling session. `done` and `dropped` fail as invalid input.
  */
 export const TaskStageReportInput = Schema.Struct({
@@ -614,7 +614,7 @@ export const MAX_STAGE_REPORT_MESSAGE = 400;
 /** What `task.reportStage` returns: the outcome, and one line the agent can act on. */
 export const TaskStageReport = Schema.Struct({
   outcome: StageReportOutcome,
-  /** Says what happened and why, such as "Kept at In review: pull request #12 is still open, and facts outrank reports." */
+  /** Describes what happened and why, such as "Kept at In review: something linked to this Task is still open, and facts outrank reports. If the card should move now, tell the user." */
   message: bounded(1, MAX_STAGE_REPORT_MESSAGE),
 });
 
@@ -816,7 +816,7 @@ export const WorkCard = Schema.Struct({
    * Why the card is in its stage, set only when the current stage came from a
    * fact about a linked thing (`kind: "fact"`) or from the lead Thread's
    * report (`kind: "report"`). Any other write of the stage clears it: a
-   * drag, an edit, an agent. `text` says what happened, such as
+   * drag, an edit, an agent. `text` describes what happened, such as
    * "PR #6221 merged" or "“Pricing research” says Planned".
    */
   stageCause: Schema.optionalKey(
@@ -843,7 +843,7 @@ export const WorkCard = Schema.Struct({
          * repeats or the same Thread reports the same words twice.
          */
         stageRevision: Schema.Int,
-        /** What the report said, such as "“Pricing research” says Planned". */
+        /** The report as a sentence, such as "“Pricing research” says Planned". */
         text: bounded(1, MAX_STAGE_CAUSE_TEXT),
       }),
     ]),
@@ -1134,7 +1134,7 @@ export const task = HttpApiGroup.make("task")
     /**
      * Reports the stage of the calling session's own Task, as its lead. The
      * Task is found from the session. The weakest way to move a card: facts
-     * and the user's moves outrank it, and the outcome says which rule kept
+     * and the user's moves outrank it, and the outcome names the rule that kept
      * the card where it was. Fails `InvalidState` when the caller is not a
      * session, is on no Task, or is not the Task's lead.
      */

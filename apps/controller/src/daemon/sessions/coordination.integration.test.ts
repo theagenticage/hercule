@@ -9,8 +9,8 @@
  * - a session without `wiki.read` gets no paragraph, until a Permission
  *   Request for it is decided with outcome `session`;
  * - only the first five repositories get a line with Wiki facts;
- * - the thread that leads an open Task gets the lead paragraph, with or
- *   without a checkout, and no other session does.
+ * - the thread that leads an open Task and holds `task.update` gets the lead
+ *   paragraph, with or without a checkout, and no other session does.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { WikiPage } from "@hercule/contract";
@@ -108,7 +108,7 @@ describe("the coordination paragraph", () => {
     await withFleet(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web.git");
       await seedPages(arranged, web, 1);
-      const writer = await createProfile(arranged, "wiki-writer", ["wiki.write"]);
+      const writer = await createProfile(arranged, "wiki-writer", ["wiki.write", "task.update"]);
 
       const frame = await spawnWithCheckouts(arranged, writer.id, [web]);
       expect(frame.spec.coordination).toBe(LEAD_ONLY);
@@ -224,6 +224,19 @@ describe("the coordination paragraph", () => {
         const text = await runWithDatabase(arranged, buildSessionCoordination(sessionId));
 
         expect(text?.startsWith(buildLeadInstructions("Fix the login"))).toBe(true);
+      });
+    });
+
+    it("is left out for a lead whose profile lacks task.update, because its reports would be refused", async () => {
+      await withFleet(async (arranged) => {
+        const profile = await createProfile(arranged, "no-reports", ["wiki.write"]);
+
+        const frame = await spawnWithCheckouts(arranged, profile.id, []);
+
+        expect(frame.spec.coordination).toBeUndefined();
+        expect(
+          await runWithDatabase(arranged, buildSessionCoordination(frame.sessionId)),
+        ).toBeUndefined();
       });
     });
 

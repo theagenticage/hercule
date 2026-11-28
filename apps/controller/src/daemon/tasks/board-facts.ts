@@ -107,7 +107,7 @@ const buildEntityContext = (
  * words of its thing. Returns `undefined` for a Task whose stage no fact
  * placed. Facts are never deleted, so a cause id always has its row.
  */
-const buildStageCause = (
+const buildFactStageCause = (
   causes: ReadonlyMap<number, EntityFact>,
   words: ReadonlyMap<string, StageCauseThing>,
   factId: number | undefined,
@@ -134,7 +134,7 @@ const buildCardStageCause = (
   words: ReadonlyMap<string, StageCauseThing>,
   reportTitles: ReadonlyMap<string, string>,
 ): BoardCardFacts["stageCause"] => {
-  const fromFact = buildStageCause(causes, words, task.stageCauseFactId);
+  const fromFact = buildFactStageCause(causes, words, task.stageCauseFactId);
   if (fromFact !== undefined || task.stageCauseSessionId === undefined) return fromFact;
   return {
     kind: "report",

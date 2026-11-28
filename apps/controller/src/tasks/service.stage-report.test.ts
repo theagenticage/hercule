@@ -387,6 +387,24 @@ describe("task.reportStage", () => {
       expect(readRefusal(error).message).toContain("on no Task");
     });
 
+    it("refuses a session whose Task was deleted, with a message of its own", async () => {
+      const error = await run(
+        Effect.gen(function* () {
+          const cast = yield* arrangeLedTask("exploring");
+          const sql = yield* SqlClient.SqlClient;
+          yield* withTransaction(
+            sql,
+            sql`UPDATE tasks SET deleted_at = '2026-10-14T10:00:00.000Z'
+                WHERE id = ${uuidFromString(cast.taskId)}`,
+          );
+          return yield* Effect.flip(report(cast.lead, "planned"));
+        }),
+      );
+      expect(readRefusal(error).code).toBe("invalid_state");
+      expect(readRefusal(error).message).toContain("was deleted");
+      expect(readRefusal(error).message).not.toContain("on no Task");
+    });
+
     it("refuses a report on a Task with no lead", async () => {
       const error = await run(
         Effect.gen(function* () {

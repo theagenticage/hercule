@@ -14,7 +14,9 @@
  * session's workspace, which gives the Resource id the parts' commands take.
  * A session with no repository checked out, or told nothing by any feature,
  * gets no checkout paragraph. A session that leads no open Task gets no lead
- * paragraph, and one with neither gets no text.
+ * paragraph, and one with neither gets no text. The lead paragraph also needs
+ * the grant `task.update`, which `hercule task report` needs: without it the
+ * session could only be refused.
  *
  * It is built when the controller builds a start frame, for a new start and
  * for every resume or fork, and it is never stored. It lives in the
@@ -28,10 +30,11 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import type { Grant } from "@hercule/contract";
 import { flattenToOneLine, prepareForQuoting } from "@hercule/contract";
 import { describeDiscussionsToSession } from "../../discussions";
 import { permissionRequestRepository } from "../../permissions";
-import { TaskService } from "../../tasks";
+import { TaskService, UNTITLED_THREAD_TITLE } from "../../tasks";
 import { describeWikiToSession } from "../../wiki";
 import { listCheckedOutRepositories, type RepositoryRef } from "../../workspaces";
 
@@ -100,17 +103,23 @@ export const assembleCoordinationParagraph = (
  * that leads the Task reports the stage the work has reached with
  * `hercule task report`. The title is agent-written text, so it goes through
  * `prepareForQuoting`: no quote or line break can end the quoted part early,
- * and at most 100 characters of it are kept.
+ * and at most 100 characters of it are kept. A title with nothing left after
+ * that is replaced by `Untitled thread`.
  */
-export const buildLeadInstructions = (taskTitle: string): string =>
-  `This thread leads the Task \u201C${prepareForQuoting(taskTitle, MAX_TITLE_LENGTH)}\u201D on the user's Work board. ` +
-  "When the work moves to another stage, run `hercule task report --stage <stage>` once:\n" +
-  "- exploring: working out what to do; nothing is settled yet\n" +
-  "- planned: what to do is agreed, and building has not started\n" +
-  "- building: making the thing\n" +
-  "- in-review: built, and being reviewed\n" +
-  "- landed: finished from your side, waiting for the user to look\n\n" +
-  "Report only when the stage changes. A pull request opening or merging moves the card by itself.";
+export const buildLeadInstructions = (taskTitle: string): string => {
+  const quoted = prepareForQuoting(taskTitle, MAX_TITLE_LENGTH).trim();
+  const title = quoted === "" ? UNTITLED_THREAD_TITLE : quoted;
+  return (
+    `This thread leads the Task \u201C${title}\u201D on the user's Work board. ` +
+    "When the work moves to another stage, run `hercule task report --stage <stage>` once:\n" +
+    "- exploring: working out what to do; nothing is settled yet\n" +
+    "- planned: what to do is agreed, and building has not started\n" +
+    "- building: making the thing\n" +
+    "- in-review: built, and being reviewed\n" +
+    "- landed: finished from your side, waiting for the user to look\n\n" +
+    "Report only when the stage changes. A pull request opening or merging moves the card by itself."
+  );
+};
 
 /**
  * Builds the checkout paragraph from the session's grants and the
@@ -119,14 +128,13 @@ export const buildLeadInstructions = (taskTitle: string): string =>
  */
 const buildCheckoutParagraph = (
   sessionId: string,
+  grants: ReadonlySet<Grant>,
 ): Effect.Effect<string | undefined, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const repositories = yield* listCheckedOutRepositories(sessionId);
     // A session with no repository checked out gets no paragraph, so nothing
     // else is read.
     if (repositories.length === 0) return undefined;
-    const requests = yield* permissionRequestRepository;
-    const grants = new Set(yield* requests.listHeldGrants(sessionId));
     const resourceIdsWithLine = repositories
       .slice(0, MAX_REPOSITORY_LINES)
       .map((repository) => repository.resourceId);
@@ -139,17 +147,22 @@ const buildCheckoutParagraph = (
 
 /**
  * Builds a session's coordination text as it is now: the lead paragraph, if
- * the session leads an open Task, then the checkout paragraph, separated by a
- * blank line. Returns `undefined` when the session gets neither.
+ * the session leads an open Task and holds `task.update`, then the checkout
+ * paragraph, separated by a blank line. Returns `undefined` when the session
+ * gets neither. The session's grants are read once for both paragraphs.
  */
 export const buildSessionCoordination = (
   sessionId: string,
 ): Effect.Effect<string | undefined, SqlError, SqlClient.SqlClient | TaskService> =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
-    const ledTitle = yield* tasks.readLedTaskTitle(sessionId);
+    const requests = yield* permissionRequestRepository;
+    const grants = new Set(yield* requests.listHeldGrants(sessionId));
+    const ledTitle = grants.has("task.update")
+      ? yield* tasks.readLedTaskTitle(sessionId)
+      : Option.none<string>();
     const title = Option.getOrUndefined(ledTitle);
-    const checkout = yield* buildCheckoutParagraph(sessionId);
+    const checkout = yield* buildCheckoutParagraph(sessionId, grants);
     const paragraphs = [title === undefined ? undefined : buildLeadInstructions(title), checkout];
     const present = paragraphs.filter((paragraph) => paragraph !== undefined);
     return present.length === 0 ? undefined : present.join("\n\n");

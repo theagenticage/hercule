@@ -101,7 +101,7 @@ import {
   describeMergeLoop,
   type EdgeWrite,
 } from "./blockers";
-import { makeLeads, type LeadMove } from "./lead";
+import { makeLeads, type SessionTaskMove } from "./lead";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
 import { takeOnRecordRepository, type TakeOnRecord } from "./take-on-records";
 import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
@@ -303,6 +303,10 @@ const ONLY_A_SESSION_REPORTS =
 const REPORTER_IS_ON_NO_TASK =
   "This session is on no Task, so there is no stage to report. Tell the user what you found instead.";
 
+/** The refusal of `reportStage` for a session whose Task was deleted. */
+const REPORTERS_TASK_IS_DELETED =
+  "The Task of this session was deleted, so there is no stage to report. Tell the user what you found instead.";
+
 /** The refusal of `reportStage` for a Task that no Thread leads. */
 const NO_THREAD_LEADS_THE_TASK =
   "No Thread leads this Task, so no session can report its stage. Tell the user what you found instead.";
@@ -316,7 +320,7 @@ const describeOnlyTheLeadReports = (leadTitle: string): string => {
 };
 
 /**
- * Returns the one line `reportStage` answers with, that says what became of
+ * Returns the one line `reportStage` returns as its message: what became of
  * the report and why. `held` is the stage the Task has after the report.
  */
 const describeStageReportOutcome = (
@@ -334,9 +338,9 @@ const describeStageReportOutcome = (
     case "repeat":
       return `Kept at ${describeStage(held)}: ${describeStage(reported)} is already this Task's last report, so repeating it does not move the card. If the card should move, tell the user.`;
     case "fact":
-      return `Kept at ${describeStage(held)}: something linked to this Task is still open, and facts outrank reports. The card moves when the linked work finishes; tell the user if it should move now.`;
+      return `Kept at ${describeStage(held)}: something linked to this Task is still open, and facts outrank reports. If the card should move now, tell the user.`;
     case "open-links":
-      return `Kept at ${describeStage(held)}: something linked to this Task is still open. Your report of ${describeStage(reported)} is recorded; the card moves when the linked work finishes, or tell the user if it should move now.`;
+      return `Kept at ${describeStage(held)}: something linked to this Task is still open. Your report of ${describeStage(reported)} is recorded. If the card should move now, tell the user.`;
   }
 };
 
@@ -2215,7 +2219,7 @@ const make = Effect.gen(function* () {
      * Reports the stage of the calling session's own Task, as its lead: the
      * weakest way to move a card (spec 09, "Stage reports"). Returns the
      * outcome and one line the caller can act on. A report that leaves the card
-     * where it is is an answer, not an error.
+     * where it is is a normal result, not an error.
      *
      * Fails with `InvalidState`, and writes nothing, when the caller is not a
      * session, the session is on no Task, or the session is not the Task's
@@ -2253,7 +2257,11 @@ const make = Effect.gen(function* () {
               ? Option.none<Task>()
               : yield* tasks.readLiveOrSurvivor(taskId.value);
             if (Option.isNone(task)) {
-              return yield* Effect.fail(createInvalidStateError(REPORTER_IS_ON_NO_TASK));
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  Option.isNone(taskId) ? REPORTER_IS_ON_NO_TASK : REPORTERS_TASK_IS_DELETED,
+                ),
+              );
             }
             const lead = task.value.leadSessionId;
             if (lead === null) {
@@ -2358,6 +2366,7 @@ const make = Effect.gen(function* () {
             yield* tasks.writeStageDecision(targetId, yield* stageDecisions.decideStageOfMerge());
             yield* linkOwners.moveTaskLinks(sourceId, targetId);
             yield* leads.settleLeadAfterMerge({ survivorTaskId: targetId, sourceTaskId: sourceId });
+            yield* tasks.moveStageClaim(sourceId, targetId);
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
             // a handoff entry still names its run, which moved just above.
@@ -2715,7 +2724,7 @@ const make = Effect.gen(function* () {
      * set only for a fork made by `session.continue`, never for a spawned
      * child.
      */
-    settleLeadAfterMove: (move: LeadMove): Effect.Effect<void, SqlError> =>
+    settleLeadAfterMove: (move: SessionTaskMove): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {

@@ -133,7 +133,7 @@ describe("the saved board snapshot", () => {
     expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([{ id: "b", stage: "planned" }]);
   });
 
-  it("reads a report cause stored by an earlier build as no cause", () => {
+  it("reads an entry with a report cause as no snapshot, because a snapshot never holds one", () => {
     store({
       cards: [
         {
@@ -145,7 +145,7 @@ describe("the saved board snapshot", () => {
       isTruncated: false,
     });
 
-    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([{ id: "b", stage: "planned" }]);
+    expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
   });
 
   it("reads a missing or odd truncation flag as a whole board", () => {

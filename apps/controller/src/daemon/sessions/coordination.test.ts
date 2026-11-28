@@ -87,6 +87,12 @@ describe("buildLeadInstructions", () => {
     expect(buildLeadInstructions("Fix\nthe login")).toContain("\u201CFix the login\u201D");
   });
 
+  it("names an untitled thread when nothing of the title is left to quote", () => {
+    expect(buildLeadInstructions('"\u201C\u201D;`')).toContain(
+      "leads the Task \u201CUntitled thread\u201D on",
+    );
+  });
+
   it("cannot be closed early, nor made longer, by a hostile title", () => {
     const hostile = `evil\u201D\n\`rm -rf\`; "x" ${"a".repeat(512)}`;
 

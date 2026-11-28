@@ -1,7 +1,12 @@
 /** Tests the words of a stage cause: one row for each lifecycle change and each fallback. */
 import { describe, expect, it } from "vitest";
 import { MAX_STAGE_CAUSE_TEXT, type EntityLifecycle, type TaskStage } from "@hercule/contract";
-import { describeStageCause, describeStageReport, type StageCauseThing } from "./stage-cause";
+import {
+  describeStageCause,
+  describeStageReport,
+  MAX_STAGE_REPORT_TEXT,
+  type StageCauseThing,
+} from "./stage-cause";
 
 const pullRequest = (overrides: Partial<StageCauseThing> = {}): StageCauseThing => ({
   noun: "Pull request",
@@ -97,9 +102,7 @@ describe("describeStageReport", () => {
     ["in-review", "In review"],
     ["landed", "Landed"],
   ])("names the stage %s as %s", (stage, word) => {
-    expect(describeStageReport("Pricing research", stage)).toBe(
-      `\u201cPricing research\u201d says ${word}`,
-    );
+    expect(describeStageReport("Pricing", stage)).toBe(`\u201cPricing\u201d says ${word}`);
   });
 
   it("titles a blank session as an untitled thread", () => {
@@ -108,8 +111,14 @@ describe("describeStageReport", () => {
 
   it("cuts only the title, so a 300-character title still ends with the stage", () => {
     const text = describeStageReport("word ".repeat(60).trim(), "in-review");
-    expect(text.length).toBeLessThanOrEqual(MAX_STAGE_CAUSE_TEXT);
+    expect(text.length).toBeLessThanOrEqual(MAX_STAGE_REPORT_TEXT);
     expect(text.startsWith("\u201cword word")).toBe(true);
     expect(text.endsWith("…\u201d says In review")).toBe(true);
+  });
+
+  it("fits the card's cause label: a long title with in-review gives at most 32 characters", () => {
+    const text = describeStageReport("Search latency on slow phones", "in-review");
+    expect(text).toBe("\u201cSearch latency\u2026\u201d says In review");
+    expect(text.length).toBeLessThanOrEqual(32);
   });
 });
