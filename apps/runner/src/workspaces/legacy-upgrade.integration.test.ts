@@ -17,7 +17,7 @@ import {
   cleanTemporaries,
   createId,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "./testing";
@@ -103,9 +103,9 @@ describe("upgrading a legacy array registry", () => {
   it("preserves working files, HEADs, local Git configuration and clone form during inspect and completed replay", async () => {
     const fixture = createLegacyInstallation();
     const before = {
-      main: hashContents(fixture.mainRoot),
-      ephemeral: hashContents(fixture.ephemeralRoot),
-      cache: hashContents(fixture.cache),
+      main: snapshotContents(fixture.mainRoot),
+      ephemeral: snapshotContents(fixture.ephemeralRoot),
+      cache: snapshotContents(fixture.cache),
     };
     const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
     for (const [workspaceId, checkoutId, form, head, root] of [
@@ -142,9 +142,9 @@ describe("upgrading a legacy array registry", () => {
       expect(existsSync(join(root, "setup-repeated"))).toBe(false);
       expect(runGitOrThrow(root, "rev-parse", "HEAD")).toBe(head);
     }
-    expect(hashContents(fixture.mainRoot)).toBe(before.main);
-    expect(hashContents(fixture.ephemeralRoot)).toBe(before.ephemeral);
-    expect(hashContents(fixture.cache)).toBe(before.cache);
+    expect(snapshotContents(fixture.mainRoot)).toBe(before.main);
+    expect(snapshotContents(fixture.ephemeralRoot)).toBe(before.ephemeral);
+    expect(snapshotContents(fixture.cache)).toBe(before.cache);
     expect(existsSync(join(fixture.mainRoot, ".git", "objects"))).toBe(true);
     expect(runGitOrThrow(fixture.mainRoot, "diff", "--cached", "--name-only")).toBe("staged.txt");
   });
@@ -174,7 +174,7 @@ describe("upgrading a legacy array registry", () => {
     expect(readCommonDirectory(freshRoot)).toBe(readCommonDirectory(fixture.mainRoot));
     expect(readCommonDirectory(fixture.ephemeralRoot)).toBe(realpathSync(fixture.cache));
     expect(readFileSync(trace, "utf8")).not.toMatch(/built-in: git (?:fetch|clone)/);
-    const mainAfterCreation = hashContents(fixture.mainRoot);
+    const mainAfterCreation = snapshotContents(fixture.mainRoot);
     const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
     expect(Effect.runSync(restarted.resolve(fixture.ephemeralId))?.checkouts[0]?.checkoutId).toBe(
       fixture.ephemeralCheckoutId,
@@ -203,7 +203,7 @@ describe("upgrading a legacy array registry", () => {
     expect(existsSync(fixture.ephemeralRoot)).toBe(false);
     expect(runGitOrThrow(fixture.cache, "rev-parse", "old-cache-work")).toBe(fixture.ephemeralHead);
     expect(runGitOrThrow(freshRoot, "rev-parse", "HEAD")).toBe(fixture.mainHead);
-    expect(hashContents(fixture.mainRoot)).toBe(mainAfterCreation);
+    expect(snapshotContents(fixture.mainRoot)).toBe(mainAfterCreation);
     expect(
       Effect.runSync(
         makeTestWorkspaces({ storageDir: fixture.storageDir }).resolve(fresh.workspaceId),
@@ -249,7 +249,7 @@ it.each([
       expect((await Effect.runPromise(manager.inspect(fixture.mainId))).status).toBe("ready");
     }
     expect(existsSync(marker)).toBe(false);
-    const oldBefore = hashContents(fixture.ephemeralRoot);
+    const oldBefore = snapshotContents(fixture.ephemeralRoot);
     renameSync(fixture.remote.path, `${fixture.remote.path}.offline`);
     const frame = buildProvisionFrame({
       kind: "ephemeral",
@@ -274,7 +274,7 @@ it.each([
       readCommonDirectory(fixture.mainRoot),
     );
     expect(readCommonDirectory(fixture.ephemeralRoot)).toBe(realpathSync(fixture.cache));
-    expect(hashContents(fixture.ephemeralRoot)).toBe(oldBefore);
+    expect(snapshotContents(fixture.ephemeralRoot)).toBe(oldBefore);
     expect(runGitOrThrow(fixture.mainRoot, "rev-parse", "HEAD")).toBe(fixture.mainHead);
     expect(existsSync(join(fixture.mainRoot, ".git", "objects"))).toBe(true);
     expect(readFileSync(join(fixture.mainRoot, "README.md"), "utf8")).toBe("dirty human main\n");
@@ -314,7 +314,7 @@ it.each([{ kind: "current" as const }, { kind: "local" as const, branch: "unpubl
       "origin",
       "https://fixture.invalid/a-different-repository",
     );
-    const before = hashContents(fixture.mainRoot);
+    const before = snapshotContents(fixture.mainRoot);
     const counter = join(fixture.storageDir, "unsafe-setup-count");
     const frame = buildProvisionFrame({
       kind: "ephemeral",
@@ -333,7 +333,7 @@ it.each([{ kind: "current" as const }, { kind: "local" as const, branch: "unpubl
     expect(report.message).toMatch(/remote|repository|selected|restore/i);
     expect(existsSync(counter)).toBe(false);
     expect(existsSync(join(fixture.storageDir, "workspaces", frame.workspaceId))).toBe(false);
-    expect(hashContents(fixture.mainRoot)).toBe(before);
+    expect(snapshotContents(fixture.mainRoot)).toBe(before);
     expect(runGitOrThrow(fixture.mainRoot, "branch", "--list", "must-not-be-created")).toBe("");
   },
 );
@@ -394,7 +394,7 @@ it("refuses a changed managed-cache remote before creating a new local worktree 
     "origin",
     "https://fixture.invalid/changed-managed-repository",
   );
-  const before = hashContents(cache);
+  const before = snapshotContents(cache);
   const counter = join(storageDir, "unsafe-setup-count");
   const frame = buildProvisionFrame({
     kind: "ephemeral",
@@ -413,7 +413,7 @@ it("refuses a changed managed-cache remote before creating a new local worktree 
   expect(report.message).toMatch(/remote|repository|selected|restore/i);
   expect(existsSync(counter)).toBe(false);
   expect(existsSync(join(storageDir, "workspaces", frame.workspaceId))).toBe(false);
-  expect(hashContents(cache)).toBe(before);
+  expect(snapshotContents(cache)).toBe(before);
   expect(runGitOrThrow(cache, "branch", "--list", "must-not-be-created")).toBe("");
 });
 
@@ -422,9 +422,9 @@ it("refuses unavailable recorded standalone main storage instead of silently sel
   const savedMain = `${fixture.mainRoot}.unavailable`;
   renameSync(fixture.mainRoot, savedMain);
   const before = {
-    main: hashContents(savedMain),
-    cache: hashContents(fixture.cache),
-    ephemeral: hashContents(fixture.ephemeralRoot),
+    main: snapshotContents(savedMain),
+    cache: snapshotContents(fixture.cache),
+    ephemeral: snapshotContents(fixture.ephemeralRoot),
   };
   const counter = join(fixture.storageDir, "must-not-run-fallback-setup");
   const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
@@ -447,9 +447,9 @@ it("refuses unavailable recorded standalone main storage instead of silently sel
   expect(report.message).toMatch(/unavailable|restore|selected|source|checkout/i);
   expect(existsSync(counter)).toBe(false);
   expect(existsSync(join(fixture.storageDir, "workspaces", frame.workspaceId))).toBe(false);
-  expect(hashContents(savedMain)).toBe(before.main);
-  expect(hashContents(fixture.cache)).toBe(before.cache);
-  expect(hashContents(fixture.ephemeralRoot)).toBe(before.ephemeral);
+  expect(snapshotContents(savedMain)).toBe(before.main);
+  expect(snapshotContents(fixture.cache)).toBe(before.cache);
+  expect(snapshotContents(fixture.ephemeralRoot)).toBe(before.ephemeral);
   expect(Effect.runSync(manager.resolve(fixture.ephemeralId))?.cwd).toBe(fixture.ephemeralRoot);
 });
 
@@ -457,8 +457,8 @@ it("replays a healthy old cache workspace through its own topology when the sepa
   const fixture = createLegacyInstallation();
   renameSync(fixture.mainRoot, `${fixture.mainRoot}.unavailable`);
   const before = {
-    cache: hashContents(fixture.cache),
-    workspace: hashContents(fixture.ephemeralRoot),
+    cache: snapshotContents(fixture.cache),
+    workspace: snapshotContents(fixture.ephemeralRoot),
   };
   const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
   expect((await Effect.runPromise(manager.inspect(fixture.ephemeralId))).status).toBe("ready");
@@ -486,6 +486,6 @@ it("replays a healthy old cache workspace through its own topology when the sepa
   });
   expect(Effect.runSync(manager.resolve(fixture.ephemeralId))?.cwd).toBe(fixture.ephemeralRoot);
   expect(existsSync(join(fixture.ephemeralRoot, "setup-repeated"))).toBe(false);
-  expect(hashContents(fixture.cache)).toBe(before.cache);
-  expect(hashContents(fixture.ephemeralRoot)).toBe(before.workspace);
+  expect(snapshotContents(fixture.cache)).toBe(before.cache);
+  expect(snapshotContents(fixture.ephemeralRoot)).toBe(before.workspace);
 });

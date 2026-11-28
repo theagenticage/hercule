@@ -1996,7 +1996,7 @@ it("echoes durable disposal and detach receipts through the socket while preserv
   });
   expect((await Effect.runPromise(manager.provision(derived))).status).toBe("ready");
   const cwd = Effect.runSync(manager.resolve(derived.workspaceId))!.cwd;
-  const sourceBefore = workspaceFixtures.hashContents(source);
+  const sourceBefore = workspaceFixtures.snapshotContents(source);
   const stub = await stubController((hello) => ({
     ...hello,
     capabilities: ["workspaceLifecycle"],
@@ -2019,7 +2019,7 @@ it("echoes durable disposal and detach receipts through the socket while preserv
         (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-detach-intent",
       ),
     ).toMatchObject({ status: "deleted", workspaceId: attached.workspaceId });
-    expect(workspaceFixtures.hashContents(source)).toBe(sourceBefore);
+    expect(workspaceFixtures.snapshotContents(source)).toBe(sourceBefore);
     expect(Effect.runSync(manager.resolve(derived.workspaceId))?.cwd).toBe(cwd);
     writeFileSync(joinPath(cwd, "README.md"), "remaining derived changes\n");
     stub.say({

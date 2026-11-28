@@ -30,7 +30,7 @@ import type { ProvisionCheckout, WorkspaceKind, WorkspaceProvision } from "@herc
  * Git's automatic maintenance and garbage collection are turned off too. After
  * a commit, clone or fetch, git may start `git maintenance` in the background,
  * which creates and removes files such as `.git/objects/maintenance.lock`.
- * That changes a repository behind the test's back, and `hashContents` fails
+ * That changes a repository behind the test's back, and `snapshotContents` fails
  * when a file it listed has vanished before it reads it.
  */
 const GIT_ENV: Record<string, string> = {
@@ -149,21 +149,25 @@ export const cloneUserCheckout = (remote: Remote, branch = "main"): string => {
 };
 
 /**
- * Returns a hash of every path, file mode, file and symlink under a directory,
- * so a test can check that nothing there changed.
+ * Returns one line for every path, file mode, file and symlink under a
+ * directory, so a test can check that nothing there changed.
+ *
+ * It returns the lines, not one hash of them, so that when two snapshots
+ * differ the assertion's diff names the files that changed.
  */
-export const hashContents = (dir: string): string => {
+export const snapshotContents = (dir: string): string => {
   const entries = readdirSync(dir, { recursive: true, encoding: "utf8" }).sort();
-  const hash = createHash("sha256");
+  const lines: Array<string> = [];
   for (const entry of entries) {
     const full = join(dir, entry);
     const stat = lstatSync(full);
-    hash.update(`${relative(dir, full)}\0${String(stat.mode)}\0`);
-    if (stat.isSymbolicLink()) hash.update(readlinkSync(full));
-    else if (stat.isFile()) hash.update(readFileSync(full));
-    hash.update("\0");
+    let content = "";
+    if (stat.isSymbolicLink()) content = `-> ${JSON.stringify(readlinkSync(full))}`;
+    else if (stat.isFile())
+      content = `sha256:${createHash("sha256").update(readFileSync(full)).digest("hex")}`;
+    lines.push(`${JSON.stringify(relative(dir, full))} mode=${String(stat.mode)} ${content}`);
   }
-  return hash.digest("hex");
+  return lines.join("\n");
 };
 
 export const createId = (): string => crypto.randomUUID();

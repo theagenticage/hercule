@@ -15,7 +15,7 @@ import {
   makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "../../../runner/src/workspaces/testing";
@@ -420,7 +420,7 @@ describe("explicit disposal and admission", () => {
       const token = String((caller.start as unknown as Record<string, unknown>)["token"]);
       const cwd = Effect.runSync(world.manager.resolve(target.workspaceId))!.cwd;
       writeFileSync(join(cwd, "README.md"), "user must authorize discard\n");
-      const before = hashContents(cwd);
+      const before = snapshotContents(cwd);
       const forced = await send(
         "DELETE",
         arranged.harness.base,
@@ -429,7 +429,7 @@ describe("explicit disposal and admission", () => {
       );
       expect(forced.status).toBe(403);
       expect(await forced.text()).toMatch(/user|session|workflow|discard/i);
-      expect(hashContents(cwd)).toBe(before);
+      expect(snapshotContents(cwd)).toBe(before);
       expect(listFramesTagged(arranged.wire, "workspaceDispose")).toHaveLength(0);
       runGitOrThrow(cwd, "checkout", "--", "README.md");
       const max = await Effect.runPromise(
@@ -684,10 +684,10 @@ describe("public attachment detachment", () => {
       });
       await endResumable(arranged, derived.session);
       const derivedRoot = Effect.runSync(world.manager.resolve(derived.workspaceId))!.cwd;
-      const sourceBefore = hashContents(source);
+      const sourceBefore = snapshotContents(source);
       const discarded = await dispose(arranged, primary.id, { discardChanges: true });
       expect(discarded.status).toBe(409);
-      expect(hashContents(source)).toBe(sourceBefore);
+      expect(snapshotContents(source)).toBe(sourceBefore);
       const detached = await post(
         arranged.harness.base,
         `/api/v1/workspaces/${primary.id}/detach`,
@@ -704,7 +704,7 @@ describe("public attachment detachment", () => {
       );
       arranged.wire.send(await Effect.runPromise(world.manager.detach(instruction)));
       await waitStatus(arranged, primary.id, "deleted");
-      expect(hashContents(source)).toBe(sourceBefore);
+      expect(snapshotContents(source)).toBe(sourceBefore);
       expect(Effect.runSync(world.manager.resolve(primary.id))).toBeUndefined();
       const newWork = await post(
         arranged.harness.base,
@@ -906,7 +906,7 @@ describe("failed managed preparation attempts", () => {
       const recorded = await waitStatus(arranged, first.workspace.id, "failed");
       const firstRoot = join(world.storageDir, "primaries", first.workspace.id);
       expect(readFileSync(join(firstRoot, "setup-count.txt"), "utf8")).toBe("setup ran\n");
-      const before = hashContents(firstRoot);
+      const before = snapshotContents(firstRoot);
       const changed = await send(
         "PATCH",
         arranged.harness.base,
@@ -926,10 +926,10 @@ describe("failed managed preparation attempts", () => {
       expect(preserved.message).toBe(recorded.message);
       expect(preserved.disposedAt).toBeNull();
       expect(preserved.provisionedAt).toBeNull();
-      expect(hashContents(firstRoot)).toBe(before);
+      expect(snapshotContents(firstRoot)).toBe(before);
       expect(await Effect.runPromise(world.manager.provision(first.frame))).toEqual(failed);
       expect(readFileSync(join(firstRoot, "setup-count.txt"), "utf8")).toBe("setup ran\n");
-      expect(hashContents(firstRoot)).toBe(before);
+      expect(snapshotContents(firstRoot)).toBe(before);
     });
   });
 });

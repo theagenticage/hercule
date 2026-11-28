@@ -17,7 +17,7 @@ import {
   cloneUserCheckout,
   buildCheckout,
   cleanTemporaries,
-  hashContents,
+  snapshotContents,
   runGitOrThrow,
   createId,
   makeRemote,
@@ -100,7 +100,7 @@ describe("a fresh managed primary worktree", () => {
     const mine = cloneUserCheckout(remote);
     runGitOrThrow(mine, "checkout", "-b", "local-only");
     writeFileSync(join(mine, "scratch.txt"), "mine\n");
-    const before = hashContents(mine);
+    const before = snapshotContents(mine);
     const head = runGitOrThrow(mine, "rev-parse", "HEAD");
     const storageDir = createStorageDir();
     const resourceId = createId();
@@ -119,7 +119,7 @@ describe("a fresh managed primary worktree", () => {
     expect(report.status).toBe("ready");
     expect(report.checkouts?.[0]?.branch).toBe(`hercule/main-${workspaceId}`);
     expect(existsSync(join(storageDir, "primaries", workspaceId))).toBe(true);
-    expect(hashContents(mine)).toBe(before);
+    expect(snapshotContents(mine)).toBe(before);
     expect(runGitOrThrow(mine, "rev-parse", "HEAD")).toBe(head);
     expect(runGitOrThrow(mine, "rev-parse", "--abbrev-ref", "HEAD")).toBe("local-only");
   });
@@ -470,7 +470,7 @@ describe("a workspace whose setup command failed", () => {
     );
     expect(failed.status).toBe("failed");
     const failedRoot = join(storageDir, "primaries", failedId);
-    const before = hashContents(failedRoot);
+    const before = snapshotContents(failedRoot);
     const freshId = createId();
     const manager = makeTestWorkspaces({ storageDir });
     const ready = await Effect.runPromise(
@@ -484,7 +484,7 @@ describe("a workspace whose setup command failed", () => {
     );
     expect(ready.status, ready.message).toBe("ready");
     expect(Effect.runSync(manager.resolve(freshId))?.root).not.toBe(failedRoot);
-    expect(hashContents(failedRoot)).toBe(before);
+    expect(snapshotContents(failedRoot)).toBe(before);
     expect(Effect.runSync(manager.resolve(failedId))).toBeUndefined();
   });
 

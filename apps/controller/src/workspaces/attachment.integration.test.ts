@@ -16,7 +16,7 @@ import {
   makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "../../../runner/src/workspaces/testing";
@@ -104,7 +104,7 @@ const attachOrFail = async (arranged: Arranged, body: unknown): Promise<Workspac
 describe("workspace.attach", () => {
   it("keeps a workflow-only managed selection fixed before a main working copy exists", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       await startSentWorkflow(arranged.harness.base, arranged.token, {
@@ -143,13 +143,13 @@ describe("workspace.attach", () => {
 
       expect(refused.status).toBe(409);
       expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
   it("revalidates the same restored attachment through the public operation without replacing IDs or running setup", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const body = { resourceId, runnerId: arranged.runnerId, path: fixture.path };
@@ -190,14 +190,14 @@ describe("workspace.attach", () => {
         (await readWorkspace(arranged, workspace.id)).status === "ready" ? true : undefined,
       );
       expect((await readWorkspace(arranged, workspace.id)).path).toBe(fixture.path);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
       expect(existsSync(join(fixture.path, "attachment-setup-ran"))).toBe(false);
     });
   });
 
   it("rejects an older runner visibly before persisting or sending attachment intent", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const older = await arranged.enlist({ capabilities: [] });
@@ -226,7 +226,7 @@ describe("workspace.attach", () => {
         path: fixture.path,
       });
       expect(supported.runnerId).toBe(arranged.runnerId);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
@@ -237,7 +237,7 @@ describe("workspace.attach", () => {
       const remotePath = join(fixture.world, "remote runner checkout");
       runGitOrThrow(fixture.world, "clone", fixture.remote.url, remotePath);
       runGitOrThrow(remotePath, "remote", "set-url", "origin", fixture.remoteUrl);
-      const before = hashContents(fixture.world);
+      const before = snapshotContents(fixture.world);
       await withRunnerFleet(
         async (arranged) => {
           const resourceId = await createResource(arranged, fixture.remoteUrl);
@@ -276,7 +276,7 @@ describe("workspace.attach", () => {
               expect(Effect.runSync(manager.resolve(workspace.id))?.cwd).toBe(path);
             else expect(Effect.runSync(manager.resolve(workspace.id))?.cwd).not.toBe(path);
           }
-          expect(hashContents(fixture.world)).toBe(before);
+          expect(snapshotContents(fixture.world)).toBe(before);
         },
         {
           firstRunnerIsLocal: true,
@@ -295,7 +295,7 @@ describe("workspace.attach", () => {
 
   it("validates on the selected runner and records its normalized root without changing the checkout", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const workspace = await attachOrFail(arranged, {
@@ -328,14 +328,14 @@ describe("workspace.attach", () => {
       expect(ready.ownership).toBe("adopted");
       expect(ready.runnerId).toBe(arranged.runnerId);
       expect(Effect.runSync(manager.resolve(workspace.id))?.cwd).toBe(fixture.path);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
       expect(existsSync(join(fixture.path, "attachment-setup-ran"))).toBe(false);
     });
   });
 
   it("persists attachment intent offline and reuses the same primary after reconnect and duplicate calls", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       arranged.wire.close();
@@ -372,7 +372,7 @@ describe("workspace.attach", () => {
       const repeated = await attachOrFail(arranged, body);
       expect(repeated.id).toBe(first.id);
       expect(repeated.path).toBe(fixture.path);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
@@ -380,7 +380,7 @@ describe("workspace.attach", () => {
     const fixture = createCheckout();
     const other = join(fixture.world, "other candidate");
     runGitOrThrow(fixture.world, "clone", fixture.path, other);
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const responses = await Promise.all([
@@ -400,13 +400,13 @@ describe("workspace.attach", () => {
       );
       expect([fixture.path, other]).toContain(frame!.attachment?.path);
       expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
   it("rejects switching an established managed choice to attachment and an attached choice to managed", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const second = await arranged.enlist();
@@ -425,13 +425,13 @@ describe("workspace.attach", () => {
         arranged.token,
       );
       expect(refusedManaged.status).toBe(409);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
   it("refuses session actors from attaching external directories", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       await spawnSessionOrFail(arranged, { prompt: "hello" });
@@ -445,7 +445,7 @@ describe("workspace.attach", () => {
 
       expect(refused.status).toBe(403);
       expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(0);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
@@ -458,7 +458,7 @@ describe("workspace.attach", () => {
       "origin",
       "https://fixture.invalid/not/the-resource",
     );
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const workspace = await attachOrFail(arranged, {
@@ -482,13 +482,13 @@ describe("workspace.attach", () => {
       expect(failed.message).toMatch(/remote|repository/i);
       expect(Effect.runSync(manager.resolve(workspace.id))).toBeUndefined();
       expect(existsSync(join(storageDir, "cache"))).toBe(false);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
     });
   });
 
   it("keeps an attachment and local-only branch on runner A while runner B establishes managed storage", async () => {
     const fixture = createCheckout();
-    const before = hashContents(fixture.world);
+    const before = snapshotContents(fixture.world);
     await withFleet(async (arranged) => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const second = await arranged.enlist();
@@ -533,7 +533,7 @@ describe("workspace.attach", () => {
         runGitOrThrow(Effect.runSync(managerB.resolve(managed.id))!.cwd, "rev-parse", "HEAD"),
       ).toBe(runGitOrThrow(fixture.remote.work, "rev-parse", "HEAD"));
       expect(Effect.runSync(managerA.resolve(attached.id))?.cwd).toBe(fixture.path);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
       expect(readFileSync(join(fixture.path, "README.md"), "utf8")).toBe("dirty tracked\n");
     });
   });
@@ -562,7 +562,7 @@ describe("reattaching a normalized checkout root", () => {
         return current.status === "ready" && current.path === fixture.path ? true : undefined;
       });
       rmdirSync(join(fixture.path, "nested"));
-      const before = hashContents(fixture.world);
+      const before = snapshotContents(fixture.world);
       const changed = await send(
         "PATCH",
         arranged.harness.base,
@@ -594,7 +594,7 @@ describe("reattaching a normalized checkout root", () => {
       expect(report.status, report.message).toBe("ready");
       expect(report.path).toBe(fixture.path);
       arranged.wire.send(report);
-      expect(hashContents(fixture.world)).toBe(before);
+      expect(snapshotContents(fixture.world)).toBe(before);
       expect(existsSync(join(fixture.path, "attachment-setup-ran"))).toBe(false);
       expect(existsSync(join(fixture.path, "changed-setup-ran"))).toBe(false);
     });

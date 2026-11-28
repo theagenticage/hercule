@@ -77,7 +77,7 @@ import {
   buildProvisionFrame,
   cleanTemporaries,
   createId,
-  hashContents,
+  snapshotContents,
   makeRemote,
   runGitOrThrow,
 } from "../workspaces/testing";
@@ -5435,7 +5435,7 @@ describe("the Git boundary at a workspace root", () => {
     const { supervisor, machine } = buildConnection(fake);
     const { workspaceId, root, checkouts } = await provisionCheckouts(machine, 1);
     const checkout = checkouts[0]!.path;
-    const before = hashContents(checkout);
+    const before = snapshotContents(checkout);
 
     await runConnected(
       fake,
@@ -5444,7 +5444,7 @@ describe("the Git boundary at a workspace root", () => {
     );
 
     expect(fake.contexts[0]?.cwd).toBe(checkout);
-    expect(hashContents(checkout)).toBe(before);
+    expect(snapshotContents(checkout)).toBe(before);
     expect(existsSync(join(root, ".git"))).toBe(false);
   });
 
