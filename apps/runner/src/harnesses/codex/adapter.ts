@@ -248,6 +248,11 @@ interface Host extends AppServer {
   /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
   readonly stop: Effect.Effect<void>;
   /**
+   * Why the app-server's output could not be read, once that has happened.
+   * The session's exit gives it as its reason.
+   */
+  readFailure: string | undefined;
+  /**
    * Keeps the notifications with no thread id that arrive before the session
    * is registered, so `startSession` can hand them to the session once it is.
    * A notification that names a thread is not kept: before registration, the
@@ -724,7 +729,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     host.kill();
   };
 
-  const exitSession = (held: Held, reason: ExitReason): void => {
+  const exitSession = (held: Held, reason: ExitReason, message?: string): void => {
     // Compared by identity: a stop waits on the harness, and in that time the
     // server may close the thread or the app-server may die, which already
     // ended this session. A second exit would record the same end twice.
@@ -737,6 +742,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       sessionId: held.binding.sessionId,
       at: now(),
       reason,
+      ...(message === undefined ? {} : { message: truncateMessage(message) }),
     });
     releaseHost(held.host);
   };
@@ -744,7 +750,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   /** Ends the host's session when its app-server exits on its own. */
   const onHostGone = (host: Host): void => {
     const held = findHostSession(host);
-    if (held !== undefined) exitSession(held, "process_exit");
+    if (held !== undefined) exitSession(held, "process_exit", host.readFailure);
     host.textGeneration?.serverExited();
   };
 
@@ -836,10 +842,18 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           rememberComplaint(message);
           warn(host, message);
         },
+        // The app-server is stopped, and its exit then ends the session with
+        // the cause as the reason.
+        onReadError: (message) => {
+          host.readFailure = message;
+          rememberComplaint(message);
+          void Effect.runPromise(host.stop);
+        },
       }),
       kill: child.kill,
       stop: stopChild(child),
       complaint: () => complaints.join("\n"),
+      readFailure: undefined,
       sessionId,
       textGeneration,
       framesBeforeRegistration:
