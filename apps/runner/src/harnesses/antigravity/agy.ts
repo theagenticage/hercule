@@ -38,7 +38,8 @@ import {
 import type { HarnessRunnerContext } from "../index";
 import type { LoginCommand } from "../login";
 import { isExecutableNotFound, stopChild } from "../process";
-import type { CheckedFramedChild, FramedChild, Run } from "../process";
+import { keepStderrTail } from "../stderr-tail";
+import type { CheckedFramedChild, Run } from "../process";
 import { describeFileFailure } from "../session-files";
 import { truncateFact } from "../text";
 import {
@@ -268,9 +269,6 @@ const CONVERSATION_ID_FILE = "conversation-id";
  * keeps the pipe open must not hold up the failure.
  */
 const STDERR_WAIT = Duration.seconds(1);
-
-/** The number of lines from the end of stderr that a failed start repeats. */
-const STDERR_LINES = 5;
 
 /**
  * Returns the environment of an `agy` process of this account: the context's
@@ -584,30 +582,6 @@ const readWorkerLogSignals = (folder: string): Effect.Effect<WorkerLogSignals, A
   });
 
 /**
- * Reads the stderr of `child` as it arrives. Returns what the last lines were
- * and a promise that resolves when stderr has ended. A pipe nobody reads fills
- * up, and the process then blocks, so it is read from the start, until the
- * process ends.
- */
-const drainStderr = (
-  child: Pick<FramedChild, "stderr">,
-): { readonly lastLines: () => string; readonly ended: Promise<void> } => {
-  const lines: Array<string> = [];
-  const ended = (async () => {
-    try {
-      for await (const line of child.stderr) {
-        if (line.trim() === "") continue;
-        lines.push(truncateFact(line.trim()));
-        if (lines.length > STDERR_LINES) lines.shift();
-      }
-    } catch {
-      // A stderr that fails has nothing more to say.
-    }
-  })();
-  return { lastLines: () => lines.join(" "), ended };
-};
-
-/**
  * Sends `authenticate` and returns the reply. Fails with the error `failOpening`
  * builds for any failure, except the refusal that tells the user to run
  * `agy acp --login`: the error -32603 with that text. `agy` gives that exact
@@ -771,7 +745,7 @@ export const openSignedInAgy = (
       }),
       (spawned) => stopChild(spawned),
     );
-    const stderr = drainStderr(child);
+    const stderr = keepStderrTail(child.stderr, (line) => truncateFact(line.trim()));
 
     // Covers the failures of opening the connection and of `authenticate`, the
     // two calls made while the process may still be starting up. A connection
@@ -785,7 +759,7 @@ export const openSignedInAgy = (
             STDERR_WAIT,
           );
         }
-        const lastLines = stderr.lastLines();
+        const lastLines = stderr.lastLines().join(" ");
         return yield* Effect.fail(
           buildStartFailure(
             ANTIGRAVITY_NAME,

@@ -83,6 +83,7 @@ import {
   stopChild,
   type Run,
 } from "../process";
+import { keepStderrTail } from "../stderr-tail";
 import {
   isRealFolder,
   PLAIN_ID_PATTERN,
@@ -147,9 +148,6 @@ const PI_BINARY = "pi";
 
 /** The name the user knows this harness by, as it appears in the messages shown to them. */
 const PI_NAME = "pi";
-
-/** How many of pi's last stderr lines are kept, to report why it exited. */
-const MAX_COMPLAINT_LINES = 5;
 
 /**
  * How long pi gets to exit by itself after its stdin is closed, even when it is
@@ -1565,30 +1563,20 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    */
   const watchChild = (held: Held, agent: RunningAgent): (() => Promise<string>) => {
     const child = agent.child;
-    const complaints: Array<string> = [];
-    const drained = (async () => {
-      try {
-        for await (const line of child.stderr) {
-          if (line.trim() === "") continue;
-          complaints.push(line);
-          if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
-        }
-      } catch {
-        // A child killed while being read has no more output, and the lines
-        // already read are still worth reporting.
-      }
-    })();
+    const stderr = keepStderrTail(child.stderr);
     // The read failure comes first: it is Hercule's own account of why pi was
     // stopped, and the error output after it is pi's.
     const describeFailure = (): string =>
-      [...(agent.readFailure === undefined ? [] : [agent.readFailure]), ...complaints].join("\n");
+      [...(agent.readFailure === undefined ? [] : [agent.readFailure]), ...stderr.lastLines()].join(
+        "\n",
+      );
     const onChildGone = async (code: number | undefined): Promise<void> => {
       // `stopSession` waits for this exit and reports its own reason. A pi
       // that exited by itself has nobody else to report it.
       if (held.stopping) return;
       // pi's last stderr lines can still be in the pipe when the exit arrives.
       // Wait for them, so a crash is reported with its reason.
-      await drained;
+      await stderr.ended;
       const message = code === 0 && agent.readFailure === undefined ? "" : describeFailure();
       if (!isSubagent(agent)) {
         if (held.startup._tag === "checking") {
@@ -1608,7 +1596,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     };
     void child.exited.then(onChildGone, () => onChildGone(undefined));
     return async () => {
-      await drained;
+      await stderr.ended;
       return describeFailure();
     };
   };
