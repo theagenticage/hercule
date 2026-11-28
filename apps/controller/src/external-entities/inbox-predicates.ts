@@ -93,7 +93,15 @@ const OBSERVED_BY_SQL = `EXISTS (SELECT 1 FROM external_entity_observations o WH
 export const escapeLike = (word: string): string =>
   word.replace(/[\\%_]/g, (match) => `\\${match}`);
 
-/** The condition on one stored field row `f` of the thing `e`, with the key as its first parameter. */
+/**
+ * The condition on one stored field row `f` of the thing `e`, with the key as its first parameter.
+ *
+ * A numeric comparison is written with a unary `+` on the column
+ * (`+f.number_value > ?`), which keeps SQLite from reading the whole
+ * `(key, number_value)` index for each thing. SQLite has no statistics here, so
+ * it can pick that index over the seek by `(ref, key)` that finds the one row
+ * of the thing, and then each thing costs a walk of every row of that field.
+ */
 const buildFieldRowSql = (condition: string): string =>
   `EXISTS (SELECT 1 FROM external_entity_fields f WHERE f.ref = e.ref AND f.key = ? AND ${condition})`;
 
@@ -177,7 +185,7 @@ const compileFieldCondition = (
     case "money": {
       const comparison = clause.op === "is" ? "=" : clause.op === "over" ? ">" : "<";
       return {
-        sql: buildFieldRowSql(`f.number_value IS NOT NULL AND f.number_value ${comparison} ?`),
+        sql: buildFieldRowSql(`f.number_value IS NOT NULL AND +f.number_value ${comparison} ?`),
         params: [key, Number(value)],
       };
     }
@@ -188,14 +196,14 @@ const compileFieldCondition = (
       if (!Number.isFinite(cutoff)) return undefined;
       return {
         sql: buildFieldRowSql(
-          `f.number_value IS NOT NULL AND f.number_value ${clause.op === "over" ? "<" : ">"} ?`,
+          `f.number_value IS NOT NULL AND +f.number_value ${clause.op === "over" ? "<" : ">"} ?`,
         ),
         params: [key, cutoff],
       };
     }
     case "bool":
       return {
-        sql: buildFieldRowSql("f.number_value IS NOT NULL AND f.number_value = ?"),
+        sql: buildFieldRowSql("f.number_value IS NOT NULL AND +f.number_value = ?"),
         params: [key, value === true ? 1 : 0],
       };
   }

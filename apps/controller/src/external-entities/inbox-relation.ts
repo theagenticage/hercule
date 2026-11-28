@@ -161,7 +161,7 @@ const buildAskTables = (
         },
       ]),
   plain(
-    `live_links AS MATERIALIZED (${buildLiveTaskLinksSql(onlyRefs === undefined ? "1" : "l.ref IN (SELECT ref FROM page_refs)")})`,
+    `live_links AS MATERIALIZED (${buildLiveTaskLinksSql(onlyRefs === undefined ? undefined : "l.ref IN (SELECT ref FROM page_refs)")})`,
   ),
   plain(TAKEN_SQL),
   {

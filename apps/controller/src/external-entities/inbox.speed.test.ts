@@ -616,6 +616,81 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
   }, 300_000);
 });
 
+/** How many links of finished Tasks the Inbox's reads are timed with, besides none. */
+const FINISHED_LINK_COUNTS = [5_000, 10_000, 20_000, 40_000, 80_000] as const;
+
+/**
+ * Adds `count` finished Tasks (stage `done`), each with one link to a ref. The
+ * refs follow the numbering of `seed` and spread over 60,000 tickets, so a
+ * thing of the Inbox has about one finished Task at most, as in a database that
+ * has seen a lot of work come and go.
+ */
+const seedFinishedTaskLinks = (count: number, offset: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const numbers = Array.from({ length: count }, (_, n) => offset + n);
+    yield* sql`
+      INSERT INTO tasks
+        (id, title, description, status, stage, priority, labels, created_at, updated_at,
+         status_changed_at, stage_changed_at, board_rank)
+      SELECT unhex(printf('%032x', value + 1)), 'Finished ' || value, '', 'done', 'done', 'normal', '[]',
+        ${AT}, ${AT}, ${AT}, ${AT}, 'a'
+      FROM json_each(${JSON.stringify(numbers)})`;
+    yield* sql`
+      INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by)
+      SELECT unhex(printf('%032x', value + 1)), 'acme:ticket:' || ((value * 7) % 60000 + 1), ${AT}, 'user'
+      FROM json_each(${JSON.stringify(numbers)})`;
+  }).pipe(inTransaction);
+
+describe.runIf(SPEED_TESTS_ENABLED && !isCountingOnly)(
+  "the Inbox's reads with finished Tasks",
+  () => {
+    it("do not slow down with the links of finished Tasks", async () => {
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* seed(300);
+          const everything = { list: { savedQuery: "everything" } } as const;
+          const rows: Array<{
+            links: number;
+            page: number;
+            count: number;
+            scans: ReadonlyArray<string>;
+          }> = [];
+          let added = 0;
+          for (const links of [0, ...FINISHED_LINK_COUNTS]) {
+            yield* seedFinishedTaskLinks(links - added, added);
+            added = links;
+            const page = yield* measure(inbox.readFirstPage(ENVIRONMENT, everything));
+            const count = yield* measure(inbox.countInbox(ENVIRONMENT));
+            const { statements } = yield* captureStatements(inbox.countInbox(ENVIRONMENT));
+            rows.push({
+              links,
+              page: page.median,
+              count: count.median,
+              scans: yield* findBigScans(statements),
+            });
+          }
+          return rows;
+        }).pipe(Effect.provide(TestDatabase)),
+      );
+      process.stderr.write(
+        `\nthe Inbox's reads at 300 things, with links of finished Tasks, median of ${String(RUNS)}:\n` +
+          results
+            .map(
+              (row) =>
+                `  ${String(row.links).padStart(6)} links  page ${format(row.page)} ms  count ${format(row.count)} ms\n` +
+                row.scans.map((scan) => `        SCAN of a big table: ${scan}\n`).join(""),
+            )
+            .join(""),
+      );
+      const first = results[0]!;
+      const last = results.at(-1)!;
+      expect(last.page).toBeLessThan(Math.max(PAGE_TARGET_MS, first.page * 2));
+      expect(last.count).toBeLessThan(Math.max(COUNTS_CEILING_MS / 10, first.count * 2));
+    }, 300_000);
+  },
+);
+
 /**
  * Writes `part-of` claims from each `[child, parent]` pair, as one Connection
  * reported them, in one transaction.
