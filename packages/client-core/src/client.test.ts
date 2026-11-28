@@ -229,6 +229,55 @@ describe("createClient", () => {
     assert.strictEqual(error.code, "internal");
   });
 
+  it("turns the bare 503 of a stopping controller into a ConnectionError, whatever the operation declares", async () => {
+    const { fetch } = stubFetch(
+      () =>
+        new Response("Hercule is stopping; try again once it is back.", {
+          status: 503,
+          headers: { "content-type": "text/plain" },
+        }),
+    );
+    const client = createClient({ baseUrl: BASE, token: "tok", fetch });
+
+    // One operation that has no 503 in its contract, and one that has.
+    const undeclared = await client.setup.read().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const declared = await client.task.query({ query: {} }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert.instanceOf(undeclared, ConnectionError);
+    assert.instanceOf(declared, ConnectionError);
+  });
+
+  it("keeps the sealed controller's 503 an ApiError that names the new address", async () => {
+    const { fetch } = stubFetch(() =>
+      buildJsonResponse(
+        {
+          error: {
+            code: "controller_sealed",
+            message: "moved",
+            details: { newAddress: "http://new.test" },
+          },
+        },
+        503,
+      ),
+    );
+    const client = createClient({ baseUrl: BASE, token: "tok", fetch });
+
+    const error = await client.task.query({ query: {} }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert.instanceOf(error, ApiError);
+    assert.strictEqual(error.code, "controller_sealed");
+    assert.deepStrictEqual(error.details, { newAddress: "http://new.test" });
+  });
+
   it("turns a response it cannot decode into an internal ApiError", async () => {
     const { fetch } = stubFetch(() => new Response("<html>502</html>", { status: 502 }));
     const client = createClient({ baseUrl: BASE, fetch });

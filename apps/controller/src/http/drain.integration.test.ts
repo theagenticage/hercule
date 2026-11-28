@@ -44,6 +44,10 @@ interface Rig {
   readonly releaseStream: Deferred.Deferred<void>;
   /** Opened by the route at `/ws` when it has finished cleaning up after its socket. */
   readonly socketRouteCleanedUp: Deferred.Deferred<void>;
+  /** Opened by the route at `/held-ws` when its upgrade is held, before the socket registers. */
+  readonly heldUpgradeReached: Deferred.Deferred<void>;
+  /** Opened by the test to let the upgrade at `/held-ws` go on. */
+  readonly releaseHeldUpgrade: Deferred.Deferred<void>;
   /** Opened by the route at `/late-ws` when a request has reached it. */
   readonly lateReached: Deferred.Deferred<void>;
   /** Opened by the test to let the route at `/late-ws` try to upgrade. */
@@ -106,6 +110,35 @@ const buildRoutes = (rig: Rig) =>
         );
       }),
     ),
+    // A socket route whose platform upgrade is held until the test says. The
+    // route hands `serveSocket` a view of the request with a slower `upgrade`,
+    // which is the only way to stop the upgrade between the drain's check and
+    // the socket's registration.
+    HttpRouter.add(
+      "GET",
+      "/held-ws",
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const drain = yield* ListenerDrain;
+        const held = Object.create(request, {
+          upgrade: {
+            value: Effect.andThen(
+              Effect.andThen(
+                Deferred.succeed(rig.heldUpgradeReached, undefined),
+                Deferred.await(rig.releaseHeldUpgrade),
+              ),
+              request.upgrade,
+            ),
+          },
+        }) as HttpServerRequest.HttpServerRequest;
+        return yield* drain.serveSocket(held, (socket) =>
+          Effect.gen(function* () {
+            const { pull } = yield* socket.reader;
+            yield* Effect.ignore(Effect.forever(pull));
+          }),
+        );
+      }),
+    ),
     // A request that is admitted, then reaches its upgrade only when the test says.
     HttpRouter.add(
       "GET",
@@ -141,6 +174,8 @@ const withListener = (body: (listener: Listener) => Effect.Effect<void, unknown,
           releaseSlow: Deferred.makeUnsafe<void>(),
           releaseStream: Deferred.makeUnsafe<void>(),
           socketRouteCleanedUp: Deferred.makeUnsafe<void>(),
+          heldUpgradeReached: Deferred.makeUnsafe<void>(),
+          releaseHeldUpgrade: Deferred.makeUnsafe<void>(),
           lateReached: Deferred.makeUnsafe<void>(),
           releaseLate: Deferred.makeUnsafe<void>(),
         };
@@ -257,6 +292,26 @@ describe("ListenerDrain", () => {
           code: GOING_AWAY_CLOSE_CODE,
           reason: "the controller is stopping",
         });
+      }),
+    ));
+
+  it("closes a socket whose upgrade was still under way when closeSockets ran, as it registers", () =>
+    withListener(({ drain, rig, port }) =>
+      Effect.gen(function* () {
+        const socket = new WebSocket(`ws://127.0.0.1:${port}/held-ws`);
+        const closed = readClose(socket);
+        yield* Deferred.await(rig.heldUpgradeReached);
+
+        // Nothing is registered yet, so there is nothing to close and nothing to wait for.
+        yield* drain.closeSockets;
+        yield* Deferred.succeed(rig.releaseHeldUpgrade, undefined);
+
+        expect(yield* Effect.promise(() => closed)).toEqual({
+          code: GOING_AWAY_CLOSE_CODE,
+          reason: "the controller is stopping",
+        });
+        // The socket's route has ended, so a second `closeSockets` has nothing to wait for either.
+        yield* drain.closeSockets;
       }),
     ));
 

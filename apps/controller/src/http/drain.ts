@@ -55,6 +55,10 @@ const STOPPING_MESSAGE = "Hercule is stopping; try again once it is back.";
  * and means "stopping" (`controller_sealed` carries the address of a new
  * machine, and there is none), and `internal` renders as 500. The connection
  * is closed, so a client does not send its next request on it.
+ *
+ * Clients read it as "the controller is not serving": `@hercule/client-core`
+ * turns a 503 that is not an error envelope into a `ConnectionError`, which
+ * every client already treats as "cannot reach the controller, try again".
  */
 const buildStoppingResponse = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(STOPPING_MESSAGE, { status: 503, headers: { connection: "close" } });
@@ -64,6 +68,10 @@ type CloseSocket = Effect.Effect<void>;
 
 const make = Effect.sync(() => {
   let draining = false;
+  // Set by `closeSockets`. A socket that registers after it is closed at once,
+  // because the close that `closeSockets` sent went only to the sockets that
+  // were registered by then.
+  let closing = false;
 
   let requestsInFlight = 0;
   const openSockets = new Set<CloseSocket>();
@@ -115,10 +123,12 @@ const make = Effect.sync(() => {
       const close: CloseSocket = Effect.ignore(
         write(new Socket.CloseEvent(GOING_AWAY_CLOSE_CODE, STOPPING_CLOSE_REASON)),
       );
-      yield* Effect.sync(() => {
+      const registeredWhileClosing = yield* Effect.sync(() => {
         openSockets.add(close);
         settle();
+        return closing;
       });
+      if (registeredWhileClosing) yield* close;
       return { socket, close };
     });
 
@@ -205,13 +215,16 @@ const make = Effect.sync(() => {
     /**
      * Closes every open socket with the going-away code, then waits until
      * every one has been forgotten, which happens when its route has ended.
+     * A socket whose upgrade was still under way registers later and is
+     * closed as it registers; this does not wait for it.
      */
-    closeSockets: Effect.suspend(() =>
-      Effect.andThen(
+    closeSockets: Effect.suspend(() => {
+      closing = true;
+      return Effect.andThen(
         Effect.forEach([...openSockets], (close) => close, { discard: true }),
         noOpenSockets.await,
-      ),
-    ),
+      );
+    }),
   };
 });
 
