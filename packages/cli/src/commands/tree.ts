@@ -676,16 +676,25 @@ const readPayloadSchema = (payload: unknown): unknown => {
 const listPropertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
   (ast?.propertySignatures ?? []).map((property) => String(property.name));
 
-/** Returns what the success schema describes: a record, a page of records, or a bare list. */
+/**
+ * Returns what the success schema describes: a record, a page of records, or a
+ * bare list. A reply that is a union of records (one for each mode of the
+ * request, or one for each state of a run) lists every field of every member,
+ * each name once, in the order they first appear.
+ */
 const readReturns = (success: unknown): Returns => {
   const ast = [...((success as Set<{ ast?: Ast }> | undefined) ?? [])][0]?.ast;
   if (ast === undefined) return { fields: [], items: undefined };
   if (ast._tag === "Arrays") {
     return { fields: [], items: listPropertyNames(ast.rest?.[0]) };
   }
-  const fields = listPropertyNames(ast);
-  const page = ast.propertySignatures?.find((property) => String(property.name) === "items");
-  return { fields, items: page === undefined ? undefined : listPropertyNames(page.type.rest?.[0]) };
+  const members = ast._tag === "Union" ? (ast.types ?? []) : [ast];
+  const fields = [...new Set(members.flatMap(listPropertyNames))];
+  const itemNames = members.flatMap((member) => {
+    const page = member.propertySignatures?.find((property) => String(property.name) === "items");
+    return page === undefined ? [] : [listPropertyNames(page.type.rest?.[0])];
+  });
+  return { fields, items: itemNames.length === 0 ? undefined : [...new Set(itemNames.flat())] };
 };
 
 /**
