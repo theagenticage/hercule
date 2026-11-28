@@ -255,9 +255,6 @@ export interface SummaryAttempt {
   readonly dirtyRevision: number;
 }
 
-/** The most Task ids one statement lists links for, well under SQLite's limit on bound values. */
-const MAX_TASKS_PER_LINK_STATEMENT = 500;
-
 /** The columns an edit may set. An absent one is left as it was. */
 export interface TaskEdit {
   readonly title?: string;
@@ -1340,24 +1337,23 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the refs each of the Tasks links, in the order they were linked
-     * (then by ref). A Task with no link has no entry. One statement for each
-     * 500 Tasks.
+     * (then by ref). A Task with no link has no entry. One statement, whatever
+     * the number of Tasks: the ids reach SQLite as one JSON text, which is not
+     * limited by the number of bound values.
      */
     listEntityLinks: (
       taskIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
       Effect.map(
-        Effect.forEach(
-          Arr.chunksOf(taskIds, MAX_TASKS_PER_LINK_STATEMENT),
-          (chunk) =>
-            sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
-              SELECT task_id, ref FROM task_entity_links
-              WHERE task_id IN ${sql.in(chunk.map(uuidFromString))}
-              ORDER BY linked_at, ref`,
-        ),
-        (chunks) => {
+        sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
+          SELECT task_id, ref FROM task_entity_links
+          WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(
+            taskIds.map((id) => id.replaceAll("-", "")),
+          )}))
+          ORDER BY linked_at, ref`,
+        (rows) => {
           const links = new Map<string, Array<string>>();
-          for (const row of chunks.flat()) {
+          for (const row of rows) {
             const taskId = uuidToString(row.task_id);
             const refs = links.get(taskId);
             if (refs === undefined) links.set(taskId, [row.ref]);

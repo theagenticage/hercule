@@ -655,6 +655,19 @@ describe("the cost of the board read", () => {
     expect(large.statements).toHaveLength(small.statements.length);
     expect(large.statements.some((text) => text.includes("session_stream"))).toBe(false);
   });
+
+  it.each([400, 600, 1200])(
+    "sends the same number of statements for %i Tasks as for 10, however many cards fit",
+    async (count) => {
+      const small = await countStatements(10);
+      const large = await countStatements(count);
+
+      // 1,200 Tasks are more than the board shows: it cuts at MAX_BOARD_CARDS.
+      expect(large.board.cards).toHaveLength(Math.min(count, MAX_BOARD_CARDS));
+      expect(large.statements).toHaveLength(small.statements.length);
+    },
+    30_000,
+  );
 });
 
 const PLUGIN = "acme-tracker";

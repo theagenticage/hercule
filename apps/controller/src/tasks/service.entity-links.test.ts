@@ -7,9 +7,10 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import type { ExternalRef } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidFromString, withTransaction } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -92,6 +93,38 @@ describe("the link a Task's provenance writes", () => {
     expect(after[0]).toEqual(first[0]);
     expect(after[1]!.linked_at > first[0]!.linked_at).toBe(true);
   });
+});
+
+describe("listing the refs of many Tasks", () => {
+  it.each([400, 600, 1200])(
+    "reads the links of %i Task ids in one statement, in link order",
+    async (count) => {
+      const { statements, links, first, last } = await run(
+        Effect.gen(function* () {
+          const first = yield* createTaskOnRef("First", REF);
+          const last = yield* createTaskOnRef("Last", THIRD_REF);
+          // Ids of Tasks that do not exist, with the two real ones at both ends of the list.
+          const others = Array.from({ length: count - 2 }, () => uuidToString(mintUuid()));
+          const tasks = yield* taskRepository;
+          const statements: Array<string> = [];
+          const links = yield* tasks.listEntityLinks([first.id, ...others, last.id]).pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+            ),
+          );
+          return { statements, links, first: first.id, last: last.id };
+        }),
+      );
+
+      expect(statements).toHaveLength(1);
+      expect([...links.keys()].toSorted()).toEqual([first, last].toSorted());
+      expect(links.get(first)).toEqual([REF]);
+      expect(links.get(last)).toEqual([THIRD_REF]);
+    },
+  );
 });
 
 describe("the active Task of a ref", () => {
