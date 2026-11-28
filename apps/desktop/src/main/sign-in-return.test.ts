@@ -343,3 +343,34 @@ describe("signInReturn.wait as the renderer calls it", () => {
     }
   });
 });
+
+describe("loading the listening code", () => {
+  it("waits for the first sign-in: cancelling and quitting without one load nothing, and listen loads it once", async () => {
+    vi.resetModules();
+    const loadListening = vi.fn(async (importOriginal: () => Promise<unknown>) => importOriginal());
+    vi.doMock("./sign-in-return-listener", loadListening);
+    try {
+      const fresh = await import("./sign-in-return");
+      const scope = await Effect.runPromise(Scope.make());
+      const context = await Effect.runPromise(
+        Layer.buildWithScope(fresh.makeSignInReturnLayer(1000), scope),
+      );
+      const service = Context.get(context, fresh.SignInReturn);
+
+      await Effect.runPromise(service.cancel("no-such-listener"));
+      await Effect.runPromise(service.cancelCurrent);
+      expect(loadListening).not.toHaveBeenCalled();
+
+      const first = await Effect.runPromise(service.listen);
+      const second = await Effect.runPromise(service.listen);
+      expect(first._tag).toBe("listening");
+      expect(second._tag).toBe("listening");
+      expect(loadListening).toHaveBeenCalledTimes(1);
+
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    } finally {
+      vi.doUnmock("./sign-in-return-listener");
+      vi.resetModules();
+    }
+  });
+});
