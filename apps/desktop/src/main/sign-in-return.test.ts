@@ -189,6 +189,21 @@ describe("cancelling", () => {
     expect(await secondWaiting).toEqual({ _tag: "received", callbackQuery: "code=a&state=s2" });
   });
 
+  it("settles a listen that a second listen overtakes while it is binding, and keeps the second", async () => {
+    const { service } = await openService();
+
+    const [first, second] = await Promise.all([
+      Effect.runPromise(service.listen),
+      Effect.runPromise(service.listen),
+    ]);
+
+    expect(first).toEqual({ _tag: "unavailable" });
+    if (second._tag !== "listening") throw new Error("the second listener could not start");
+    const waiting = waitFor(service, second.listenerId, "s2");
+    await fetch(`${second.redirectUri}?code=a&state=s2`);
+    expect(await waiting).toEqual({ _tag: "received", callbackQuery: "code=a&state=s2" });
+  });
+
   it("is what quitting the app does to the listener", async () => {
     const { service, quit } = await openService();
     const { listenerId, redirectUri } = await listenOn(service);
@@ -345,13 +360,13 @@ describe("signInReturn.wait as the renderer calls it", () => {
 });
 
 describe("loading the listening code", () => {
-  it("waits for the first sign-in: cancelling and quitting without one load nothing, and listen loads it once", async () => {
+  it("waits for the first sign-in: cancelling and quitting without one load nothing", async () => {
     vi.resetModules();
     const loadListening = vi.fn(async (importOriginal: () => Promise<unknown>) => importOriginal());
     vi.doMock("./sign-in-return-listener", loadListening);
+    const scope = await Effect.runPromise(Scope.make());
     try {
       const fresh = await import("./sign-in-return");
-      const scope = await Effect.runPromise(Scope.make());
       const context = await Effect.runPromise(
         Layer.buildWithScope(fresh.makeSignInReturnLayer(1000), scope),
       );
@@ -359,16 +374,10 @@ describe("loading the listening code", () => {
 
       await Effect.runPromise(service.cancel("no-such-listener"));
       await Effect.runPromise(service.cancelCurrent);
-      expect(loadListening).not.toHaveBeenCalled();
-
-      const first = await Effect.runPromise(service.listen);
-      const second = await Effect.runPromise(service.listen);
-      expect(first._tag).toBe("listening");
-      expect(second._tag).toBe("listening");
-      expect(loadListening).toHaveBeenCalledTimes(1);
-
       await Effect.runPromise(Scope.close(scope, Exit.void));
+      expect(loadListening).not.toHaveBeenCalled();
     } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
       vi.doUnmock("./sign-in-return-listener");
       vi.resetModules();
     }

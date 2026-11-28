@@ -80,10 +80,15 @@ const isReturnOfState = (query: string, expectedState: string | null): boolean =
   return callback._tag === "Callback" && callback.state === expectedState;
 };
 
-/** Binds `server` to 127.0.0.1 on a port the system picks, and returns the port, or null when it cannot. */
+/**
+ * Binds `server` to 127.0.0.1 on a port the system picks, and returns the port,
+ * or null when it cannot, or when the server is closed before it is bound (a
+ * newer listener ended it).
+ */
 const bindToLoopback = (server: Server): Promise<number | null> =>
   new Promise((resolve) => {
     server.once("error", () => resolve(null));
+    server.once("close", () => resolve(null));
     server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
   });
 
