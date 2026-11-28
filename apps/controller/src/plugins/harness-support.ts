@@ -1,4 +1,4 @@
-import { decideAccountKindHarness } from "@hercule/contract";
+import { decideAccountKindHarnessSupport } from "@hercule/contract";
 import type { AccountKind } from "@hercule/plugin-host";
 import type { RegisteredHarness } from "./harnesses";
 import { findCredentialSecretName, type RegisteredProvider } from "./providers";
@@ -109,25 +109,22 @@ export const decideProviderAccountHarness = (
   if (harness === undefined) {
     return { _tag: "refused", field, reason: `this build carries no ${wanted} harness` };
   }
-  const verdict = decideAccountKindHarness(account, kind, harness);
-  if (verdict === "disallowed-by-provider") {
+  const decision = decideAccountKindHarnessSupport(provider.id, kind, harness);
+  if (decision._tag === "disallowed-by-provider") {
     return {
       _tag: "refused",
       field,
       reason: `${provider.displayName} does not allow ${kind.title} accounts to run in ${harness.displayName}`,
     };
   }
-  if (verdict === "unsupported-by-harness") {
+  if (decision._tag === "unsupported-by-harness") {
     return {
       _tag: "refused",
       field,
       reason: `${harness.displayName} cannot run ${provider.displayName} ${kind.title} accounts`,
     };
   }
-  // The verdict `runs` means the harness lists this provider and kind, so both lookups find an entry.
-  const supportedKind = harness.runs
-    .find((candidate) => candidate.providerId === provider.id)!
-    .kinds.find((candidate) => candidate.kind === kind.id)!;
+  const supportedKind = decision.support;
   return {
     _tag: "chosen",
     provider,

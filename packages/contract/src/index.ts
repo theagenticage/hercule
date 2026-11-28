@@ -144,7 +144,7 @@ export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-mode
 
 export { findSnapshotModel, isModelMissingFromHarness } from "./harness-models";
 
-export { decideAccountKindHarness, type AccountKindHarnessVerdict } from "./harness-account-kinds";
+export { decideAccountKindHarnessSupport } from "./harness-account-kinds";
 
 export {
   MAX_PASSWORD_LENGTH,

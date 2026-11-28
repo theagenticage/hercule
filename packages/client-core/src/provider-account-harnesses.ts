@@ -5,7 +5,7 @@
  * harness is struck through for the same reason wherever it is drawn.
  */
 import {
-  decideAccountKindHarness,
+  decideAccountKindHarnessSupport,
   type Harness,
   type Provider,
   type ProviderAccount,
@@ -71,7 +71,10 @@ export const canAccountKindRunInHarness = (
   harness: Harness,
 ): boolean => {
   const kind = findProviderAccountKind(providers, account);
-  return kind !== undefined && decideAccountKindHarness(account, kind, harness) === "runs";
+  return (
+    kind !== undefined &&
+    decideAccountKindHarnessSupport(account.providerId, kind, harness)._tag === "runs"
+  );
 };
 
 /**
@@ -103,7 +106,7 @@ export const listProviderAccountHarnessChoices = (
     if (kind === undefined) {
       return `${providerName} no longer offers this kind of account`;
     }
-    const verdict = decideAccountKindHarness(account, kind, harness);
+    const verdict = decideAccountKindHarnessSupport(account.providerId, kind, harness)._tag;
     if (verdict === "disallowed-by-provider") {
       return `${providerName} allows ${withArticle(readKindNoun(kind.title))} only in ${formatNameList(
         kind.harnesses.map((harnessId) => findHarnessName(harnesses, harnessId)),
