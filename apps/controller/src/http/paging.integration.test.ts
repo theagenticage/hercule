@@ -9,7 +9,7 @@
  * - a cursor from somewhere else is a `validation` error, not a page with a
  *   meaningless boundary.
  */
-import { MAX_PAGE_LIMIT, MAX_SESSION_WORKSPACE_IDS } from "@hercule/contract";
+import { MAX_PAGE_LIMIT, MAX_SESSION_RUN_IDS, MAX_SESSION_WORKSPACE_IDS } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { completeSetup, post, send, withServer } from "./testing";
 
@@ -173,31 +173,34 @@ describe("bounds on what a caller may send", () => {
 });
 
 describe("a query string that names many ids", () => {
-  it("answers a session query naming the most workspace ids, and refuses one more", async () => {
-    await withServer(async ({ base }) => {
-      const token = await completeSetup(base);
-      const idsQuery = (count: number): string =>
-        Array.from({ length: count }, () => `workspaceId=${Bun.randomUUIDv7()}`).join("&");
+  it.each([
+    { key: "workspaceId", most: MAX_SESSION_WORKSPACE_IDS },
+    { key: "runId", most: MAX_SESSION_RUN_IDS },
+  ])(
+    "answers a session query naming the most $key ids, and refuses one more",
+    async ({ key, most }) => {
+      await withServer(async ({ base }) => {
+        const token = await completeSetup(base);
+        const idsQuery = (count: number): string =>
+          Array.from({ length: count }, () => `${key}=${Bun.randomUUIDv7()}`).join("&");
 
-      // The server refuses a request whose headers pass 16 KiB, so a cap that
-      // lets the query string grow past that fails here with a 431.
-      const full = await send(
-        "GET",
-        base,
-        `/api/v1/sessions?${idsQuery(MAX_SESSION_WORKSPACE_IDS)}&kind=thread&limit=${String(MAX_PAGE_LIMIT)}`,
-        { token },
-      );
-      expect(full.status, await full.clone().text()).toBe(200);
-      expect(((await full.json()) as { items: ReadonlyArray<unknown> }).items).toEqual([]);
+        // The server refuses a request whose headers pass 16 KiB, so a cap that
+        // lets the query string grow past that fails here with a 431.
+        const full = await send(
+          "GET",
+          base,
+          `/api/v1/sessions?${idsQuery(most)}&kind=thread&limit=${String(MAX_PAGE_LIMIT)}`,
+          { token },
+        );
+        expect(full.status, await full.clone().text()).toBe(200);
+        expect(((await full.json()) as { items: ReadonlyArray<unknown> }).items).toEqual([]);
 
-      const tooMany = await send(
-        "GET",
-        base,
-        `/api/v1/sessions?${idsQuery(MAX_SESSION_WORKSPACE_IDS + 1)}`,
-        { token },
-      );
-      expect(tooMany.status).toBe(400);
-      expect(await readErrorCode(tooMany)).toBe("validation");
-    });
-  });
+        const tooMany = await send("GET", base, `/api/v1/sessions?${idsQuery(most + 1)}`, {
+          token,
+        });
+        expect(tooMany.status).toBe(400);
+        expect(await readErrorCode(tooMany)).toBe("validation");
+      });
+    },
+  );
 });

@@ -3242,7 +3242,7 @@ Settings does not open a live topic the shell does not already need, except whil
 | Cost | Expected | Measured |
 |---|---|---|
 | Processes | none added | none added |
-| Operations | none added. `session.query`'s `runId` filter takes several runs, so the Office reads the sessions of every live run in one read | by reading the contract |
+| Operations | none added. `session.query`'s `runId` filter takes several runs, so the Office reads the sessions of every live run, in one read per 150 runs (`MAX_SESSION_RUN_IDS`) | by reading the contract |
 | The first screen's JavaScript | grows only by `isThreadSeated`, the two new hats in the sidebar's faces, and the Office's query options: about 1 kB | 333.8 kB to 334.5 kB gzipped (+0.7 kB), the bundle check on `main` and on the branch |
 | The Office's chunk | grows by the café's furniture and the two hats, within its budget of 241.5 kB | 223.8 kB to 229.4 kB gzipped (+5.6 kB) |
 | Reads | when the Office opens: the running runs and the pending ones (the workflow list's own two reads), and the sessions of those runs in one read. A `run` push reads the two run lists again; the sessions of the runs are read again only when the set of live runs changes | the Office's integration test counts them |

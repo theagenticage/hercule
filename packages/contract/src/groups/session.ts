@@ -981,11 +981,23 @@ export const SessionStatusFilter = Schema.Union([
 ]);
 
 /**
- * One run's id, or several. The desktop app's Office reads the sessions of
- * every live run in one read; every other caller asks for one run. The query
- * string carries several as repeated `runId` keys.
+ * The most run ids one `session.query` names. The query string carries each
+ * id as a repeated `runId` key of about 43 bytes, and the server refuses a
+ * request whose headers pass 16 KiB (about 380 ids). 150 ids are about 6.5 KiB,
+ * which leaves room for the other filters and for headers a proxy adds.
  */
-export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
+export const MAX_SESSION_RUN_IDS = 150;
+
+/**
+ * One run's id, or several, at most `MAX_SESSION_RUN_IDS`. The desktop app's
+ * Office reads the sessions of every live run, in as many reads as that takes;
+ * every other caller asks for one run. The query string carries several as
+ * repeated `runId` keys.
+ */
+export const SessionRunFilter = Schema.Union([
+  Id,
+  atMost(Id, MAX_SESSION_RUN_IDS).check(Schema.isMinLength(1)),
+]);
 
 /**
  * One kind, or several. The desktop sidebar reads its Threads and Agent

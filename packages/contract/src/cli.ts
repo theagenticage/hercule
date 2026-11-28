@@ -4964,7 +4964,7 @@ export const CLI = {
       },
       runId: {
         flag: "run",
-        help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; repeat the flag to list the sessions of several runs. Find a run with `hercule run list`.",
+        help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; repeat the flag to list the sessions of up to 150 runs. Find a run with `hercule run list`.",
         resolves: "run.query",
       },
       taskId: {
@@ -4986,7 +4986,7 @@ export const CLI = {
       thread: { hidden: true },
       workspaceId: {
         flag: "workspace",
-        help: "Only the sessions placed in this workspace, by its id or a tail of eight or more characters; repeat the flag to list the sessions of several workspaces. Find a workspace with `hercule workspace list`.",
+        help: "Only the sessions placed in this workspace, by its id or a tail of eight or more characters; repeat the flag to list the sessions of up to 150 workspaces. Find a workspace with `hercule workspace list`.",
         resolves: "workspace.query",
       },
       done: {
