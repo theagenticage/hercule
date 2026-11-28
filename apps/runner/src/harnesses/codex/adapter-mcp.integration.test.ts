@@ -349,9 +349,10 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     });
     // The session has no shell snapshot (`features.shell_snapshot=false`). With
     // one, Codex would write every variable, the token included, to
-    // `shell_snapshots/` for as long as the session runs, and Codex 0.154.0
-    // leaves the file after the session ends. So the scan covers the whole
-    // Harness Home, while the session runs and after it stops.
+    // `shell_snapshots/` while the session runs. Codex removes the file only
+    // when the session exits cleanly, so a session that is killed leaves it
+    // behind. The scan covers the whole Harness Home, while the session runs
+    // and after it stops.
     const scanFolders = [home, userHome, cwd];
     const findTokenFiles = () =>
       scanFolders.flatMap(listFiles).filter((file) => readFileSync(file).includes(TOKEN));
