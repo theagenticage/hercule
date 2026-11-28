@@ -1,8 +1,7 @@
 /**
  * Test helpers shared by the connection tests that run the controller over
  * HTTP or call the service directly: the connection record the API returns,
- * the test plugins that contribute connection types, and an in-test provider
- * with a device flow.
+ * and the test plugins that contribute connection types.
  */
 import { expect } from "vitest";
 import type {
@@ -93,77 +92,4 @@ export const readConnectionsSurface = (stub: TestPlugin): ConnectionsRuntime => 
   if (ctx === undefined) throw new Error("the plugin was never activated");
   if (ctx.connections === undefined) throw new Error("the plugin was given no connections surface");
   return ctx.connections;
-};
-
-/** The provider's device code, which only the controller sends back. */
-export const DEVICE_CODE = "the-device-code";
-
-/** A response to the token endpoint, which a test may make wait. */
-export type TokenAnswer = () => Response | Promise<Response>;
-
-/** An in-test provider that runs the provider's side of a device flow (RFC 8628). */
-export interface DeviceProvider {
-  /** The origin the type's `deviceCodeUrl` and `tokenUrl` are built from. */
-  readonly base: string;
-  /** Every form body posted to the device code endpoint, in order. */
-  readonly codeRequests: ReadonlyArray<Record<string, string>>;
-  /** Every form body posted to the token endpoint, in order. */
-  readonly tokenRequests: ReadonlyArray<Record<string, string>>;
-  /** The next responses of the two endpoints, which a test can replace. */
-  readonly answers: { code: () => Response; token: TokenAnswer };
-  readonly stop: () => Promise<void>;
-}
-
-/**
- * Starts a provider with a device code endpoint and a token endpoint. By
- * default the device code endpoint issues a code with a five-second interval,
- * and the token endpoint answers that the user has not approved yet.
- */
-export const createDeviceProvider = (): DeviceProvider => {
-  const codeRequests: Array<Record<string, string>> = [];
-  const tokenRequests: Array<Record<string, string>> = [];
-  const answers: DeviceProvider["answers"] = {
-    code: () =>
-      buildJsonResponse({
-        device_code: DEVICE_CODE,
-        user_code: "WDJB-MJHT",
-        verification_uri: "https://provider.test/device",
-        expires_in: 900,
-        interval: 5,
-      }),
-    token: () => buildJsonResponse({ error: "authorization_pending" }),
-  };
-
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch: async (request) => {
-      const url = new URL(request.url);
-      const form = Object.fromEntries(new URLSearchParams(await request.text()));
-      if (url.pathname === "/device/code") {
-        codeRequests.push(form);
-        return answers.code();
-      }
-      if (url.pathname === "/token") {
-        tokenRequests.push(form);
-        return answers.token();
-      }
-      return new Response("not here", { status: 404 });
-    },
-  });
-
-  let stopped = false;
-  return {
-    base: `http://127.0.0.1:${server.port}`,
-    codeRequests,
-    tokenRequests,
-    answers,
-    // A test may stop the provider to simulate an unreachable one, and the
-    // harness stops it again afterwards, so a second call does nothing.
-    stop: async () => {
-      if (stopped) return;
-      stopped = true;
-      await server.stop(true);
-    },
-  };
 };

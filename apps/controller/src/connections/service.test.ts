@@ -34,7 +34,8 @@ import { ConnectionEntityFacts } from "./entity-facts";
 import { ConnectionReferences } from "./references";
 import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer, type ConnectionPage } from "./service";
-import { buildJsonResponse, createDeviceProvider, type DeviceProvider } from "./testing";
+import { buildJsonResponse } from "./testing";
+import { type ListeningFakeOAuthProvider, startFakeOAuthProvider } from "../oauth/testing";
 
 let homes: Array<string> = [];
 
@@ -135,7 +136,7 @@ const START = { type: DEVICE_TYPE };
  * given `validate`. A test that needs other setup steps passes them.
  */
 const buildDeviceType = (
-  provider: DeviceProvider,
+  provider: ListeningFakeOAuthProvider,
   validate: RegisteredConnectionType["contribution"]["validate"],
   setup: ReadonlyArray<SetupStep> = [{ kind: "device" }],
 ): RegisteredConnectionType => ({
@@ -188,7 +189,7 @@ const waitFor = (condition: () => boolean): Effect.Effect<void> =>
   });
 
 describe("the account check at the end of a device flow", () => {
-  let provider: DeviceProvider | undefined;
+  let provider: ListeningFakeOAuthProvider | undefined;
   afterEach(async () => {
     await provider?.stop();
     provider = undefined;
@@ -200,7 +201,7 @@ describe("the account check at the end of a device flow", () => {
    * and then two, and returns the poll's answer and the time of each check.
    */
   const pollThroughRetries = (failures: number) => {
-    const started = createDeviceProvider();
+    const started = startFakeOAuthProvider();
     provider = started;
     const checkedAt: Array<number> = [];
     const type = buildDeviceType(started, () =>
@@ -265,7 +266,7 @@ describe("the account check at the end of a device flow", () => {
 
 describe("a device flow whose type changed while the user was approving it", () => {
   it("answers failed, and ends the flow, when the type no longer has a device flow", async () => {
-    const provider = createDeviceProvider();
+    const provider = startFakeOAuthProvider();
     try {
       const type = buildDeviceType(provider, () =>
         Effect.succeed({ displayName: "octocat", accountId: "583231" }),
@@ -352,7 +353,7 @@ describe("the refusal of a setup operation the type does not offer", () => {
   });
 
   it("names the device flow when a type that has one is asked for a redirect flow", async () => {
-    const provider = createDeviceProvider();
+    const provider = startFakeOAuthProvider();
     try {
       const failure = await runAsUser(
         [
@@ -411,7 +412,7 @@ describe("the label of a connection the user did not name", () => {
   });
 
   it("is the type's name at the end of a device flow whose account name is empty", async () => {
-    const provider = createDeviceProvider();
+    const provider = startFakeOAuthProvider();
     try {
       const answer = await runAsUser(
         [

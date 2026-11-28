@@ -16,11 +16,7 @@ import * as Schema from "effect/Schema";
 import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import type { SessionStart } from "@hercule/protocol";
 import { OAUTH_TOKENS } from "../connections";
-import {
-  buildJsonResponse,
-  createDeviceProvider,
-  type DeviceProvider,
-} from "../connections/testing";
+import { buildJsonResponse } from "../connections/testing";
 import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import { findStepRecords, startSentWorkflow, waitForRun } from "../runs/testing";
@@ -49,6 +45,7 @@ import {
   sendMessage,
   waitForConversationSessions,
 } from "../conversations/testing";
+import { type ListeningFakeOAuthProvider, startFakeOAuthProvider } from "../oauth/testing";
 
 const SECOND_PAT = "ghp_another-token";
 
@@ -61,7 +58,7 @@ const REFRESHED_DEVICE_TOKEN = "gho_a-refreshed-device-token";
  * a token inside its refresh margin can be refreshed. A pasted token is the
  * other way to connect, as in `githubPlugin`.
  */
-const buildDeviceGithubPlugin = (provider: DeviceProvider): Plugin => ({
+const buildDeviceGithubPlugin = (provider: ListeningFakeOAuthProvider): Plugin => ({
   manifest: {
     id: "github",
     displayName: "GitHub",
@@ -259,7 +256,7 @@ describe("a credential asked for by a provisioning workspace", () => {
   });
 
   it("answers with a refreshed token when the device flow's token is inside its refresh margin", async () => {
-    const provider = createDeviceProvider();
+    const provider = startFakeOAuthProvider();
     provider.answers.token = () =>
       buildJsonResponse({
         access_token: REFRESHED_DEVICE_TOKEN,

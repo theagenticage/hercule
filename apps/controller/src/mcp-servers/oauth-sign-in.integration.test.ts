@@ -980,7 +980,7 @@ describe("finishing a sign-in", () => {
     await withOAuthRig(async (rig) => {
       const serverId = await addServerThatNeedsSignIn(rig);
       const callback = await startAndApprove(rig, serverId);
-      rig.authorizationServer.stop();
+      await rig.authorizationServer.stop();
 
       const error = await refusal(rig, serverId, callback, 409);
 
@@ -1045,7 +1045,7 @@ describe("starting a sign-in", () => {
   it("is unreadable when the authorization server cannot be reached", async () => {
     await withOAuthRig(async (rig) => {
       const serverId = await addServerThatNeedsSignIn(rig);
-      rig.authorizationServer.stop();
+      await rig.authorizationServer.stop();
 
       const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
 

@@ -27,7 +27,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Redacted, Schema } from "effect";
 import { HOST_API, registerWorkflowAction, type Plugin } from "@hercule/plugin-host";
 import { OAUTH_TOKENS } from "../connections";
-import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
+import { buildJsonResponse } from "../connections/testing";
 import { serializeTokens } from "../oauth";
 import { withTransaction } from "../db";
 import { PluginHost } from "../plugins";
@@ -52,6 +52,7 @@ import {
   startFakeUpstream,
   type FakeUpstream,
 } from "./testing";
+import { startFakeOAuthProvider } from "../oauth/testing";
 
 /** Starts a controller with a Connection and a server that is `ready`, and runs `body`. */
 const withReadyServer = async (
@@ -304,7 +305,7 @@ describe("a server follows its plugin", () => {
 interface ActionRig {
   readonly controller: SetUpController;
   readonly fake: FakeUpstream;
-  readonly provider: ReturnType<typeof createDeviceProvider>;
+  readonly provider: ReturnType<typeof startFakeOAuthProvider>;
   readonly connectionId: string;
   /** Makes the Connection's token expire, so the next read of it refreshes it. */
   readonly expireToken: () => Promise<void>;
@@ -321,7 +322,7 @@ interface ActionRig {
  */
 const withActionRig = async (body: (rig: ActionRig) => Promise<void>): Promise<void> => {
   const fake = await startFakeUpstream();
-  const provider = createDeviceProvider();
+  const provider = startFakeOAuthProvider();
   const mcpPlugin = buildMcpServerPlugin("acme", {
     server: buildDeskMcpServer("acme", fake),
     deviceProviderUrl: provider.base,

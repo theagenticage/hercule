@@ -34,7 +34,8 @@ import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository } from "./repository";
 import { githubTokens } from "./github";
 import { ConnectionTypes, ConnectionTypesLayer } from "./runtime";
-import { buildJsonResponse, createDeviceProvider, type DeviceProvider } from "./testing";
+import { buildJsonResponse } from "./testing";
+import { type ListeningFakeOAuthProvider, startFakeOAuthProvider } from "../oauth/testing";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -43,7 +44,7 @@ const HOUR = 60 * MINUTE;
 const LOGIN = "octocat";
 
 let homes: Array<string> = [];
-let provider: DeviceProvider | undefined;
+let provider: ListeningFakeOAuthProvider | undefined;
 
 afterEach(async () => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
@@ -84,7 +85,7 @@ const run = <A, E>(
   arrangement: Arrangement,
   use: (id: string) => Effect.Effect<A, E, ConnectionTypes | Secrets | SqlClient.SqlClient>,
 ): Promise<A> => {
-  const started = createDeviceProvider();
+  const started = startFakeOAuthProvider();
   provider = started;
   return Effect.runPromise(
     Effect.gen(function* () {

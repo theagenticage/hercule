@@ -18,6 +18,7 @@ import {
   type OAuthClient,
   type TokenSet,
 } from "./client";
+import { startFakeOAuthProvider } from "./testing";
 
 const TOKEN = "gho_secret-access-token";
 
@@ -572,20 +573,18 @@ describe("the lifetime and the type of a token", () => {
 
 describe("the body of an answer that is not read to its end", () => {
   /**
-   * Starts a server whose every answer has the given status and a body that
-   * never ends, `chunkBytes` at a time, and records whether the client
-   * cancelled that body.
+   * Builds an answer of the provider's token endpoint whose body never ends, `chunkBytes`
+   * at a time, with the given status and headers. `wasCancelled` tells whether
+   * the client cancelled a body, which a client that bounds what it reads does.
    */
-  const startEndlessBodyServer = (
-    responseInit: { status: number; headers?: Record<string, string> },
+  const buildEndlessBodyAnswer = (
+    init: { readonly status: number; readonly headers?: Record<string, string> },
     chunkBytes = 1,
-  ) => {
-    const state = { cancelled: false };
+  ): { readonly answer: () => Response; readonly wasCancelled: () => boolean } => {
+    let cancelled = false;
     const chunk = new Uint8Array(chunkBytes);
-    const server = Bun.serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      fetch: () => {
+    return {
+      answer: () => {
         let timer: ReturnType<typeof setInterval> | undefined;
         return new Response(
           new ReadableStream({
@@ -594,31 +593,27 @@ describe("the body of an answer that is not read to its end", () => {
               timer = setInterval(() => controller.enqueue(chunk), 20);
             },
             cancel() {
-              state.cancelled = true;
+              cancelled = true;
               clearInterval(timer);
             },
           }),
-          responseInit,
+          init,
         );
       },
-    });
-    return {
-      state,
-      url: `http://127.0.0.1:${String(server.port)}/token`,
-      stop: () => server.stop(true),
+      wasCancelled: () => cancelled,
     };
   };
 
   /**
-   * Waits until the server saw the body cancelled, and gives up after 300
-   * milliseconds. A client that only gives up its connection later (when its
-   * runtime notices, almost a second on Bun) fails this on purpose.
+   * Waits until the body was cancelled, and gives up after 300 milliseconds.
+   * A client that only gives up its connection later (when its runtime
+   * notices, almost a second on Bun) fails this on purpose.
    */
-  const waitForCancel = async (state: { cancelled: boolean }): Promise<boolean> => {
-    for (let waited = 0; waited < 300 && !state.cancelled; waited += 10) {
+  const waitForCancel = async (wasCancelled: () => boolean): Promise<boolean> => {
+    for (let waited = 0; waited < 300 && !wasCancelled(); waited += 10) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    return state.cancelled;
+    return wasCancelled();
   };
 
   it.each([
@@ -626,18 +621,20 @@ describe("the body of an answer that is not read to its end", () => {
     ["a server error", { status: 502 }, 1],
     ["a body over the limit", { status: 200 }, MAX_ANSWER_BYTES + 1],
   ])("is cancelled for %s", async (_name, init, chunkBytes) => {
-    const server = startEndlessBodyServer(init, chunkBytes);
+    const endless = buildEndlessBodyAnswer(init, chunkBytes);
+    const provider = startFakeOAuthProvider();
+    provider.answers.token = endless.answer;
     try {
       const failure = await Effect.runPromise(
-        Effect.flip(postForm(server.url, { a: "b" }, "token endpoint")).pipe(
+        Effect.flip(postForm(`${provider.base}/token`, { a: "b" }, "token endpoint")).pipe(
           Effect.provide(FetchHttpClient.layer),
         ),
       );
 
       expect(failure._tag).toBe("ProviderUnreachable");
-      expect(await waitForCancel(server.state)).toBe(true);
+      expect(await waitForCancel(endless.wasCancelled)).toBe(true);
     } finally {
-      await server.stop();
+      await provider.stop();
     }
   });
 });

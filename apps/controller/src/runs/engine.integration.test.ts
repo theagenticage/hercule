@@ -72,6 +72,7 @@ import {
   expectStatus,
 } from "./testing";
 import { runEffect } from "../daemon/testing";
+import { startFakeOAuthProvider } from "../oauth/testing";
 
 /** Long enough for a run that waits its full deadline. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });
@@ -462,23 +463,6 @@ describe("a run whose step acts through a Connection", () => {
     type RefreshAnswer = () => Response | Promise<Response>;
 
     /**
-     * Starts a token endpoint that answers every refresh with `answer()`,
-     * and records the form of every request it receives.
-     */
-    const startTokenEndpoint = (answer: { current: RefreshAnswer }) => {
-      const requests: Array<Record<string, string>> = [];
-      const server = Bun.serve({
-        port: 0,
-        hostname: "127.0.0.1",
-        fetch: async (request) => {
-          requests.push(Object.fromEntries(new URLSearchParams(await request.text())));
-          return answer.current();
-        },
-      });
-      return { tokenUrl: `http://127.0.0.1:${server.port}/token`, requests, server };
-    };
-
-    /**
      * Runs `body` against a controller with the forge plugin pointed at a
      * token endpoint, an OAuth client for the plugin, and one forge
      * Connection whose access token has expired. The endpoint answers a
@@ -495,8 +479,9 @@ describe("a run whose step acts through a Connection", () => {
         readonly workflowId: string;
       }) => Promise<void>,
     ): Promise<void> => {
-      const endpoint = startTokenEndpoint({ current: answer });
-      const forge = buildForgePlugin({ tokenUrl: endpoint.tokenUrl });
+      const endpoint = startFakeOAuthProvider();
+      endpoint.answers.token = answer;
+      const forge = buildForgePlugin({ tokenUrl: `${endpoint.base}/token` });
       try {
         await withSetUpController(
           async ({ harness, base, token }) => {
@@ -537,7 +522,7 @@ describe("a run whose step acts through a Connection", () => {
             });
             await body({
               forge,
-              requests: endpoint.requests,
+              requests: endpoint.tokenRequests,
               base,
               token,
               connectionId,
@@ -547,7 +532,7 @@ describe("a run whose step acts through a Connection", () => {
           [forge.plugin],
         );
       } finally {
-        await endpoint.server.stop(true);
+        await endpoint.stop();
       }
     };
 

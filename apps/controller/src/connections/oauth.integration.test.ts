@@ -44,6 +44,7 @@ import {
   requestTransfer,
   QUIET_LOOP_TIMINGS,
 } from "../promotion/testing";
+import { startFakeOAuthProvider, type ListeningFakeOAuthProvider } from "../oauth/testing";
 import {
   buildAccount,
   buildAccountName,
@@ -87,78 +88,35 @@ const REJECTED = "that account is not one this type can act as";
 const ABSENT_STATE = "zzzz".repeat(16);
 
 /**
- * The token endpoint's response for each grant type, which a test can replace.
- * A test that needs a request held in flight returns a promise it resolves
- * later.
- */
-type Answers = Record<string, () => Response | Promise<Response>>;
-
-interface AuthServer {
-  /** The origin the type's `authorizationUrl` and `tokenUrl` are built from. */
-  readonly base: string;
-  /** Every form body posted to the token endpoint, in order. */
-  readonly requests: ReadonlyArray<Record<string, string>>;
-  /** The token endpoint's next response, keyed by `grant_type`. */
-  readonly answers: Answers;
-  readonly stop: () => Promise<void>;
-}
-
-/**
  * Starts a provider's token endpoint. By default it returns a standard token
  * response, and it records every request so the callback and refresh tests can
- * assert on them.
+ * assert on them. The token endpoint's response for each grant type is
+ * `provider.answers.byGrant`, which a test can replace. A test that needs a
+ * request held in flight returns a promise it resolves later.
  */
-const createAuthServer = (): AuthServer => {
-  const requests: Array<Record<string, string>> = [];
-  const answers: Answers = {
-    authorization_code: () =>
-      buildJsonResponse({
-        access_token: FIRST_TOKEN,
-        refresh_token: "refresh-1",
-        token_type: "bearer",
-        expires_in: 3600,
-      }),
-    refresh_token: () =>
-      buildJsonResponse({
-        access_token: REFRESHED_TOKEN,
-        refresh_token: "refresh-2",
-        token_type: "bearer",
-        expires_in: 3600,
-      }),
-  };
-
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch: async (request) => {
-      const url = new URL(request.url);
-      if (url.pathname !== "/token") return new Response("not here", { status: 404 });
-      const form = Object.fromEntries(new URLSearchParams(await request.text()));
-      requests.push(form);
-      // A public client has no secret, so a request that sends one is wrong.
-      if (form["client_id"] === PUBLIC_CLIENT_ID && "client_secret" in form) {
-        return buildJsonResponse({ error: "invalid_client" }, 401);
-      }
-      const answer = answers[form["grant_type"] ?? ""];
-      return answer === undefined
-        ? buildJsonResponse({ error: "unsupported_grant_type" }, 400)
-        : answer();
-    },
-  });
-
-  let stopped = false;
-  return {
-    base: `http://127.0.0.1:${server.port}`,
-    requests,
-    answers,
-    // A test may stop the provider to simulate an unreachable one, and the
-    // harness stops it again afterwards, so a second call does nothing.
-    stop: async () => {
-      if (stopped) return;
-      stopped = true;
-      await server.stop(true);
-    },
-  };
+const createAuthServer = (): ListeningFakeOAuthProvider => {
+  const provider = startFakeOAuthProvider();
+  provider.answers.byGrant["authorization_code"] = () =>
+    buildJsonResponse({
+      access_token: FIRST_TOKEN,
+      refresh_token: "refresh-1",
+      token_type: "bearer",
+      expires_in: 3600,
+    });
+  provider.answers.byGrant["refresh_token"] = () =>
+    buildJsonResponse({
+      access_token: REFRESHED_TOKEN,
+      refresh_token: "refresh-2",
+      token_type: "bearer",
+      expires_in: 3600,
+    });
+  provider.answers.token = () => buildJsonResponse({ error: "unsupported_grant_type" }, 400);
+  // A public client has no secret, so a request that sends one is wrong.
+  provider.vetRequest = (form) =>
+    form["client_id"] === PUBLIC_CLIENT_ID && "client_secret" in form
+      ? buildJsonResponse({ error: "invalid_client" }, 401)
+      : undefined;
+  return provider;
 };
 
 /**
@@ -169,7 +127,7 @@ const createAuthServer = (): AuthServer => {
 const buildConnectionTypePlugin = (options: {
   readonly id: string;
   readonly type: string;
-  readonly oauth?: AuthServer;
+  readonly oauth?: ListeningFakeOAuthProvider;
   /**
    * Makes the type's redirect flow run as the public client `PUBLIC_CLIENT_ID`,
    * registered for `PUBLIC_REDIRECT_URI` and `LOOPBACK_REDIRECT_URI`, with a
@@ -239,7 +197,7 @@ const buildConnectionTypePlugin = (options: {
 };
 
 /** Builds new plugins for each test, so no activation context outlives its test. */
-const buildPlugins = (provider: AuthServer) => ({
+const buildPlugins = (provider: ListeningFakeOAuthProvider) => ({
   oauth: buildConnectionTypePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
   second: buildConnectionTypePlugin({ id: "second", type: "second-type", oauth: provider }),
   pasted: buildConnectionTypePlugin({ id: "pasted", type: "pasted-type" }),
@@ -263,7 +221,7 @@ const withOAuth = async (
     harness: ServerHarness,
     registry: Registry,
     token: string,
-    provider: AuthServer,
+    provider: ListeningFakeOAuthProvider,
   ) => Promise<void>,
   timings: Pick<
     ServerOptions,
@@ -500,7 +458,7 @@ describe("GET /oauth/callback", () => {
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).toBe("/connections?oauth=ok");
 
-      const [exchange] = provider.requests;
+      const [exchange] = provider.tokenRequests;
       expect(exchange).toMatchObject({
         grant_type: "authorization_code",
         code: "the-code",
@@ -635,7 +593,7 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      provider.answers["authorization_code"] = () =>
+      provider.answers.byGrant["authorization_code"] = () =>
         buildJsonResponse({ error: "invalid_grant" }, 400);
       const url = await startOAuthOrFail(base, token);
 
@@ -655,7 +613,7 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      provider.answers["authorization_code"] = () =>
+      provider.answers.byGrant["authorization_code"] = () =>
         buildJsonResponse({ access_token: UNUSABLE_TOKEN, token_type: "bearer", expires_in: 3600 });
       const url = await startOAuthOrFail(base, token);
 
@@ -681,7 +639,7 @@ describe("GET /oauth/callback", () => {
       await Effect.runPromise(
         readConnectionsSurface(registry.oauth).report(before.id, { status: "needs-reauth" }),
       );
-      provider.answers["authorization_code"] = () =>
+      provider.answers.byGrant["authorization_code"] = () =>
         buildJsonResponse({
           access_token: "good-second",
           refresh_token: "refresh-9",
@@ -717,7 +675,7 @@ describe("GET /oauth/callback", () => {
       const before = await connect(base, token);
       const surface = readConnectionsSurface(registry.oauth);
       await Effect.runPromise(surface.report(before.id, { status: "needs-reauth" }));
-      provider.answers["authorization_code"] = () =>
+      provider.answers.byGrant["authorization_code"] = () =>
         // A token the type accepts, for another account than the first sign-in.
         buildJsonResponse({ access_token: "good-other@account-2", token_type: "bearer" });
 
@@ -748,8 +706,8 @@ describe("the access token a plugin asks the core for", () => {
    * well inside the refresh margin, so the token needs a refresh as soon as it
    * is stored.
    */
-  const makeTokensExpireNow = (provider: AuthServer): void => {
-    provider.answers["authorization_code"] = () =>
+  const makeTokensExpireNow = (provider: ListeningFakeOAuthProvider): void => {
+    provider.answers.byGrant["authorization_code"] = () =>
       buildJsonResponse({
         access_token: FIRST_TOKEN,
         refresh_token: "refresh-1",
@@ -761,14 +719,14 @@ describe("the access token a plugin asks the core for", () => {
   it("is returned without calling the provider while it is still valid", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       const one = await connect(base, token);
-      const asked = provider.requests.length;
+      const asked = provider.tokenRequests.length;
 
       const credentials = await Effect.runPromise(
         readConnectionsSurface(registry.oauth).credentials(one.id),
       );
 
       expect(credentials).toMatchObject({ accessToken: FIRST_TOKEN });
-      expect(provider.requests).toHaveLength(asked);
+      expect(provider.tokenRequests).toHaveLength(asked);
     });
   });
 
@@ -781,7 +739,7 @@ describe("the access token a plugin asks the core for", () => {
       const refreshed = await Effect.runPromise(surface.credentials(one.id));
 
       expect(refreshed).toMatchObject({ accessToken: REFRESHED_TOKEN });
-      const refresh = provider.requests.at(-1);
+      const refresh = provider.tokenRequests.at(-1);
       expect(refresh).toMatchObject({
         grant_type: "refresh_token",
         refresh_token: "refresh-1",
@@ -790,11 +748,11 @@ describe("the access token a plugin asks the core for", () => {
       });
 
       // The new token set was stored, so the next call does not refresh again.
-      const asked = provider.requests.length;
+      const asked = provider.tokenRequests.length;
       expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
         accessToken: REFRESHED_TOKEN,
       });
-      expect(provider.requests).toHaveLength(asked);
+      expect(provider.tokenRequests).toHaveLength(asked);
     });
   });
 
@@ -814,7 +772,7 @@ describe("the access token a plugin asks the core for", () => {
       // second refresh with the same token would leave one caller with tokens
       // that no longer work.
       expect(
-        provider.requests.filter((form) => form["grant_type"] === "refresh_token"),
+        provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token"),
       ).toHaveLength(1);
       expect(both[0]).toMatchObject({ accessToken: REFRESHED_TOKEN });
       expect(both[1]).toMatchObject({ accessToken: REFRESHED_TOKEN });
@@ -835,15 +793,15 @@ describe("the access token a plugin asks the core for", () => {
       // spent one. So the refresh waits at the promotion gate, and the
       // provider is not called while the controller is frozen.
       await Effect.runPromise(awaitHeldWork(promotion, 1));
-      expect(provider.requests.filter((form) => form["grant_type"] === "refresh_token")).toEqual(
-        [],
-      );
+      expect(
+        provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token"),
+      ).toEqual([]);
 
       const cancelled = await requestTransfer(base, promotionToken, "DELETE");
       expect(cancelled.status).toBe(204);
       expect(await credentials).toMatchObject({ accessToken: REFRESHED_TOKEN });
       expect(
-        provider.requests.filter((form) => form["grant_type"] === "refresh_token"),
+        provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token"),
       ).toHaveLength(1);
     }, QUIET_LOOP_TIMINGS);
   });
@@ -857,10 +815,10 @@ describe("the access token a plugin asks the core for", () => {
       const answered = new Promise<void>((resolve) => {
         providerAnswered = resolve;
       });
-      const issue = provider.answers["refresh_token"];
-      provider.answers["refresh_token"] = () => {
+      const issue = provider.answers.byGrant["refresh_token"];
+      provider.answers.byGrant["refresh_token"] = (form, request) => {
         providerAnswered();
-        return issue?.() ?? buildJsonResponse({ error: "invalid_grant" }, 400);
+        return issue?.(form, request) ?? buildJsonResponse({ error: "invalid_grant" }, 400);
       };
 
       // The response is still on its way to the controller when the cancel
@@ -871,11 +829,11 @@ describe("the access token a plugin asks the core for", () => {
       await answered;
       await Effect.runPromise(Fiber.interrupt(caller));
 
-      const asked = provider.requests.length;
+      const asked = provider.tokenRequests.length;
       expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
         accessToken: REFRESHED_TOKEN,
       });
-      expect(provider.requests).toHaveLength(asked);
+      expect(provider.tokenRequests).toHaveLength(asked);
       const response = await get(base, `/api/v1/connections/${one.id}`, token);
       expect(await response.json()).toMatchObject({ status: "connected" });
     });
@@ -905,12 +863,12 @@ describe("the access token a plugin asks the core for", () => {
       makeTokensExpireNow(provider);
       const one = await connect(base, token);
       const surface = readConnectionsSurface(registry.oauth);
-      const working = provider.answers["refresh_token"];
+      const working = provider.answers.byGrant["refresh_token"];
       let requestArrived = (): void => {};
       const arrived = new Promise<void>((resolve) => {
         requestArrived = resolve;
       });
-      provider.answers["refresh_token"] = () => {
+      provider.answers.byGrant["refresh_token"] = () => {
         requestArrived();
         return new Promise<Response>(() => {});
       };
@@ -929,7 +887,7 @@ describe("the access token a plugin asks the core for", () => {
 
           // The failed refresh released the connection's lock, so this one runs.
           if (working === undefined) throw new Error("the provider has no refresh answer");
-          provider.answers["refresh_token"] = working;
+          provider.answers.byGrant["refresh_token"] = working;
           expect(yield* surface.credentials(one.id)).toMatchObject({
             accessToken: REFRESHED_TOKEN,
           });
@@ -944,7 +902,8 @@ describe("the access token a plugin asks the core for", () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       makeTokensExpireNow(provider);
       const one = await connect(base, token);
-      provider.answers["refresh_token"] = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+      provider.answers.byGrant["refresh_token"] = () =>
+        buildJsonResponse({ error: "invalid_grant" }, 400);
 
       const failure = await Effect.runPromise(
         Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
@@ -963,7 +922,8 @@ describe("the access token a plugin asks the core for", () => {
       // GitHub returns its OAuth errors with status 200. The error field, not
       // the status, decides that the provider refused the refresh, rather than
       // answered with something unreadable.
-      provider.answers["refresh_token"] = () => buildJsonResponse({ error: "bad_refresh_token" });
+      provider.answers.byGrant["refresh_token"] = () =>
+        buildJsonResponse({ error: "bad_refresh_token" });
 
       const failure = await Effect.runPromise(
         Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
@@ -986,7 +946,7 @@ describe("the access token a plugin asks the core for", () => {
       { base }: ServerHarness,
       registry: Registry,
       token: string,
-      provider: AuthServer,
+      provider: ListeningFakeOAuthProvider,
       answer: () => Response,
     ) => {
       makeTokensExpireNow(provider);
@@ -997,7 +957,7 @@ describe("the access token a plugin asks the core for", () => {
       const arrived = new Promise<void>((resolve) => {
         refreshArrived = resolve;
       });
-      provider.answers["refresh_token"] = () => {
+      provider.answers.byGrant["refresh_token"] = () => {
         refreshArrived();
         return new Promise((resolve) => {
           releaseRefresh = () => {
@@ -1008,7 +968,7 @@ describe("the access token a plugin asks the core for", () => {
       const held = Effect.runPromise(Effect.result(surface.credentials(one.id)));
       await arrived;
 
-      provider.answers["authorization_code"] = () =>
+      provider.answers.byGrant["authorization_code"] = () =>
         buildJsonResponse({
           access_token: "good-second",
           refresh_token: "refresh-9",
@@ -1156,7 +1116,7 @@ describe("a redirect flow with a public client", () => {
 
       const one = await connectPublic(base, token);
 
-      const [exchange] = provider.requests;
+      const [exchange] = provider.tokenRequests;
       expect(exchange).toMatchObject({
         grant_type: "authorization_code",
         code: "the-code",
@@ -1172,7 +1132,7 @@ describe("a redirect flow with a public client", () => {
   it("refreshes an expired token with the public client id and no client secret", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       await setUnusedPluginClient(base, token);
-      provider.answers["authorization_code"] = () =>
+      provider.answers.byGrant["authorization_code"] = () =>
         buildJsonResponse({ access_token: FIRST_TOKEN, refresh_token: "refresh-1", expires_in: 0 });
       const one = await connectPublic(base, token);
 
@@ -1181,7 +1141,7 @@ describe("a redirect flow with a public client", () => {
       );
 
       expect(refreshed).toMatchObject({ accessToken: REFRESHED_TOKEN });
-      const refresh = provider.requests.at(-1);
+      const refresh = provider.tokenRequests.at(-1);
       expect(refresh).toMatchObject({
         grant_type: "refresh_token",
         refresh_token: "refresh-1",
