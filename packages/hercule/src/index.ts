@@ -34,6 +34,12 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
  * Master Key), so it cannot live in the CLI, and it must not boot a
  * controller, so it is not `serve` either.
  *
+ * `hercule git-credential` is the one runner verb that keeps its verb in the
+ * line: git runs it for each request, and the runner's own socket handles it
+ * rather than the public API. With the verb kept, the runner role cannot read
+ * a flag after it, such as `--local`, as `hercule runner --local` and start a
+ * daemon.
+ *
  * `hercule github-token` is not routed here. `main.ts` handles it before it
  * imports this module, so the `gh` shim, which runs it on every `gh` call,
  * never loads the dispatcher and the code behind it.
@@ -55,12 +61,8 @@ function route(
       return { role: "promote", args: withoutVerb };
     case "service":
       return { role: "service", args: withoutVerb };
-    // git runs this command for each request, and the runner's own socket
-    // handles it rather than the public API. The role acts on the action git
-    // gives. With no action, the verb itself is passed along, so a bare
-    // `hercule git-credential` cannot be read as `hercule runner` and start a daemon.
     case "git-credential":
-      return { role: "runner", args: subcommand === undefined ? argv : withoutVerb };
+      return { role: "runner", args: argv };
     case "runner":
       // Needed as long as `hercule runner` is both the daemon and a CLI noun:
       // help for either is one screen, and the CLI renders it.

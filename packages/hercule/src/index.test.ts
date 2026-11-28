@@ -121,22 +121,26 @@ describe("dispatch", () => {
 
   // The git credential helper is a runner-side subcommand: it talks to the
   // daemon's socket, not to the public API, and git invokes it per request.
-  it("sends git-credential to the runner", async () => {
+  it("sends git-credential to the runner, verb included", async () => {
     await dispatch(["git-credential", "get"]);
-    expect(run.runner).toHaveBeenCalledWith(["get"]);
+    expect(run.runner).toHaveBeenCalledWith(["git-credential", "get"]);
     expect(run.cli).not.toHaveBeenCalled();
 
     await dispatch(["--home=/tmp/h", "git-credential", "store"]);
-    expect(run.runner).toHaveBeenCalledWith(["--home=/tmp/h", "store"]);
+    expect(run.runner).toHaveBeenCalledWith(["--home=/tmp/h", "git-credential", "store"]);
     expect(run.cli).not.toHaveBeenCalled();
   });
 
-  // git always names an action. A bare `hercule git-credential` must not read as
-  // `hercule runner` and start a daemon, so the verb itself is passed along.
-  it("keeps git-credential in the line when no action follows it", async () => {
-    await dispatch(["git-credential"]);
-    expect(run.runner).toHaveBeenCalledWith(["git-credential"]);
-    expect(run.cli).not.toHaveBeenCalled();
+  // A flag after `git-credential` must not read as `hercule runner <flag>`, and
+  // neither must nothing at all: either would start a daemon. The verb stays in
+  // the line so the runner role knows whose arguments these are.
+  it("keeps git-credential in the line when a flag or nothing follows it", async () => {
+    for (const rest of [[], ["--local"]]) {
+      run.runner.mockClear();
+      await dispatch(["git-credential", ...rest]);
+      expect(run.runner).toHaveBeenCalledWith(["git-credential", ...rest]);
+      expect(run.cli).not.toHaveBeenCalled();
+    }
   });
 
   it("sends everything else to the CLI", async () => {
