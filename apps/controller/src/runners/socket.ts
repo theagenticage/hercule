@@ -56,6 +56,7 @@ import {
   type RunnerHello,
 } from "@hercule/protocol";
 import { readBearerToken } from "../http/bearer";
+import { buildStoppingResponse, ListenerDrain } from "../http/drain";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
 import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
@@ -539,6 +540,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, (request) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
+    const drain = yield* ListenerDrain;
     const credential = readBearerToken(request);
     if (credential === undefined)
       return buildErrorResponse(createUnauthenticatedError(NO_CREDENTIAL));
@@ -556,9 +558,14 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
       return buildErrorResponse(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
     }
 
-    const socket = yield* request.upgrade;
+    const socket = yield* drain.upgrade(request);
     // After the upgrade there is no HTTP response left to send a status on.
     yield* holdConnection(admitted.value, socket);
     return HttpServerResponse.empty();
-  }).pipe(Effect.withSpan("runner.socket")),
+  }).pipe(
+    // A controller that is stopping accepts no new connection. The runner
+    // reconnects when the controller is back.
+    Effect.catchTag("ListenerStopping", () => Effect.succeed(buildStoppingResponse())),
+    Effect.withSpan("runner.socket"),
+  ),
 );
