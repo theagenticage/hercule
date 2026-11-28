@@ -154,7 +154,8 @@ const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string>
 };
 
 /**
- * The longest line, in characters, that a harness's stdout may have. The
+ * The longest line, in characters, that the stdout of a Codex or pi process may
+ * have (`spawnFramed`). The
  * largest real lines are Codex tool results that carry base64 images, a few
  * megabytes each. 64 MiB is more than ten times that, and still stops a harness
  * that never sends a newline from filling the runner's memory.
@@ -448,6 +449,10 @@ const spawnFramed = (
  * - When the process has exited, Bun closes the sink, and `write` resolves with
  *   `true` instead of a byte count and `flush` with `undefined`, and nothing
  *   throws. A successful write resolves with the number of bytes.
+ *
+ * Unlike `spawnFramed`, it puts no limit on the length of a stdout line. Its
+ * only reader, the Antigravity session, loses the cause when the reader fails,
+ * so a limit would end a session with no reason shown.
  */
 export const spawnCheckedFramed = (
   command: ReadonlyArray<string>,
@@ -456,7 +461,7 @@ export const spawnCheckedFramed = (
 ): CheckedFramedChild => {
   const child = startFramedProcess(command, env, cwd);
   return {
-    stdout: splitLines(child.stdout, MAX_LINE_LENGTH),
+    stdout: splitLines(child.stdout),
     stderr: splitLines(child.stderr),
     write: async (text) => {
       const written: unknown = await child.stdin.write(text);

@@ -339,4 +339,19 @@ describe("an output that cannot be read", () => {
 
     expect(peer.readErrors).toEqual([]);
   });
+
+  it("warns about a frame it cannot handle and goes on reading, without blaming the pipe", async () => {
+    const peer = createPeer();
+
+    // Valid JSON that is not an object: reading `method` from it throws.
+    peer.answer("null");
+    peer.answer(JSON.stringify({ method: "thread/started", params: {} }));
+    peer.end();
+    await Effect.runPromise(peer.rpc.pump);
+
+    expect(peer.warnings).toHaveLength(1);
+    expect(peer.warnings[0]).toContain("could not handle");
+    expect(peer.notifications.map((frame) => frame.method)).toEqual(["thread/started"]);
+    expect(peer.readErrors).toEqual([]);
+  });
 });

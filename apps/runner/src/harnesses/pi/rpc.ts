@@ -121,9 +121,9 @@ export const makeRpc = (
    */
   onLine: (line: string, frame: unknown) => void,
   /**
-   * Called once when reading pi's output fails, with the cause in text for the
-   * user. pi is stopped first, because a session that goes on without its
-   * output would hang.
+   * Called once when pi's output cannot be read or handled, with the cause in
+   * text for the user. pi is stopped right after, because a session that goes
+   * on without its output would hang.
    */
   onReadError: (message: string) => void = () => undefined,
 ): PiRpc => {
@@ -172,6 +172,12 @@ export const makeRpc = (
     settle(frame as Record<string, unknown>);
   };
 
+  /** Reports why pi's output stopped being read and stops pi, which nobody reads any more. */
+  const failReading = (message: string): void => {
+    onReadError(message);
+    Effect.runFork(stopChild(child));
+  };
+
   const abandon = (): void => {
     gone = true;
     for (const [id, waiting] of pending) {
@@ -212,15 +218,26 @@ export const makeRpc = (
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
-        try {
-          for await (const line of child.stdout) {
-            if (signal.aborted) return;
-            if (line.trim() !== "") deliver(line);
+        const lines = child.stdout[Symbol.asyncIterator]();
+        for (;;) {
+          let next: IteratorResult<string>;
+          try {
+            next = await lines.next();
+          } catch (error) {
+            if (!signal.aborted) failReading(`reading pi's output failed: ${describeError(error)}`);
+            break;
           }
-        } catch (error) {
           if (signal.aborted) return;
-          onReadError(`reading pi's output failed: ${describeError(error)}`);
-          Effect.runFork(stopChild(child));
+          if (next.done === true) break;
+          if (next.value.trim() === "") continue;
+          try {
+            deliver(next.value);
+          } catch (error) {
+            // A reader that stopped at a throw would leave pi running with
+            // nobody reading it, as a read failure does.
+            failReading(`pi sent a line this build could not handle: ${describeError(error)}`);
+            break;
+          }
         }
         if (signal.aborted) return;
         abandon();

@@ -1589,7 +1589,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       // pi's last stderr lines can still be in the pipe when the exit arrives.
       // Wait for them, so a crash is reported with its reason.
       await drained;
-      const message = code === 0 ? "" : describeFailure();
+      const message = code === 0 && agent.readFailure === undefined ? "" : describeFailure();
       if (!isSubagent(agent)) {
         if (held.startup._tag === "checking") {
           held.startup = { _tag: "exited", message };

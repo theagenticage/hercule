@@ -14,6 +14,7 @@ import {
   killProcessesHolding,
   MAX_LINE_LENGTH,
   spawnCheckedFramed,
+  spawnPi,
   splitLines,
   stopChild,
   type StopSignal,
@@ -215,14 +216,17 @@ describe("recognising a spawn of a missing executable", () => {
 });
 
 /** Builds a byte stream that delivers each of `chunks` as one read. */
-const streamOf = (chunks: ReadonlyArray<Uint8Array | string>): ReadableStream<Uint8Array> => {
+const streamOf = (
+  chunks: ReadonlyArray<Uint8Array | string>,
+  options: { readonly leaveOpen?: boolean } = {},
+): ReadableStream<Uint8Array> => {
   const encoder = new TextEncoder();
   return new ReadableStream({
     start: (controller) => {
       for (const chunk of chunks) {
         controller.enqueue(typeof chunk === "string" ? encoder.encode(chunk) : chunk);
       }
-      controller.close();
+      if (options.leaveOpen !== true) controller.close();
     },
   });
 };
@@ -267,8 +271,11 @@ describe("splitting a stream into lines", () => {
 
   it("fails on a line with no newline that grows past the limit over many chunks", async () => {
     const chunks = Array.from({ length: 20 }, () => "x");
-    // The line never ends, so a reader that waited for the newline would hold all of it.
-    await expect(readLines(streamOf(chunks), 10)).rejects.toThrow("longer than 10 characters");
+    // The stream never ends, as a harness that never sends a newline does, so a
+    // reader that waited for the end of the stream would wait forever.
+    await expect(readLines(streamOf(chunks, { leaveOpen: true }), 10)).rejects.toThrow(
+      "longer than 10 characters",
+    );
   });
 
   it("counts each line of a chunk alone, so many short lines are not too long together", async () => {
@@ -277,7 +284,6 @@ describe("splitting a stream into lines", () => {
 });
 
 describe("the limit on a line from a spawned harness", () => {
-  /** The number of characters one real harness line may have in these tests: `MAX_LINE_LENGTH` plus one. */
   const OVER_THE_LIMIT = MAX_LINE_LENGTH + 1;
   const writeLongLine = (stream: "stdout" | "stderr"): Array<string> => [
     "bun",
@@ -285,22 +291,29 @@ describe("the limit on a line from a spawned harness", () => {
     `process.${stream}.write("x".repeat(${OVER_THE_LIMIT}) + "\\n" + "after\\n")`,
   ];
 
-  it("fails the reader of stdout on a line over the limit", async () => {
-    const child = spawnCheckedFramed(writeLongLine("stdout"), process.env);
-    await expect(
-      (async () => {
-        for await (const line of child.stdout) void line;
-      })(),
-    ).rejects.toThrow("is longer than");
-    child.kill();
-    await child.exited;
+  it("fails the reader of a Codex or pi stdout on a line over the limit", async () => {
+    const child = spawnPi(writeLongLine("stdout"), process.env, null);
+    try {
+      await expect(
+        (async () => {
+          for await (const line of child.stdout) void line;
+        })(),
+      ).rejects.toThrow("is longer than");
+    } finally {
+      child.kill("SIGKILL");
+      await child.exited;
+    }
   });
 
   it("does not limit stderr, which an adapter reads only for its last lines", async () => {
-    const child = spawnCheckedFramed(writeLongLine("stderr"), process.env);
-    const lengths: Array<number> = [];
-    for await (const line of child.stderr) lengths.push(line.length);
-    expect(lengths).toEqual([OVER_THE_LIMIT, "after".length]);
-    await child.exited;
+    const child = spawnPi(writeLongLine("stderr"), process.env, null);
+    try {
+      const lengths: Array<number> = [];
+      for await (const line of child.stderr) lengths.push(line.length);
+      expect(lengths).toEqual([OVER_THE_LIMIT, "after".length]);
+    } finally {
+      child.kill("SIGKILL");
+      await child.exited;
+    }
   });
 });

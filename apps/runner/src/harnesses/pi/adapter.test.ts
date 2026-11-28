@@ -1201,7 +1201,10 @@ describe("a pi that exits while its turn is running", () => {
   it("stops a pi whose output cannot be read, and puts the cause before pi's own error output on the exit", async () => {
     const run = await startBusySession();
 
-    run.child.failRead("A line is longer than 10 characters, the limit for one line.");
+    run.child.failRead(
+      "A line is longer than 10 characters, the limit for one line.",
+      "pi: the output pipe broke",
+    );
 
     await waitUntil(
       "said the session ended",
@@ -1209,13 +1212,14 @@ describe("a pi that exits while its turn is running", () => {
     );
     // Without the stop, pi would keep running with nobody reading its output.
     expect(run.child.kills()).toBeGreaterThan(0);
+    const expected =
+      "reading pi's output failed: A line is longer than 10 characters, the limit for one line.\npi: the output pipe broke";
     const completed = filterByTag(run.seen, "turn.completed")[0];
     expect(completed?.state).toBe("failed");
+    expect(JSON.stringify(completed?.error)).toContain(expected.split("\n")[0]);
     const exited = filterByTag(run.seen, "session.exited")[0];
     expect(exited?.reason).toBe("process_exit");
-    expect(exited?.message).toBe(
-      "reading pi's output failed: A line is longer than 10 characters, the limit for one line.",
-    );
+    expect(exited?.message).toBe(expected);
   });
 });
 

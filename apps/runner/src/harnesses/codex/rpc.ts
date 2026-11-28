@@ -255,17 +255,38 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
-        try {
-          for await (const line of child.stdout) {
-            if (signal.aborted) return;
-            if (line.trim() !== "") deliver(line);
+        const lines = child.stdout[Symbol.asyncIterator]();
+        for (;;) {
+          // Only the read is guarded here. A failure while handling a frame is
+          // not a read failure, and stopping the app-server for it would
+          // blame the pipe for a fault in this build.
+          let next: IteratorResult<string>;
+          try {
+            next = await lines.next();
+          } catch (error) {
+            // The output cannot be read any more, so whatever the app-server
+            // writes next is lost. The cause goes to the handler, which stops
+            // the app-server: a session that goes on without its output would
+            // hang.
+            if (!signal.aborted) {
+              handlers.onReadError(
+                `reading the app-server's output failed: ${describeError(error)}`,
+              );
+            }
+            break;
           }
-        } catch (error) {
-          // The output cannot be read any more, so whatever the app-server
-          // writes next is lost. The cause goes to the handler, which stops the
-          // app-server: a session that goes on without its output would hang.
           if (signal.aborted) return;
-          handlers.onReadError(`reading the app-server's output failed: ${describeError(error)}`);
+          if (next.done === true) break;
+          if (next.value.trim() === "") continue;
+          try {
+            deliver(next.value);
+          } catch (error) {
+            // Like a line that is not JSON, one frame this build cannot handle
+            // must not close the connection.
+            handlers.onWarning(
+              `the app-server sent a frame this build could not handle: ${describeError(error)}`,
+            );
+          }
         }
         if (signal.aborted) return;
         // The app-server is gone, so fail every waiting request now instead

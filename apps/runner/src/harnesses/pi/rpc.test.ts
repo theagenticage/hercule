@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { createLines } from "./testing";
+import { createLines, waitUntil } from "./testing";
 import { RPC_DEADLINE, makeRpc } from "./rpc";
 
 /** Builds an rpc over a pi that records its commands and responds only when the test says so. */
@@ -28,7 +28,7 @@ const createPeer = (onLine: (line: string, frame: unknown) => void = () => undef
   );
   const respondToLast = (): void =>
     stdout.push(JSON.stringify({ type: "response", id: writes.at(-1)!["id"], success: true }));
-  return { rpc, respondToLast, stdout, readErrors, kills };
+  return { rpc, respondToLast, stdout, readErrors, kills, writes };
 };
 
 describe("the time pi gets to respond to a command", () => {
@@ -93,13 +93,14 @@ describe("the lines pi writes that are not responses", () => {
 
 describe("an output that cannot be read", () => {
   it("reports the cause once, stops pi and fails the command that waits", async () => {
-    const { rpc, stdout, readErrors, kills } = createPeer();
+    const { rpc, stdout, readErrors, kills, writes } = createPeer();
 
     const failure = await Effect.runPromise(
       Effect.gen(function* () {
         const pumping = yield* Effect.forkChild(rpc.pump);
         const sent = yield* Effect.forkChild(Effect.flip(rpc.send({ type: "get_state" })));
-        yield* Effect.sleep(1);
+        // The command is written, so it is waiting for a response when the read fails.
+        yield* Effect.promise(() => waitUntil("wrote the command", () => writes.length === 1));
         stdout.fail(new Error("A line is longer than 10 characters, the limit for one line."));
         yield* Fiber.join(pumping);
         return yield* Fiber.join(sent);
