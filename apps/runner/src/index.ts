@@ -15,6 +15,7 @@
  * to stdout: the controller that spawns a local runner reads a line from its
  * stdout, and a service unit discards stdout.
  */
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
 import type * as Scope from "effect/Scope";
@@ -103,6 +104,11 @@ const runUntilStopped = async (
           Effect.raceFirst(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
         ),
       ).pipe(
+        // The reason the runner stopped also goes to its own log, not only to
+        // standard error, which is the controller's stderr log for a local
+        // runner. `tapCause` also sees an exception thrown by plain code on
+        // the start path, which is not a typed failure.
+        Effect.tapCause((cause) => Effect.logError(`the runner stopped: ${Cause.pretty(cause)}`)),
         // Stop any harness login in progress. A login process blocked on
         // stdin would otherwise outlive this process, still waiting for a
         // credential.
