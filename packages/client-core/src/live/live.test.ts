@@ -835,6 +835,16 @@ describe("createLive", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await settleTimers();
     assert.strictEqual(socket.calls("subscribe").length, before + 1);
+
+    // The restart is per attempt: the wait grew to 2 s after that retry, and a
+    // quick failure right after must not start it over again.
+    socket.fail(socket.calls("subscribe")[before]?.id, capFailure);
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, before + 1, "no retry after 1 s");
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, before + 2);
   });
 
   it("marks the first delta of each subscription made with a cursor as the replay", async () => {

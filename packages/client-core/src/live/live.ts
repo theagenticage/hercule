@@ -67,9 +67,8 @@ const MAX_RETRY_MS = 30_000;
 
 /**
  * Returns whether a connection or a subscription stream that stayed up for
- * `upMs` showed it works, so the retry wait after it starts again from the
- * shortest delay rather than continuing a backoff from hours ago. The
- * connection's loop and each subscription's loop share this rule.
+ * `upMs` (at least the longest retry wait) shows it works, so its next retry
+ * wait starts again from the shortest delay.
  */
 const stayedUpLongEnough = (upMs: number): boolean => upMs >= MAX_RETRY_MS;
 
@@ -628,9 +627,6 @@ export const createLive = (options: LiveOptions): Live => {
       }
       const held = ticket.ticket === null ? null : yield* connect(ticket.ticket);
       setStatus("disconnected");
-      // A connection that lasted longer than the longest wait shows the client
-      // can connect, so the next wait starts again from the shortest delay
-      // rather than continuing a backoff from hours ago.
       if (held !== null && stayedUpLongEnough(held)) delay = FIRST_RETRY_MS;
       yield* sleepWithJitter(delay);
       delay = Math.min(delay * 2, MAX_RETRY_MS);
