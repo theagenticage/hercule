@@ -53,6 +53,7 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
+import { isDiskBelowLimit } from "./disk-limit";
 import { announceProviderRunnerChange } from "./announce-provider-change";
 import { JoinTokens } from "./join-tokens";
 import { RunnerConnections } from "./connections";
@@ -333,8 +334,8 @@ const make = Effect.gen(function* () {
             // the Runner Metrics would detect, and it is recorded the same way.
             let becameAccepting = false;
             if (before.metrics !== null && edit.diskWatermarkBytes !== undefined) {
-              const wasAccepting = before.metrics.diskFreeBytes >= before.diskWatermarkBytes;
-              const accepting = before.metrics.diskFreeBytes >= edit.diskWatermarkBytes;
+              const wasAccepting = !isDiskBelowLimit(before.metrics, before.diskWatermarkBytes);
+              const accepting = !isDiskBelowLimit(before.metrics, edit.diskWatermarkBytes);
               becameAccepting = !wasAccepting && accepting;
               if (wasAccepting !== accepting) {
                 yield* audit.append({

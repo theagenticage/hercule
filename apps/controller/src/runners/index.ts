@@ -8,6 +8,7 @@
  * domain decides what to do about it.
  */
 export { describeNoAdapter, requireAdapter, requireOnline } from "./adapters";
+export { isDiskBelowLimit } from "./disk-limit";
 export { RunnerJoinLayer } from "./join";
 export { JoinTokens, JoinTokensLayer } from "./join-tokens";
 export {
