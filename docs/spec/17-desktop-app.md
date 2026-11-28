@@ -6310,7 +6310,7 @@ The pane is most of the Inbox chunk's growth. The two block renderers load only 
 | Work per streamed token | unchanged | unchanged: a turn streams over the live WebSocket, which no limit here covers |
 
 - **Work per request.** A request's body passes through the same `TransformStream` as before. Each piece of the body Chromium hands over now clears and sets one timer. Nothing else runs per piece.
-- **Counts.** Every request, render and idle-timer count of `perf:counts` (Inbox, Work, MCP servers) is unchanged; only the three bundle sizes above went up.
+- **Counts.** Every request, render, element and idle-timer count of `perf:counts` (Inbox, Work, MCP servers) is unchanged. Four `restyled` counts moved by run-to-run noise (+28 of 19,327 at most, three of them down or by 1), and only the three bundle sizes above went up.
 - **Not measured:** memory, launch and idle wakeups in the packaged app. The change adds no state that lives past a request, and no work while idle.
 
 ## Slices
