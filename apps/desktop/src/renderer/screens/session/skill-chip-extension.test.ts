@@ -10,6 +10,7 @@ import { Paragraph } from "@tiptap/extension-paragraph";
 import { Text } from "@tiptap/extension-text";
 import { UndoRedo } from "@tiptap/extensions/undo-redo";
 import { redo, undo } from "@tiptap/pm/history";
+import { Fragment } from "@tiptap/pm/model";
 import {
   buildSkillChipExtension,
   readDocumentText,
@@ -172,38 +173,39 @@ describe("the work of one edit among many chips", () => {
   const buildChips = (count: number): JSONContent[] =>
     Array.from({ length: count }, () => [chip("review"), text(" ")]).flat();
 
-  /** Types one character at the end of the paragraph and returns the milliseconds it took. */
-  const timeKeystroke = (editor: Editor): number => {
-    const startedAt = performance.now();
-    editor.view.dispatch(editor.state.tr.insertText("x", editor.state.doc.content.size - 1));
-    return performance.now() - startedAt;
-  };
-
   /**
-   * Returns the best keystroke time, in milliseconds, for each of two
-   * paragraphs. The editors are built first and the keystrokes alternate
-   * between them, so both share the same warm-up and the same machine load.
-   * Timing one editor after the other let a cold start or a busy moment fall
-   * on one side of the ratio. The best of the rounds is taken, so a pause of
-   * the machine does not decide the result.
+   * Types one character at the end of the paragraph and returns how many
+   * children of a node the plugin walked past with `Fragment.forEach`, the
+   * walk it reads the document with. A pass over the whole document once per
+   * reference, as the extension once did, shows up as a count that grows with
+   * the square of the chips. It is a count, not a time, so a busy machine
+   * gives the same answer as a quiet one. It cannot see work on plain arrays,
+   * which never touches ProseMirror.
    */
-  const timeKeystrokesAlternating = (smallCount: number, largeCount: number) => {
-    const small = buildEditor(buildChips(smallCount));
-    const large = buildEditor(buildChips(largeCount));
-    let smallBest = Infinity;
-    let largeBest = Infinity;
-    for (let round = 0; round < 15; round++) {
-      smallBest = Math.min(smallBest, timeKeystroke(small));
-      largeBest = Math.min(largeBest, timeKeystroke(large));
+  const countWalkedChildren = (editor: Editor): number => {
+    let walked = 0;
+    // Called with `.call(this, ...)` below, so `this` stays bound.
+    // oxlint-disable-next-line typescript/unbound-method
+    const { forEach } = Fragment.prototype;
+    try {
+      Fragment.prototype.forEach = function (this: Fragment, callback) {
+        walked += this.childCount;
+        return forEach.call(this, callback);
+      };
+      editor.view.dispatch(editor.state.tr.insertText("x", editor.state.doc.content.size - 1));
+    } finally {
+      Fragment.prototype.forEach = forEach;
     }
-    return { smallBest, largeBest };
+    return walked;
   };
 
   it("grows with the number of chips, not with its square", () => {
-    // The pass over every reference once cost this much more each time the
-    // chips doubled: with four times the chips, a ratio near 16 where a linear
-    // pass gives one near 4. The bound of 8 leaves room for a busy machine.
-    const { smallBest, largeBest } = timeKeystrokesAlternating(1_500, 6_000);
-    expect(largeBest / smallBest).toBeLessThan(8);
+    const smallCount = 500;
+    const largeCount = 4 * smallCount;
+    const small = countWalkedChildren(buildEditor(buildChips(smallCount)));
+    const large = countWalkedChildren(buildEditor(buildChips(largeCount)));
+    // With four times the chips, a linear pass walks about 4 times as many
+    // children and a pass per reference about 16 times as many.
+    expect(large / small).toBeLessThan(5);
   });
 });
