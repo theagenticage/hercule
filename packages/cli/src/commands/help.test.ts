@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildCommandHelp, buildNounHelp, buildRootHelp } from "./help";
 import type { OperationId } from "@hercule/contract";
+import * as HttpApi from "effect/http-api/HttpApi";
+import { api } from "@hercule/contract";
 import { COMMANDS, findCommandById, type Command } from "./tree";
 
 /** The width help.ts wraps prose at. */
@@ -168,5 +170,43 @@ describe("a command whose field of several shapes is filled from flags", () => {
       "  hercule mcp-server create --plugin sentry/sentry --connection 1f3a9c2e",
     );
     expect(examples).toContain("  hercule mcp-server create --url https://mcp.notion.com/mcp");
+  });
+});
+
+describe("returns", () => {
+  it("never says a reply is only the status when the reply has fields", () => {
+    // The oracle is the API's own success schemas, not the command tree, which is what is under test.
+    const withFields = new Set<string>();
+    HttpApi.reflect(api, {
+      onGroup: () => {},
+      onEndpoint: ({ endpoint, group }) => {
+        const ast = [...endpoint.success][0]?.ast;
+        const members = ast?._tag === "Union" ? ast.types : [ast];
+        const hasFields = members.some(
+          (member) =>
+            member?._tag === "Arrays" ||
+            (member?._tag === "Objects" && member.propertySignatures.length > 0),
+        );
+        if (hasFields) withFields.add(`${group.identifier}.${endpoint.identifier}`);
+      },
+    });
+    const wrong = COMMANDS.filter(
+      (command) =>
+        withFields.has(command.id) &&
+        readSection(buildCommandHelp(command), "returns:").some((line) =>
+          line.includes("only the status"),
+        ),
+    ).map((command) => command.spelling);
+    expect(wrong).toEqual([]);
+  });
+
+  it("lists the fields of every member of a union reply, and says no one reply holds them all", () => {
+    const lines = readSection(
+      buildCommandHelp(readCommand("connection.pollDeviceFlow")),
+      "returns:",
+    ).join(" ");
+    // `connection` is a field of a later member only.
+    expect(lines).toContain("connection");
+    expect(lines).toContain("one of several replies");
   });
 });

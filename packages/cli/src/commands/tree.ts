@@ -176,6 +176,8 @@ export interface Returns {
   readonly fields: ReadonlyArray<string>;
   /** The fields of one item, when the result is a page or a bare list. */
   readonly items: ReadonlyArray<string> | undefined;
+  /** True when the reply is one of several shapes, so `fields` is not what one reply holds. */
+  readonly isUnion: boolean;
 }
 
 export interface Command {
@@ -676,16 +678,30 @@ const readPayloadSchema = (payload: unknown): unknown => {
 const listPropertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
   (ast?.propertySignatures ?? []).map((property) => String(property.name));
 
-/** Returns what the success schema describes: a record, a page of records, or a bare list. */
+/**
+ * Returns what the success schema describes: a record, a page of records, or a
+ * bare list. A reply that is a union of records (one for each mode of the
+ * request, or one for each state of a run) has `fields` that are every field
+ * any member has, each name once, in the order they first appear, and
+ * `isUnion` is true because no single reply holds them all.
+ */
 const readReturns = (success: unknown): Returns => {
   const ast = [...((success as Set<{ ast?: Ast }> | undefined) ?? [])][0]?.ast;
-  if (ast === undefined) return { fields: [], items: undefined };
+  if (ast === undefined) return { fields: [], items: undefined, isUnion: false };
   if (ast._tag === "Arrays") {
-    return { fields: [], items: listPropertyNames(ast.rest?.[0]) };
+    return { fields: [], items: listPropertyNames(ast.rest?.[0]), isUnion: false };
+  }
+  if (ast._tag === "Union") {
+    const fields = [...new Set((ast.types ?? []).flatMap(listPropertyNames))];
+    return { fields, items: undefined, isUnion: true };
   }
   const fields = listPropertyNames(ast);
   const page = ast.propertySignatures?.find((property) => String(property.name) === "items");
-  return { fields, items: page === undefined ? undefined : listPropertyNames(page.type.rest?.[0]) };
+  return {
+    fields,
+    items: page === undefined ? undefined : listPropertyNames(page.type.rest?.[0]),
+    isUnion: false,
+  };
 };
 
 /**
