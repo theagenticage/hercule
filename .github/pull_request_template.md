@@ -17,6 +17,4 @@
 
 ## Needs updating to see the change
 
-<!-- Say which of these must be updated or restarted before the change shows: controller, runner, desktop app, Android app. Write "None" when nothing. -->
-
-Needs updating:
+Controller, runner, desktop app, Android app, or None:
