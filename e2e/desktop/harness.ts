@@ -327,9 +327,7 @@ export interface ArrangedFleet {
  * Starts a controller for the current test that is set up, and connects a
  * fleet to it, with no runners yet. When the test finishes, the runners
  * disconnect first and the controller that is running then is stopped, the
- * restarted one when `restartController` was called. A controller stopped
- * while a socket from outside is still open, such as a scripted runner's or
- * the app's, waits out its shutdown drain, ten seconds.
+ * restarted one when `restartController` was called.
  *
  * The controller starts a runner of its own on this machine, which may be
  * logged in to a real provider. It is retired before this returns, so no
@@ -341,7 +339,7 @@ export interface ArrangedFleet {
  * A test that needs the real runner passes `keepOwnRunner: true`. Nothing is
  * retired then, so the caller places threads on that runner with care: it may
  * find a real agent on this machine. The controller stops its own runner
- * before its drain, so keeping it does not slow a restart.
+ * as it shuts down, so keeping it does not slow a restart.
  *
  * `controllerEnv` is added to the environment of the controller and of the
  * runner it starts for itself, at the first start and again after every

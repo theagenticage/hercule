@@ -395,6 +395,28 @@ export default tseslint.config(
     },
   },
   {
+    // The controller upgrades a request to a WebSocket only through
+    // `ListenerDrain.serveSocket`, which is the one place that knows every
+    // open socket. A socket upgraded anywhere else is not closed when the
+    // controller stops, and holds the stop up until the drain deadline. The
+    // rule's options replace the base block's, so its selectors are repeated.
+    files: ["apps/controller/src/**/*.ts"],
+    ignores: ["apps/controller/src/http/drain.ts", "**/*.test.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...bannedChildProcessCalls,
+        ...inlineSchemaCalls,
+        ...libraryCalls,
+        {
+          selector: "MemberExpression[property.name=/^upgrade(With)?$/]",
+          message:
+            "Upgrade a request to a WebSocket with ListenerDrain.serveSocket, so the controller can close the socket when it stops.",
+        },
+      ],
+    },
+  },
+  {
     // The pre-paint theme scripts are plain browser JavaScript that no build
     // touches, so they are linted as what they are rather than ignored.
     files: ["apps/web/public/**/*.js", "apps/desktop/src/renderer/public/**/*.js"],

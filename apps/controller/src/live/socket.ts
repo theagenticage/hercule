@@ -27,6 +27,7 @@
  * `validation` error can be returned and the connection stays open.
  */
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -34,9 +35,13 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as NetAddress from "effect/net/NetAddress";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as RpcServer from "effect/rpc/RpcServer";
 import type * as Rpc from "effect/rpc/Rpc";
+import type * as Socket from "effect/socket/Socket";
+import * as SocketServer from "effect/socket/SocketServer";
 import {
   createDecodeValidationError,
   createInternalError,
@@ -55,6 +60,7 @@ import {
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, requireGrant, type UserActor } from "../actor";
 import { Credentials } from "../credentials";
+import { ListenerDrain } from "../http/drain";
 import { WsTickets } from "./tickets";
 import { LiveTopics, type LiveQueue } from "./topics";
 
@@ -365,6 +371,61 @@ const handlers = live.toLayer(
 );
 
 /**
+ * Builds the RPC protocol for the live socket and registers `GET /ws` on the
+ * current router.
+ *
+ * The RPC server's own WebSocket protocol upgrades the request itself, which
+ * would hide the socket from the listener's drain. So the route upgrades
+ * through `ListenerDrain` and hands the socket to the RPC server's
+ * socket-server protocol. That protocol expects a `SocketServer` that accepts
+ * sockets in a loop; here the loop is the route, so `run` only keeps the
+ * function that serves one socket for the route to call.
+ */
+const buildLiveSocketProtocol = Effect.gen(function* () {
+  const drain = yield* ListenerDrain;
+  const router = yield* HttpRouter.HttpRouter;
+
+  const socketHandler = Deferred.makeUnsafe<(socket: Socket.Socket) => Effect.Effect<void>>();
+  const server = SocketServer.SocketServer.of({
+    // The protocol never reads the address, and this server has no port of its own.
+    address: NetAddress.unixPathAddress(LIVE_SOCKET_PATH),
+    // Keeps the handler together with the services it needs, so the route can
+    // call it with nothing left to provide. The handler's typed failures are
+    // discarded, because the route has nobody to report them to; defects
+    // still propagate to the route.
+    run: <R, E, A>(handler: (socket: Socket.Socket) => Effect.Effect<A, E, R>) =>
+      Effect.gen(function* () {
+        const services = yield* Effect.context<R>();
+        yield* Deferred.succeed(socketHandler, (socket) =>
+          Effect.ignore(Effect.provideContext(handler(socket), services)),
+        );
+        return yield* Effect.never;
+      }),
+  });
+
+  yield* router.add(
+    "GET",
+    LIVE_SOCKET_PATH,
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      // A controller that is stopping refuses the upgrade with a 503, and the
+      // client connects again when the controller is back.
+      return yield* drain.serveSocket(request, (socket) =>
+        Effect.flatMap(Deferred.await(socketHandler), (handle) => handle(socket)),
+      );
+    }).pipe(
+      // A request that cannot be upgraded is a defect, as it was when the RPC
+      // server upgraded it.
+      Effect.orDie,
+    ),
+  );
+
+  return yield* RpcServer.makeProtocolSocketServer.pipe(
+    Effect.provideService(SocketServer.SocketServer, server),
+  );
+});
+
+/**
  * Serves the live socket as a route on the current router. Uses JSON
  * serialization, because a WebSocket already frames its messages and the
  * client is a browser.
@@ -372,9 +433,9 @@ const handlers = live.toLayer(
 export const LiveSocketLayer: Layer.Layer<
   never,
   never,
-  HttpRouter.HttpRouter | WsTickets | LiveTopics | Credentials
+  HttpRouter.HttpRouter | WsTickets | LiveTopics | Credentials | ListenerDrain
 > = RpcServer.layer(live).pipe(
   Layer.provide(handlers),
-  Layer.provide(RpcServer.layerProtocolWebsocket({ path: LIVE_SOCKET_PATH })),
+  Layer.provide(Layer.effect(RpcServer.Protocol)(buildLiveSocketProtocol)),
   Layer.provide(RpcSerialization.layerJson),
 );

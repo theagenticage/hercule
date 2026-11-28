@@ -207,14 +207,17 @@ const isConnectionLoss = (error: unknown): boolean => {
  * so it becomes a `RequestError` rather than an envelope the controller never
  * sent.
  *
- * A `ConnectionError` means no complete response arrived: the request could
- * not be sent, or the connection was lost or aborted while the body arrived.
+ * A `ConnectionError` means the controller did not answer the request: it
+ * could not be sent, the connection was lost or aborted while the body
+ * arrived, or the response is a 503 that is not an error envelope. The last
+ * is what a stopping controller answers with, and no client can do more than
+ * try again later, as for the others.
  *
  * A response that arrived but could not be decoded becomes an `internal`
  * `ApiError`, with the original failure kept as `cause`. That covers:
  *
- * - a status the contract does not declare;
- * - a body that is not an error envelope;
+ * - a status the contract does not declare, other than 503;
+ * - a body that is not an error envelope, on a status other than 503;
  * - a success body that does not match its schema.
  *
  * The caller cannot act on any of these, which is what `internal` means.
@@ -239,6 +242,16 @@ export const toClientError = (
       reason._tag === "TransportError" ||
       reason._tag === "InvalidUrlError" ||
       (reason._tag === "DecodeError" && isConnectionLoss(reason.cause))
+    ) {
+      return new ConnectionError(url, failure);
+    }
+    // A 503 that is not an error envelope is not the controller's answer to
+    // the request: the controller is stopping, or something in front of it
+    // is not serving. A 503 that is the `controller_sealed` envelope never
+    // gets here, because the check above already turned it into an `ApiError`.
+    if (
+      (reason._tag === "DecodeError" || reason._tag === "StatusCodeError") &&
+      reason.response.status === 503
     ) {
       return new ConnectionError(url, failure);
     }
