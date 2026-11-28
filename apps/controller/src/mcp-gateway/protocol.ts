@@ -66,6 +66,11 @@ export const classifyMessage = (json: unknown): IncomingMessage => {
   const decoded = decodeEnvelope(json);
   if (Option.isNone(decoded)) return { _tag: "invalid" };
   const message = decoded.value;
+  // Effect drops an `id` it cannot read (such as `null`) when a message decodes as a notification.
+  // JSON-RPC forbids an `id` on a notification, and such a body must not pass for one.
+  if (!("id" in message) && typeof json === "object" && json !== null && "id" in json) {
+    return { _tag: "invalid" };
+  }
   if ("method" in message && "id" in message) {
     return {
       _tag: "request",
@@ -190,18 +195,19 @@ const isObject = (value: unknown): value is JsonObject =>
 
 /**
  * Checks that a stateless message's HTTP headers agree with its JSON-RPC
- * payload, as Effect's own transport does for `2026-07-28`. Returns the
- * refusal, or `undefined` when they agree.
+ * payload and carry what `2026-07-28` requires. Returns the
+ * refusal, or `undefined` when they do.
  *
- * - `MCP-Protocol-Version` is required, must equal the revision in `_meta`,
- *   and must be the revision the gateway offers;
- * - `_meta` must carry the revision and the client's capabilities;
+ * - `MCP-Protocol-Version` is required and must be the revision the gateway
+ *   offers;
  * - `Mcp-Method` must equal the method, and for `tools/call`, `Mcp-Name` must
- *   equal the tool's name.
+ *   equal the tool's name;
+ * - a request must carry the revision and the client's capabilities in its
+ *   `_meta`, and the revision must equal the header.
  *
  * A notification is exempt from the `_meta` rules, because the `2026-07-28`
- * specification requires that `_meta` on requests only. A notification that
- * does carry the revision in its `_meta` must still agree with the header.
+ * specification requires `_meta` fields on requests only. A notification that
+ * does name a revision in its `_meta` must still agree with the header.
  */
 export const checkStatelessMetadata = (
   headers: HeaderMap,
@@ -220,7 +226,7 @@ export const checkStatelessMetadata = (
       message: "Required request metadata is missing",
     };
   }
-  if ((!isNotification || claim !== undefined) && claim !== version) {
+  if (claim !== undefined && claim !== version) {
     return buildHeaderMismatch("MCP-Protocol-Version header does not match request metadata");
   }
   if (!isNotification && !isObject(meta?.[CLIENT_CAPABILITIES_META_KEY])) {

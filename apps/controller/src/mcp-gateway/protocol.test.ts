@@ -46,9 +46,16 @@ describe("readStatelessRevision", () => {
   });
 });
 
+describe("classifyMessage and a body that carries an id", () => {
+  it("does not pass a message that has a method and an unreadable id for a notification", () => {
+    for (const id of [null, {}, [1]]) {
+      expect(classifyMessage({ jsonrpc: "2.0", method: "tools/list", id })._tag).toBe("invalid");
+    }
+  });
+});
+
 describe("checkStatelessMetadata", () => {
   const headers = { "mcp-protocol-version": "2026-07-28" };
-  const revisionMeta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28" };
   const notification = (
     method: string,
     params: Extract<IncomingMessage, { readonly method: string }>["params"] = {},
@@ -58,8 +65,8 @@ describe("checkStatelessMetadata", () => {
     params,
   });
 
-  it("accepts a notification that carries no _meta, as agy sends notifications/roots/list_changed", () => {
-    for (const method of ["notifications/roots/list_changed", "notifications/cancelled"]) {
+  it("accepts any notification that carries no _meta, not only the ones the gateway knows", () => {
+    for (const method of ["notifications/example/changed", "notifications/cancelled"]) {
       expect(
         checkStatelessMetadata({ ...headers, "mcp-method": method }, notification(method)),
       ).toBeUndefined();
@@ -71,37 +78,43 @@ describe("checkStatelessMetadata", () => {
       { ...headers, "mcp-method": "tools/list" },
       { _tag: "request", id: 1, method: "tools/list", params: {} },
     );
-    expect(refusal).toMatchObject({ status: 400, message: "Required request metadata is missing" });
+    expect(refusal).toMatchObject({
+      status: 400,
+      code: -32602,
+      message: "Required request metadata is missing",
+    });
   });
 
-  it("holds a notification to the version header and to its own method header", () => {
-    const method = "notifications/roots/list_changed";
-    expect(checkStatelessMetadata({}, notification(method))?.message).toBe(
-      "MCP-Protocol-Version header is required",
-    );
-    expect(checkStatelessMetadata(headers, notification(method))?.message).toBe(
-      "Mcp-Method header does not match request method",
-    );
+  it("holds a notification to its method header", () => {
+    expect(
+      checkStatelessMetadata(
+        { ...headers, "mcp-method": "tools/list" },
+        notification("notifications/example/changed"),
+      ),
+    ).toMatchObject({ status: 400, code: -32020 });
+  });
+
+  it("holds a notification that names a revision to the version header", () => {
+    const method = "notifications/example/changed";
+    const withRevision = (revision: string) =>
+      notification(method, { _meta: { "io.modelcontextprotocol/protocolVersion": revision } });
+    expect(
+      checkStatelessMetadata({ ...headers, "mcp-method": method }, withRevision("2026-07-28")),
+    ).toBeUndefined();
+    expect(
+      checkStatelessMetadata({ ...headers, "mcp-method": method }, withRevision("2025-11-25")),
+    ).toMatchObject({ status: 400, code: -32020 });
+    expect(
+      checkStatelessMetadata({ "mcp-method": method }, withRevision("2026-07-28")),
+    ).toMatchObject({
+      status: 400,
+      code: -32020,
+    });
     expect(
       checkStatelessMetadata(
         { "mcp-protocol-version": "2025-11-25", "mcp-method": method },
-        notification(method),
-      )?.message,
-    ).toBe("Unsupported protocol version: 2025-11-25");
-  });
-
-  it("refuses a notification whose _meta names another revision than the header", () => {
-    const method = "notifications/roots/list_changed";
-    const refusal = checkStatelessMetadata(
-      { ...headers, "mcp-method": method },
-      notification(method, { _meta: { "io.modelcontextprotocol/protocolVersion": "2025-11-25" } }),
-    );
-    expect(refusal?.message).toBe("MCP-Protocol-Version header does not match request metadata");
-    expect(
-      checkStatelessMetadata(
-        { ...headers, "mcp-method": method },
-        notification(method, { _meta: revisionMeta }),
+        withRevision("2025-11-25"),
       ),
-    ).toBeUndefined();
+    ).toMatchObject({ status: 400, code: -32022 });
   });
 });
