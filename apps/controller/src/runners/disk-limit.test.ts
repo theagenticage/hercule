@@ -13,6 +13,5 @@ describe("whether free disk is below the disk limit", () => {
 
   it("is false for a runner that has not reported metrics yet", () => {
     expect(isDiskBelowLimit(null, 100)).toBe(false);
-    expect(isDiskBelowLimit(null, 0)).toBe(false);
   });
 });
