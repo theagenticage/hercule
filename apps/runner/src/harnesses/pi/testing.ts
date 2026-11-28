@@ -313,6 +313,8 @@ export interface FakePiBehaviour {
   readonly lingers?: boolean;
   /** A pi that, once killed, exits only when this promise resolves, like one that shuts down slowly. */
   readonly exitsAfterKill?: Promise<void>;
+  /** The exit code of a killed pi. It is 143, a pi stopped by SIGTERM, unless set; 0 is a pi that caught the signal and exited cleanly. */
+  readonly exitCodeAfterKill?: number;
 }
 
 /**
@@ -405,7 +407,9 @@ export const buildFakePiSeam = (
         kills += 1;
         out.end();
         err.end();
-        void (behaviour.exitsAfterKill ?? Promise.resolve()).then(() => resolveExited(143));
+        void (behaviour.exitsAfterKill ?? Promise.resolve()).then(() =>
+          resolveExited(behaviour.exitCodeAfterKill ?? 143),
+        );
       },
       exited: done,
     };

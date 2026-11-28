@@ -231,6 +231,20 @@ describe("a text generation on pi", () => {
     });
   });
 
+  it("reports a failure with the cause when pi's output cannot be read", async () => {
+    const { outcome, child } = await startGeneration();
+
+    // The cause is Hercule's own text, unlike pi's error output, so it can be shown.
+    child.failRead("A line is longer than 10 characters, the limit for one line.");
+
+    await expect(outcome).resolves.toEqual({
+      outcome: "failed",
+      message:
+        "reading pi's output failed: A line is longer than 10 characters, the limit for one line.",
+    });
+    expect(child.kills()).toBeGreaterThan(0);
+  });
+
   it("reports a failure when pi will not start", async () => {
     const { seam } = buildFakePiSeam({ dies: true });
 

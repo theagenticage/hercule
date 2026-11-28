@@ -1221,6 +1221,21 @@ describe("a pi that exits while its turn is running", () => {
     expect(exited?.reason).toBe("process_exit");
     expect(exited?.message).toBe(expected);
   });
+
+  it("keeps the cause on the exit when the stopped pi exits with status 0", async () => {
+    const run = await startBusySession({ exitCodeAfterKill: 0 });
+
+    run.child.failRead("A line is longer than 10 characters, the limit for one line.");
+
+    await waitUntil(
+      "said the session ended",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    // A pi that caught SIGTERM and exited cleanly must not hide why it was stopped.
+    expect(filterByTag(run.seen, "session.exited")[0]?.message).toBe(
+      "reading pi's output failed: A line is longer than 10 characters, the limit for one line.",
+    );
+  });
 });
 
 describe("stopping a session", () => {

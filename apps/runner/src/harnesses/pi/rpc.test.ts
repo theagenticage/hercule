@@ -124,4 +124,27 @@ describe("an output that cannot be read", () => {
     expect(readErrors).toEqual([]);
     expect(kills).toEqual([]);
   });
+
+  it("stops pi, with its own cause, when the handler of a line throws", async () => {
+    const { rpc, stdout, readErrors, kills, writes } = createPeer(() => {
+      throw new Error("boom");
+    });
+
+    const failure = await Effect.runPromise(
+      Effect.gen(function* () {
+        const pumping = yield* Effect.forkChild(rpc.pump);
+        const sent = yield* Effect.forkChild(Effect.flip(rpc.send({ type: "get_state" })));
+        yield* Effect.promise(() => waitUntil("wrote the command", () => writes.length === 1));
+        // An event, not a response, so it goes to the handler that throws.
+        stdout.push('{"type":"agent_start"}');
+        yield* Fiber.join(pumping);
+        return yield* Fiber.join(sent);
+      }),
+    );
+
+    // Not a read failure: the pipe is fine, so the message does not blame it.
+    expect(readErrors).toEqual(["pi sent a line this build could not handle: boom"]);
+    expect(kills).toEqual(["SIGTERM"]);
+    expect(failure._tag).toBe("PiExited");
+  });
 });
