@@ -852,6 +852,55 @@ describe("Thread: transcript", () => {
     expect(readPageText()).toContain("command · running");
     expect(readPageText()).not.toContain("· ·");
   });
+
+  it("opens a compaction's line to the summary the harness wrote, and no other line", async () => {
+    const user = userEvent.setup();
+    const summary = "The user asked for a login fix.";
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        buildCommandStart("t1", "2026-09-08T10:00:01.000Z", "tool1", {
+          name: "Bash",
+          input: { command: "pnpm test" },
+        }),
+        [
+          {
+            _tag: "item.started",
+            eventId: "",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T10:00:02.000Z",
+            turnId: "t1",
+            itemId: "compaction1",
+            kind: "context_compaction",
+          },
+          {
+            _tag: "item.completed",
+            eventId: "",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T10:00:03.000Z",
+            turnId: "t1",
+            itemId: "compaction1",
+            kind: "context_compaction",
+            status: "completed",
+            detail: { trigger: "auto", tokensBefore: 182_000, tokensAfter: 31_000, summary },
+          },
+        ],
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^Worked for/ }));
+    const summaryText = screen.getByText(summary);
+    const disclosure = summaryText.closest("details")!;
+    expect(disclosure.open).toBe(false);
+
+    await user.click(screen.getByText(/^compaction · 182k → 31k tokens \(auto\) · completed/));
+    expect(disclosure.open).toBe(true);
+
+    expect(screen.getByText(/^command · /).closest("details")).toBeNull();
+  });
 });
 
 describe("Thread: the live turn", () => {
