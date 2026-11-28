@@ -18,7 +18,7 @@ import {
   type OAuthClient,
   type TokenSet,
 } from "./client";
-import { buildEndlessBodyAnswer, startFakeOAuthProvider } from "./testing";
+import { startFakeOAuthProvider } from "./testing";
 
 const TOKEN = "gho_secret-access-token";
 
@@ -572,6 +572,38 @@ describe("the lifetime and the type of a token", () => {
 });
 
 describe("the body of an answer that is not read to its end", () => {
+  /**
+   * Builds an answer of the provider's token endpoint whose body never ends, `chunkBytes`
+   * at a time, with the given status and headers. `wasCancelled` tells whether
+   * the client cancelled a body, which a client that bounds what it reads does.
+   */
+  const buildEndlessBodyAnswer = (
+    init: { readonly status: number; readonly headers?: Record<string, string> },
+    chunkBytes = 1,
+  ): { readonly answer: () => Response; readonly wasCancelled: () => boolean } => {
+    let cancelled = false;
+    const chunk = new Uint8Array(chunkBytes);
+    return {
+      answer: () => {
+        let timer: ReturnType<typeof setInterval> | undefined;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(chunk);
+              timer = setInterval(() => controller.enqueue(chunk), 20);
+            },
+            cancel() {
+              cancelled = true;
+              clearInterval(timer);
+            },
+          }),
+          init,
+        );
+      },
+      wasCancelled: () => cancelled,
+    };
+  };
+
   /**
    * Waits until the body was cancelled, and gives up after 300 milliseconds.
    * A client that only gives up its connection later (when its runtime

@@ -110,6 +110,7 @@ const createAuthServer = (): ListeningFakeOAuthProvider => {
       token_type: "bearer",
       expires_in: 3600,
     });
+  provider.answers.token = () => buildJsonResponse({ error: "unsupported_grant_type" }, 400);
   // A public client has no secret, so a request that sends one is wrong.
   provider.vetRequest = (form) =>
     form["client_id"] === PUBLIC_CLIENT_ID && "client_secret" in form

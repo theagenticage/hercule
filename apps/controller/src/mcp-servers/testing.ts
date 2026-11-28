@@ -1052,6 +1052,7 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
       "/.well-known/oauth-authorization-server",
       "/register",
       fake.authorizePath,
+      fake.tokenPath,
     ].includes(url.pathname);
     if (isMine && fake.stopped) return new Response("down", { status: 503 });
     if (url.pathname === "/.well-known/oauth-authorization-server") {
@@ -1159,7 +1160,7 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
         return new Response(`bad request: ${problems.join(",")}`, { status: 400 });
       return new Response(null, { status: 204 });
     }
-    return provider.handle(request);
+    return url.pathname === fake.tokenPath ? provider.handle(request) : undefined;
   };
 
   // Every grant gets the checks of a real token endpoint before the provider
@@ -1188,6 +1189,9 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
   provider.answers.token = async (form, request) => {
     const basic = parseBasicClientAuth(request.headers.get("authorization"));
     const clientId = basic?.clientId ?? form.client_id ?? "";
+    // The client as it was when the request arrived, even if the test makes the
+    // fake forget it while the exchange is held.
+    const client = clients.get(clientId);
     await heldExchange;
     const code = codes.get(form.code ?? "");
     if (form.grant_type !== "authorization_code" || code === undefined)
@@ -1200,7 +1204,6 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
     ) {
       return fake.refuse("invalid_grant");
     }
-    const client = clients.get(clientId);
     return fake.issueTokens({
       refreshToken: client?.grantTypes.includes("refresh_token") === true,
     });

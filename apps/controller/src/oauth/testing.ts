@@ -21,17 +21,17 @@ const DEVICE_CODE_PATH = "/device/code";
 export const DEVICE_CODE = "the-device-code";
 
 /** The form body of one request to the token endpoint. */
-export type TokenForm = Record<string, string>;
+type TokenForm = Record<string, string>;
 
 /**
  * An answer of the token endpoint. A test replaces one to make the provider
  * refuse, fail, or hold the request in flight by returning a promise it
  * settles later.
  */
-export type TokenAnswer = (form: TokenForm, request: Request) => Response | Promise<Response>;
+type TokenEndpointAnswer = (form: TokenForm, request: Request) => Response | Promise<Response>;
 
 /** What `FakeOAuthProvider.issueTokens` may be asked for. */
-export interface IssueTokensOptions {
+interface IssueTokensOptions {
   /** Whether the answer carries a refresh token. By default it does. */
   readonly refreshToken?: boolean;
 }
@@ -55,12 +55,12 @@ export interface FakeOAuthProvider {
    */
   readonly answers: {
     code: () => Response;
-    token: TokenAnswer;
-    readonly byGrant: Record<string, TokenAnswer>;
+    token: TokenEndpointAnswer;
+    readonly byGrant: Record<string, TokenEndpointAnswer>;
   };
   /**
-   * Runs before the answer to every token request, and returns the response
-   * that refuses it, or `undefined` to let the answer go ahead. A test sets it
+   * Runs before the answer to every token request (after `refuseRefresh`), and
+   * returns the response that refuses it, or `undefined` to let the answer go ahead. A test sets it
    * for a rule every answer must respect, such as what a client may send.
    */
   vetRequest: ((form: TokenForm, request: Request) => Response | undefined) | undefined;
@@ -86,8 +86,8 @@ export interface FakeOAuthProvider {
    * carries new tokens. Any other refresh token is refused `invalid_grant`.
    */
   rotateRefreshToken: (form: TokenForm) => Response;
-  /** Builds an OAuth error response and records its code in `tokenErrorCodes`. */
-  refuse: (error: string, status?: number) => Response;
+  /** Builds an HTTP 400 OAuth error response and records its code in `tokenErrorCodes`. */
+  refuse: (error: string) => Response;
   /** Whether an `Authorization` header carries an access token that was issued and not revoked. */
   accepts: (authorization: string | null) => boolean;
   /** The access token issued last. */
@@ -126,9 +126,9 @@ export const createFakeOAuthProvider = (): FakeOAuthProvider => {
   let issued = 0;
   let lastAccessToken = "";
 
-  const refuse = (error: string, status = 400) => {
+  const refuse = (error: string) => {
     tokenErrorCodes.push(error);
-    return Response.json({ error }, { status });
+    return Response.json({ error }, { status: 400 });
   };
 
   const issueTokens = (options: IssueTokensOptions = {}): Response => {
@@ -201,7 +201,10 @@ export const createFakeOAuthProvider = (): FakeOAuthProvider => {
       if (grant === "refresh_token" && fake.refuseRefresh) return refuse(fake.refreshErrorCode);
       const refusal = fake.vetRequest?.(form, request);
       if (refusal !== undefined) return refusal;
-      return (fake.answers.byGrant[grant] ?? fake.answers.token)(form, request);
+      const answer = Object.hasOwn(fake.answers.byGrant, grant)
+        ? fake.answers.byGrant[grant]!
+        : fake.answers.token;
+      return answer(form, request);
     },
     stopped: false,
     stop: () => {
@@ -232,36 +235,4 @@ export const startFakeOAuthProvider = (): ListeningFakeOAuthProvider => {
       await server.stop(true);
     },
   });
-};
-
-/**
- * Builds an answer of the token endpoint whose body never ends, `chunkBytes`
- * at a time, with the given status and headers. `wasCancelled` tells whether
- * the client cancelled a body, which a client that bounds what it reads does.
- */
-export const buildEndlessBodyAnswer = (
-  init: { readonly status: number; readonly headers?: Record<string, string> },
-  chunkBytes = 1,
-): { readonly answer: TokenAnswer; readonly wasCancelled: () => boolean } => {
-  let cancelled = false;
-  const chunk = new Uint8Array(chunkBytes);
-  return {
-    answer: () => {
-      let timer: ReturnType<typeof setInterval> | undefined;
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(chunk);
-            timer = setInterval(() => controller.enqueue(chunk), 20);
-          },
-          cancel() {
-            cancelled = true;
-            clearInterval(timer);
-          },
-        }),
-        init,
-      );
-    },
-    wasCancelled: () => cancelled,
-  };
 };
