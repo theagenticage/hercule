@@ -25,7 +25,7 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { MAX_CONTEXT_DEPTH, MAX_CONTEXT_PARENTS } from "@hercule/contract";
 import { OPEN_THREAD_REFS_SQL } from "../signals";
-import { LIVE_TASK_LINKS_SQL } from "../tasks";
+import { ALL_LIVE_TASK_LINKS_SQL } from "../tasks";
 import { CURRENT_PART_OF_SQL, WALK_STATE_ROOM } from "./claim-graph";
 import { CURRENT_LINKED_SQL } from "./entity-links";
 import { buildWorkRecordCondition } from "./entity-records";
@@ -77,7 +77,7 @@ export const WANTED_REFS_SQL = `
   wanted_roots(ref) AS (
     ${CONCERNED_REFS_SQL}
     UNION
-    SELECT ref FROM (${LIVE_TASK_LINKS_SQL})
+    SELECT ref FROM (${ALL_LIVE_TASK_LINKS_SQL})
     UNION
     SELECT e.ref FROM external_entities e
     WHERE ${buildWorkRecordCondition("e")} AND e.ref IN (${OPEN_THREAD_REFS_SQL})

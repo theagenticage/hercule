@@ -18,6 +18,7 @@ export type { TakeOnRecord } from "./take-on-records";
 export { groupByTask } from "./lists";
 export type { EntityLinkPair } from "./entity-facts";
 export {
+  ALL_LIVE_TASK_LINKS_SQL,
   LIVE_TASK_LINKS_SQL,
   buildLiveTaskLinksSql,
   JOINABLE_TASK_SQL,

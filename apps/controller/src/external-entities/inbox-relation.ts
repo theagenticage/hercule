@@ -32,7 +32,7 @@ import {
   type InboxClauseOperator,
 } from "@hercule/plugin-host";
 import { uuidFromString } from "../db";
-import { buildLiveTaskLinksSql } from "../tasks";
+import { ALL_LIVE_TASK_LINKS_SQL, buildLiveTaskLinksSql } from "../tasks";
 import { buildWorkRecordCondition } from "./entity-records";
 
 // ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ const buildAskTables = (
         },
       ]),
   plain(
-    `live_links AS MATERIALIZED (${buildLiveTaskLinksSql(onlyRefs === undefined ? undefined : "l.ref IN (SELECT ref FROM page_refs)")})`,
+    `live_links AS MATERIALIZED (${onlyRefs === undefined ? ALL_LIVE_TASK_LINKS_SQL : buildLiveTaskLinksSql("l.ref IN (SELECT ref FROM page_refs)")})`,
   ),
   plain(TAKEN_SQL),
   {
@@ -188,6 +188,20 @@ const TAKEN_SQL = `taken AS MATERIALIZED (
     WHERE l.position = 1 AND l.taken_at IS NOT NULL)`;
 
 /**
+ * The `FROM` of `eligible` over every thing: the records that concern the user,
+ * have a live Task link or hold a live signal, each reached by its ref. The
+ * `WHERE` of `eligible` still decides who is on the Inbox; this only says where
+ * to look, so the read follows the things that can be on it and not every
+ * record the database keeps (the daily sweep keeps the records that finished
+ * Tasks link). It reads the `live_links` and `live_signals` tables.
+ */
+const CANDIDATE_ENTITIES_SQL = `(
+      ${CONCERNED_REFS_SQL}
+      UNION SELECT ref FROM live_links
+      UNION SELECT ref FROM live_signals
+    ) candidate CROSS JOIN external_entities e ON e.ref = candidate.ref`;
+
+/**
  * Builds the common table expressions of the eligible entities, to put after
  * `WITH`: `buildAskTables` over every ref (or the `onlyRefs`), and
  *
@@ -211,7 +225,7 @@ export const buildEligibleEntities = (
     ...buildAskTables(membership, onlyRefs),
     plain(`eligible AS (
     SELECT e.*, l.task_id AS task_id, a.ask_count, a.oldest_ask, a.newest_ask
-    FROM external_entities e
+    FROM ${onlyRefs === undefined ? CANDIDATE_ENTITIES_SQL : "external_entities e"}
     LEFT JOIN live_links l ON l.ref = e.ref AND l.position = 1
     LEFT JOIN ask_summary a ON a.ref = e.ref
     WHERE ${buildWorkRecordCondition("e")}

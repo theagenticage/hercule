@@ -617,13 +617,14 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
 });
 
 /** How many links of finished Tasks the Inbox's reads are timed with, besides none. */
-const FINISHED_LINK_COUNTS = [5_000, 10_000, 20_000, 40_000, 80_000] as const;
+const FINISHED_LINK_COUNTS = [20_000, 80_000] as const;
 
 /**
  * Adds `count` finished Tasks (stage `done`), each with one link to a ref. The
  * refs follow the numbering of `seed` and spread over 60,000 tickets, so a
- * thing of the Inbox has about one finished Task at most, as in a database that
- * has seen a lot of work come and go.
+ * thing of the Inbox has about one finished Task at most. The links keep their
+ * records, as the daily sweep does, so the database holds many records no one
+ * concerns, as one that has seen a lot of work come and go.
  */
 const seedFinishedTaskLinks = (count: number, offset: number) =>
   Effect.gen(function* () {
@@ -640,6 +641,13 @@ const seedFinishedTaskLinks = (count: number, offset: number) =>
       INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by)
       SELECT unhex(printf('%032x', value + 1)), 'acme:ticket:' || ((value * 7) % 60000 + 1), ${AT}, 'user'
       FROM json_each(${JSON.stringify(numbers)})`;
+    // The records those links keep, which nobody concerns and no Task of today holds.
+    yield* sql`
+      INSERT INTO external_entities
+        (id, ref, kind, noun, pace, completeness, title, first_observed_at, updated_at)
+      SELECT randomblob(16), ref, 'acme/ticket', 'Ticket', 'fast', 'full', 'Old ' || ref, ${AT}, ${AT}
+      FROM (SELECT DISTINCT ref FROM task_entity_links)
+      WHERE ref NOT IN (SELECT ref FROM external_entities)`;
   }).pipe(inTransaction);
 
 describe.runIf(SPEED_TESTS_ENABLED && !isCountingOnly)(
@@ -685,8 +693,10 @@ describe.runIf(SPEED_TESTS_ENABLED && !isCountingOnly)(
       );
       const first = results[0]!;
       const last = results.at(-1)!;
-      expect(last.page).toBeLessThan(Math.max(PAGE_TARGET_MS, first.page * 2));
-      expect(last.count).toBeLessThan(Math.max(COUNTS_CEILING_MS / 10, first.count * 2));
+      // A hard limit, and a guard that the time does not follow the finished Tasks.
+      expect(last.page).toBeLessThan(PAGE_TARGET_MS);
+      expect(last.page).toBeLessThan(first.page * 2);
+      expect(last.count).toBeLessThan(first.count * 2 + 1);
     }, 300_000);
   },
 );

@@ -16,7 +16,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { EntityLifecycle } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
-import { LIVE_TASK_LINKS_SQL, JOINABLE_TASK_SQL } from "./repository";
+import { ALL_LIVE_TASK_LINKS_SQL, LIVE_TASK_LINKS_SQL, JOINABLE_TASK_SQL } from "./repository";
 
 /** The most refs one statement lists links for, well under SQLite's limit on bound values. */
 const MAX_REFS_PER_STATEMENT = 500;
@@ -227,7 +227,7 @@ const make = Effect.gen(function* () {
     listAllLiveLinks: (): Effect.Effect<ReadonlyArray<EntityLinkPair>, SqlError> =>
       Effect.map(
         sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
-          SELECT task_id, ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})`,
+          SELECT task_id, ref FROM (${sql.literal(ALL_LIVE_TASK_LINKS_SQL)})`,
         (rows) =>
           sortLinks(rows.map((row) => ({ taskId: uuidToString(row.task_id), ref: row.ref }))),
       ),
