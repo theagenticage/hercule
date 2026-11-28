@@ -6298,18 +6298,19 @@ The pane is most of the Inbox chunk's growth. The two block renderers load only 
 - **Idle:** no new interval, timer or animation frame while no dialog is open. With a dialog open: one 30-second timer after a "Check now" press, until the record changes; the browser opens on the user's press, with no timer.
 - **Counts that moved:** the MCP list holds 11 more elements (the "Added by URL" group, its heading, the Add button and its empty note). Opening the `+` menu's servers restyles about 440 or about 700 elements from run to run, on `main` as on the branch, so its rise in one CI run is noise ([#1265](https://github.com/theagenticage/hercule/issues/1265)).
 
-**Two time limits on a request,** measured 2026-10-29 on a Mac with `vite build --config vite.renderer.config.ts` and `check-bundle-budget.ts` called as `build:desktop` calls it, on `0a506385` (main, Before) and on this change (After), for [#919](https://github.com/theagenticage/hercule/issues/919). *(Added 2026-11-28, [#919](https://github.com/theagenticage/hercule/issues/919).)* A request now has a wait for the headers and a limit on the body's silence ([Reaching the controller](#the-controller-url-and-the-connect-screen)), and a `ConnectionError` names its operation. Method: the renderer was built twice in the same worktree, once with this change's renderer and client-core files reset to main's. Gzipped sizes use `Bun.gzipSync`, as the budget checker does.
+**Two time limits on a request,** measured 2026-11-28 by CI's `perf:counts` on Linux, on this change against `main`, for [#919](https://github.com/theagenticage/hercule/issues/919). *(Added 2026-11-28, [#919](https://github.com/theagenticage/hercule/issues/919).)* A request now has a wait for the headers and a limit on the body's silence ([Reaching the controller](#the-controller-url-and-the-connect-screen)), and a `ConnectionError` names its operation.
 
 | Measure | Budget | Measured |
 |---|---|---|
-| The first screen's JavaScript, gzipped | a guide of 250 kB | 467.6 kB to 467.8 kB, in 26 chunks both times. Over the guide as before |
-| The entry chunk (`first-screen-*.js`) | - | 1,305,824 to 1,306,505 bytes: 681 more; gzipped 414,072 to 414,316 (244 more) |
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 539,294 to 539,720 bytes: 426 more. Over the guide as before |
+| The whole renderer | - | 4,900,509 to 4,901,746 bytes: 1,237 more; gzipped 1,800,345 to 1,800,587 (242 more) |
 | Main and the preload | - | not built: neither imports a changed file. Main imports only `@hercule/client-core/skill-folder` from client-core, and the preload imports none of it |
 | Processes | none added | none added |
 | Work while idle | none added | none added: the one timer a request holds stops when the request ends. The exception is a status the contract does not declare: the client does not read that body, so the silence timer aborts the request after 5 seconds. That is one wakeup per such answer, as before this change |
 | Work per streamed token | unchanged | unchanged: a turn streams over the live WebSocket, which no limit here covers |
 
 - **Work per request.** A request's body passes through the same `TransformStream` as before. Each piece of the body Chromium hands over now clears and sets one timer. Nothing else runs per piece.
+- **Counts.** Every request, render and idle-timer count of `perf:counts` (Inbox, Work, MCP servers) is unchanged; only the three bundle sizes above went up.
 - **Not measured:** memory, launch and idle wakeups in the packaged app. The change adds no state that lives past a request, and no work while idle.
 
 ## Slices
