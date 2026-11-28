@@ -88,6 +88,9 @@ const root = fileURLToPath(new URL("../../../../../", import.meta.url));
 
 afterAll(cleanupHomes);
 
+/** The arguments that stop Codex from writing the shell snapshot that would hold the session's token. */
+const SHELL_SNAPSHOT_OFF = ["-c", "features.shell_snapshot=false"];
+
 /** The arguments that give Codex the key of an account in `OPENAI_API_KEY`. */
 const API_KEY_OVERRIDES = [
   "-c",
@@ -424,6 +427,7 @@ describe("the home directories a session's app-server gets", () => {
       "--strict-config",
       "-c",
       "check_for_update_on_startup=false",
+      ...SHELL_SNAPSHOT_OFF,
     ]);
 
     const codexHome = join(home, "codex");
@@ -520,6 +524,7 @@ describe("the home directories a session's app-server gets", () => {
       "--strict-config",
       "-c",
       "check_for_update_on_startup=false",
+      ...SHELL_SNAPSHOT_OFF,
       "-c",
       "model_auto_compact_token_limit_scope=body_after_prefix",
       "-c",
@@ -546,7 +551,7 @@ describe("the home directories a session's app-server gets", () => {
     );
 
     const spawn = spawns[0]!;
-    const overrides = spawn.command.slice(5);
+    const overrides = spawn.command.slice(7);
     expect(overrides).toHaveLength(4);
     expect(overrides[1]).toMatch(/^hooks\.PreToolUse=\[\{matcher="Bash\|apply_patch", hooks=/);
     // One trust entry, for this hook's key: the user's own hooks stay as
@@ -575,7 +580,7 @@ describe("the home directories a session's app-server gets", () => {
           editMarks,
         }),
       );
-      const overrides = spawns[0]!.command.slice(5);
+      const overrides = spawns[0]!.command.slice(7);
       return {
         command: JSON.parse(/command=(".*"), timeout=10/.exec(overrides[1]!)![1]!) as string,
         trustedHash: /trusted_hash="(.*)"/.exec(overrides[3]!)![1],
