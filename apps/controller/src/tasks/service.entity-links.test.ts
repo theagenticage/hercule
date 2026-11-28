@@ -96,18 +96,22 @@ describe("the link a Task's provenance writes", () => {
 });
 
 describe("listing the refs of many Tasks", () => {
-  it.each([400, 600, 1200])(
-    "reads the links of %i Task ids in one statement, in link order",
-    async (count) => {
-      const { statements, links, first, last } = await run(
-        Effect.gen(function* () {
-          const first = yield* createTaskOnRef("First", REF);
-          const last = yield* createTaskOnRef("Last", THIRD_REF);
-          // Ids of Tasks that do not exist, with the two real ones at both ends of the list.
-          const others = Array.from({ length: count - 2 }, () => uuidToString(mintUuid()));
-          const tasks = yield* taskRepository;
-          const statements: Array<string> = [];
-          const links = yield* tasks.listEntityLinks([first.id, ...others, last.id]).pipe(
+  it("reads 1,200 Task ids in one statement, Tasks in the order given and refs in link order", async () => {
+    const { statements, links, older, newer } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const repository = yield* taskRepository;
+        const older = yield* createTaskOnRef("Older", THIRD_REF);
+        // Linked a minute later, and sorting before THIRD_REF by name.
+        yield* TestClock.adjust(A_MINUTE);
+        yield* tasks.linkEntity({ id: older.id, ref: REF });
+        const newer = yield* createTaskOnRef("Newer", OTHER_REF);
+        // Ids of Tasks that do not exist, more than one old chunk of 500 apart.
+        const missing = Array.from({ length: 1197 }, () => uuidToString(mintUuid()));
+        const statements: Array<string> = [];
+        const links = yield* repository
+          .listEntityLinks([newer.id, ...missing.slice(0, 600), older.id, ...missing.slice(600)])
+          .pipe(
             Effect.provideService(Statement.CurrentTransformer, (statement) =>
               Effect.sync(() => {
                 statements.push(statement.compile()[0]);
@@ -115,16 +119,16 @@ describe("listing the refs of many Tasks", () => {
               }),
             ),
           );
-          return { statements, links, first: first.id, last: last.id };
-        }),
-      );
+        return { statements, links, older: older.id, newer: newer.id };
+      }),
+    );
 
-      expect(statements).toHaveLength(1);
-      expect([...links.keys()].toSorted()).toEqual([first, last].toSorted());
-      expect(links.get(first)).toEqual([REF]);
-      expect(links.get(last)).toEqual([THIRD_REF]);
-    },
-  );
+    expect(statements).toHaveLength(1);
+    expect([...links]).toEqual([
+      [newer, [OTHER_REF]],
+      [older, [THIRD_REF, REF]],
+    ]);
+  });
 });
 
 describe("the active Task of a ref", () => {

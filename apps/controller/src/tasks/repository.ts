@@ -1336,21 +1336,23 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the refs each of the Tasks links, in the order they were linked
-     * (then by ref). A Task with no link has no entry. One statement, whatever
-     * the number of Tasks: the ids reach SQLite as one JSON text, which is not
-     * limited by the number of bound values.
+     * Returns the refs each of the Tasks links. A Task with no link has no
+     * entry. The Tasks come in the order of `taskIds` (so a caller that spends
+     * a budget over the refs, as the board does over its places, serves the
+     * first Tasks first), and each Task's refs in the order they were linked,
+     * then by ref. One statement, whatever the number of Tasks: the ids reach
+     * SQLite as one JSON text, which is not limited by the number of bound
+     * values. `taskIds` must not repeat an id.
      */
     listEntityLinks: (
       taskIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
       Effect.map(
         sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
-          SELECT task_id, ref FROM task_entity_links
-          WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(
-            taskIds.map((id) => id.replaceAll("-", "")),
-          )}))
-          ORDER BY linked_at, ref`,
+          SELECT l.task_id, l.ref
+          FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}) j
+          JOIN task_entity_links l ON l.task_id = unhex(j.value)
+          ORDER BY j.key, l.linked_at, l.ref`,
         (rows) => {
           const links = new Map<string, Array<string>>();
           for (const row of rows) {

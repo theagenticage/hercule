@@ -1009,7 +1009,7 @@ describe("the context of the board", () => {
     expect(() => Schema.encodeSync(WorkBoard)(read)).not.toThrow();
   });
 
-  it("sends the same number of statements for 10 Tasks and for 300 that link things under places", async () => {
+  it("sends the same number of statements for 10 Tasks and for 600 that link things under places", async () => {
     /** Reads a board of `count` Tasks, each linking its own ticket under one project, and returns the statements sent. */
     const countContextStatements = (count: number) =>
       Effect.runPromise(
@@ -1040,11 +1040,11 @@ describe("the context of the board", () => {
       );
 
     const small = await countContextStatements(10);
-    const large = await countContextStatements(300);
+    const large = await countContextStatements(600);
 
-    expect(large.board.cards).toHaveLength(300);
+    expect(large.board.cards).toHaveLength(600);
     expect(large.board.cards.every((card) => card.contextRefs.includes(PROJECT_A))).toBe(true);
-    expect(large.board.places).toHaveLength(301);
+    expect(large.board.places).toHaveLength(601);
     expect(large.statements).toHaveLength(small.statements.length);
   });
 });
