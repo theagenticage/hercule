@@ -124,12 +124,23 @@ export const InitiativeUpdateInput = Schema.Struct(INITIATIVE_UPDATE_FIELDS).che
 export type InitiativeUpdateInput = Schema.Schema.Type<typeof InitiativeUpdateInput>;
 
 /**
+ * Which Initiatives a listing holds, by whether they are closed: `only` the
+ * closed Initiatives, or `include` them beside the open ones.
+ */
+export const InitiativeClosedFilter = Schema.Literals(["only", "include"]);
+
+export type InitiativeClosedFilter = Schema.Schema.Type<typeof InitiativeClosedFilter>;
+
+/**
  * The filters and paging of `initiative.query`. The list has one order,
  * creation order (`createdAt`, then `id`), so it takes no `sort`.
  */
 export const InitiativeQuery = Schema.Struct({
-  /** `true` lists the closed Initiatives instead of the open ones. Absent means `false`. */
-  closed: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Left out, only the open Initiatives are listed. `only` lists the closed
+   * Initiatives instead, and `include` lists every Initiative, open and closed.
+   */
+  closed: Schema.optionalKey(InitiativeClosedFilter),
   /** Lists only the Initiatives that draw in this project's lane. */
   projectId: Schema.optionalKey(Id),
   ...cursorParams.fields,

@@ -919,6 +919,7 @@ export {
 export {
   INITIATIVE_HUES,
   Initiative,
+  InitiativeClosedFilter,
   InitiativeCreateInput,
   InitiativeHue,
   InitiativeQuery,
