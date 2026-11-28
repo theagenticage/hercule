@@ -882,11 +882,11 @@ const buildSkillCommandName = (skill: ResolvedSkillReference): string =>
 /** The text of an input as Claude gets it, in the two parts `buildClaudePromptParts` builds. */
 interface ClaudePromptParts {
   /**
-   * Everything before the command: the sender header, the text before the
-   * command, and the line naming each image's file. Empty when there is none.
+   * Everything before the command: the sender header, the user's text, and the
+   * line naming each image's file. Empty when there is none.
    */
   readonly leading: string;
-  /** The slash command that runs the last skill, with the text after it. Absent without skills. */
+  /** The slash command that runs the last skill, with its arguments. Absent without skills. */
   readonly command: string | undefined;
 }
 
@@ -894,14 +894,18 @@ interface ClaudePromptParts {
  * Returns the text of an input split the way Claude needs it for the Skill
  * References of the text (spec 06 section 9.4, "Composer rules"). Claude runs
  * a slash command only when it is the start of the last text part of the
- * message, so an input with skills has two parts:
+ * message, so an input with skills has two parts. Every reference in the text
+ * is replaced by its Claude name. Claude runs only the command, and the model
+ * runs any other skill only if it chooses to call it.
  *
- * - `command` is the Claude name of the last skill, then a space and the text
- *   after the reference without its leading whitespace. There is no space
- *   when that text is empty.
- * - `leading` is what `buildHarnessPrompt` builds around the text before that
- *   reference. Every earlier reference in it is replaced by its Claude name,
- *   which Claude runs only if the model chooses to call that skill.
+ * - When the last reference starts the text, `command` is its Claude name, then
+ *   a space and the text after it without its leading whitespace (no space
+ *   when that text is empty), and `leading` holds only the sender header and
+ *   image lines.
+ * - Otherwise `leading` holds the whole text in the order the user wrote it,
+ *   and `command` is the Claude name of the last skill alone. Claude shows a
+ *   command's arguments before the message's other text parts, so text after
+ *   a reference given as arguments would come before the text in front of it.
  *
  * An input without skills has only `leading`, which is `buildHarnessPrompt`
  * unchanged.
@@ -917,16 +921,22 @@ export const buildClaudePromptParts = (turn: AdapterTurnInput): ClaudePromptPart
     at = reference.end;
   }
   before += turn.text.slice(at, last.start);
-  const rest = turn.text.slice(last.end).trimStart();
   const name = buildSkillCommandName(last);
+  const rest = turn.text.slice(last.end);
+  if (before.trim() !== "") {
+    return {
+      leading: buildHarnessPrompt(turn, `${before}${name}${rest}`.trimEnd()),
+      command: name,
+    };
+  }
+  const textAfter = rest.trimStart();
   return {
-    // The space before the command is not part of the leading text.
-    leading: buildHarnessPrompt(turn, before.trimEnd()),
+    leading: buildHarnessPrompt(turn, ""),
     // Claude ends the command name at the first whitespace, so the space is
     // needed even when the text after the reference starts with punctuation:
     // `$review: now` must become `/skills:review : now`, because
     // `/skills:review: now` would name the unknown command `skills:review:`.
-    command: rest === "" ? name : `${name} ${rest}`,
+    command: textAfter === "" ? name : `${name} ${textAfter}`,
   };
 };
 
