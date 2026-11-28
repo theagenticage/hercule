@@ -87,9 +87,10 @@ const make = Effect.gen(function* () {
               Effect.gen(function* () {
                 const outcome = yield* workspaces.reported(traffic.runnerId, traffic.report);
                 const { settled } = outcome;
-                // A workspace that failed to provision ends the sessions waiting
-                // on it, with the runner's error message as the reason, and
-                // fails the runs working in it.
+                // A workspace that failed ends the queued sessions waiting on
+                // it, with the runner's error message as the reason, and fails
+                // the runs working in it. A session the runner already runs is
+                // left alone: it ends when the runner reports its exit.
                 if (settled?.moved === "failed") {
                   const { message } = traffic.report;
                   yield* sessions.endForWorkspace(settled.workspaceId, message ?? null);
